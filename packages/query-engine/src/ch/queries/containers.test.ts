@@ -132,6 +132,13 @@ describe("listContainersSummaryQuery", () => {
 		expect(sql).not.toMatch(/__PARAM_\w+__/)
 	})
 
+	it("scans only the two aggregated percent gauges — it runs twice per page load", () => {
+		const { sql } = compileUnsafe(listContainersSummaryQuery({}), baseParams)
+		expect(sql).toContain("MetricName IN ('container.cpu.utilization', 'container.memory.percent')")
+		expect(sql).not.toContain("container.uptime")
+		expect(sql).not.toContain("container.cpu.limit")
+	})
+
 	it("accepts the same filter set as the list", () => {
 		const { sql } = compileUnsafe(
 			listContainersSummaryQuery({ hostNames: ["host-1"], search: "api" }),
@@ -208,6 +215,14 @@ describe("containerCountersSummaryQuery", () => {
 			"ifNotFinite(maxIf(Value, MetricName = 'container.restarts') - minIf(Value, MetricName = 'container.restarts'), 0) AS restartsDelta",
 		)
 	})
+
+	it("groups counters per host so cross-host counter offsets never fabricate a delta", () => {
+		// `redis` on two hosts has two independent cumulative counters; a global
+		// max-min would report their offset as restarts.
+		const { sql } = compileUnsafe(containerCountersSummaryQuery({ containerName: "redis" }), baseParams)
+		expect(sql).toContain("GROUP BY hostName")
+		expect(sql).toContain("sum(restartsDelta) AS restartsDelta")
+	})
 })
 
 describe("containerGaugeTimeseriesQuery", () => {
@@ -252,6 +267,21 @@ describe("containerSumTimeseriesQuery", () => {
 		expect(sql).toContain("multiIf")
 		expect(sql).toContain("'receive'")
 		expect(sql).toContain("'transmit'")
+	})
+
+	it("averages sampled sums instead of adding a bucket's samples together", () => {
+		// container.memory.usage.total is a sampled value; summing ~10 samples per
+		// bucket would inflate the chart by samples-per-bucket.
+		const { sql } = compileUnsafe(
+			containerSumTimeseriesQuery({
+				containerName: "redis",
+				metricNames: ["container.memory.usage.total"],
+				average: true,
+			}),
+			baseParams,
+		)
+		expect(sql).toContain("avg(Value) AS sumValue")
+		expect(sql).not.toContain("sum(Value)")
 	})
 
 	it("groups block IO by the operation datapoint attribute", () => {

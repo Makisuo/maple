@@ -175,6 +175,7 @@ export const containerMetricSpec = (metric: ContainerInfraTimeseriesRequest["met
 				metricNames: ["container.cpu.utilization"],
 				unit: "percent" as const,
 				isSum: false,
+				average: undefined,
 				divideBy: 100,
 				metricLabels: undefined,
 				groupByAttributeKey: undefined,
@@ -184,6 +185,7 @@ export const containerMetricSpec = (metric: ContainerInfraTimeseriesRequest["met
 				metricNames: ["container.memory.percent"],
 				unit: "percent" as const,
 				isSum: false,
+				average: undefined,
 				divideBy: 100,
 				metricLabels: undefined,
 				groupByAttributeKey: undefined,
@@ -193,15 +195,19 @@ export const containerMetricSpec = (metric: ContainerInfraTimeseriesRequest["met
 				metricNames: ["container.uptime"],
 				unit: "seconds" as const,
 				isSum: false,
+				average: undefined,
 				divideBy: undefined,
 				metricLabels: undefined,
 				groupByAttributeKey: undefined,
 			}
 		case "memory_bytes":
+			// Sampled bytes, not a cumulative counter — summing a bucket's samples
+			// would inflate the chart by samples-per-bucket.
 			return {
 				metricNames: ["container.memory.usage.total"],
 				unit: "bytes" as const,
 				isSum: true,
+				average: true,
 				divideBy: undefined,
 				metricLabels: undefined,
 				groupByAttributeKey: undefined,
@@ -211,6 +217,7 @@ export const containerMetricSpec = (metric: ContainerInfraTimeseriesRequest["met
 				metricNames: ["container.network.io.usage.rx_bytes", "container.network.io.usage.tx_bytes"],
 				unit: "bytes" as const,
 				isSum: true,
+				average: undefined,
 				divideBy: undefined,
 				metricLabels: [
 					["container.network.io.usage.rx_bytes", "receive"],
@@ -223,6 +230,7 @@ export const containerMetricSpec = (metric: ContainerInfraTimeseriesRequest["met
 				metricNames: ["container.blockio.io_service_bytes_recursive"],
 				unit: "bytes" as const,
 				isSum: true,
+				average: undefined,
 				divideBy: undefined,
 				metricLabels: undefined,
 				groupByAttributeKey: "operation",

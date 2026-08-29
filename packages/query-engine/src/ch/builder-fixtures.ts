@@ -842,6 +842,22 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 			),
 	},
 	{
+		// Sampled sums (memory bytes) average a bucket's samples instead of
+		// adding them.
+		module: "containers",
+		name: "containerSumTimeseriesQuery",
+		label: "memory-average",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.containerSumTimeseriesQuery({
+					containerName: "api",
+					metricNames: ["container.memory.usage.total"],
+					average: true,
+				}),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
 		// Block IO groups by the `operation` datapoint attribute instead.
 		module: "containers",
 		name: "containerSumTimeseriesQuery",

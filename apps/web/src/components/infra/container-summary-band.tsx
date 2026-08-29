@@ -49,13 +49,14 @@ interface ScopeCellProps {
 
 function ScopeCell({ label, hint, value, scope, active, onSelect }: ScopeCellProps) {
 	// A zero count is still information, but pressing it would only produce an
-	// empty table — see the pod band.
+	// empty table — unless the scope is already active (a shared ?scope= URL in
+	// a window where the count is 0), where the press is the only way back out.
 	const tone = value > 0 ? SCOPE_TONE[scope] : "neutral"
 	return (
 		<button
 			type="button"
 			aria-pressed={active}
-			disabled={value === 0}
+			disabled={value === 0 && !active}
 			onClick={() => onSelect(active ? undefined : scope)}
 			className={cn(
 				"flex flex-1 flex-col justify-center gap-1.5 border-l px-4 py-3 text-left transition-colors",

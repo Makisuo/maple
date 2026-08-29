@@ -156,6 +156,30 @@ export interface FacetOutput {
 	readonly facetType: string
 }
 
+// A conditional aggregate over a metric family the entity never emitted returns
+// `nan`, which ClickHouse serializes as JSON `null` — and one null against a
+// numeric row schema fails the decode for the whole page, not just that row.
+// Shared by the infra (host/pod/node/workload) and container queries.
+export const avgIfOrZero = (value: CH.Expr<number>, condition: CH.Condition): CH.Expr<number> =>
+	CH.ifNotFinite(CH.avgIf(value, condition), 0)
+
+export const maxIfOrZero = (value: CH.Expr<number>, condition: CH.Condition): CH.Expr<number> =>
+	CH.ifNotFinite(CH.maxIf(value, condition), 0)
+
+/**
+ * Facet dimensions are plain `ResourceAttributes` keys, with one exception: the
+ * deployment environment has two semconv spellings, so it resolves to the
+ * coalescing expression instead of a single map lookup. Shared by every infra
+ * facet builder so a future renamed-key coalesce lands in one place.
+ */
+export const facetAttrExpr = (
+	resourceAttributes: { get(key: string): CH.Expr<string> },
+	attrKey: string,
+): CH.Expr<string> =>
+	attrKey === "deployment.environment.name"
+		? deploymentEnvExpr(resourceAttributes)
+		: resourceAttributes.get(attrKey)
+
 export function inclusionCondition(col: CH.Expr<string>, values: readonly string[]): CH.Condition {
 	return values.length === 1 ? col.eq(values[0]!) : CH.inList(col, values)
 }

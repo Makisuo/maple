@@ -101,6 +101,25 @@ describe("getActiveInfraCorrelations", () => {
 		expect(getActiveInfraCorrelations({ "container.name": "" })).toEqual([])
 	})
 
+	it("suppresses the container group when a non-docker runtime is declared", () => {
+		// containerd/cri-o records have no docker_stats metrics — the group would
+		// be a stack of empty charts.
+		const groups = getActiveInfraCorrelations({
+			"container.name": "app",
+			"container.runtime": "containerd",
+			"host.name": "node-1",
+		})
+		expect(groups.map((g) => g.kind)).toEqual(["host"])
+	})
+
+	it("keeps the container group when container.runtime is docker", () => {
+		const groups = getActiveInfraCorrelations({
+			"container.name": "app",
+			"container.runtime": "docker",
+		})
+		expect(groups.map((g) => g.kind)).toEqual(["container"])
+	})
+
 	it("each group carries at least one chart", () => {
 		const groups = getActiveInfraCorrelations({
 			"k8s.pod.name": "p",

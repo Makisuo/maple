@@ -40,16 +40,18 @@ export const deriveContainerAttributes = (probe: ContainerProbe): Record<string,
 	const attrs: Record<string, string> = {}
 	if (inDocker) attrs["container.runtime"] = "docker"
 
-	const fromMountinfo = safe(() => probe.readFile("/proc/self/mountinfo").match(CONTAINER_ID_RE)?.[1])
-	const fromCgroup = safe(() => probe.readFile("/proc/self/cgroup").match(CGROUP_ID_RE)?.[1])
-	const fromHostname = inDocker
-		? safe(() => {
-				const name = probe.hostname()
-				return SHORT_ID_HOSTNAME_RE.test(name) ? name : undefined
-			})
-		: undefined
-
-	const containerId = fromMountinfo ?? fromCgroup ?? fromHostname
+	// Lazy fallback chain — this runs at every SDK boot (customer processes),
+	// and mountinfo can run to hundreds of KB, so later probes only fire when
+	// the earlier ones miss.
+	const containerId =
+		safe(() => probe.readFile("/proc/self/mountinfo").match(CONTAINER_ID_RE)?.[1]) ??
+		safe(() => probe.readFile("/proc/self/cgroup").match(CGROUP_ID_RE)?.[1]) ??
+		(inDocker
+			? safe(() => {
+					const name = probe.hostname()
+					return SHORT_ID_HOSTNAME_RE.test(name) ? name : undefined
+				})
+			: undefined)
 	if (containerId) attrs["container.id"] = containerId
 	return attrs
 }

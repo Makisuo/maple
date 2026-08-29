@@ -12,8 +12,10 @@ import type { TemplateDefinition, WidgetDef } from "@/dashboard-templates/types"
 
 function widgets(host?: string): WidgetDef[] {
 	// Container/host identity lives on ResourceAttributes — the metrics
-	// query-builder reaches it via the `resource.` prefix.
-	const where = combineWhere(host ? `resource.host.name = "${host}"` : "")
+	// query-builder reaches it via the `resource.` prefix. kubeletstats
+	// per-container rows also carry container.* names (on a 0..1 scale); the
+	// pod-name guard keeps them out, same as the containers page queries.
+	const where = combineWhere('resource.k8s.pod.name = ""', host ? `resource.host.name = "${host}"` : "")
 	const groupBy = ["resource.container.name"]
 	return [
 		{
@@ -110,7 +112,10 @@ export const dockerContainersTemplate: TemplateDefinition = {
 		setupLabel: "the Docker stats receiver",
 		hint: "Run the Maple Docker agent on each host and every widget fills in on its own.",
 	},
-	requiredMetricPrefixes: ["container."],
+	// Deliberately NOT the bare "container." prefix: kubeletstats also emits
+	// container.cpu./container.memory. names, which would light this template
+	// up as ready on k8s-only orgs. Network + blockio are dockerstats-only.
+	requiredMetricPrefixes: ["container.network.io.", "container.blockio."],
 	parameters: [
 		{
 			key: paramKey("host"),

@@ -9,7 +9,7 @@ import { displayError } from "@/lib/error-messages"
 
 const CHART_HEIGHT = 280
 
-export const CONTAINER_METRIC_LABELS: Record<ContainerInfraMetric, string> = {
+const CONTAINER_METRIC_LABELS = {
 	cpu: "CPU",
 	memory_percent: "Memory / limit",
 	memory_bytes: "Memory usage",

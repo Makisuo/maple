@@ -425,6 +425,7 @@ const containerInfraSumTimeseries = defineQuery({
 				metricNames: spec.metricNames,
 				metricLabels: spec.metricLabels,
 				groupByAttributeKey: spec.groupByAttributeKey,
+				average: spec.average,
 			}),
 			{
 				orgId,

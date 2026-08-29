@@ -32,7 +32,7 @@ const DOCS_URLS = {
 	docker: "https://maple.dev/docs/guides/docker-infrastructure",
 } as const
 
-export type InstallTab = keyof typeof DOCS_URLS
+type InstallTab = keyof typeof DOCS_URLS
 
 interface InstallModalProps {
 	open: boolean
@@ -168,9 +168,13 @@ export function InstallHostModal({ open, onOpenChange, defaultTab = "kubernetes"
 		<Dialog
 			open={open}
 			onOpenChange={(next) => {
-				// Re-mask the key whenever the modal closes, so it's never exposed
-				// by default on the next open.
-				if (!next) setRevealed(false)
+				// Reset to defaults whenever the modal closes: re-mask the key so
+				// it's never exposed on the next open, and restore the caller's
+				// defaultTab so "opens on Docker" holds per open, not just once.
+				if (!next) {
+					setRevealed(false)
+					setTab(defaultTab)
+				}
 				onOpenChange(next)
 			}}
 		>
@@ -193,7 +197,8 @@ export function InstallHostModal({ open, onOpenChange, defaultTab = "kubernetes"
 							<p className="text-muted-foreground text-xs">
 								The Maple Helm chart deploys a DaemonSet for per-node host + kubelet metrics
 								and a single-replica deployment for cluster-wide signals. Run the command
-								against your cluster.
+								against your cluster. For production, prefer an existing Secret over an inline
+								value — see the docs.
 							</p>
 							<SnippetPanel
 								loading={loading}
@@ -225,8 +230,7 @@ export function InstallHostModal({ open, onOpenChange, defaultTab = "kubernetes"
 					<p className="text-muted-foreground text-xs">
 						The command embeds your org's{" "}
 						<strong className="text-foreground">private ingest key</strong>. Rotate it from
-						Settings → Ingestion if it leaks. For production, prefer an existing Secret over an
-						inline value — see the docs.
+						Settings → Ingestion if it leaks.
 					</p>
 				</DialogPanel>
 

@@ -84,6 +84,7 @@ const HOST_CHARTS: ReadonlyArray<{ label: string; metric: HostInfraMetric }> = [
 ]
 
 const CONTAINER_NAME_KEY = "container.name"
+const CONTAINER_RUNTIME_KEY = "container.runtime"
 const POD_NAME_KEY = "k8s.pod.name"
 const POD_NAMESPACE_KEY = "k8s.namespace.name"
 const NODE_NAME_KEY = "k8s.node.name"
@@ -109,13 +110,15 @@ export function getActiveInfraCorrelations(
 	resourceAttributes: Record<string, string> | null | undefined,
 ): InfraCorrelation[] {
 	const out: InfraCorrelation[] = []
+	const podName = attr(resourceAttributes, POD_NAME_KEY)
 
-	// k8s pods also carry `container.name`, but their per-container metrics come
-	// from kubeletstats, not dockerstats — a container group there would render
-	// an empty duplicate chart stack, so k8s identity suppresses it.
+	// The container group's metrics come from docker_stats only, so it needs a
+	// docker-shaped record: k8s pods also carry `container.name` (kubeletstats),
+	// and a declared non-docker runtime (containerd, cri-o, …) has no docker
+	// metrics either — both would render an empty duplicate chart stack.
 	const containerName = attr(resourceAttributes, CONTAINER_NAME_KEY)
-	const k8sPodName = attr(resourceAttributes, POD_NAME_KEY)
-	if (containerName && !k8sPodName) {
+	const containerRuntime = attr(resourceAttributes, CONTAINER_RUNTIME_KEY)
+	if (containerName && !podName && (containerRuntime === undefined || containerRuntime === "docker")) {
 		out.push({
 			kind: "container",
 			title: "Container",
@@ -126,7 +129,6 @@ export function getActiveInfraCorrelations(
 		})
 	}
 
-	const podName = attr(resourceAttributes, POD_NAME_KEY)
 	if (podName) {
 		out.push({
 			kind: "pod",

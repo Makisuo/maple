@@ -27,15 +27,8 @@ import { from, fromQuery, type ColumnAccessor } from "@maple-dev/clickhouse-buil
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, MetricsSum } from "../tables"
 import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
-import type { FacetOutput } from "./query-helpers"
-
-// See infra.ts: conditional aggregates over metrics an entity never emitted
-// return `nan`, which serializes as JSON `null` and breaks numeric decodes.
-const avgIfOrZero = (value: CH.Expr<number>, condition: CH.Condition): CH.Expr<number> =>
-	CH.ifNotFinite(CH.avgIf(value, condition), 0)
-
-const maxIfOrZero = (value: CH.Expr<number>, condition: CH.Condition): CH.Expr<number> =>
-	CH.ifNotFinite(CH.maxIf(value, condition), 0)
+import { avgIfOrZero, facetAttrExpr, maxIfOrZero, type FacetOutput } from "./query-helpers"
+import type { SortDirection } from "./infra"
 
 const CONTAINER_METRIC_NAMES = [
 	"container.cpu.utilization",
@@ -49,12 +42,16 @@ const CONTAINER_METRIC_NAMES = [
 // full set at a fraction of the rows scanned (see POD_FACET_PROBE_METRIC).
 const CONTAINER_FACET_PROBE_METRIC = "container.cpu.utilization" as const
 
+// The summary aggregates only the two percent gauges (+ max(TimeUnix)), and it
+// runs twice per page load (band + list denominator) — scanning uptime/limit
+// rows there would be pure waste. cpu.utilization is always-on, so totals and
+// lastSeen stay exact.
+const CONTAINER_SUMMARY_METRIC_NAMES = ["container.cpu.utilization", "container.memory.percent"] as const
+
 /** Ten collection intervals at the agent's 30s default. */
 const STALE_CONTAINER_SECONDS = 300
 
 export type ContainerSortKey = "saturation" | "cpuPct" | "memoryPct" | "containerName" | "lastSeen"
-
-export type ContainerSortDirection = "asc" | "desc"
 
 /**
  * No `unbounded` scope: docker_stats CPU% is host-relative and running without
@@ -64,7 +61,7 @@ export type ContainerSortDirection = "asc" | "desc"
 export type ContainerScope = "saturated" | "elevated" | "stale"
 
 /** Containers with no limits report saturation 0 — sort those by raw CPU peak. */
-const CONTAINER_SORT_TIEBREAK: ReadonlyArray<[ContainerSortKey | "cpuPctPeak", ContainerSortDirection]> = [
+const CONTAINER_SORT_TIEBREAK: ReadonlyArray<[ContainerSortKey | "cpuPctPeak", SortDirection]> = [
 	["cpuPctPeak", "desc"],
 	["containerName", "asc"],
 ]
@@ -85,7 +82,7 @@ export interface ListContainersOpts {
 	excludedEnvironments?: ReadonlyArray<string>
 	/** Defaults to `saturation` — see ContainerSortKey. */
 	sortBy?: ContainerSortKey
-	sortDir?: ContainerSortDirection
+	sortDir?: SortDirection
 	/** One-click fleet scope from the summary band. */
 	scope?: ContainerScope
 	limit?: number
@@ -166,7 +163,7 @@ const containerFilterConditions = (
 export function listContainersQuery(opts: ListContainersOpts = {}) {
 	const sortBy = opts.sortBy ?? "saturation"
 	const sortDir = opts.sortDir ?? (sortBy === "containerName" ? "asc" : "desc")
-	const orderBy: Array<[string, ContainerSortDirection]> = [
+	const orderBy: Array<[string, SortDirection]> = [
 		[sortBy, sortDir],
 		...CONTAINER_SORT_TIEBREAK.filter(([key]) => key !== sortBy),
 	]
@@ -221,7 +218,7 @@ export function listContainersQuery(opts: ListContainersOpts = {}) {
 			saturation: $.saturation,
 		}))
 		.where(($) => [opts.scope ? containerScopeCondition($, opts.scope) : undefined])
-		.orderBy(...(orderBy as Array<[never, ContainerSortDirection]>))
+		.orderBy(...(orderBy as Array<[never, SortDirection]>))
 		.limit(opts.limit ?? 50)
 		.offset(opts.offset ?? 0)
 		.format("JSON")
@@ -270,7 +267,10 @@ export function listContainersSummaryQuery(opts: ListContainersOpts = {}) {
 				maxIfOrZero($.Value, $.MetricName.eq("container.memory.percent")).div(100),
 			),
 		}))
-		.where(($) => [...containerBaseConditions($), ...containerFilterConditions($, opts)])
+		.where(($) => [
+			...containerBaseConditions($, CONTAINER_SUMMARY_METRIC_NAMES),
+			...containerFilterConditions($, opts),
+		])
 		.groupBy("containerName", "hostName")
 
 	return fromQuery(perContainer, "containers")
@@ -354,8 +354,13 @@ export interface ContainerCountersSummaryOutput {
 }
 
 export function containerCountersSummaryQuery(opts: ContainerCountersSummaryOpts) {
-	return from(MetricsSum)
+	// Grouped per host first: container names collide across hosts, and a
+	// max−min over two hosts' independent cumulative counters fabricates a
+	// restart delta out of their offset. Per-host deltas sum correctly even
+	// when the caller omits `hostName`.
+	const perHost = from(MetricsSum)
 		.select(($) => ({
+			hostName: $.ResourceAttributes.get("host.name"),
 			memoryBytesAvg: avgIfOrZero($.Value, $.MetricName.eq("container.memory.usage.total")),
 			memoryLimitBytes: maxIfOrZero($.Value, $.MetricName.eq("container.memory.usage.limit")),
 			restartsDelta: CH.ifNotFinite(
@@ -380,6 +385,15 @@ export function containerCountersSummaryQuery(opts: ContainerCountersSummaryOpts
 				"container.pids.count",
 			),
 		])
+		.groupBy("hostName")
+
+	return fromQuery(perHost, "hosts")
+		.select(($) => ({
+			memoryBytesAvg: CH.avg($.memoryBytesAvg),
+			memoryLimitBytes: CH.max_($.memoryLimitBytes),
+			restartsDelta: CH.sum($.restartsDelta),
+			pidsAvg: CH.avg($.pidsAvg),
+		}))
 		.format("JSON")
 }
 
@@ -422,10 +436,11 @@ export function containerGaugeTimeseriesQuery(opts: ContainerGaugeTimeseriesOpts
 		.format("JSON")
 }
 
-// Container sum time-series — cumulative counters (network, block IO, memory
-// bytes). Same crude aggregation caveat as hostNetworkTimeseriesQuery: these
-// are cumulative counters and the first cut surfaces bucketed sums; the UI
-// renders relative shape, not exact bytes/sec.
+// Container sum time-series — metrics_sum families. Cumulative counters
+// (network, block IO) surface bucketed sums — same crude caveat as
+// hostNetworkTimeseriesQuery: the UI renders relative shape, not exact
+// bytes/sec. Sampled non-monotonic sums (memory bytes) must set `average`
+// instead: summing samples would inflate the chart by samples-per-bucket.
 
 export interface ContainerSumTimeseriesOpts {
 	containerName: string
@@ -438,6 +453,8 @@ export interface ContainerSumTimeseriesOpts {
 	 */
 	metricLabels?: ReadonlyArray<readonly [metricName: string, label: string]>
 	groupByAttributeKey?: string
+	/** Average samples per bucket — for sampled values, not cumulative counters. */
+	average?: boolean
 }
 
 export function containerSumTimeseriesQuery(opts: ContainerSumTimeseriesOpts) {
@@ -455,7 +472,7 @@ export function containerSumTimeseriesQuery(opts: ContainerSumTimeseriesOpts) {
 				: opts.groupByAttributeKey
 					? $.Attributes.get(opts.groupByAttributeKey)
 					: CH.lit(""),
-			sumValue: CH.sum($.Value),
+			sumValue: opts.average ? CH.avg($.Value) : CH.sum($.Value),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
@@ -476,14 +493,6 @@ export function containerSumTimeseriesQuery(opts: ContainerSumTimeseriesOpts) {
 // reflect the current filtered set. Counts are uniq(container.id): a recreated
 // container gets a new id but keeps its name, so id is the cardinality key.
 
-const containerFacetAttrExpr = (
-	resourceAttributes: { get(key: string): CH.Expr<string> },
-	attrKey: string,
-): CH.Expr<string> =>
-	attrKey === "deployment.environment.name"
-		? deploymentEnvExpr(resourceAttributes)
-		: resourceAttributes.get(attrKey)
-
 export type ContainerFacetsOutput = FacetOutput
 
 const makeContainerFacet = (
@@ -494,14 +503,14 @@ const makeContainerFacet = (
 ) =>
 	from(MetricsGauge)
 		.select(($) => ({
-			name: containerFacetAttrExpr($.ResourceAttributes, attrKey),
+			name: facetAttrExpr($.ResourceAttributes, attrKey),
 			count: CH.uniq($.ResourceAttributes.get("container.id")),
 			facetType: CH.lit(facetType),
 		}))
 		.where(($) => [
 			...containerBaseConditions($, [CONTAINER_FACET_PROBE_METRIC]),
 			...containerFilterConditions($, opts),
-			containerFacetAttrExpr($.ResourceAttributes, attrKey).neq(""),
+			facetAttrExpr($.ResourceAttributes, attrKey).neq(""),
 		])
 		.groupBy("name")
 		.orderBy(["count", "desc"])

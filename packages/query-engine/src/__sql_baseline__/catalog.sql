@@ -22,8 +22,14 @@ SELECT
         GROUP BY orgId
         FORMAT JSON
 
--- builder:containers:containerCountersSummaryQuery:default  [13063370]
+-- builder:containers:containerCountersSummaryQuery:default  [6bbc043d]
 SELECT
+          avg(memoryBytesAvg) AS memoryBytesAvg,
+          max(memoryLimitBytes) AS memoryLimitBytes,
+          sum(restartsDelta) AS restartsDelta,
+          avg(pidsAvg) AS pidsAvg
+        FROM (SELECT
+          ResourceAttributes['host.name'] AS hostName,
           ifNotFinite(avgIf(Value, MetricName = 'container.memory.usage.total'), 0) AS memoryBytesAvg,
           ifNotFinite(maxIf(Value, MetricName = 'container.memory.usage.limit'), 0) AS memoryLimitBytes,
           ifNotFinite(maxIf(Value, MetricName = 'container.restarts') - minIf(Value, MetricName = 'container.restarts'), 0) AS restartsDelta,
@@ -36,6 +42,7 @@ SELECT
           AND ResourceAttributes['host.name'] = 'ip-10-0-1-42'
           AND ResourceAttributes['k8s.pod.name'] = ''
           AND MetricName IN ('container.memory.usage.total', 'container.memory.usage.limit', 'container.restarts', 'container.pids.count')
+        GROUP BY hostName) AS hosts
         FORMAT JSON
 
 -- builder:containers:containerDetailSummaryQuery:default  [6063da9a]
@@ -211,6 +218,22 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
+-- builder:containers:containerSumTimeseriesQuery:memory-average  [ab3a920e]
+SELECT
+          toStartOfInterval(TimeUnix, INTERVAL 300 SECOND) AS bucket,
+          '' AS attributeValue,
+          avg(Value) AS sumValue
+        FROM metrics_sum
+        WHERE OrgId = 'org_sql_catalog'
+          AND TimeUnix >= '2026-01-01 10:30:00'
+          AND TimeUnix <= '2026-01-03 14:15:00'
+          AND ResourceAttributes['container.name'] = 'api'
+          AND ResourceAttributes['k8s.pod.name'] = ''
+          AND MetricName IN ('container.memory.usage.total')
+        GROUP BY bucket, attributeValue
+        ORDER BY bucket ASC
+        FORMAT JSON
+
 -- builder:containers:containerSumTimeseriesQuery:network  [6010f053]
 SELECT
           toStartOfInterval(TimeUnix, INTERVAL 300 SECOND) AS bucket,
@@ -377,7 +400,7 @@ SELECT
         OFFSET 0
         FORMAT JSON
 
--- builder:containers:listContainersSummaryQuery:default  [68400edc]
+-- builder:containers:listContainersSummaryQuery:default  [5709c9ea]
 SELECT
           count() AS totalContainers,
           countIf(saturation >= 0.9) AS saturatedContainers,
@@ -394,7 +417,7 @@ SELECT
           AND TimeUnix <= '2026-01-03 14:15:00'
           AND ResourceAttributes['container.name'] != ''
           AND ResourceAttributes['k8s.pod.name'] = ''
-          AND MetricName IN ('container.cpu.utilization', 'container.memory.percent', 'container.uptime', 'container.cpu.limit')
+          AND MetricName IN ('container.cpu.utilization', 'container.memory.percent')
         GROUP BY containerName, hostName) AS containers
         FORMAT JSON
 

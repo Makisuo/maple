@@ -257,9 +257,11 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 			seen.add(sub.icon)
 			unique.push(sub)
 		}
-		// Beyond four the miniatures start eating the section label itself
-		// (~14px per glyph) — Infrastructure hit five when Containers landed.
-		return unique.slice(0, 4)
+		// Beyond four glyphs the miniatures eat the section label (~14px each),
+		// and truncating by position would silently drop whichever brand lands
+		// last — the same partial-run problem as the every-child guard above.
+		// All or nothing: a section that outgrows the preview loses it.
+		return unique.length > 4 ? undefined : unique
 	}, [isOpen, subItems])
 
 	// The sub-list can't render at 48px, so the rail turns the row into a menu.

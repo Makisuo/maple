@@ -86,14 +86,17 @@ processors:
 
   # Dual-emit both environment keys; Maple's MVs coalesce them (see
   # DEPLOYMENT_ENV_SQL in packages/domain/src/tinybird/semconv-renames.ts).
+  # `insert`, not `upsert`: app OTLP passing through the agent keeps its own
+  # deployment.environment.* — only unlabeled data (docker_stats, filelog)
+  # gets the agent's environment.
   resource/env:
     attributes:
       - key: deployment.environment.name
         value: ${env:MAPLE_ENVIRONMENT:-production}
-        action: upsert
+        action: insert
       - key: deployment.environment
         value: ${env:MAPLE_ENVIRONMENT:-production}
-        action: upsert
+        action: insert
 
   batch:
     send_batch_size: 2000
