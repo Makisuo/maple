@@ -6,6 +6,7 @@ import { makeResolveTenant } from "./AuthService"
 import { annotateAuthSpan } from "@/services/auth/auth-span"
 import { CurrentAuditActor } from "@/services/auth/audit-actor"
 import { AuditLogService } from "@/services/audit/AuditLogService"
+import { recordApiDenial } from "@/services/auth/audit-denial"
 import { Env } from "@/platform/Env"
 
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
@@ -47,18 +48,13 @@ export const ApiAuthorizationLayer = Layer.effect(
 						const resolved = apiKeyResolved.value
 						// Denied attempts are audited with the same attribution as
 						// successes — a key probing a surface it is not valid for is
-						// exactly what the audit log exists to surface.
+						// exactly what the audit log exists to surface. This layer has
+						// no rate limiter, so coalescing is what bounds the volume.
 						const recordDenied = (denialReason: string) =>
-							audit.record({
+							recordApiDenial(audit, request, {
 								orgId: resolved.orgId,
-								actor: {
-									type: "api_key",
-									userId: resolved.userId,
-									apiKeyId: resolved.keyId,
-								},
-								source: "api",
-								action: "api.request",
-								outcome: "denied",
+								userId: resolved.userId,
+								apiKeyId: resolved.keyId,
 								denialReason,
 							})
 						if (resolved.kind !== "standard") {

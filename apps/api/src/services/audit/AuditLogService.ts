@@ -9,7 +9,7 @@ import { and, arrayContains, desc, eq, gte, lte } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import type { Queue } from "@cloudflare/workers-types"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
-import { Database } from "@/platform/DatabaseLive"
+import { Database, type DatabaseError } from "@/platform/DatabaseLive"
 import { msToDate } from "@/platform/time"
 import { CurrentAuditActor } from "@/services/auth/audit-actor"
 import { AuditLogEvent, auditEventToInsert, encodeAuditLogEventSync } from "./audit-event"
@@ -27,10 +27,15 @@ class AuditQueueSendError extends Schema.TaggedError<AuditQueueSendError>()(
 /** Producer binding name; the paired `*_NAME` var drives consumer dispatch. */
 export const AUDIT_EVENTS_QUEUE_BINDING = "AUDIT_EVENTS_QUEUE"
 
-const toPersistenceError = (error: unknown) =>
-	new AuditLogPersistenceError({
-		message: error instanceof Error ? error.message : "Audit log query failed",
-	})
+/**
+ * `queue.send` sits on the response path of every mutation and denial. A
+ * healthy send is tens of ms; 2s bounds a stalling broker before the entry
+ * degrades to a direct Postgres write.
+ */
+export const AUDIT_QUEUE_SEND_TIMEOUT = "2 seconds"
+
+const toPersistenceError = (error: DatabaseError) =>
+	new AuditLogPersistenceError({ message: error.message, cause: error })
 
 /** The credential-holder behind an audited action, as known at the call site. */
 export interface AuditActorRef {
@@ -121,6 +126,14 @@ export class AuditLogService extends Context.Service<AuditLogService, AuditLogSe
 					)
 				})
 
+			// Queue unavailability must not lose the entry: degrade to a direct
+			// write before giving up. Only typed send failures land here — an
+			// interrupt must propagate, not spawn a Postgres insert mid-teardown.
+			const fallbackToDirect = (event: AuditLogEvent, error: AuditQueueSendError) =>
+				Effect.logWarning("Audit queue send failed; writing directly", { cause: error }).pipe(
+					Effect.andThen(insertDirect(event)),
+				)
+
 			const publish = (event: AuditLogEvent) =>
 				queue === undefined
 					? insertDirect(event)
@@ -129,12 +142,15 @@ export class AuditLogService extends Context.Service<AuditLogService, AuditLogSe
 							catch: (cause) =>
 								new AuditQueueSendError({ message: "Audit queue send failed", cause }),
 						}).pipe(
-							// Queue unavailability must not lose the entry: degrade to a
-							// direct write before giving up.
-							Effect.catchCause((cause) =>
-								Effect.logWarning("Audit queue send failed; writing directly", { cause }).pipe(
-									Effect.andThen(insertDirect(event)),
-								),
+							// A Queues brown-out that stalls (rather than rejects) must not
+							// hang the mutation's response: 2s is far above a healthy send's
+							// latency yet bounds the worst case before the direct-write fallback.
+							Effect.timeout(AUDIT_QUEUE_SEND_TIMEOUT),
+							Effect.catchTag("TimeoutError", (error) =>
+								Effect.fail(new AuditQueueSendError({ message: "Audit queue send timed out", cause: error })),
+							),
+							Effect.catchTag("@maple/api/services/audit/AuditQueueSendError", (error) =>
+								fallbackToDirect(event, error),
 							),
 						)
 
@@ -180,9 +196,15 @@ export class AuditLogService extends Context.Service<AuditLogService, AuditLogSe
 						}),
 					)
 				}
+				// Swallow typed failures and defects — a mutation that succeeded must
+				// not 500 because its audit write did not — but let interrupts
+				// propagate so fiber teardown never triggers a stray insert.
 				yield* publish(event).pipe(
-					Effect.catchCause((cause) =>
-						Effect.logWarning("Audit log write failed", { action: input.action, cause }),
+					Effect.catch((error) =>
+						Effect.logWarning("Audit log write failed", { action: input.action, cause: error }),
+					),
+					Effect.catchDefect((defect) =>
+						Effect.logWarning("Audit log write failed", { action: input.action, cause: defect }),
 					),
 				)
 			})

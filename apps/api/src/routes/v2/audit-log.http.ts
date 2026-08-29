@@ -8,13 +8,17 @@ import {
 	paginateOffsetQuery,
 	PublicIdPrefixes,
 	timestamp,
+	V2InsufficientPermissions,
 	V2ParameterInvalid,
 } from "@maple/domain/http/v2"
 import type { V2AuditLogEntry } from "@maple/domain/http/v2"
 import type { AuditLogEntryRow } from "@maple/db"
 import { Effect, Option, Schema } from "effect"
 import { AuditLogService } from "@/services/audit/AuditLogService"
+import { requireAdmin } from "@/services/auth/auth"
 import type { AuditLogListFilters } from "@/services/audit/AuditLogService"
+
+const adminOnly = () => V2InsufficientPermissions.make("Only org admins can read the audit log")
 
 const decodeApiKeyIdOption = Schema.decodeUnknownOption(ApiKeyId)
 const decodeActorIdOption = Schema.decodeUnknownOption(ActorId)
@@ -99,6 +103,10 @@ export const HttpV2AuditLogLive = HttpApiBuilder.group(MapleApiV2, "auditLog", (
 		return handlers.handle("list", ({ query }) =>
 			Effect.gen(function* () {
 				const tenant = yield* CurrentTenant.Context
+				// The log carries every member's activity, denial history, and origin
+				// IP for the whole retention window — org admins only. Scoped API keys
+				// are additionally gated by `audit_log:read`.
+				yield* requireAdmin(tenant.roles, adminOnly)
 				const identity =
 					query.actor_id !== undefined ? yield* actorIdentityFilter(query.actor_id) : undefined
 				const affectedUser =

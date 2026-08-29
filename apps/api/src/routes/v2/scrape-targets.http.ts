@@ -11,7 +11,7 @@ import {
 } from "@maple/domain/http/v2"
 import type { V2ScrapeTarget, V2ScrapeTargetCheck } from "@maple/domain/http/v2"
 import { Effect } from "effect"
-import { diffAuditChanges, pickPresentFields } from "@/routes/v2/audit-changes"
+import { diffAuditChanges, pickPresentFields, redactAuditUrl } from "@/routes/v2/audit-changes"
 import { recordHttpAudit } from "@/services/audit/AuditLogService"
 import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsService"
 
@@ -185,10 +185,32 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 						}),
 					)
 
-					const observable = diffAuditChanges(
+					// Read-then-write with no CAS: a concurrent update can make `before`
+					// reflect a state this update never saw. Accepted for audit purposes.
+					const diffed = diffAuditChanges(
 						pickPresentFields(targetAuditKeys, payload, toV2ScrapeTarget(current)),
 						pickPresentFields(targetAuditKeys, payload, toV2ScrapeTarget(updated)),
 					)
+					// Scrape URLs may carry tokens in userinfo/query — audit only scheme/host/path.
+					// Identical redacted values still mean the URL changed within the stripped part.
+					const observable =
+						diffed === undefined || !diffed.fields.includes("url")
+							? diffed
+							: {
+									fields: diffed.fields,
+									before: {
+										...diffed.before,
+										...(typeof diffed.before["url"] === "string"
+											? { url: redactAuditUrl(diffed.before["url"]) }
+											: undefined),
+									},
+									after: {
+										...diffed.after,
+										...(typeof diffed.after["url"] === "string"
+											? { url: redactAuditUrl(diffed.after["url"]) }
+											: undefined),
+									},
+								}
 					// Credentials are write-only: audit that they rotated, never their value.
 					const changes =
 						payload.auth_credentials !== undefined

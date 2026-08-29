@@ -9,7 +9,7 @@ import {
 } from "../audit-log"
 import { AuthorizationV2 } from "./auth"
 import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
-import { V2ParameterInvalid } from "./errors"
+import { V2InsufficientPermissions, V2ParameterInvalid } from "./errors"
 import { publicErrors } from "./public-error"
 import { PublicId, PublicIdPrefixes } from "./public-id"
 
@@ -225,13 +225,13 @@ export class V2AuditLogApiGroup extends HttpApiGroup.make("auditLog")
 		HttpApiEndpoint.get("list", "/", {
 			query: V2AuditLogQuery,
 			success: AuditLogEntryList,
-			error: [V2ParameterInvalid.schema, auditLogPersistence],
+			error: [V2ParameterInvalid.schema, V2InsufficientPermissions.schema, auditLogPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "listAuditLogEntries",
 				summary: "List audit log entries",
 				description:
-					"Returns your organization's audit log, newest first, optionally filtered by actor, action, outcome, resource, changed field, request, and time window. Cursor-paginated. Requires the `audit_log:read` scope.",
+					"Returns your organization's audit log, newest first, optionally filtered by actor, action, outcome, resource, changed field, request, and time window. Cursor-paginated. Session callers must be organization administrators; API keys require the `audit_log:read` scope.",
 			}),
 		),
 	)
@@ -241,6 +241,6 @@ export class V2AuditLogApiGroup extends HttpApiGroup.make("auditLog")
 		OpenApi.annotations({
 			title: "Audit Log",
 			description:
-				"The organization's append-only audit trail — every allowed or denied action performed through the dashboard, the public API, or MCP, attributed to the user, API key, or agent that performed it, with before/after diffs for updates.",
+				"The organization's append-only audit trail — allowed and denied actions performed through the dashboard, the public API, and MCP, attributed to the user, API key, or agent that performed them, with before/after diffs for updates. Reading it requires organization-administrator access (or the `audit_log:read` scope for API keys).",
 		}),
 	) {}

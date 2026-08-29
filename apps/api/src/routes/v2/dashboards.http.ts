@@ -312,6 +312,15 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 				)
 
 				yield* logShare("dashboard share rotated", context, { "maple.share.id": rotated.id })
+				// Security event: rotation invalidates the previous public share token.
+				yield* recordHttpAudit("dashboard_share.rotated", {
+					resourceType: "dashboard_share",
+					resourceId: encodePublicId(PublicIdPrefixes.dashboardShare, rotated.id),
+					metadata: {
+						dashboard_id: encodePublicId(PublicIdPrefixes.dashboard, dashboardId),
+						...(widgetId === null ? undefined : { widget_id: widgetId }),
+					},
+				})
 
 				return toV2DashboardShare(rotated)
 			})
@@ -412,7 +421,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 											widgets: "<updated>",
 											sections: "<updated>",
 											variables: "<updated>",
-										},
+										} satisfies Partial<Record<(typeof dashboardAuditKeys)[number], string>>,
 									)
 						yield* recordHttpAudit("dashboard.updated", {
 							resourceType: "dashboard",
@@ -450,6 +459,11 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 							tenant.userId,
 							converted.dashboard,
 						)
+						yield* recordHttpAudit("dashboard.created", {
+							resourceType: "dashboard",
+							resourceId: encodePublicId(PublicIdPrefixes.dashboard, dashboard.id),
+							metadata: { name: dashboard.name, source: "perses_import" },
+						})
 
 						return {
 							object: "dashboard_import" as const,
@@ -508,6 +522,17 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 							params.id,
 							params.version_id,
 						)
+						yield* recordHttpAudit("dashboard.version_restored", {
+							resourceType: "dashboard",
+							resourceId: encodePublicId(PublicIdPrefixes.dashboard, dashboard.id),
+							metadata: {
+								name: dashboard.name,
+								version_id: encodePublicId(
+									PublicIdPrefixes.dashboardVersion,
+									params.version_id,
+								),
+							},
+						})
 
 						return toV2DashboardMutation(dashboard)
 					}),
@@ -600,6 +625,15 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 						})
 						const tenant = yield* CurrentTenant.Context
 						const dashboard = yield* persistence.create(tenant.orgId, tenant.userId, portable)
+						yield* recordHttpAudit("dashboard.created", {
+							resourceType: "dashboard",
+							resourceId: encodePublicId(PublicIdPrefixes.dashboard, dashboard.id),
+							metadata: {
+								name: dashboard.name,
+								source: "template",
+								template_id: params.template_id,
+							},
+						})
 
 						return toV2DashboardMutation(dashboard)
 					}),

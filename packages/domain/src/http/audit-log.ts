@@ -41,6 +41,8 @@ export class AuditLogPersistenceError extends HttpTaggedError<AuditLogPersistenc
 	"@maple/http/errors/AuditLogPersistenceError",
 	{
 		message: Schema.String,
+		// Diagnostic only — `exposure: "redacted"` keeps it off the wire.
+		cause: Schema.optionalKey(Schema.Defect()),
 	},
 	{
 		status: 503,

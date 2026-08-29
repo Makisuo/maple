@@ -412,7 +412,9 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 							pickPresentFields(ruleAuditKeys, payload, toV2Rule(updated)),
 						),
 						// Query drafts and raw SQL are config blobs — audit that they changed, not their bodies.
-						{ query_builder_draft: "<updated>", raw_query_sql: "<updated>" },
+						{ query_builder_draft: "<updated>", raw_query_sql: "<updated>" } satisfies Partial<
+							Record<(typeof ruleAuditKeys)[number], string>
+						>,
 					)
 					yield* recordHttpAudit("alert_rule.updated", {
 						resourceType: "alert_rule",

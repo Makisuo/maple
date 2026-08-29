@@ -198,6 +198,9 @@ export function useVisibleSettingsSections() {
 			...section,
 			items: section.items.filter((item) => {
 				if (item.id === "data-platform") return canAccessDataPlatform
+				// `GET /v2/audit_log` is admin-only; hide the tab rather than let a
+				// member open it into a 403.
+				if (item.id === "audit-log") return isAdmin
 				return true
 			}),
 		}))

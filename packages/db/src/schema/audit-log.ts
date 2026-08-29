@@ -54,6 +54,25 @@ export const auditLogEntries = pgTable(
 			table.outcome,
 			table.occurredAt,
 		),
+		// Retention sweep scans `occurred_at < cutoff` across ALL orgs; every other
+		// index leads with org_id and cannot serve that predicate.
+		index("audit_log_entries_occurred_idx").on(table.occurredAt),
+		// "What did this credential do" — the primary read-endpoint filters.
+		index("audit_log_entries_org_user_occurred_idx").on(table.orgId, table.userId, table.occurredAt),
+		index("audit_log_entries_org_api_key_occurred_idx").on(
+			table.orgId,
+			table.apiKeyId,
+			table.occurredAt,
+		),
+		index("audit_log_entries_org_actor_occurred_idx").on(table.orgId, table.actorId, table.occurredAt),
+		index("audit_log_entries_org_affected_user_occurred_idx").on(
+			table.orgId,
+			table.affectedUserId,
+			table.occurredAt,
+		),
+		index("audit_log_entries_org_action_occurred_idx").on(table.orgId, table.action, table.occurredAt),
+		// drizzle `arrayContains` compiles to `@>`, which only GIN can serve on text[].
+		index("audit_log_entries_changed_fields_gin_idx").using("gin", table.changedFields),
 	],
 )
 

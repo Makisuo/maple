@@ -1,8 +1,8 @@
 import { auditLogEntries } from "@maple/db"
-import { inArray, lt } from "drizzle-orm"
+import { sql } from "drizzle-orm"
 import { Clock, Config, Effect } from "effect"
 import { Database } from "@/platform/DatabaseLive"
-import { msToDate } from "@/platform/time"
+import { msToSqlTimestamp } from "@/platform/time"
 
 /**
  * Retention for the org audit log (`audit_log_entries`).
@@ -34,20 +34,21 @@ const retentionDaysConfig = Config.number("AUDIT_LOG_RETENTION_DAYS").pipe(
 export const runAuditLogRetention = Effect.gen(function* () {
 	const retentionDays = yield* retentionDaysConfig
 	const now = yield* Clock.currentTimeMillis
-	const cutoff = msToDate(now - retentionDays * DAY_MS)
+	// Raw-fragment param: bind an ISO string, not a Date — see msToSqlTimestamp.
+	const cutoff = msToSqlTimestamp(now - retentionDays * DAY_MS)
 	const database = yield* Database
 
 	const deleted = yield* database.execute(async (db) => {
 		let total = 0
 		for (let batch = 0; batch < RETENTION_MAX_BATCHES; batch++) {
-			const staleIds = db
-				.select({ id: auditLogEntries.id })
-				.from(auditLogEntries)
-				.where(lt(auditLogEntries.occurredAt, cutoff))
-				.limit(RETENTION_BATCH_ROWS)
+			// ctid-addressed delete: one scan of the standalone occurred_at index
+			// finds the batch, and the DELETE fetches those exact tuples directly —
+			// no second lookup by a key the PK index (org_id, id) cannot serve.
 			const rows = await db
 				.delete(auditLogEntries)
-				.where(inArray(auditLogEntries.id, staleIds))
+				.where(
+					sql`ctid IN (SELECT ctid FROM ${auditLogEntries} WHERE ${auditLogEntries.occurredAt} < ${cutoff}::timestamptz LIMIT ${RETENTION_BATCH_ROWS})`,
+				)
 				.returning({ id: auditLogEntries.id })
 			total += rows.length
 			if (rows.length < RETENTION_BATCH_ROWS) break
