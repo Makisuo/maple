@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import { Exit } from "effect"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@maple/ui/components/ui/alert"
+import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
@@ -33,6 +34,58 @@ import {
 } from "./cloudflare-zone-board"
 
 const EMPTY_USAGE: RowUsage = { totalRequests: 0, lastDataAt: null, points: [] }
+
+/** The slice of a connected account the strip renders (schema class or legacy fallback). */
+interface ConnectedAccountEntry {
+	readonly accountId: string
+	readonly accountName: string | null
+	readonly analyticsCapable: boolean
+	readonly revoked: boolean
+	readonly zoneCount: number
+}
+
+/**
+ * The accounts the org's grant covers, one row per account with its health badges. One OAuth
+ * grant carries every account, so there is no per-account disconnect — changing the set means
+ * reconnecting and ticking different accounts on Cloudflare's consent screen.
+ */
+function CloudflareAccountsStrip({ accounts }: { readonly accounts: ReadonlyArray<ConnectedAccountEntry> }) {
+	if (accounts.length < 2) return null
+	return (
+		<div className="rounded-lg border border-border/60 bg-card">
+			<div className="border-b border-border/60 px-4 py-2.5">
+				<h3 className="text-xs font-medium text-muted-foreground">
+					Connected accounts ({accounts.length})
+				</h3>
+			</div>
+			<ul className="divide-y divide-border/60">
+				{accounts.map((account) => (
+					<li key={account.accountId} className="flex items-center gap-3 px-4 py-2.5">
+						<CloudflareMonoIcon size={16} className="shrink-0 text-muted-foreground" />
+						<div className="flex min-w-0 flex-col">
+							<span className="truncate text-sm font-medium">
+								{account.accountName ?? account.accountId}
+							</span>
+							<span className="truncate font-mono text-[11px] text-muted-foreground">
+								{account.accountId}
+							</span>
+						</div>
+						<div className="flex items-center gap-1.5">
+							{account.revoked ? (
+								<Badge variant="error">Reconnect required</Badge>
+							) : !account.analyticsCapable ? (
+								<Badge variant="warning">Needs updated access</Badge>
+							) : null}
+						</div>
+						<span className="ml-auto text-xs text-muted-foreground">
+							{account.zoneCount === 1 ? "1 zone" : `${account.zoneCount} zones`}
+						</span>
+					</li>
+				))}
+			</ul>
+		</div>
+	)
+}
 
 /**
  * Account-level Cloudflare OAuth connection (Authorization Code + PKCE). Distinct from the
@@ -94,6 +147,33 @@ export function CloudflareAccountCard() {
 		const known = new Set(status.zones.map((zone) => zone.name))
 		return usage.services.filter((service) => service.kind === "zone" && !known.has(service.displayName))
 	}, [usage, status])
+
+	// Connected accounts for the strip. Older API responses predate `accounts`; synthesize
+	// the single-connection entry from the legacy top-level fields during a deploy window.
+	const connectedAccounts = useMemo((): ReadonlyArray<ConnectedAccountEntry> => {
+		if (status?.connected !== true) return []
+		const list = status.accounts ?? []
+		if (list.length > 0) {
+			return list.map((account) => ({
+				accountId: account.accountId,
+				accountName: account.accountName,
+				analyticsCapable: account.analyticsCapable,
+				revoked: account.revoked,
+				zoneCount: account.zones.length,
+			}))
+		}
+		return status.accountId == null
+			? []
+			: [
+					{
+						accountId: status.accountId,
+						accountName: status.accountName,
+						analyticsCapable: status.analyticsCapable,
+						revoked: false,
+						zoneCount: status.zones.length,
+					},
+				]
+	}, [status])
 
 	// The first account-wide failure across zones/workers (revoked token, missing config, denied
 	// auth). Surfaced once as a banner instead of repeated — and unreadable — on every row.
@@ -258,6 +338,7 @@ export function CloudflareAccountCard() {
 
 	return (
 		<div className="flex flex-col gap-4">
+			<CloudflareAccountsStrip accounts={connectedAccounts} />
 			{hasReadout ? (
 				<>
 					{!usageFailed ? (
@@ -306,11 +387,21 @@ export function CloudflareHeaderActions() {
 	const disconnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "cloudflareDisconnect"), {
 		mode: "promiseExit",
 	})
+	// Same memoized atom as the card — no extra fetch, just the account count for labels.
+	const statusResult = useAtomValue(
+		retainedQuery("integrations", "cloudflareStatus", {
+			reactivityKeys: ["cloudflareIntegrationStatus"],
+		}),
+	)
+	const accountCount = Result.builder(statusResult)
+		.onSuccess((s) => s.accounts?.length ?? (s.connected ? 1 : 0))
+		.orElse(() => 1)
 	const [disconnectBusy, setDisconnectBusy] = useState(false)
 	if (connectFlow === null) {
 		throw new Error("CloudflareHeaderActions must be rendered inside IntegrationConnectProvider")
 	}
 	const actionBusy = connectFlow.busy || disconnectBusy
+	const multiAccount = accountCount > 1
 
 	async function handleDisconnect() {
 		setDisconnectBusy(true)
@@ -319,9 +410,12 @@ export function CloudflareHeaderActions() {
 		})
 		setDisconnectBusy(false)
 		if (Exit.isSuccess(result)) {
-			toastManager.add({ title: "Cloudflare account disconnected", type: "success" })
+			toastManager.add({
+				title: multiAccount ? "Cloudflare accounts disconnected" : "Cloudflare account disconnected",
+				type: "success",
+			})
 		} else {
-			toastManager.add({ title: "Failed to disconnect Cloudflare account", type: "error" })
+			toastManager.add({ title: "Failed to disconnect Cloudflare", type: "error" })
 		}
 	}
 
@@ -329,7 +423,7 @@ export function CloudflareHeaderActions() {
 		<div className="flex items-center gap-2">
 			<Button size="sm" variant="outline" onClick={connectFlow.connect} disabled={actionBusy}>
 				{connectFlow.busy ? <LoaderIcon size={14} className="animate-spin" /> : null}
-				Reconnect
+				{multiAccount ? "Edit accounts" : "Reconnect"}
 			</Button>
 			<Button
 				size="sm"
@@ -339,7 +433,7 @@ export function CloudflareHeaderActions() {
 				className="border-destructive/40 text-destructive-foreground hover:bg-destructive/10 hover:text-destructive-foreground"
 			>
 				{disconnectBusy ? <LoaderIcon size={14} className="animate-spin" /> : null}
-				Disconnect
+				{multiAccount ? "Disconnect all" : "Disconnect"}
 			</Button>
 		</div>
 	)

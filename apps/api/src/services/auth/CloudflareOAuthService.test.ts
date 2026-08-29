@@ -3,7 +3,7 @@ import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OrgId, UserId } from "@maple/domain/http"
 import { Env } from "@/platform/Env"
-import { CloudflareOAuthService } from "./CloudflareOAuthService"
+import { CloudflareOAuthService, type CloudflareOAuthServiceApi } from "./CloudflareOAuthService"
 import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 
 const trackedDbs: TestDb[] = []
@@ -183,10 +183,10 @@ describe("CloudflareOAuthService", () => {
 
 			const status = yield* service.getStatus(asOrgId("org_a"))
 			assert.strictEqual(status.connected, true)
-			if (status.connected) {
-				assert.strictEqual(status.accountId, "acc_1")
-				assert.strictEqual(status.accountName, "Acme Inc")
-			}
+			assert.strictEqual(status.accounts.length, 1)
+			assert.strictEqual(status.accounts[0]?.accountId, "acc_1")
+			assert.strictEqual(status.accounts[0]?.accountName, "Acme Inc")
+			assert.strictEqual(status.accounts[0]?.revoked, false)
 
 			const row = yield* Effect.promise(() =>
 				queryFirstRow<{
@@ -227,30 +227,50 @@ describe("CloudflareOAuthService", () => {
 		}).pipe(Effect.provide(Layer.mergeAll(makeLayer(testDb, withOAuthApp), withMockFetch([]))))
 	})
 
-	it.effect("completeConnect rejects a token that spans multiple accounts and revokes it", () => {
+	it.effect("completeConnect accepts a grant spanning multiple accounts as one connection", () => {
 		const testDb = createTestDb(trackedDbs)
 		const accounts = [
 			{ id: "acc_1", name: "Acme Inc", type: "standard" },
 			{ id: "acc_2", name: "Beta LLC", type: "standard" },
 		]
-		const counters = { revoked: 0 }
 		return Effect.gen(function* () {
 			const service = yield* CloudflareOAuthService
 			const { state } = yield* service.startConnect(asOrgId("org_a"), asUserId("user_a"), {
 				callbackUrl: "https://api.example.com/api/integrations/cloudflare/callback",
 			})
-			const error = yield* service.completeConnect("auth-code", state).pipe(Effect.flip)
-			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsValidationError")
+			const result = yield* service.completeConnect("auth-code", state)
+			assert.strictEqual(result.orgId, "org_a")
 
+			// Both accounts surface, in the grant's order.
 			const status = yield* service.getStatus(asOrgId("org_a"))
-			assert.strictEqual(status.connected, false)
-			// The rejected token is never stored, so it must be revoked upstream right away.
-			assert.strictEqual(counters.revoked, 1)
-		}).pipe(
-			Effect.provide(
-				Layer.mergeAll(makeLayer(testDb, withOAuthApp), withMockFetch(accounts, counters)),
-			),
-		)
+			assert.strictEqual(status.connected, true)
+			assert.deepStrictEqual(
+				status.accounts.map((account) => account.accountId),
+				["acc_1", "acc_2"],
+			)
+			assert.strictEqual(status.accounts[1]?.accountName, "Beta LLC")
+
+			// One grant is one row; the account fan-out lives in granted_accounts_json.
+			const row = yield* Effect.promise(() =>
+				queryFirstRow<{ external_user_id: string; granted_accounts_json: string | null }>(
+					testDb,
+					"SELECT external_user_id, granted_accounts_json FROM oauth_connections WHERE org_id = $1 AND provider = 'cloudflare'",
+					["org_a"],
+				),
+			)
+			assert.strictEqual(row?.external_user_id, "acc_1")
+			assert.deepStrictEqual(JSON.parse(row?.granted_accounts_json ?? "[]"), [
+				{ id: "acc_1", name: "Acme Inc" },
+				{ id: "acc_2", name: "Beta LLC" },
+			])
+
+			// Account-addressed tokens resolve for every granted account; an account outside
+			// the grant refuses.
+			const token = yield* service.getValidAccessToken(asOrgId("org_a"), "acc_2")
+			assert.strictEqual(token.accountId, "acc_2")
+			const outside = yield* service.getValidAccessToken(asOrgId("org_a"), "acc_3").pipe(Effect.flip)
+			assert.strictEqual(outside._tag, "@maple/http/errors/IntegrationsValidationError")
+		}).pipe(Effect.provide(Layer.mergeAll(makeLayer(testDb, withOAuthApp), withMockFetch(accounts))))
 	})
 
 	it.effect("completeConnect refuses a token with no refresh token and revokes it", () => {
@@ -381,8 +401,8 @@ describe("CloudflareOAuthService", () => {
 			// rotated-token 400 falsely surfaces as IntegrationsRevokedError.
 			const [a, b] = yield* Effect.all(
 				[
-					service.getValidAccessToken(asOrgId("org_a")),
-					service.getValidAccessToken(asOrgId("org_a")),
+					service.getValidAccessToken(asOrgId("org_a"), "acc_1"),
+					service.getValidAccessToken(asOrgId("org_a"), "acc_1"),
 				],
 				{ concurrency: 2 },
 			)
@@ -443,7 +463,7 @@ describe("CloudflareOAuthService", () => {
 			})
 			yield* service.completeConnect("auth-code", state)
 
-			const error = yield* service.getValidAccessToken(asOrgId("org_a")).pipe(Effect.flip)
+			const error = yield* service.getValidAccessToken(asOrgId("org_a"), "acc_1").pipe(Effect.flip)
 			// 400/401 on the refresh grant means the grant itself is gone — classified as
 			// revoked (reconnect required), not a transient upstream failure.
 			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsRevokedError")
@@ -500,5 +520,97 @@ describe("CloudflareOAuthService", () => {
 			const result = yield* service.disconnect(asOrgId("org_a"))
 			assert.strictEqual(result.disconnected, false)
 		}).pipe(Effect.provide(makeLayer(testDb, withOAuthApp)))
+	})
+
+	it.effect("reconnecting with a different grant replaces the account set", () => {
+		const testDb = createTestDb(trackedDbs)
+		// Mutable fixture: each OAuth round-trip "grants" whatever accounts the test sets next,
+		// mirroring the user re-ticking accounts in Cloudflare's authorize screen.
+		const granted = { current: [{ id: "acc_1", name: "Acme Inc", type: "standard" }] }
+		const fetchImpl: typeof globalThis.fetch = (input) => {
+			const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+			if (url.includes("/oauth2/revoke")) {
+				return Promise.resolve(new Response(null, { status: 200 }))
+			}
+			if (url.includes("/oauth2/token")) {
+				return Promise.resolve(
+					jsonResponse({
+						access_token: `cf-access-token-${granted.current[0]?.id}`,
+						refresh_token: `cf-refresh-token-${granted.current[0]?.id}`,
+						token_type: "bearer",
+						expires_in: 3600,
+						scope: "account.settings:read",
+					}),
+				)
+			}
+			if (url.includes("/accounts")) {
+				return Promise.resolve(
+					jsonResponse({
+						success: true,
+						errors: [],
+						messages: [],
+						result: granted.current,
+						result_info: {
+							count: granted.current.length,
+							page: 1,
+							per_page: 50,
+							total_count: granted.current.length,
+						},
+					}),
+				)
+			}
+			return Promise.resolve(
+				jsonResponse({ success: false, errors: [], messages: [], result: null }, 404),
+			)
+		}
+		const connect = (service: CloudflareOAuthServiceApi) =>
+			Effect.gen(function* () {
+				const { state } = yield* service.startConnect(asOrgId("org_a"), asUserId("user_a"), {
+					callbackUrl: "https://api.example.com/api/integrations/cloudflare/callback",
+				})
+				return yield* service.completeConnect("auth-code", state)
+			})
+
+		return Effect.gen(function* () {
+			const service = yield* CloudflareOAuthService
+			yield* connect(service)
+
+			// Reconnecting with a different grant REPLACES the account set — the old grant's
+			// token is superseded, so its accounts must not linger as connected.
+			granted.current = [
+				{ id: "acc_2", name: "Beta LLC", type: "standard" },
+				{ id: "acc_3", name: "Gamma GmbH", type: "standard" },
+			]
+			yield* connect(service)
+			const status = yield* service.getStatus(asOrgId("org_a"))
+			assert.strictEqual(status.connected, true)
+			assert.deepStrictEqual(
+				status.accounts.map((account) => account.accountId),
+				["acc_2", "acc_3"],
+			)
+
+			// Still one row: the new grant overwrote the old connection in place.
+			const rowCount = yield* Effect.promise(() =>
+				queryFirstRow<{ n: number }>(
+					testDb,
+					"SELECT count(*)::int AS n FROM oauth_connections WHERE org_id = $1 AND provider = 'cloudflare'",
+					["org_a"],
+				),
+			)
+			assert.strictEqual(rowCount?.n, 1)
+
+			// Tokens are the new grant's, for every account it covers.
+			const token = yield* service.getValidAccessToken(asOrgId("org_a"), "acc_3")
+			assert.strictEqual(token.accessToken, "cf-access-token-acc_2")
+			const stale = yield* service.getValidAccessToken(asOrgId("org_a"), "acc_1").pipe(Effect.flip)
+			assert.strictEqual(stale._tag, "@maple/http/errors/IntegrationsValidationError")
+		}).pipe(
+			Effect.provide(
+				Layer.mergeAll(
+					makeLayer(testDb, withOAuthApp),
+					Layer.succeed(FetchHttpClient.Fetch, fetchImpl),
+				),
+			),
+		)
 	})
 })
