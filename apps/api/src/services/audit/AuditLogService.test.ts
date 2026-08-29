@@ -5,7 +5,10 @@ import { OrgId, UserId } from "@maple/domain/primitives"
 import { Effect, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
-import { AuditLogService } from "./AuditLogService"
+import { AuditLogService, recordHttpAudit } from "./AuditLogService"
+import { CurrentTenant } from "@maple/domain/http"
+import { ApiKeyId } from "@maple/domain/primitives"
+import { type AuditActorInfo, CurrentAuditActor } from "@/services/auth/audit-actor"
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const asUserId = Schema.decodeUnknownSync(UserId)
@@ -17,6 +20,7 @@ const createdDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(createdDbs))
 
 const DASHBOARD_ID = "3f1b7c02-9a44-4d1e-8b2f-0c5d6e7a8b91"
+const API_KEY = Schema.decodeUnknownSync(ApiKeyId)("7b2e4c10-55aa-4d3e-9f21-1a2b3c4d5e6f")
 
 const makeLayer = () => AuditLogService.layer.pipe(Layer.provide(createTestDb(createdDbs).layer))
 
@@ -183,6 +187,67 @@ describe("AuditLogService", () => {
 					),
 				),
 			),
+		)
+	})
+
+	// The credential and the surface are the two facts a mutation handler cannot
+	// re-derive, and getting them wrong is what made API-key and MCP actions read
+	// back as dashboard sessions.
+	describe("recordHttpAudit attribution", () => {
+		const tenant = new CurrentTenant.TenantSchema({
+			orgId: ORG,
+			userId: USER,
+			roles: [],
+			authMode: "self_hosted",
+		})
+
+		const recordAs = (info: AuditActorInfo | undefined) =>
+			Effect.gen(function* () {
+				const audit = yield* AuditLogService
+				yield* recordHttpAudit("dashboard.created", { resourceId: DASHBOARD_ID })
+				const rows = yield* audit.list(ORG, { limit: 1, offset: 0 })
+				return rows[0]!
+			}).pipe(
+				Effect.provideService(CurrentTenant.Context, tenant),
+				Effect.provideService(CurrentAuditActor, info),
+				Effect.provide(makeLayer().pipe(Layer.provide(Layer.succeed(WorkerEnvironment, {})))),
+			)
+
+		it.effect("attributes an API-key request to the key, not the dashboard", () =>
+			Effect.gen(function* () {
+				const row = yield* recordAs({ type: "api_key", apiKeyId: API_KEY, source: "api" })
+				expect(row.actorType).toBe("api_key")
+				expect(row.source).toBe("api")
+				expect(row.apiKeyId).toBe(API_KEY)
+			}),
+		)
+
+		it.effect("records the MCP surface rather than assuming a dashboard session", () =>
+			Effect.gen(function* () {
+				const row = yield* recordAs({ type: "api_key", source: "mcp" })
+				expect(row.source).toBe("mcp")
+				expect(row.actorType).toBe("api_key")
+			}),
+		)
+
+		it.effect("records Maple's own internal-token actions as system", () =>
+			Effect.gen(function* () {
+				const row = yield* recordAs({ type: "system", source: "system" })
+				expect(row.actorType).toBe("system")
+				expect(row.source).toBe("system")
+			}),
+		)
+
+		// Requests that skipped every auth middleware still have a tenant; the
+		// fallback must not invent a credential it did not see.
+		it.effect("falls back to the tenant user when no middleware set the reference", () =>
+			Effect.gen(function* () {
+				const row = yield* recordAs(undefined)
+				expect(row.actorType).toBe("user")
+				expect(row.source).toBe("dashboard")
+				expect(row.userId).toBe(USER)
+				expect(row.apiKeyId).toBeNull()
+			}),
 		)
 	})
 

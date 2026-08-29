@@ -31,6 +31,7 @@ import {
 	V2TimeRangeInvalid,
 } from "@maple/domain/http/v2"
 import { Array as Arr, Effect, Option } from "effect"
+import { recordHttpAudit } from "@/services/audit/AuditLogService"
 import { requireAdmin } from "@/services/auth/auth"
 import { Env } from "@/platform/Env"
 import { EdgeCacheService } from "@maple/cache"
@@ -258,6 +259,7 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 					const result = yield* slack
 						.startInstall(tenant.orgId, tenant.userId, callbackUrl)
 						.pipe(tapHttpErrors("Slack install failed"))
+					yield* recordHttpAudit("slack_integration.install_started")
 					return {
 						object: "slack_integration.install" as const,
 						url: result.url,
@@ -273,6 +275,7 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 					yield* slack
 						.uninstall(tenant.orgId)
 						.pipe(tapHttpErrors("Slack integration uninstall failed"))
+					yield* recordHttpAudit("slack_integration.uninstalled")
 					return {
 						object: "slack_integration" as const,
 						installed: false as const,
@@ -353,6 +356,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 									returnTo: payload.return_to,
 								})
 								.pipe(tapHttpErrors("PlanetScale connect failed"))
+							yield* recordHttpAudit("planetscale_integration.connect_started")
 							return {
 								object: "planetscale_integration.connect" as const,
 								redirect_url: result.redirectUrl,
@@ -397,6 +401,13 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 									excludeBranches: payload.exclude_branches,
 								})
 								.pipe(tapHttpErrors("PlanetScale organization selection failed"))
+							yield* recordHttpAudit("planetscale_integration.organization_selected", {
+								metadata: {
+									organization: payload.organization,
+									include_branches: payload.include_branches,
+									exclude_branches: payload.exclude_branches,
+								},
+							})
 							return toPlanetScaleStatus(status)
 						}),
 					)
@@ -414,6 +425,11 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 									tokenSecret: payload.token_secret,
 								})
 								.pipe(tapHttpErrors("PlanetScale metrics token update failed"))
+							// The token id names which credential was installed; its secret
+							// is write-only and never reaches an audit row.
+							yield* recordHttpAudit("planetscale_integration.metrics_token_set", {
+								metadata: { token_id: payload.token_id },
+							})
 							return toPlanetScaleStatus(status)
 						}),
 					)
@@ -426,6 +442,7 @@ export const HttpV2PlanetScaleIntegrationsLive = HttpApiBuilder.group(
 							yield* planetscale
 								.disconnect(tenant.orgId)
 								.pipe(tapHttpErrors("PlanetScale disconnect failed"))
+							yield* recordHttpAudit("planetscale_integration.disconnected")
 							return {
 								object: "planetscale_integration" as const,
 								connected: false as const,

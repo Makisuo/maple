@@ -40,7 +40,31 @@ export const AuditResources = {
 	error_issue: { prefix: PublicIdPrefixes.errorIssue, verbs: ErrorIssueEventType.literals },
 	/** Org-singleton public/private pair; which one rolled is in `metadata`. */
 	ingest_key: { verbs: ["rolled"] },
+	investigation: { prefix: PublicIdPrefixes.investigation, verbs: ["created", "restarted", "status_changed"] },
+	/**
+	 * Org-singleton connections. `*_started` is the admin action Maple sees; the
+	 * OAuth round trip completes at the provider's callback.
+	 */
+	planetscale_integration: {
+		verbs: ["connect_started", "organization_selected", "metrics_token_set", "disconnected"],
+	},
+	slack_integration: { verbs: ["install_started", "uninstalled"] },
+	/**
+	 * Org membership, learned from Clerk's webhook — the web app changes members
+	 * in Clerk directly, so nothing reaches Maple's own API. The member is the
+	 * entry's `affected_user`; no prefix, since Clerk IDs are already public.
+	 */
+	member: { verbs: ["added", "role_changed", "removed"] },
+	/**
+	 * The org itself. No prefix: every row already carries `org_id`, and a
+	 * deleted org has no public ID left to resolve.
+	 */
+	organization: { verbs: ["deleted"] },
 	scrape_target: { prefix: PublicIdPrefixes.scrapeTarget, verbs: ["created", "updated", "deleted"] },
+	/** Org-singleton BYO-ClickHouse connection; holds warehouse credentials. */
+	warehouse_settings: { verbs: ["updated", "deleted", "schema_applied"] },
+	/** Short-lived device credentials for the mobile widget; keyed by installation. */
+	widget_credential: { verbs: ["minted", "revoked"] },
 } as const satisfies Record<string, AuditResourceDefinition>
 
 interface AuditResourceDefinition {

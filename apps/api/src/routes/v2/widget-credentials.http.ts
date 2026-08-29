@@ -2,6 +2,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant } from "@maple/domain/http"
 import { MapleApiV2, isoTimestamp } from "@maple/domain/http/v2"
 import { Effect } from "effect"
+import { recordHttpAudit } from "@/services/audit/AuditLogService"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 
 /**
@@ -49,6 +50,14 @@ export const HttpV2WidgetCredentialsLive = HttpApiBuilder.group(MapleApiV2, "wid
 						// letting it resolve with the API-key default — is `root`.
 						roles: tenant.roles,
 					})
+					// A credential mint is the security event; the secret itself never
+					// reaches the row, only which installation it was issued to.
+					yield* recordHttpAudit("widget_credential.minted", {
+						metadata: {
+							installation_id: params.installation_id,
+							scopes: credential.scopes ?? WIDGET_CREDENTIAL_SCOPES,
+						},
+					})
 					return {
 						object: "widget_credential" as const,
 						secret: credential.secret,
@@ -68,6 +77,9 @@ export const HttpV2WidgetCredentialsLive = HttpApiBuilder.group(MapleApiV2, "wid
 					// to revoke: this is the sign-out path, and an error the app
 					// cannot act on while signing out anyway is worse than silence.
 					yield* apiKeys.revokeDeviceKeys(tenant.orgId, params.installation_id)
+					yield* recordHttpAudit("widget_credential.revoked", {
+						metadata: { installation_id: params.installation_id },
+					})
 					return { object: "widget_credential" as const, deleted: true as const }
 				}),
 			)

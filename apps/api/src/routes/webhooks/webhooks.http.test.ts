@@ -4,6 +4,7 @@ import { HttpRouter } from "effect/unstable/http"
 import { Env } from "@/platform/Env"
 import { ProductEventsService, type ProductEventInput } from "@/services/product-events/ProductEventsService"
 import { signSvix } from "@/services/product-events/svix"
+import { AuditLogService, type AuditLogRecordInput } from "@/services/audit/AuditLogService"
 import { AutumnWebhookRouter } from "./autumn.http"
 import { ClerkWebhookRouter } from "./clerk.http"
 
@@ -34,11 +35,27 @@ const recordingProductEvents = () => {
 	return { tracked, layer }
 }
 
+const recordingAudit = () => {
+	const recorded: Array<AuditLogRecordInput> = []
+	const layer = Layer.succeed(AuditLogService, {
+		record: (input) => Effect.sync(() => void recorded.push(input)),
+		list: () => Effect.succeed([]),
+	})
+	return { recorded, layer }
+}
+
 const makeRouterLayer = (
 	router: typeof ClerkWebhookRouter,
 	config: Record<string, string>,
 	productEvents: Layer.Layer<ProductEventsService>,
-) => router.pipe(Layer.provide(productEvents), Layer.provide(Env.layer), Layer.provide(makeConfig(config)))
+	audit: Layer.Layer<AuditLogService> = recordingAudit().layer,
+) =>
+	router.pipe(
+		Layer.provide(productEvents),
+		Layer.provide(audit),
+		Layer.provide(Env.layer),
+		Layer.provide(makeConfig(config)),
+	)
 
 const signedHeaders = (secret: string, body: string, nowMs: number, id = "msg_test") =>
 	Effect.gen(function* () {
@@ -118,7 +135,55 @@ const AUTUMN_BILLING_UPDATED = JSON.stringify({
 	},
 })
 
+const CLERK_MEMBERSHIP_CREATED = JSON.stringify({
+	type: "organizationMembership.created",
+	timestamp: 1_700_000_000_000,
+	data: {
+		organization: { id: "org_42" },
+		public_user_data: { user_id: "user_2abc" },
+		role: "org:admin",
+	},
+})
+
 describe("ClerkWebhookRouter", () => {
+	// Membership is changed in Clerk, never through Maple's API, so this receiver
+	// is the only writer of `affected_user`.
+	it.effect("audits an organizationMembership.created delivery against the member", () =>
+		Effect.gen(function* () {
+			const events = recordingProductEvents()
+			const audit = recordingAudit()
+			const configured = HttpRouter.toWebHandler(
+				makeRouterLayer(
+					ClerkWebhookRouter,
+					{ CLERK_WEBHOOK_SECRET: CLERK_SECRET },
+					events.layer,
+					audit.layer,
+				),
+				{ disableLogger: true },
+			)
+			yield* Effect.gen(function* () {
+				const now = Date.now()
+				const headers = yield* signedHeaders(CLERK_SECRET, CLERK_MEMBERSHIP_CREATED, now)
+				const response = yield* post(
+					configured.handler,
+					"/webhooks/clerk",
+					CLERK_MEMBERSHIP_CREATED,
+					headers,
+				)
+				assert.strictEqual(response.status, 200)
+				assert.strictEqual(audit.recorded.length, 1)
+				const entry = audit.recorded[0]!
+				assert.strictEqual(entry.action, "member.added")
+				assert.strictEqual(entry.affectedUserId, "user_2abc")
+				assert.strictEqual(entry.orgId, "org_42")
+				// Clerk's payload never names the admin who acted; claiming a user
+				// here would be a guess, so the entry is Maple recording what it learned.
+				assert.strictEqual(entry.actor.type, "system")
+				assert.strictEqual(entry.source, "system")
+			}).pipe(Effect.ensuring(Effect.promise(() => configured.dispose())))
+		}),
+	)
+
 	it.effect(
 		"503s while unconfigured, 401s a bad signature, and emits signup_completed for user.created",
 		() =>

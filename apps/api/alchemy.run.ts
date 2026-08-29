@@ -324,6 +324,11 @@ export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOp
 		const auditEventsQueue = yield* Cloudflare.Queues.Queue("audit-events", {
 			name: auditEventsQueueName,
 		})
+		// Parking lot for audit entries that exhausted their retries. Deliberately
+		// has no consumer: an entry landing here is a lost audit record, and the
+		// point is that it survives for inspection instead of being dropped.
+		const auditEventsDlqName = resolveWorkerName("audit-events-dlq", stage)
+		yield* Cloudflare.Queues.Queue("audit-events-dlq", { name: auditEventsDlqName })
 
 		const worker = (yield* Cloudflare.Worker("api", {
 			name: resolveWorkerName("api", stage),
@@ -441,6 +446,9 @@ export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOp
 		yield* Cloudflare.Queues.Consumer("audit-events-consumer", {
 			queueId: auditEventsQueue.queueId,
 			scriptName: worker.workerName,
+			// `maxRetries` must stay in sync with AUDIT_EVENTS_MAX_RETRIES in
+			// audit-events-runtime.ts, which logs the drop on the final attempt.
+			deadLetterQueue: auditEventsDlqName,
 			settings: {
 				batchSize: 25,
 				maxConcurrency: 2,

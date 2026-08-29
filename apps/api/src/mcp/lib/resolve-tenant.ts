@@ -14,7 +14,8 @@ import {
 import { recordExpectedMcpFailure } from "@/mcp/expected-failures"
 import { sessionStore } from "@/mcp/lib/session-store"
 
-const INTERNAL_SERVICE_PREFIX = "maple_svc_"
+/** Exported so the audit layer classifies the same token the same way. */
+export const INTERNAL_SERVICE_PREFIX = "maple_svc_"
 const decodeOrgId = Schema.decodeUnknownEffect(OrgId)
 const decodeUserId = Schema.decodeUnknownEffect(UserId)
 const decodeActorIdOption = Schema.decodeUnknownOption(ActorId)

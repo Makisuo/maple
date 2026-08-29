@@ -85,6 +85,7 @@ export const ApiAuthorizationLayer = Layer.effect(
 							Effect.provideService(CurrentAuditActor, {
 								type: "api_key",
 								apiKeyId: resolved.keyId,
+								source: "api",
 							}),
 						)
 					}
@@ -93,7 +94,7 @@ export const ApiAuthorizationLayer = Layer.effect(
 					yield* annotateAuthSpan("session", { orgId: tenant.orgId, userId: tenant.userId })
 					return yield* httpEffect.pipe(
 						Effect.provideService(CurrentTenant.Context, new CurrentTenant.TenantSchema(tenant)),
-						Effect.provideService(CurrentAuditActor, { type: "user" }),
+						Effect.provideService(CurrentAuditActor, { type: "user", source: "dashboard" }),
 					)
 				}),
 		})

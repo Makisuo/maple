@@ -39,6 +39,8 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { AuditLogService } from "@/services/audit/AuditLogService"
+import { CurrentAuditActor } from "@/services/auth/audit-actor"
+import { SYSTEM_ERRORS_AGENT_NAME } from "@/services/auth/system-actors"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
 import { dateToMs, msToDate } from "@/platform/time"
 import { ErrorActorsService } from "./ErrorActorsService"
@@ -421,12 +423,22 @@ const make: Effect.Effect<
 				)
 				const actor = rows[0]
 				if (actor === undefined || (actor.type !== "agent" && actor.type !== "user")) return
+				// Maple's own sweeps run as an agent actor (`ensureSystemActor` mints
+				// one), so without this check auto-close, lease expiry and fix
+				// verification all read as a third-party agent acting over MCP.
+				const isSystemActor = actor.type === "agent" && actor.agentName === SYSTEM_ERRORS_AGENT_NAME
+				// The actors row knows *who*, never *how*: it is the same row whether
+				// the mutation arrived from the dashboard, an API key, or MCP. The
+				// request's `CurrentAuditActor` is the only thing that knows the
+				// credential and surface, so a human actor is attributed through it and
+				// falls back to a dashboard session only when nothing set it (queue
+				// consumers, crons).
+				const request = yield* CurrentAuditActor
 				yield* audit.record({
 					orgId,
-					// A human actor at this layer may have acted from the dashboard or
-					// over MCP — the issue event does not say which.
-					actor:
-						actor.type === "agent"
+					actor: isSystemActor
+						? { type: "system", actorId, label: SYSTEM_ERRORS_AGENT_NAME }
+						: actor.type === "agent"
 							? {
 									type: "agent",
 									actorId,
@@ -436,11 +448,18 @@ const make: Effect.Effect<
 									...(actor.createdBy === null ? undefined : { userId: actor.createdBy }),
 								}
 							: {
-									type: "user",
+									type: request?.type ?? "user",
 									...(actor.userId === null ? undefined : { userId: actor.userId }),
+									...(request?.apiKeyId === undefined
+										? undefined
+										: { apiKeyId: request.apiKeyId }),
 									actorId,
 								},
-					source: actor.type === "agent" ? "mcp" : "dashboard",
+					source: isSystemActor
+						? "system"
+						: actor.type === "agent"
+							? "mcp"
+							: (request?.source ?? "dashboard"),
 					action: `error_issue.${type}`,
 					resourceId: issueId,
 					metadata: {
@@ -859,6 +878,11 @@ const make: Effect.Effect<
 				createdAt: msToDate(timestamp),
 			}
 			yield* dbExecute((db) => db.insert(errorIssueEvents).values(row))
+			// This path writes the event row itself rather than going through
+			// `recordEvent`, so the audit mirror has to be invoked explicitly. The
+			// comment body stays out of the row — the audit records that a comment
+			// was made, not what it said.
+			yield* recordEventAudit(orgId, issueId, actorId, type, {})
 			yield* actorsService.touchActor(orgId, actorId, timestamp)
 			const actorMap = yield* actorsService.collectActorDocs(orgId, [actorId])
 			return rowToEvent(row, actorMap)

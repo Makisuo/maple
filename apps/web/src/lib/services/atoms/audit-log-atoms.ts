@@ -12,17 +12,21 @@ export interface AuditLogPageInput {
 	readonly cursor?: string
 	readonly actorType?: AuditActorType
 	readonly outcome?: AuditOutcome
+	/**
+	 * Upper bound on `occurred_at`, pinned by the caller when it takes the first
+	 * page. Pagination here is offset-based over a newest-first, append-only
+	 * table, so an entry written mid-scroll shifts every later row down by one:
+	 * without a frozen ceiling the next page repeats a row and skips another.
+	 */
+	readonly until?: string
 }
 
-// Actor types and outcomes never contain "|", and the cursor is the trailing
-// segment, so splitting on the first two separators stays unambiguous even for
-// exotic cursors.
+// Actor types and outcomes never contain "|", nor does an ISO timestamp, and the
+// cursor is the trailing segment — so splitting on the first three separators
+// stays unambiguous even for exotic cursors.
 const family = Atom.family((key: string) => {
-	const firstSeparator = key.indexOf("|")
-	const secondSeparator = key.indexOf("|", firstSeparator + 1)
-	const actorRaw = key.slice(0, firstSeparator)
-	const outcomeRaw = key.slice(firstSeparator + 1, secondSeparator)
-	const cursor = key.slice(secondSeparator + 1)
+	const [actorRaw = "", outcomeRaw = "", until = ""] = key.split("|", 3)
+	const cursor = key.slice(actorRaw.length + outcomeRaw.length + until.length + 3)
 	const actorType = ACTOR_TYPES.find((type) => type === actorRaw)
 	const outcome = OUTCOMES.find((value) => value === outcomeRaw)
 
@@ -35,12 +39,13 @@ const family = Atom.family((key: string) => {
 					...(cursor !== "" ? { cursor } : undefined),
 					...(actorType !== undefined ? { actor_type: actorType } : undefined),
 					...(outcome !== undefined ? { outcome } : undefined),
+					...(until !== "" ? { until } : undefined),
 				},
 			})
 		}),
 	)
 })
 
-/** One page of the org's audit log, keyed by cursor + actor-type/outcome filters. */
+/** One page of the org's audit log, keyed by cursor + filters + the pinned ceiling. */
 export const auditLogPageAtom = (input: AuditLogPageInput) =>
-	family(`${input.actorType ?? ""}|${input.outcome ?? ""}|${input.cursor ?? ""}`)
+	family(`${input.actorType ?? ""}|${input.outcome ?? ""}|${input.until ?? ""}|${input.cursor ?? ""}`)

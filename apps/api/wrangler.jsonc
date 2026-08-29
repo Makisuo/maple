@@ -120,6 +120,10 @@
 				"max_batch_size": 25,
 				"max_batch_timeout": 5,
 				"max_retries": 5,
+				// Mirrors alchemy.run.ts: exhausted audit entries park here rather
+				// than being dropped. Keep `max_retries` in sync with
+				// AUDIT_EVENTS_MAX_RETRIES in audit-events-runtime.ts.
+				"dead_letter_queue": "maple-audit-events-dlq-local",
 			},
 		],
 	},

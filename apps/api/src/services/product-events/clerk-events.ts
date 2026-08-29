@@ -29,6 +29,38 @@ export const ClerkUserCreatedData = Schema.Struct({
 	created_at: Schema.optionalKey(Schema.Number),
 })
 
+/**
+ * `organizationMembership.*` payload. Membership is managed in Clerk directly —
+ * the web app never asks Maple's API to add or remove a member — so this
+ * webhook is the only place those changes can be audited. Clerk does not name
+ * the admin who made the change in this payload, only the member it happened
+ * to, which is why the resulting entries are attributed to `system`.
+ */
+export const ClerkOrganizationMembershipData = Schema.Struct({
+	organization: Schema.Struct({ id: Schema.String }),
+	public_user_data: Schema.Struct({ user_id: Schema.String }),
+	role: Schema.optionalKey(Schema.String),
+})
+export type ClerkOrganizationMembershipData = Schema.Schema.Type<
+	typeof ClerkOrganizationMembershipData
+>
+
+export const decodeClerkOrganizationMembership = Schema.decodeUnknownEffect(
+	ClerkOrganizationMembershipData,
+)
+
+/** The membership verbs Maple audits, keyed by Clerk's event type. */
+export const CLERK_MEMBERSHIP_EVENTS = {
+	"organizationMembership.created": "added",
+	"organizationMembership.updated": "role_changed",
+	"organizationMembership.deleted": "removed",
+} as const satisfies Record<string, "added" | "role_changed" | "removed">
+
+export type ClerkMembershipEventType = keyof typeof CLERK_MEMBERSHIP_EVENTS
+
+export const isClerkMembershipEvent = (type: string): type is ClerkMembershipEventType =>
+	Object.hasOwn(CLERK_MEMBERSHIP_EVENTS, type)
+
 export const ClerkWebhookEnvelope = Schema.Struct({
 	type: Schema.String,
 	data: Schema.Unknown,

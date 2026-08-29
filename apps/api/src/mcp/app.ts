@@ -10,6 +10,8 @@ import { InstructionsResource } from "./resources/instructions"
 import { sessionStore } from "./lib/session-store"
 import type { McpToolExecutor } from "./dispatcher"
 import { CurrentMcpRequestTenant, CurrentMcpTenant, resolveHttpMcpTenant } from "./lib/query-warehouse"
+import { type AuditActorInfo, CurrentAuditActor } from "@/services/auth/audit-actor"
+import { INTERNAL_SERVICE_PREFIX } from "./lib/resolve-tenant"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { Env } from "@/platform/Env"
@@ -93,6 +95,23 @@ const mcpUnavailable = () =>
 		),
 	)
 
+/**
+ * Which credential an MCP request presented, as far as the transport can tell.
+ * Mirrors the branches in `resolveMcpTenantContext`: an internal service token
+ * is Maple acting on its own behalf, any other bearer is an API key or OAuth
+ * token, and no bearer at all means a forwarded dashboard session.
+ */
+const mcpAuditActor = (headers: Record<string, string | undefined>): AuditActorInfo => {
+	const authorization = headers["authorization"] ?? headers["Authorization"]
+	if (authorization?.toLowerCase().startsWith("bearer ") !== true) {
+		return { type: "user", source: "mcp" }
+	}
+	const bearer = authorization.slice("bearer ".length).trim()
+	return bearer.startsWith(INTERNAL_SERVICE_PREFIX)
+		? { type: "system", source: "system" }
+		: { type: "api_key", source: "mcp" }
+}
+
 const McpAuthorizationMiddleware = HttpRouter.middleware<{ provides: CurrentMcpTenant }>()(
 	Effect.gen(function* () {
 		const apiKeys = yield* ApiKeysService
@@ -108,6 +127,12 @@ const McpAuthorizationMiddleware = HttpRouter.middleware<{ provides: CurrentMcpT
 					Effect.flatMap((tenant) =>
 						Effect.provideService(httpEffect, CurrentMcpTenant, tenant).pipe(
 							Effect.provideService(CurrentMcpRequestTenant, tenant),
+							// Without this an MCP mutation reads the reference's `undefined`
+							// default and is audited as a dashboard session. The credential
+							// kind is all this layer can see — `resolveMcpTenantContext`
+							// returns the tenant, not the key it resolved — so the key id is
+							// deliberately absent rather than guessed.
+							Effect.provideService(CurrentAuditActor, mcpAuditActor(request.headers)),
 						),
 					),
 					Effect.catchTags({

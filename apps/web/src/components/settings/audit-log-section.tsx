@@ -82,6 +82,19 @@ function formatSourceTooltip(entry: V2AuditLogEntry): string | undefined {
 	return lines.length > 0 ? lines.join("\n") : undefined
 }
 
+/**
+ * Append the next page, dropping any entry already shown. The pinned `until`
+ * ceiling makes overlap rare, but a filter re-fetch or a refresh mid-scroll can
+ * still repeat one — and a duplicated React key corrupts the list either way.
+ */
+function dedupeById(
+	existing: ReadonlyArray<V2AuditLogEntry>,
+	next: ReadonlyArray<V2AuditLogEntry>,
+): V2AuditLogEntry[] {
+	const seen = new Set(existing.map((entry) => entry.id))
+	return [...existing, ...next.filter((entry) => !seen.has(entry.id))]
+}
+
 interface AuditLogView {
 	source: { data: ReadonlyArray<V2AuditLogEntry> }
 	entries: V2AuditLogEntry[]
@@ -93,9 +106,14 @@ export function AuditLogSection() {
 	const [actorFilter, setActorFilter] = useState<ActorFilter>("all")
 	const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("all")
 	const [cursor, setCursor] = useState<string | undefined>(undefined)
+	// Frozen on the first Load more, and cleared whenever the list restarts. The
+	// log is append-only and paginated by offset, so entries written mid-scroll
+	// would otherwise shift later pages and make them repeat and skip rows.
+	const [until, setUntil] = useState<string | undefined>(undefined)
 
 	const pageAtom = auditLogPageAtom({
 		...(cursor !== undefined ? { cursor } : undefined),
+		...(until !== undefined ? { until } : undefined),
 		...(actorFilter !== "all" ? { actorType: actorFilter } : undefined),
 		...(outcomeFilter !== "all" ? { outcome: outcomeFilter } : undefined),
 	})
@@ -112,7 +130,7 @@ export function AuditLogSection() {
 			entries:
 				cursor === undefined
 					? [...pageResult.value.data]
-					: [...(view?.entries ?? []), ...pageResult.value.data],
+					: dedupeById(view?.entries ?? [], pageResult.value.data),
 			hasMore: pageResult.value.has_more,
 			nextCursor: pageResult.value.next_cursor,
 		})
@@ -122,12 +140,14 @@ export function AuditLogSection() {
 		if (value === actorFilter) return
 		setActorFilter(value)
 		setCursor(undefined)
+		setUntil(undefined)
 	}
 
 	function handleOutcomeSelect(value: OutcomeFilter) {
 		if (value === outcomeFilter) return
 		setOutcomeFilter(value)
 		setCursor(undefined)
+		setUntil(undefined)
 	}
 
 	const waiting = !Result.isSuccess(pageResult) || pageResult.waiting
@@ -158,8 +178,10 @@ export function AuditLogSection() {
 					))}
 				</div>
 				<div className="flex-1" />
+				{/* Deliberately not "every change": this records configuration and
+				    access changes plus refused attempts, not reads or telemetry. */}
 				<p className="text-muted-foreground text-xs">
-					Every change made through the dashboard, API, and MCP.
+					Configuration and access changes, from the dashboard, API, and MCP.
 				</p>
 			</div>
 
@@ -221,7 +243,15 @@ export function AuditLogSection() {
 						size="sm"
 						disabled={waiting}
 						onClick={() => {
-							if (view.nextCursor !== null) setCursor(view.nextCursor)
+							if (view.nextCursor === null) return
+							// Pin the window to the newest entry already on screen before
+							// the first Load more, so later offsets address a list that
+							// cannot grow underneath them.
+							if (until === undefined) {
+								const newest = view.entries[0]
+								if (newest !== undefined) setUntil(newest.occurred_at)
+							}
+							setCursor(view.nextCursor)
 						}}
 					>
 						{waiting ? "Loading…" : "Load more"}

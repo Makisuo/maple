@@ -286,10 +286,11 @@ const requestContext = Effect.gen(function* () {
 
 /**
  * Record an audit entry for the current authenticated HTTP request, deriving
- * the actor from the tenant plus the auth middleware's `CurrentAuditActor`,
- * and request forensics (request id, origin) from the Cloudflare headers.
- * Session requests (and requests that bypassed the standard middlewares)
- * attribute to the user; API-key requests attribute to the key.
+ * the actor and surface from the tenant plus the auth middleware's
+ * `CurrentAuditActor`, and request forensics (request id, origin) from the
+ * Cloudflare headers. The credential kind and the surface both come from the
+ * reference — an API-key or MCP request must not read back as a dashboard
+ * session.
  */
 export const recordHttpAudit = <A extends AuditAction>(
 	action: A,
@@ -304,15 +305,17 @@ export const recordHttpAudit = <A extends AuditAction>(
 		const tenant = yield* CurrentTenant.Context
 		const info = yield* CurrentAuditActor
 		const context = yield* requestContext
-		const isApiKey = info?.type === "api_key"
+		// No reference means the request bypassed every auth middleware (internal
+		// tokens, tests). Attribute to the tenant's user rather than inventing a
+		// credential, but do not claim a surface the request may not have used.
 		yield* audit.record({
 			orgId: tenant.orgId,
 			actor: {
-				type: isApiKey ? "api_key" : "user",
+				type: info?.type ?? "user",
 				userId: tenant.userId,
-				...(isApiKey && info.apiKeyId !== undefined ? { apiKeyId: info.apiKeyId } : undefined),
+				...(info?.apiKeyId !== undefined ? { apiKeyId: info.apiKeyId } : undefined),
 			},
-			source: isApiKey ? "api" : "dashboard",
+			source: info?.source ?? "dashboard",
 			action,
 			...context,
 			...opts,
