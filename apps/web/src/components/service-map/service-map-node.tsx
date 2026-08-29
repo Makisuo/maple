@@ -179,9 +179,10 @@ const Handles = () => (
 function DatabaseNode({ data }: { data: ServiceNodeData }) {
 	const {
 		throughput,
+		hasSampling,
 		errorRate,
 		avgLatencyMs,
-		p95LatencyMs,
+		maxLatencyMs,
 		dbSystem,
 		dbNamespace,
 		selected,
@@ -239,7 +240,10 @@ function DatabaseNode({ data }: { data: ServiceNodeData }) {
 
 					{/* Metrics row */}
 					<div className="flex gap-4">
-						<MetricCell label="calls/s" value={formatRate(throughput)} />
+						<MetricCell
+							label="calls/s"
+							value={`${hasSampling ? "~" : ""}${formatRate(throughput)}`}
+						/>
 						<MetricCell
 							label="err%"
 							value={`${(errorRate * 100).toFixed(1)}%`}
@@ -251,9 +255,9 @@ function DatabaseNode({ data }: { data: ServiceNodeData }) {
 							valueClassName={latencyToneClass(avgLatencyMs, "avg")}
 						/>
 						<MetricCell
-							label="p95"
-							value={formatLatency(p95LatencyMs ?? 0)}
-							valueClassName={latencyToneClass(p95LatencyMs ?? 0, "p95")}
+							label="max"
+							value={formatLatency(maxLatencyMs ?? 0)}
+							valueClassName={latencyToneClass(maxLatencyMs ?? 0, "p95")}
 						/>
 					</div>
 

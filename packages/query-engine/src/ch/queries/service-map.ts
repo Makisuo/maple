@@ -60,7 +60,15 @@ export interface ServiceDependenciesOutput {
 	readonly callCount: number
 	readonly errorCount: number
 	readonly avgDurationMs: number
-	readonly p95DurationMs: number
+	/**
+	 * The window's slowest call, NOT a percentile — the edge rollups store
+	 * `MaxDurationMs`, and there is no quantile state at edge grain to merge.
+	 * Named for what it is: it rendered as "p95" on the service map for months,
+	 * against a drill-down panel showing a real tDigest p95 off the same node, so
+	 * a Scylla edge read 3s beside its own 7ms p99. Renaming it is the cheap half
+	 * of the fix; storing a tDigest in the edge rollups is the other half.
+	 */
+	readonly maxDurationMs: number
 	readonly estimatedSpanCount: number
 }
 
@@ -70,7 +78,7 @@ const ServiceDependenciesOutputSchema: CompiledQueryRowSchema<ServiceDependencie
 	callCount: CHNumber,
 	errorCount: CHNumber,
 	avgDurationMs: CHNumberOrZero,
-	p95DurationMs: CHNumber,
+	maxDurationMs: CHNumber,
 	estimatedSpanCount: CHNumber,
 })
 
@@ -365,7 +373,7 @@ export function serviceDependenciesQueryBase(opts: { serviceName?: string; deplo
 			callCount: CH.sum($.bucketCallCount),
 			errorCount: CH.sum($.bucketErrorCount),
 			avgDurationMs: CH.sum($.bucketDurationSumMs).div(CH.nullIf(CH.sum($.bucketCallCount), CH.lit(0))),
-			p95DurationMs: CH.max_($.bucketMaxDurationMs),
+			maxDurationMs: CH.max_($.bucketMaxDurationMs),
 			estimatedSpanCount: CH.sum($.bucketEstimatedSpanCount),
 		}))
 		.groupBy("sourceService", "targetService")
@@ -405,7 +413,15 @@ export interface ServiceDbEdgesOutput {
 	readonly callCount: number
 	readonly errorCount: number
 	readonly avgDurationMs: number
-	readonly p95DurationMs: number
+	/**
+	 * The window's slowest call, NOT a percentile — the edge rollups store
+	 * `MaxDurationMs`, and there is no quantile state at edge grain to merge.
+	 * Named for what it is: it rendered as "p95" on the service map for months,
+	 * against a drill-down panel showing a real tDigest p95 off the same node, so
+	 * a Scylla edge read 3s beside its own 7ms p99. Renaming it is the cheap half
+	 * of the fix; storing a tDigest in the edge rollups is the other half.
+	 */
+	readonly maxDurationMs: number
 	readonly estimatedSpanCount: number
 }
 
@@ -416,7 +432,7 @@ const ServiceDbEdgesOutputSchema: CompiledQueryRowSchema<ServiceDbEdgesOutput> =
 	callCount: CHNumber,
 	errorCount: CHNumber,
 	avgDurationMs: CHNumberOrZero,
-	p95DurationMs: CHNumber,
+	maxDurationMs: CHNumber,
 	estimatedSpanCount: CHNumber,
 })
 
@@ -539,7 +555,7 @@ function serviceDbEdgesQueryBase(opts: { serviceName?: string; deploymentEnv?: s
 			callCount: CH.sum($.bucketCallCount),
 			errorCount: CH.sum($.bucketErrorCount),
 			avgDurationMs: CH.sum($.bucketDurationSumMs).div(CH.nullIf(CH.sum($.bucketCallCount), CH.lit(0))),
-			p95DurationMs: CH.max_($.bucketMaxDurationMs),
+			maxDurationMs: CH.max_($.bucketMaxDurationMs),
 			estimatedSpanCount: CH.sum($.bucketEstimatedSpanCount),
 		}))
 		.groupBy("sourceService", "dbSystem", "dbNamespace")
@@ -1025,7 +1041,15 @@ export interface ServiceExternalEdgesOutput {
 	readonly callCount: number
 	readonly errorCount: number
 	readonly avgDurationMs: number
-	readonly p95DurationMs: number
+	/**
+	 * The window's slowest call, NOT a percentile — the edge rollups store
+	 * `MaxDurationMs`, and there is no quantile state at edge grain to merge.
+	 * Named for what it is: it rendered as "p95" on the service map for months,
+	 * against a drill-down panel showing a real tDigest p95 off the same node, so
+	 * a Scylla edge read 3s beside its own 7ms p99. Renaming it is the cheap half
+	 * of the fix; storing a tDigest in the edge rollups is the other half.
+	 */
+	readonly maxDurationMs: number
 	readonly estimatedSpanCount: number
 }
 
@@ -1037,7 +1061,7 @@ const ServiceExternalEdgesOutputSchema: CompiledQueryRowSchema<ServiceExternalEd
 	callCount: CHNumber,
 	errorCount: CHNumber,
 	avgDurationMs: CHNumberOrZero,
-	p95DurationMs: CHNumber,
+	maxDurationMs: CHNumber,
 	estimatedSpanCount: CHNumber,
 })
 
@@ -1179,7 +1203,7 @@ export function serviceExternalEdgesSQL(
 			callCount: CH.sum($.bucketCallCount),
 			errorCount: CH.sum($.bucketErrorCount),
 			avgDurationMs: CH.sum($.bucketDurationSumMs).div(CH.nullIf(CH.sum($.bucketCallCount), CH.lit(0))),
-			p95DurationMs: CH.max_($.bucketMaxDurationMs),
+			maxDurationMs: CH.max_($.bucketMaxDurationMs),
 			estimatedSpanCount: CH.sum($.bucketEstimatedSpanCount),
 		}))
 		.where(($) => [CH.not($.targetType.eq("http").and(inSubquery($.targetName, internalResolutions)))])

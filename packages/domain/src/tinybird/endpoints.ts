@@ -722,7 +722,8 @@ export interface ServiceDependenciesOutput {
 	readonly callCount: number
 	readonly errorCount: number
 	readonly avgDurationMs: number
-	readonly p95DurationMs: number
+	/** Slowest call in the window, not a percentile — the edge rollup stores a max. */
+	readonly maxDurationMs: number
 	readonly estimatedSpanCount: number
 }
 

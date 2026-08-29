@@ -145,7 +145,7 @@ describe("serviceExternalEdgesSQL", () => {
 					callCount: "11",
 					errorCount: "1",
 					avgDurationMs: "12.5",
-					p95DurationMs: "40",
+					maxDurationMs: "40",
 					estimatedSpanCount: "22",
 				},
 			])
@@ -158,7 +158,7 @@ describe("serviceExternalEdgesSQL", () => {
 					callCount: 11,
 					errorCount: 1,
 					avgDurationMs: 12.5,
-					p95DurationMs: 40,
+					maxDurationMs: 40,
 					estimatedSpanCount: 22,
 				},
 			])
@@ -173,7 +173,7 @@ describe("serviceExternalEdgesSQL", () => {
 						callCount: 1,
 						errorCount: 0,
 						avgDurationMs: 1,
-						p95DurationMs: 1,
+						maxDurationMs: 1,
 						estimatedSpanCount: 1,
 					},
 				]),
@@ -282,7 +282,7 @@ describe("serviceDependenciesSQL", () => {
 					callCount: "12",
 					errorCount: "2",
 					avgDurationMs: "8.5",
-					p95DurationMs: "30",
+					maxDurationMs: "30",
 					estimatedSpanCount: "18",
 				},
 			])
@@ -294,7 +294,7 @@ describe("serviceDependenciesSQL", () => {
 					callCount: 12,
 					errorCount: 2,
 					avgDurationMs: 8.5,
-					p95DurationMs: 30,
+					maxDurationMs: 30,
 					estimatedSpanCount: 18,
 				},
 			])
@@ -317,7 +317,7 @@ describe("serviceDependenciesSQL", () => {
 	it("keeps the union branches' aliases disjoint from the outer aggregates", () => {
 		const { sql } = Effect.runSync(serviceDependenciesSQL({}, baseParams))
 		// Inner branches project `bucket*`; the outer projects the public names.
-		for (const outerAlias of ["callCount", "errorCount", "p95DurationMs", "estimatedSpanCount"]) {
+		for (const outerAlias of ["callCount", "errorCount", "maxDurationMs", "estimatedSpanCount"]) {
 			expect(sql).toContain(`AS ${outerAlias}`)
 			expect(sql).not.toContain(`AS bucket${outerAlias}`)
 		}
@@ -475,7 +475,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 					callCount: "42",
 					errorCount: "3",
 					avgDurationMs: "14.25",
-					p95DurationMs: "88",
+					maxDurationMs: "88",
 					estimatedSpanCount: "63",
 				},
 			])
@@ -488,7 +488,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 					callCount: 42,
 					errorCount: 3,
 					avgDurationMs: 14.25,
-					p95DurationMs: 88,
+					maxDurationMs: 88,
 					estimatedSpanCount: 63,
 				},
 			])

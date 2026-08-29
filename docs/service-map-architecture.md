@@ -113,15 +113,36 @@ The direction, not yet built:
 
 ---
 
+## Statistics: one name, one meaning
+
+A database node and the panel that opens when you click it read the **same edges**. They must
+therefore render the same statistic, and for a long time they did not — a ScyllaDB node showed
+`3s` and `3k/s` beside a panel showing `7ms` and `30k/s` off the same data. Two separate
+causes, both now fixed, both worth not reintroducing:
+
+- **Counts are sample-weighted everywhere.** The node divided the raw `callCount` and
+  hardcoded `hasSampling: false`, while the panel used `estimatedQueryCount`. At a sample rate
+  of 10 that is a flat 10× disagreement. Database nodes now carry `estimatedCallCount`,
+  `hasSampling` and `samplingWeight` through from the edges, exactly as service nodes carry
+  them from the overview, and render the `~` estimate prefix.
+- **`maxDurationMs` is a max, and is named that.** The edge rollups store `MaxDurationMs` and
+  carry no quantile state, so there is no p95 at edge grain. It was called `p95DurationMs`
+  from the SQL alias all the way to a "P95 Latency" label — 3s (the slowest call in 12 hours)
+  against the panel's real merged-tDigest 7ms p95. The field is renamed end to end, and
+  `ServiceNodeData` keeps `p95LatencyMs` (service nodes, a real p95) and `maxLatencyMs`
+  (database nodes, a max) as separate optional fields so they cannot be confused again.
+
+The related rule: **a loading fallback may substitute a different source, never a different
+statistic.** The panel's P50 and P95 tiles used to fall back to the edges' mean and max until
+the summary resolved, so the number changed meaning — and magnitude — a second after opening.
+They now render an em dash while waiting. Counts still fall back, because the edge estimate
+and the summary estimate are the same statistic.
+
+Storing a tDigest state in the edge rollups would give nodes a real p95 and is the remaining
+half of this; renaming was the cheap half.
+
 ## Known-unresolved
 
-- `p95DurationMs` on both edge queries is `max(MaxDurationMs)`, not a p95, and the UI labels
-  it "P95 Latency". It is also only the *fallback*: once `serviceDbQuerySummary` resolves, the
-  same tile switches to a genuine merged-tDigest p95, so the number visibly drops a second
-  after you click a node. Either rename the field or store a tDigest state in the edge rollups.
-- The DB tile mixes count scales — `estimatedQueryCount` (sample-weighted) as the headline,
-  raw `callCount` as the fallback and in the caller list beneath it. With sampling on, the
-  callers do not sum to the headline.
 - The DB summary and its own chart use different windows for ranges ≤24h: the chart reads raw
   traces over the exact window, the card above it reads the hourly rollup.
 - Edges are `LIMIT 200` while the overview is `LIMIT 500`, so past 200 edges the map silently

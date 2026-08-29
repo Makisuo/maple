@@ -37,7 +37,7 @@ export const serviceMap = Effect.fn("Observability.serviceMap")(function* (input
 				callCount: Number(e.callCount),
 				errorCount: Number(e.errorCount),
 				avgDurationMs: e.avgDurationMs,
-				p95DurationMs: e.p95DurationMs,
+				maxDurationMs: e.maxDurationMs,
 			}),
 		),
 	)

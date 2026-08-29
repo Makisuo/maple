@@ -69,7 +69,14 @@ export interface ServiceNodeData {
 	samplingWeight: number
 	errorRate: number
 	avgLatencyMs: number
+	/** Service nodes only: a real merged-tDigest p95 from the service overview. */
 	p95LatencyMs?: number
+	/**
+	 * Database nodes only: the window's slowest call. Deliberately NOT
+	 * `p95LatencyMs` — the edge rollups store a max and have no quantile state,
+	 * and sharing the field is what let a max render under a "p95" label.
+	 */
+	maxLatencyMs?: number
 	selected: boolean
 	infra?: ServiceNodeInfra
 	platform?: ServicePlatform
@@ -151,7 +158,8 @@ export interface ServiceEdgeData {
 	errorCount: number
 	errorRate: number
 	avgDurationMs: number
-	p95DurationMs: number
+	/** Slowest call on this edge, not a percentile. */
+	maxDurationMs: number
 	hasSampling: boolean
 	/** Rendered near-invisible (focus mode dims edges leaving the neighborhood). */
 	dimmed?: boolean
@@ -309,9 +317,12 @@ export function buildFlowElements({
 			dbSystem: string
 			dbNamespace: string
 			callCount: number
+			estimatedCallCount: number
 			errorCount: number
 			durationSumMs: number
-			maxP95: number
+			maxLatencyMs: number
+			hasSampling: boolean
+			samplingWeight: number
 		}
 	>()
 	for (const e of dbEdges) {
@@ -321,14 +332,22 @@ export function buildFlowElements({
 			dbSystem: e.dbSystem,
 			dbNamespace: e.dbNamespace,
 			callCount: 0,
+			estimatedCallCount: 0,
 			errorCount: 0,
 			durationSumMs: 0,
-			maxP95: 0,
+			maxLatencyMs: 0,
+			hasSampling: false,
+			samplingWeight: 1,
 		}
 		existing.callCount += e.callCount
+		existing.estimatedCallCount += e.estimatedCallCount
 		existing.errorCount += e.errorCount
 		existing.durationSumMs += e.avgDurationMs * e.callCount
-		existing.maxP95 = Math.max(existing.maxP95, e.p95DurationMs)
+		existing.maxLatencyMs = Math.max(existing.maxLatencyMs, e.maxDurationMs)
+		// One sampled caller makes the node's number an estimate. The weight shown
+		// is the heaviest contributing edge's, which is what the "~" prefix means.
+		existing.hasSampling = existing.hasSampling || e.hasSampling
+		existing.samplingWeight = Math.max(existing.samplingWeight, e.samplingWeight)
 		dbAgg.set(nodeId, existing)
 	}
 
@@ -400,13 +419,20 @@ export function buildFlowElements({
 				// Hyperdrive-fronted databases collapse to a single "Hyperdrive" node.
 				label: resolveDbNodePresentation(agg.dbSystem, agg.dbNamespace).title,
 				kind: "database",
-				throughput: agg.callCount / safeDuration,
+				// Sample-weighted, like every service node beside it. This divided the
+				// RAW count and hardcoded `hasSampling: false`, so at a sample rate of
+				// 10 the node read 3k/s under a drill-down panel reading 30k/s off the
+				// same edges — the panel had always used the estimate.
+				throughput: agg.estimatedCallCount / safeDuration,
 				tracedThroughput: agg.callCount / safeDuration,
-				hasSampling: false,
-				samplingWeight: 1,
+				hasSampling: agg.hasSampling,
+				samplingWeight: agg.samplingWeight,
 				errorRate: agg.callCount > 0 ? agg.errorCount / agg.callCount : 0,
 				avgLatencyMs: agg.callCount > 0 ? agg.durationSumMs / agg.callCount : 0,
-				p95LatencyMs: agg.maxP95,
+				// The slowest call, not a percentile — the field it reads is a `max`.
+				// `p95LatencyMs` on a SERVICE node is a real tDigest p95 off the
+				// overview, which is exactly why these cannot share a name.
+				maxLatencyMs: agg.maxLatencyMs,
 				selected: false,
 				dbSystem: agg.dbSystem,
 				dbNamespace: agg.dbNamespace,
@@ -452,7 +478,7 @@ export function buildFlowElements({
 			errorCount: edge.errorCount,
 			errorRate: edge.errorRate,
 			avgDurationMs: edge.avgDurationMs,
-			p95DurationMs: edge.p95DurationMs,
+			maxDurationMs: edge.maxDurationMs,
 			hasSampling: edge.hasSampling,
 		},
 	}))
@@ -471,7 +497,7 @@ export function buildFlowElements({
 				errorCount: e.errorCount,
 				errorRate: e.errorRate,
 				avgDurationMs: e.avgDurationMs,
-				p95DurationMs: e.p95DurationMs,
+				maxDurationMs: e.maxDurationMs,
 				hasSampling: e.hasSampling,
 			},
 		})
@@ -513,7 +539,7 @@ export function buildFlowElements({
 						errorCount: 0,
 						errorRate: 0,
 						avgDurationMs: 0,
-						p95DurationMs: 0,
+						maxDurationMs: 0,
 						hasSampling: false,
 						relation: "hyperdrive-origin",
 					},

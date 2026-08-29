@@ -1476,7 +1476,7 @@ SELECT
         GROUP BY hourTs
         FORMAT JSON
 
--- builder:service-map:serviceDbEdgesForServiceQuery:default  [e68b8bd1]
+-- builder:service-map:serviceDbEdgesForServiceQuery:default  [7083634d]
 SELECT
           sourceService AS sourceService,
           dbSystem AS dbSystem,
@@ -1484,7 +1484,7 @@ SELECT
           sum(bucketCallCount) AS callCount,
           sum(bucketErrorCount) AS errorCount,
           sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
-          max(bucketMaxDurationMs) AS p95DurationMs,
+          max(bucketMaxDurationMs) AS maxDurationMs,
           sum(bucketEstimatedSpanCount) AS estimatedSpanCount
         FROM (
 SELECT
@@ -1528,7 +1528,7 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceDbEdgesSQL:default  [901efdaf]
+-- builder:service-map:serviceDbEdgesSQL:default  [fa979fe3]
 SELECT
           sourceService AS sourceService,
           dbSystem AS dbSystem,
@@ -1536,7 +1536,7 @@ SELECT
           sum(bucketCallCount) AS callCount,
           sum(bucketErrorCount) AS errorCount,
           sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
-          max(bucketMaxDurationMs) AS p95DurationMs,
+          max(bucketMaxDurationMs) AS maxDurationMs,
           sum(bucketEstimatedSpanCount) AS estimatedSpanCount
         FROM (
 SELECT
@@ -1579,7 +1579,7 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceDbEdgesSQL:env-scoped  [83649f53]
+-- builder:service-map:serviceDbEdgesSQL:env-scoped  [3d0a3dbf]
 SELECT
           sourceService AS sourceService,
           dbSystem AS dbSystem,
@@ -1587,7 +1587,7 @@ SELECT
           sum(bucketCallCount) AS callCount,
           sum(bucketErrorCount) AS errorCount,
           sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
-          max(bucketMaxDurationMs) AS p95DurationMs,
+          max(bucketMaxDurationMs) AS maxDurationMs,
           sum(bucketEstimatedSpanCount) AS estimatedSpanCount
         FROM (
 SELECT
@@ -1847,14 +1847,14 @@ SELECT
         LIMIT 10
         FORMAT JSON
 
--- builder:service-map:serviceDependenciesForServiceQuery:default  [e782d401]
+-- builder:service-map:serviceDependenciesForServiceQuery:default  [1a386155]
 SELECT
           sourceService AS sourceService,
           targetService AS targetService,
           sum(bucketCallCount) AS callCount,
           sum(bucketErrorCount) AS errorCount,
           sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
-          max(bucketMaxDurationMs) AS p95DurationMs,
+          max(bucketMaxDurationMs) AS maxDurationMs,
           sum(bucketEstimatedSpanCount) AS estimatedSpanCount
         FROM (
 SELECT
@@ -1914,14 +1914,14 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceDependenciesSQL:default  [334767d1]
+-- builder:service-map:serviceDependenciesSQL:default  [d0522185]
 SELECT
           sourceService AS sourceService,
           targetService AS targetService,
           sum(bucketCallCount) AS callCount,
           sum(bucketErrorCount) AS errorCount,
           sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
-          max(bucketMaxDurationMs) AS p95DurationMs,
+          max(bucketMaxDurationMs) AS maxDurationMs,
           sum(bucketEstimatedSpanCount) AS estimatedSpanCount
         FROM (
 SELECT
@@ -1979,14 +1979,14 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceDependenciesSQL:env-scoped  [4ada5514]
+-- builder:service-map:serviceDependenciesSQL:env-scoped  [89695720]
 SELECT
           sourceService AS sourceService,
           targetService AS targetService,
           sum(bucketCallCount) AS callCount,
           sum(bucketErrorCount) AS errorCount,
           sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
-          max(bucketMaxDurationMs) AS p95DurationMs,
+          max(bucketMaxDurationMs) AS maxDurationMs,
           sum(bucketEstimatedSpanCount) AS estimatedSpanCount
         FROM (
 SELECT
@@ -2047,7 +2047,7 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceExternalEdgesSQL:default  [105b06bf]
+-- builder:service-map:serviceExternalEdgesSQL:default  [172c6963]
 SELECT
           sourceService AS sourceService,
           targetType AS targetType,
@@ -2056,7 +2056,7 @@ SELECT
           sum(bucketCallCount) AS callCount,
           sum(bucketErrorCount) AS errorCount,
           sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
-          max(bucketMaxDurationMs) AS p95DurationMs,
+          max(bucketMaxDurationMs) AS maxDurationMs,
           sum(bucketEstimatedSpanCount) AS estimatedSpanCount
         FROM (
 SELECT
@@ -2113,7 +2113,7 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceExternalEdgesSQL:env-scoped  [5c36476e]
+-- builder:service-map:serviceExternalEdgesSQL:env-scoped  [db028e72]
 SELECT
           sourceService AS sourceService,
           targetType AS targetType,
@@ -2122,7 +2122,7 @@ SELECT
           sum(bucketCallCount) AS callCount,
           sum(bucketErrorCount) AS errorCount,
           sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
-          max(bucketMaxDurationMs) AS p95DurationMs,
+          max(bucketMaxDurationMs) AS maxDurationMs,
           sum(bucketEstimatedSpanCount) AS estimatedSpanCount
         FROM (
 SELECT
@@ -6698,14 +6698,14 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- pipe:service_dependencies:default:baseline  [4ada5514]
+-- pipe:service_dependencies:default:baseline  [89695720]
 SELECT
           sourceService AS sourceService,
           targetService AS targetService,
           sum(bucketCallCount) AS callCount,
           sum(bucketErrorCount) AS errorCount,
           sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
-          max(bucketMaxDurationMs) AS p95DurationMs,
+          max(bucketMaxDurationMs) AS maxDurationMs,
           sum(bucketEstimatedSpanCount) AS estimatedSpanCount
         FROM (
 SELECT

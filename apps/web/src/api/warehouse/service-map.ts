@@ -23,7 +23,8 @@ export interface ServiceEdge {
 	errorCount: number
 	errorRate: number
 	avgDurationMs: number
-	p95DurationMs: number
+	/** Slowest call in the window, not a percentile — see `maxDurationMs` in ch/queries/service-map.ts. */
+	maxDurationMs: number
 	hasSampling: boolean
 	samplingWeight: number
 }
@@ -38,7 +39,8 @@ export interface ServiceDbEdge {
 	errorCount: number
 	errorRate: number
 	avgDurationMs: number
-	p95DurationMs: number
+	/** Slowest call in the window, not a percentile — see `maxDurationMs` in ch/queries/service-map.ts. */
+	maxDurationMs: number
 	hasSampling: boolean
 	samplingWeight: number
 }
@@ -134,7 +136,7 @@ function transformEdge(row: Record<string, unknown>, durationSeconds: number): S
 		errorCount,
 		errorRate: callCount > 0 ? errorCount / callCount : 0,
 		avgDurationMs: Number(row.avgDurationMs ?? 0),
-		p95DurationMs: Number(row.p95DurationMs ?? 0),
+		maxDurationMs: Number(row.maxDurationMs ?? 0),
 		hasSampling: sampling.hasSampling,
 		samplingWeight: sampling.weight,
 	}
@@ -201,7 +203,7 @@ function transformDbEdge(row: Record<string, unknown>, durationSeconds: number):
 		errorCount,
 		errorRate: callCount > 0 ? errorCount / callCount : 0,
 		avgDurationMs: Number(row.avgDurationMs ?? 0),
-		p95DurationMs: Number(row.p95DurationMs ?? 0),
+		maxDurationMs: Number(row.maxDurationMs ?? 0),
 		hasSampling: sampling.hasSampling,
 		samplingWeight: sampling.weight,
 	}
