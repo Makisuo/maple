@@ -402,7 +402,12 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 					{
 						Effect: "Allow",
 						Action: ["ecs:UpdateTaskProtection"],
-						Resource: [`${cluster.clusterArn.replace(":cluster/", ":task/")}/*`],
+						Resource: [
+							Output.map(
+								cluster.clusterArn,
+								(arn) => `${arn.replace(":cluster/", ":task/")}/*`,
+							),
+						],
 					},
 				],
 			},
