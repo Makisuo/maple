@@ -383,6 +383,12 @@ export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOp
 					namespaceId: 2026072102,
 					simple: { limit: 60, period: 60 },
 				}),
+				// Authenticated POST /mcp, per credential. Tighter than the v2 API's
+				// because tool calls fan out into warehouse queries and LLM calls.
+				MCP_TOOLS_RATE_LIMITER: Cloudflare.RateLimit("MCP_TOOLS_RATE_LIMITER", {
+					namespaceId: 2026082901,
+					simple: { limit: 120, period: 60 },
+				}),
 				API_V2_RATE_LIMIT_PARTITION: formatMapleStage(stage),
 				// Production only: preview/stg workers run the same email crons against
 				// their own DB branches, so a binding here means every live stage sends

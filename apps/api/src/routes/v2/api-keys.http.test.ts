@@ -12,7 +12,7 @@ import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
-import { ApiV2RateLimiter, type ApiV2RateLimiterApi } from "@/services/auth/ApiV2RateLimiter"
+import { ApiV2RateLimiter, type RateLimiterApi } from "@/services/auth/ApiV2RateLimiter"
 import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
@@ -49,7 +49,7 @@ const testConfig = () =>
 	)
 
 const makeHarness = (
-	checkRateLimit: ApiV2RateLimiterApi["check"] = () => Effect.succeed("allowed" as const),
+	checkRateLimit: RateLimiterApi["check"] = () => Effect.succeed("allowed" as const),
 ) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
