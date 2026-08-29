@@ -21,6 +21,7 @@ import * as activityQueries from "./ch/queries/activity"
 import * as alertCheckQueries from "./ch/queries/alert-checks"
 import * as anomalyQueries from "./ch/queries/anomaly"
 import * as attributeKeyQueries from "./ch/queries/attribute-keys"
+import * as containerQueries from "./ch/queries/containers"
 import * as errorQueries from "./ch/queries/errors"
 import * as infraQueries from "./ch/queries/infra"
 import * as livenessQueries from "./ch/queries/liveness"
@@ -218,6 +219,7 @@ const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 	"alert-checks": alertCheckQueries,
 	anomaly: anomalyQueries,
 	"attribute-keys": attributeKeyQueries,
+	containers: containerQueries,
 	errors: errorQueries,
 	infra: infraQueries,
 	liveness: livenessQueries,

@@ -6,7 +6,7 @@ Maple's service map shows a pod-count badge on each service node and an Infrastr
 
 ```bash
 helm upgrade --install maple-k8s-infra \
-  oci://ghcr.io/makisuo/charts/maple-k8s-infra \
+  oci://ghcr.io/mapletechlabs/charts/maple-k8s-infra \
   --namespace maple --create-namespace \
   --set maple.ingestKey.value=YOUR_MAPLE_INGEST_KEY \
   --set global.clusterName=production

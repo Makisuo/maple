@@ -18,7 +18,7 @@ const installSteps = [
 	},
 	{
 		caption: m.page_k8s_install_step_2(),
-		code: "helm upgrade --install maple-k8s-infra \\\n  oci://ghcr.io/makisuo/charts/maple-k8s-infra \\\n  --namespace maple \\\n  --set maple.ingestKey.existingSecret.name=maple-ingest-key \\\n  --set maple.ingestKey.existingSecret.key=ingest-key \\\n  --set global.clusterName=production",
+		code: "helm upgrade --install maple-k8s-infra \\\n  oci://ghcr.io/mapletechlabs/charts/maple-k8s-infra \\\n  --namespace maple \\\n  --set maple.ingestKey.existingSecret.name=maple-ingest-key \\\n  --set maple.ingestKey.existingSecret.key=ingest-key \\\n  --set global.clusterName=production",
 	},
 	{
 		caption: m.page_k8s_install_step_3(),

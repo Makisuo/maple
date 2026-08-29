@@ -190,7 +190,7 @@ export class OrgClickHouseApplySchemaStatus extends Schema.Class<OrgClickHouseAp
  *     -e MAPLE_CLICKHOUSE_PASSWORD=$PASS \
  *     -v ./collector.yaml:/etc/otel/config.yaml \
  *     -p 4317:4317 -p 4318:4318 \
- *     ghcr.io/makisuo/maple/otel-collector-maple:latest
+ *     ghcr.io/mapletechlabs/maple/otel-collector-maple:latest
  *
  * The password is intentionally NOT inlined — the body references
  * `${env:MAPLE_CLICKHOUSE_PASSWORD}` so the file is safe to share.

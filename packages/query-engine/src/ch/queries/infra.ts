@@ -17,18 +17,7 @@ import { from, fromQuery, type ColumnAccessor } from "@maple-dev/clickhouse-buil
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, MetricsSum } from "../tables"
 import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
-import type { FacetOutput } from "./query-helpers"
-
-// A conditional aggregate over a metric family the entity never emitted returns
-// `nan`, which ClickHouse serializes as JSON `null` — and one null against a
-// numeric row schema fails the decode for the whole page, not just that row.
-// Absent samples mean "none of this resource in use", which is what the callers
-// already assume: `podScopeCondition("unbounded")` tests `saturation = 0`.
-const avgIfOrZero = (value: CH.Expr<number>, condition: CH.Condition): CH.Expr<number> =>
-	CH.ifNotFinite(CH.avgIf(value, condition), 0)
-
-const maxIfOrZero = (value: CH.Expr<number>, condition: CH.Condition): CH.Expr<number> =>
-	CH.ifNotFinite(CH.maxIf(value, condition), 0)
+import { avgIfOrZero, facetAttrExpr, maxIfOrZero, type FacetOutput } from "./query-helpers"
 
 const HOSTMETRIC_NAMES = [
 	"system.cpu.utilization",
@@ -1000,22 +989,6 @@ export function workloadGaugeTimeseriesQuery(opts: WorkloadGaugeTimeseriesOpts) 
 // of per-attribute SELECTs scoped to the rows that show up in the matching
 // list query (pods, nodes, or workloads), filtered by the same opts so the
 // facet counts reflect the *current* filtered set.
-
-/**
- * Facet dimensions are plain `ResourceAttributes` keys, with one exception: the
- * deployment environment has two spellings in the wild (OTel renamed
- * `deployment.environment` to `deployment.environment.name`), so it resolves to
- * the coalescing expression instead of a single map lookup. Without this a
- * cluster whose collector still emits the legacy key produced an empty
- * environment facet.
- */
-const facetAttrExpr = (
-	resourceAttributes: { get(key: string): CH.Expr<string> },
-	attrKey: string,
-): CH.Expr<string> =>
-	attrKey === "deployment.environment.name"
-		? deploymentEnvExpr(resourceAttributes)
-		: resourceAttributes.get(attrKey)
 
 export type PodFacetsOutput = FacetOutput
 

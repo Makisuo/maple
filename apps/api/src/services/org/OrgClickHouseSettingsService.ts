@@ -436,7 +436,10 @@ const decryptToken = (
 // here is the single edit needed to roll customers onto a newer maple-otel
 // collector — the generated YAML and the documented `docker run …` command
 // both pick it up.
-const COLLECTOR_IMAGE_REF = "ghcr.io/makisuo/maple/otel-collector-maple:0.1.5"
+// Stays on the latest PUBLISHED tag: this ref lands verbatim in configs
+// customers download and run. Bump only after the release tag's image exists
+// on GHCR (the Docker onboarding modal is gated the same way).
+const COLLECTOR_IMAGE_REF = "ghcr.io/mapletechlabs/maple/otel-collector-maple:0.2.0"
 const COLLECTOR_PASSWORD_ENV = "MAPLE_CLICKHOUSE_PASSWORD"
 
 /**
@@ -478,6 +481,12 @@ const renderCollectorYaml = (input: {
 		"        endpoint: 0.0.0.0:4317",
 		"      http:",
 		"        endpoint: 0.0.0.0:4318",
+		"  # Uncomment to monitor local Docker containers (requires running the",
+		"  # collector with -v /var/run/docker.sock:/var/run/docker.sock:ro and",
+		"  # --user 0:0, and adding docker_stats to the metrics pipeline below).",
+		"  # docker_stats:",
+		"  #   endpoint: unix:///var/run/docker.sock",
+		"  #   collection_interval: 30s",
 		"",
 		"processors:",
 		"  memory_limiter:",

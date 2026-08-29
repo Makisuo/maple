@@ -68,6 +68,8 @@ import { Route as ErrorsIssuesIndexRouteImport } from './routes/errors/issues/in
 import { Route as ErrorsIssuesIssueIdRouteImport } from './routes/errors/issues/$issueId'
 import { Route as InfraCloudflareIndexRouteImport } from './routes/infra/cloudflare/index'
 import { Route as InfraCloudflareZoneNameRouteImport } from './routes/infra/cloudflare/$zoneName'
+import { Route as InfraContainersIndexRouteImport } from './routes/infra/containers/index'
+import { Route as InfraContainersContainerNameRouteImport } from './routes/infra/containers/$containerName'
 import { Route as InfraPlanetscaleIndexRouteImport } from './routes/infra/planetscale/index'
 import { Route as InfraPlanetscaleDbNameRouteImport } from './routes/infra/planetscale/$dbName'
 import { Route as LabBenchInfraRouteImport } from './routes/lab/bench/infra'
@@ -381,6 +383,17 @@ const InfraCloudflareZoneNameRoute = InfraCloudflareZoneNameRouteImport.update({
   path: '/infra/cloudflare/$zoneName',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InfraContainersIndexRoute = InfraContainersIndexRouteImport.update({
+  id: '/infra/containers/',
+  path: '/infra/containers/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InfraContainersContainerNameRoute =
+  InfraContainersContainerNameRouteImport.update({
+    id: '/infra/containers/$containerName',
+    path: '/infra/containers/$containerName',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const InfraPlanetscaleIndexRoute = InfraPlanetscaleIndexRouteImport.update({
   id: '/infra/planetscale/',
   path: '/infra/planetscale/',
@@ -522,6 +535,7 @@ export interface FileRoutesByFullPath {
   '/alerts/incidents/$incidentId': typeof AlertsIncidentsIncidentIdRoute
   '/errors/issues/$issueId': typeof ErrorsIssuesIssueIdRoute
   '/infra/cloudflare/$zoneName': typeof InfraCloudflareZoneNameRoute
+  '/infra/containers/$containerName': typeof InfraContainersContainerNameRoute
   '/infra/planetscale/$dbName': typeof InfraPlanetscaleDbNameRoute
   '/lab/bench/infra': typeof LabBenchInfraRoute
   '/lab/bench/logs': typeof LabBenchLogsRoute
@@ -531,6 +545,7 @@ export interface FileRoutesByFullPath {
   '/lab/bench/tanstack': typeof LabBenchTanstackRoute
   '/errors/issues/': typeof ErrorsIssuesIndexRoute
   '/infra/cloudflare/': typeof InfraCloudflareIndexRoute
+  '/infra/containers/': typeof InfraContainersIndexRoute
   '/infra/planetscale/': typeof InfraPlanetscaleIndexRoute
   '/dashboards/$dashboardId/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
@@ -597,6 +612,7 @@ export interface FileRoutesByTo {
   '/alerts/incidents/$incidentId': typeof AlertsIncidentsIncidentIdRoute
   '/errors/issues/$issueId': typeof ErrorsIssuesIssueIdRoute
   '/infra/cloudflare/$zoneName': typeof InfraCloudflareZoneNameRoute
+  '/infra/containers/$containerName': typeof InfraContainersContainerNameRoute
   '/infra/planetscale/$dbName': typeof InfraPlanetscaleDbNameRoute
   '/lab/bench/infra': typeof LabBenchInfraRoute
   '/lab/bench/logs': typeof LabBenchLogsRoute
@@ -606,6 +622,7 @@ export interface FileRoutesByTo {
   '/lab/bench/tanstack': typeof LabBenchTanstackRoute
   '/errors/issues': typeof ErrorsIssuesIndexRoute
   '/infra/cloudflare': typeof InfraCloudflareIndexRoute
+  '/infra/containers': typeof InfraContainersIndexRoute
   '/infra/planetscale': typeof InfraPlanetscaleIndexRoute
   '/dashboards/$dashboardId/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
@@ -674,6 +691,7 @@ export interface FileRoutesById {
   '/alerts/incidents/$incidentId': typeof AlertsIncidentsIncidentIdRoute
   '/errors/issues/$issueId': typeof ErrorsIssuesIssueIdRoute
   '/infra/cloudflare/$zoneName': typeof InfraCloudflareZoneNameRoute
+  '/infra/containers/$containerName': typeof InfraContainersContainerNameRoute
   '/infra/planetscale/$dbName': typeof InfraPlanetscaleDbNameRoute
   '/lab/bench/infra': typeof LabBenchInfraRoute
   '/lab/bench/logs': typeof LabBenchLogsRoute
@@ -683,6 +701,7 @@ export interface FileRoutesById {
   '/lab/bench/tanstack': typeof LabBenchTanstackRoute
   '/errors/issues/': typeof ErrorsIssuesIndexRoute
   '/infra/cloudflare/': typeof InfraCloudflareIndexRoute
+  '/infra/containers/': typeof InfraContainersIndexRoute
   '/infra/planetscale/': typeof InfraPlanetscaleIndexRoute
   '/dashboards/$dashboardId_/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
@@ -752,6 +771,7 @@ export interface FileRouteTypes {
     | '/alerts/incidents/$incidentId'
     | '/errors/issues/$issueId'
     | '/infra/cloudflare/$zoneName'
+    | '/infra/containers/$containerName'
     | '/infra/planetscale/$dbName'
     | '/lab/bench/infra'
     | '/lab/bench/logs'
@@ -761,6 +781,7 @@ export interface FileRouteTypes {
     | '/lab/bench/tanstack'
     | '/errors/issues/'
     | '/infra/cloudflare/'
+    | '/infra/containers/'
     | '/infra/planetscale/'
     | '/dashboards/$dashboardId/widgets/$widgetId'
     | '/infra/kubernetes/nodes/$nodeName'
@@ -827,6 +848,7 @@ export interface FileRouteTypes {
     | '/alerts/incidents/$incidentId'
     | '/errors/issues/$issueId'
     | '/infra/cloudflare/$zoneName'
+    | '/infra/containers/$containerName'
     | '/infra/planetscale/$dbName'
     | '/lab/bench/infra'
     | '/lab/bench/logs'
@@ -836,6 +858,7 @@ export interface FileRouteTypes {
     | '/lab/bench/tanstack'
     | '/errors/issues'
     | '/infra/cloudflare'
+    | '/infra/containers'
     | '/infra/planetscale'
     | '/dashboards/$dashboardId/widgets/$widgetId'
     | '/infra/kubernetes/nodes/$nodeName'
@@ -903,6 +926,7 @@ export interface FileRouteTypes {
     | '/alerts/incidents/$incidentId'
     | '/errors/issues/$issueId'
     | '/infra/cloudflare/$zoneName'
+    | '/infra/containers/$containerName'
     | '/infra/planetscale/$dbName'
     | '/lab/bench/infra'
     | '/lab/bench/logs'
@@ -912,6 +936,7 @@ export interface FileRouteTypes {
     | '/lab/bench/tanstack'
     | '/errors/issues/'
     | '/infra/cloudflare/'
+    | '/infra/containers/'
     | '/infra/planetscale/'
     | '/dashboards/$dashboardId_/widgets/$widgetId'
     | '/infra/kubernetes/nodes/$nodeName'
@@ -971,9 +996,11 @@ export interface RootRouteChildren {
   AlertsIncidentsIncidentIdRoute: typeof AlertsIncidentsIncidentIdRoute
   ErrorsIssuesIssueIdRoute: typeof ErrorsIssuesIssueIdRoute
   InfraCloudflareZoneNameRoute: typeof InfraCloudflareZoneNameRoute
+  InfraContainersContainerNameRoute: typeof InfraContainersContainerNameRoute
   InfraPlanetscaleDbNameRoute: typeof InfraPlanetscaleDbNameRoute
   ErrorsIssuesIndexRoute: typeof ErrorsIssuesIndexRoute
   InfraCloudflareIndexRoute: typeof InfraCloudflareIndexRoute
+  InfraContainersIndexRoute: typeof InfraContainersIndexRoute
   InfraPlanetscaleIndexRoute: typeof InfraPlanetscaleIndexRoute
   DashboardsDashboardIdWidgetsWidgetIdRoute: typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   InfraKubernetesNodesNodeNameRoute: typeof InfraKubernetesNodesNodeNameRoute
@@ -1399,6 +1426,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InfraCloudflareZoneNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/infra/containers/': {
+      id: '/infra/containers/'
+      path: '/infra/containers'
+      fullPath: '/infra/containers/'
+      preLoaderRoute: typeof InfraContainersIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/infra/containers/$containerName': {
+      id: '/infra/containers/$containerName'
+      path: '/infra/containers/$containerName'
+      fullPath: '/infra/containers/$containerName'
+      preLoaderRoute: typeof InfraContainersContainerNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/infra/planetscale/': {
       id: '/infra/planetscale/'
       path: '/infra/planetscale'
@@ -1596,9 +1637,11 @@ const rootRouteChildren: RootRouteChildren = {
   AlertsIncidentsIncidentIdRoute: AlertsIncidentsIncidentIdRoute,
   ErrorsIssuesIssueIdRoute: ErrorsIssuesIssueIdRoute,
   InfraCloudflareZoneNameRoute: InfraCloudflareZoneNameRoute,
+  InfraContainersContainerNameRoute: InfraContainersContainerNameRoute,
   InfraPlanetscaleDbNameRoute: InfraPlanetscaleDbNameRoute,
   ErrorsIssuesIndexRoute: ErrorsIssuesIndexRoute,
   InfraCloudflareIndexRoute: InfraCloudflareIndexRoute,
+  InfraContainersIndexRoute: InfraContainersIndexRoute,
   InfraPlanetscaleIndexRoute: InfraPlanetscaleIndexRoute,
   DashboardsDashboardIdWidgetsWidgetIdRoute:
     DashboardsDashboardIdWidgetsWidgetIdRoute,

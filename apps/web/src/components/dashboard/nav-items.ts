@@ -9,6 +9,7 @@ import {
 	FileIcon,
 	GridSquareCirclePlusIcon,
 	HouseIcon,
+	DockerIcon,
 	KubernetesIcon,
 	LayersIcon,
 	MagnifierCheckIcon,
@@ -69,9 +70,10 @@ const overviewItem: NavItem = {
  * four host/k8s rows sat text-only beside two brand glyphs.
  *
  * The three k8s pages deliberately share one mark: their labels already
- * separate them, and the preview dedupes by icon, so six children still fit
- * beside "Infrastructure" as four glyphs. Giving them distinct marks costs the
- * label ~14px and truncates it to "Infrastruct…".
+ * separate them, and the preview dedupes by icon. With Containers this section
+ * now carries five unique glyphs, which is past `NavRow`'s all-or-nothing
+ * preview cap (each glyph costs the label ~14px) — so the closed row shows no
+ * miniatures until the icon variety shrinks again.
  */
 const infrastructureItem: NavItem = {
 	title: "Infrastructure",
@@ -79,6 +81,7 @@ const infrastructureItem: NavItem = {
 	icon: ComputerIcon,
 	subItems: [
 		{ title: "Hosts", href: "/infra", icon: ServerIcon },
+		{ title: "Containers", href: "/infra/containers", icon: DockerIcon },
 		{ title: "K8s Pods", href: "/infra/kubernetes/pods", icon: KubernetesIcon },
 		{ title: "K8s Nodes", href: "/infra/kubernetes/nodes", icon: KubernetesIcon },
 		{ title: "K8s Workloads", href: "/infra/kubernetes/workloads", icon: KubernetesIcon },

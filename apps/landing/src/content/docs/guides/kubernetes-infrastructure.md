@@ -7,6 +7,8 @@ order: 1
 
 Maple ships a small Helm chart — `maple-k8s-infra` — that collects host, kubelet, and cluster metrics from your Kubernetes cluster over OpenTelemetry and streams them to Maple. Once it's running, the **Infrastructure** section lights up with your pods, nodes, and workloads, and the service map gains a pod-count badge plus an Infrastructure tab on each service.
 
+Running plain Docker hosts instead of (or alongside) Kubernetes? See the [Docker Infrastructure guide](/docs/guides/docker-infrastructure) — a single-container agent covers per-container metrics and logs.
+
 The chart uses a split-collector architecture:
 
 - a **DaemonSet** for node-local OTLP, host metrics, kubelet/pod metrics, and optional pod logs
@@ -35,7 +37,7 @@ Prefer Helm directly? Install the published OCI chart:
 
 ```bash
 helm upgrade --install maple-k8s-infra \
-  oci://ghcr.io/makisuo/charts/maple-k8s-infra \
+  oci://ghcr.io/mapletechlabs/charts/maple-k8s-infra \
   --namespace maple --create-namespace \
   --set-string maple.ingestKey.value=YOUR_MAPLE_INGEST_KEY \
   --set-string global.clusterName=production
@@ -49,7 +51,7 @@ kubectl -n maple create secret generic maple-ingest-key \
   --from-literal=ingest-key=YOUR_MAPLE_INGEST_KEY
 
 helm upgrade --install maple-k8s-infra \
-  oci://ghcr.io/makisuo/charts/maple-k8s-infra \
+  oci://ghcr.io/mapletechlabs/charts/maple-k8s-infra \
   --namespace maple \
   --set maple.ingestKey.existingSecret.name=maple-ingest-key \
   --set maple.ingestKey.existingSecret.key=ingest-key \

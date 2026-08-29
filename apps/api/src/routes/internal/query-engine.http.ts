@@ -49,6 +49,11 @@ import {
 	PodDetailSummaryResponse,
 	PodInfraTimeseriesResponse,
 	PodFacetsResponse,
+	ListContainersResponse,
+	ContainersSummaryResponse,
+	ContainerDetailSummaryResponse,
+	ContainerInfraTimeseriesResponse,
+	ContainerFacetsResponse,
 	ListNodesResponse,
 	NodeDetailSummaryResponse,
 	NodeInfraTimeseriesResponse,
@@ -91,6 +96,7 @@ import {
 } from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
 import {
+	containerMetricSpec,
 	hostMetricSpec,
 	nodeMetricSpec,
 	partitionWindowAround,
@@ -1369,6 +1375,168 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 							})),
 							unit: spec.unit,
 						})
+					}),
+				)
+				.handle("listContainers", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* warehouse.warmRoute(tenant)
+						const [rows, countRow] = yield* Effect.all(
+							[
+								runQuery(Queries.listContainers, tenant, payload),
+								runQueryFirst(Queries.listContainersCount, tenant, payload),
+							],
+							{ concurrency: 2 },
+						)
+						return new ListContainersResponse({
+							data: rows.map((row) => ({
+								containerName: row.containerName,
+								hostName: row.hostName,
+								containerId: row.containerId,
+								imageName: row.imageName,
+								composeProject: row.composeProject,
+								composeService: row.composeService,
+								runtime: row.runtime,
+								environment: row.environment,
+								lastSeen: String(row.lastSeen),
+								cpuPct: Number(row.cpuPct) || 0,
+								memoryPct: Number(row.memoryPct) || 0,
+								cpuPctPeak: Number(row.cpuPctPeak) || 0,
+								memoryPctPeak: Number(row.memoryPctPeak) || 0,
+								cpuLimitCores: Number(row.cpuLimitCores) || 0,
+								uptimeSeconds: Number(row.uptimeSeconds) || 0,
+								saturation: Number(row.saturation) || 0,
+							})),
+							// The denominator has to match the predicate the list ran (see listPods).
+							totalCount:
+								Number(
+									payload.scope === "saturated"
+										? countRow?.saturatedContainers
+										: payload.scope === "elevated"
+											? countRow?.elevatedContainers
+											: payload.scope === "stale"
+												? countRow?.staleContainers
+												: countRow?.totalContainers,
+								) ||
+								// A failed count must not render as "0 of 0" under a list with rows.
+								rows.length,
+						})
+					}),
+				)
+				.handle("containersSummary", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const row = yield* runQueryFirst(Queries.containersSummary, tenant, payload)
+						return new ContainersSummaryResponse({
+							totalContainers: Number(row?.totalContainers) || 0,
+							saturatedContainers: Number(row?.saturatedContainers) || 0,
+							elevatedContainers: Number(row?.elevatedContainers) || 0,
+							staleContainers: Number(row?.staleContainers) || 0,
+						})
+					}),
+				)
+				.handle("containerDetailSummary", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* warehouse.warmRoute(tenant)
+						// Gauge identity/summary and metrics_sum counters are separate scans;
+						// merge them into the one detail shape the page renders.
+						const [row, counters] = yield* Effect.all(
+							[
+								runQueryFirst(Queries.containerDetailSummary, tenant, payload),
+								runQueryFirst(Queries.containerCountersSummary, tenant, payload),
+							],
+							{ concurrency: 2 },
+						)
+						return new ContainerDetailSummaryResponse({
+							data: row
+								? {
+										containerName: row.containerName,
+										hostName: row.hostName,
+										containerId: row.containerId,
+										imageName: row.imageName,
+										composeProject: row.composeProject,
+										composeService: row.composeService,
+										runtime: row.runtime,
+										firstSeen: String(row.firstSeen),
+										lastSeen: String(row.lastSeen),
+										cpuPct: Number(row.cpuPct) || 0,
+										memoryPct: Number(row.memoryPct) || 0,
+										cpuLimitCores: Number(row.cpuLimitCores) || 0,
+										uptimeSeconds: Number(row.uptimeSeconds) || 0,
+										memoryBytesAvg: Number(counters?.memoryBytesAvg) || 0,
+										memoryLimitBytes: Number(counters?.memoryLimitBytes) || 0,
+										restartsDelta: Number(counters?.restartsDelta) || 0,
+										pidsAvg: Number(counters?.pidsAvg) || 0,
+									}
+								: null,
+						})
+					}),
+				)
+				.handle("containerInfraTimeseries", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const spec = containerMetricSpec(payload.metric)
+
+						if (spec.isSum) {
+							const rows = yield* runQuery(Queries.containerInfraSumTimeseries, tenant, payload)
+							return new ContainerInfraTimeseriesResponse({
+								data: rows.map((row) => ({
+									bucket: String(row.bucket),
+									attributeValue: String(row.attributeValue ?? ""),
+									value: Number(row.sumValue) || 0,
+								})),
+								unit: spec.unit,
+							})
+						}
+
+						const rows = yield* runQuery(Queries.containerInfraGaugeTimeseries, tenant, payload)
+						return new ContainerInfraTimeseriesResponse({
+							data: rows.map((row) => ({
+								bucket: String(row.bucket),
+								attributeValue: String(row.attributeValue ?? ""),
+								value: Number(row.avgValue) || 0,
+							})),
+							unit: spec.unit,
+						})
+					}),
+				)
+				.handle("containerFacets", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const rows = yield* runQuery(Queries.containerFacets, tenant, payload)
+						const buckets = {
+							containers: [] as Array<{ name: string; count: number }>,
+							hosts: [] as Array<{ name: string; count: number }>,
+							images: [] as Array<{ name: string; count: number }>,
+							composeProjects: [] as Array<{ name: string; count: number }>,
+							composeServices: [] as Array<{ name: string; count: number }>,
+							environments: [] as Array<{ name: string; count: number }>,
+						}
+						for (const row of rows) {
+							const entry = { name: String(row.name), count: Number(row.count) || 0 }
+							switch (row.facetType) {
+								case "container":
+									buckets.containers.push(entry)
+									break
+								case "host":
+									buckets.hosts.push(entry)
+									break
+								case "image":
+									buckets.images.push(entry)
+									break
+								case "composeProject":
+									buckets.composeProjects.push(entry)
+									break
+								case "composeService":
+									buckets.composeServices.push(entry)
+									break
+								case "environment":
+									buckets.environments.push(entry)
+									break
+							}
+						}
+						return new ContainerFacetsResponse({ data: buckets })
 					}),
 				)
 				.handle("listNodes", ({ payload }) =>
