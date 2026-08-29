@@ -22,6 +22,29 @@ const CLOUDFLARE_PROVIDER = "cloudflare"
 const decodeOrgId = Schema.decodeUnknownSync(OrgId)
 
 /**
+ * The Cloudflare accounts one OAuth grant covers, persisted as
+ * `oauth_connections.grantedAccountsJson`. A single consent screen may tick several accounts;
+ * the one token then reaches all of them, so the org's connection stays one row and this list
+ * is the account fan-out the poller iterates.
+ */
+const GrantedAccounts = Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.NullOr(Schema.String) }))
+const decodeGrantedAccounts = Schema.decodeUnknownOption(Schema.fromJsonString(GrantedAccounts))
+
+/** Stored grant list, falling back to the row's own principal for pre-list rows. */
+const grantedAccountsOfRow = (row: {
+	readonly grantedAccountsJson: string | null
+	readonly externalUserId: string
+	readonly externalAccountName: string | null
+}): ReadonlyArray<{ readonly id: string; readonly name: string | null }> => {
+	const fallback = [{ id: row.externalUserId, name: row.externalAccountName }]
+	if (row.grantedAccountsJson == null) return fallback
+	return Option.match(decodeGrantedAccounts(row.grantedAccountsJson), {
+		onNone: () => fallback,
+		onSome: (accounts) => (accounts.length === 0 ? fallback : accounts),
+	})
+}
+
+/**
  * PKCE (RFC 7636). Cloudflare's OAuth requires PKCE (S256) for public clients — a multi-tenant SaaS
  * that any Cloudflare user can connect — and accepts it for confidential clients too, so we always
  * send it. The `code_verifier` is stashed on the auth-state row and replayed at token exchange.
@@ -73,6 +96,19 @@ interface CloudflareAccessToken {
 	readonly scope: string
 }
 
+/**
+ * One Cloudflare account covered by the org's grant. All accounts share the org's single
+ * connection row, so `connectedByUserId`/`scope`/`revoked` are grant-wide.
+ */
+export interface CloudflareConnectedAccount {
+	readonly accountId: string
+	readonly accountName: string | null
+	readonly connectedByUserId: string
+	readonly scope: string
+	/** True when Cloudflare rejected the stored grant — pollers skip it until reconnect. */
+	readonly revoked: boolean
+}
+
 export interface CloudflareOAuthServiceApi {
 	readonly startConnect: (
 		orgId: OrgId,
@@ -92,19 +128,22 @@ export interface CloudflareOAuthServiceApi {
 		| IntegrationsRevokedError
 		| IntegrationsPersistenceError
 	>
+	/** Every account the org's grant covers, in the order the grant listed them. */
 	readonly getStatus: (orgId: OrgId) => Effect.Effect<
-		| { readonly connected: false }
-		| {
-				readonly connected: true
-				readonly accountId: string
-				readonly accountName: string | null
-				readonly connectedByUserId: string
-				readonly scope: string
-		  },
+		{
+			readonly connected: boolean
+			readonly accounts: ReadonlyArray<CloudflareConnectedAccount>
+		},
 		IntegrationsPersistenceError
 	>
+	/**
+	 * Fresh access token addressed to one granted account. Without `accountId` the
+	 * grant must cover exactly one account — ambiguous lookups fail rather than
+	 * silently picking an account.
+	 */
 	readonly getValidAccessToken: (
 		orgId: OrgId,
+		accountId?: string,
 	) => Effect.Effect<
 		CloudflareAccessToken,
 		| IntegrationsNotConnectedError
@@ -117,10 +156,12 @@ export interface CloudflareOAuthServiceApi {
 		orgId: OrgId,
 	) => Effect.Effect<{ readonly disconnected: boolean }, IntegrationsPersistenceError>
 	/**
-	 * Stamp the org's connection as revoked so pollers stop retrying it every
-	 * tick; cleared automatically when the org reconnects. Best-effort.
+	 * Stamp the org's grant as revoked so pollers stop retrying it every tick;
+	 * cleared automatically on reconnect. Best-effort. The grant is one token, so
+	 * revocation is always grant-wide — `accountId` only annotates which account
+	 * surfaced the rejection.
 	 */
-	readonly markConnectionRevoked: (orgId: OrgId) => Effect.Effect<void>
+	readonly markConnectionRevoked: (orgId: OrgId, accountId?: string) => Effect.Effect<void>
 }
 
 export class CloudflareOAuthService extends Context.Service<
@@ -212,10 +253,10 @@ export class CloudflareOAuthService extends Context.Service<
 				code_verifier: stateRow.codeVerifier,
 			})
 
-			// Resolve — and require exactly one — Cloudflare account. A token that spans multiple
-			// accounts is ambiguous for org→account scoping, so we refuse it (Superlog's rule).
-			// On refusal, best-effort revoke the just-issued tokens: they are never persisted, so
-			// this is the only moment we can invalidate them upstream.
+			// Resolve every account the grant covers — the consent screen lets the user tick
+			// several, and the one token reaches all of them. An empty grant is refused: best-effort
+			// revoke the just-issued tokens, which are never persisted, so this is the only moment
+			// we can invalidate them upstream.
 			const accounts = yield* listAccounts(
 				tokenResponse.access_token,
 				env.MAPLE_CLOUDFLARE_API_BASE_URL,
@@ -228,16 +269,7 @@ export class CloudflareOAuthService extends Context.Service<
 					}),
 				)
 			}
-			if (accounts.length > 1) {
-				yield* revokeToken(config, tokenResponse.access_token)
-				return yield* Effect.fail(
-					new IntegrationsValidationError({
-						message:
-							"The Cloudflare authorization spans multiple accounts — reconnect and grant access to a single account",
-					}),
-				)
-			}
-			const account = accounts[0]!
+			const primaryAccount = accounts[0]!
 
 			const accessEnc = yield* oauth.encryptValue(tokenResponse.access_token)
 			const refreshEnc = tokenResponse.refresh_token
@@ -253,7 +285,7 @@ export class CloudflareOAuthService extends Context.Service<
 			// dies at the ~16h access-token expiry and disables every state row (the 31h outage).
 			// Refuse it loudly at connect time instead of storing a doomed connection. Best-effort
 			// revoke the just-issued access token first — it is never persisted, so this is the only
-			// moment we can invalidate it upstream (mirrors the multi-account refusal above).
+			// moment we can invalidate it upstream (mirrors the no-account refusal above).
 			if (!tokenResponse.refresh_token) {
 				yield* Effect.logWarning(
 					"Cloudflare OAuth token exchange returned no refresh token — refusing connection",
@@ -269,10 +301,15 @@ export class CloudflareOAuthService extends Context.Service<
 			}
 
 			yield* oauth.upsertConnection(orgId, currentTime, {
-				externalUserId: account.id,
+				externalUserId: primaryAccount.id,
 				// Cloudflare has no user email in this flow; the account name is a display label.
 				externalUserEmail: null,
-				externalAccountName: account.name,
+				externalAccountName: primaryAccount.name,
+				// The full account fan-out of the grant; externalUserId keeps the first account for
+				// the shared helpers' single-principal columns.
+				grantedAccountsJson: JSON.stringify(
+					accounts.map((account) => ({ id: account.id, name: account.name })),
+				),
 				connectedByUserId: stateRow.initiatedByUserId,
 				scope: tokenResponse.scope ?? config.scopes,
 				accessTokenCiphertext: accessEnc.ciphertext,
@@ -289,13 +326,36 @@ export class CloudflareOAuthService extends Context.Service<
 
 		const getValidAccessToken = Effect.fn("CloudflareOAuthService.getValidAccessToken")(function* (
 			orgId: OrgId,
+			accountId?: string,
 		) {
 			yield* Effect.annotateCurrentSpan({ orgId })
 			const config = yield* resolveConfig(env)
 			const { accessToken, row } = yield* oauth.getValidConnectionToken(config, orgId)
+			const granted = grantedAccountsOfRow(row)
+			// No account given: legacy single-account lookup. Refuse an ambiguous grant
+			// instead of silently picking an account.
+			if (accountId === undefined) {
+				if (granted.length > 1) {
+					return yield* Effect.fail(
+						new IntegrationsValidationError({
+							message:
+								"The Cloudflare grant covers multiple accounts — specify which account to use",
+						}),
+					)
+				}
+			} else {
+				yield* Effect.annotateCurrentSpan("maple.cloudflare.account_id", accountId)
+				if (!granted.some((account) => account.id === accountId)) {
+					return yield* Effect.fail(
+						new IntegrationsValidationError({
+							message: "The Cloudflare grant does not cover the requested account",
+						}),
+					)
+				}
+			}
 			return {
 				accessToken,
-				accountId: row.externalUserId,
+				accountId: accountId ?? granted[0]!.id,
 				scope: row.scope,
 			} satisfies CloudflareAccessToken
 		})
@@ -303,15 +363,20 @@ export class CloudflareOAuthService extends Context.Service<
 		const getStatus = Effect.fn("CloudflareOAuthService.getStatus")(function* (orgId: OrgId) {
 			const row = yield* oauth.loadConnection(orgId)
 			if (!row) {
-				return { connected: false } as const
+				return { connected: false, accounts: [] }
 			}
 			return {
 				connected: true,
-				accountId: row.externalUserId,
-				accountName: row.externalAccountName,
-				connectedByUserId: row.connectedByUserId,
-				scope: row.scope,
-			} as const
+				accounts: grantedAccountsOfRow(row).map(
+					(account): CloudflareConnectedAccount => ({
+						accountId: account.id,
+						accountName: account.name,
+						connectedByUserId: row.connectedByUserId,
+						scope: row.scope,
+						revoked: row.revokedAt != null,
+					}),
+				),
+			}
 		})
 
 		const disconnect = Effect.fn("CloudflareOAuthService.disconnect")(function* (orgId: OrgId) {
@@ -335,13 +400,23 @@ export class CloudflareOAuthService extends Context.Service<
 			return yield* oauth.deleteConnection(orgId)
 		})
 
+		const markConnectionRevoked = Effect.fn("CloudflareOAuthService.markConnectionRevoked")(function* (
+			orgId: OrgId,
+			accountId?: string,
+		) {
+			if (accountId !== undefined) {
+				yield* Effect.annotateCurrentSpan("maple.cloudflare.account_id", accountId)
+			}
+			yield* oauth.markConnectionRevoked(orgId)
+		})
+
 		return {
 			startConnect,
 			completeConnect,
 			getStatus,
 			getValidAccessToken,
 			disconnect,
-			markConnectionRevoked: oauth.markConnectionRevoked,
+			markConnectionRevoked,
 		} satisfies CloudflareOAuthServiceApi
 	}),
 }) {

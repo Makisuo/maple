@@ -297,11 +297,15 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 						const startMs = Math.floor(payload.startTime / MINUTE) * MINUTE
 						const endMs = Math.max(Math.ceil(payload.endTime / MINUTE) * MINUTE, startMs + MINUTE)
 						const compute = Effect.gen(function* () {
-							const { accessToken } = yield* cloudflare.getValidAccessToken(tenant.orgId)
+							// The zone's state row also names the account that owns it, so the token
+							// is minted for the right connection when several accounts are connected.
 							const zoneRows = yield* database
 								.execute((db) =>
 									db
-										.select({ zoneId: cloudflareAnalyticsState.zoneId })
+										.select({
+											zoneId: cloudflareAnalyticsState.zoneId,
+											accountId: cloudflareAnalyticsState.accountId,
+										})
 										.from(cloudflareAnalyticsState)
 										.where(
 											and(
@@ -323,14 +327,21 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 											}),
 									),
 								)
-							const zoneId = zoneRows[0]?.zoneId
-							if (zoneId == null) {
+							const zoneRow = zoneRows[0]
+							if (zoneRow == null) {
 								return yield* Effect.fail(
 									new IntegrationsValidationError({
 										message: `Unknown Cloudflare zone: ${payload.zoneName}`,
 									}),
 								)
 							}
+							const zoneId = zoneRow.zoneId
+							const { accessToken } = yield* cloudflare.getValidAccessToken(
+								tenant.orgId,
+								// "" only on orphaned pre-multi-account rows — fall back to the
+								// single-connection lookup for those.
+								zoneRow.accountId === "" ? undefined : zoneRow.accountId,
+							)
 							const result = yield* graphqlQuery(
 								accessToken,
 								{
@@ -555,8 +566,7 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 								// mid-session.
 								Effect.catchTag(
 									"@maple/api/vcs/VcsSourceRepositoryNotFoundError",
-									(error) =>
-										new IntegrationsValidationError({ message: error.message }),
+									(error) => new IntegrationsValidationError({ message: error.message }),
 								),
 							)
 						yield* Effect.annotateCurrentSpan({ "result.rowCount": pullRequests.length })

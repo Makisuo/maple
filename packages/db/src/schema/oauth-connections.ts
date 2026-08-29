@@ -12,6 +12,10 @@ export const oauthConnections = pgTable(
 		// Provider-agnostic display label for the connected principal (e.g. a Cloudflare account
 		// name). Kept separate from externalUserEmail so that column only ever holds real emails.
 		externalAccountName: text("external_account_name"),
+		// JSON array of every external principal the grant covers ([{ id, name }]) for providers
+		// whose single OAuth grant may span several (Cloudflare accounts). Null when the grant
+		// covers only the principal in externalUserId.
+		grantedAccountsJson: text("granted_accounts_json"),
 		connectedByUserId: text("connected_by_user_id").$type<UserId>().notNull(),
 		scope: text("scope").notNull().default(""),
 		accessTokenCiphertext: text("access_token_ciphertext").notNull(),
