@@ -112,9 +112,9 @@ describe("navGroups", () => {
 
 	it("collapses the three k8s pages to one mark, leaving five unique glyphs", () => {
 		// The three k8s pages sharing one mark is deliberate — `NavRow` dedupes by
-		// icon identity. Five unique glyphs is past NavRow's all-or-nothing preview
-		// cap (four), so the closed row currently shows no miniatures; if this
-		// count ever drops back to four, the preview returns on its own.
+		// icon identity. Five is exactly NavRow's all-or-nothing preview cap, so a
+		// sixth unique glyph here would drop the closed row's miniatures entirely
+		// rather than truncate them.
 		const infra = findItem("Infrastructure")
 		expect(infra.subItems?.length).toBe(7)
 		expect(new Set(infra.subItems?.map((sub) => sub.icon)).size).toBe(5)
