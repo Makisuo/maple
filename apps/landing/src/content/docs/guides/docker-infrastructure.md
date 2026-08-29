@@ -10,6 +10,9 @@ Docker socket. Once it's running, **Infrastructure → Containers** lights up wi
 the host, spans and logs that carry container identity gain an **Infrastructure** tab, and the
 **Docker Containers** dashboard template fills in.
 
+Running Kubernetes? Use the [Kubernetes Infrastructure guide](/docs/guides/kubernetes-infrastructure)
+instead — the Helm chart covers pods, nodes, and workloads cluster-wide.
+
 The agent collects:
 
 - **Per-container metrics** via the `docker_stats` receiver — CPU, memory, network, block I/O,
