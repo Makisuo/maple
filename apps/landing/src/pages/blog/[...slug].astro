@@ -61,65 +61,102 @@ const hasToc = toc.length > 0;
     <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
     <Nav />
 
+    {/* Reading progress — a hairline of amber across the very top. */}
+    <div
+        data-read-progress
+        class="fixed inset-x-0 top-0 z-[60] h-[2px] origin-left scale-x-0 bg-primary"
+        aria-hidden="true"
+    >
+    </div>
+
     <article class="relative pt-[19px]">
         <div class="mx-auto max-w-6xl px-6 pt-20 md:pt-24">
             <div class:list={["lg:grid lg:gap-16", hasToc && "lg:grid-cols-[minmax(0,1fr)_13rem]"]}>
-                {/* ── Main column ── */}
+                {/* ── Main column: one centered reading measure ── */}
                 <div class="min-w-0">
-                    <a href="/blog" class={backLink}>
-                        <span aria-hidden="true">←</span> all posts
-                    </a>
-
-                    <div class="mt-[22px] flex flex-wrap items-center gap-2 font-mono text-xs tabular-nums tracking-[0.02em] text-fg-muted">
-                        {featured && (
-                            <span class="border border-primary/40 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.16em] text-primary">
-                                featured
-                            </span>
-                        )}
-                        <time datetime={isoDate(date)}>{formatDate(date)}</time>
-                        {catLabel && (
-                            <>
-                                <span aria-hidden="true" class="opacity-50">·</span>
-                                <span>{catLabel}</span>
-                            </>
-                        )}
-                        <span aria-hidden="true" class="opacity-50">·</span>
-                        <span>{minutes} min read</span>
-                    </div>
-
-                    <h1 class="mt-3.5 max-w-[20ch] font-display text-[clamp(32px,5vw,52px)] font-semibold leading-[1.04] tracking-[-0.03em] text-balance text-foreground">
-                        {title}
-                    </h1>
-                    <p class="mt-5 max-w-[68ch] font-sans text-[15px] leading-[1.7] text-pretty text-fg-muted">{description}</p>
-
-                    <div class="mt-6 flex items-center gap-2.5 font-mono text-xs text-fg/80">
-                        <MapleMark size={22} className="text-primary" aria-hidden="true" />
-                        <span>{author}</span>
-                        {authorRole && <span class="text-fg-muted">{authorRole}</span>}
-                    </div>
-
-                    {/* Cover banner */}
-                    <div class="mt-10 overflow-hidden rounded-lg border border-border md:mt-12">
-                        <PostCover
-                            title={title}
-                            category={category}
-                            cover={cover}
-                            coverAlt={coverAlt}
-                            variant="banner"
-                            drench={featured}
-                        />
-                    </div>
-
-                    {/* Body */}
-                    {/* blog-content regrows the docs prose to essay scale (global.css) */}
-                    <div class="docs-content blog-content mt-12 md:mt-14">
-                        <Content />
-                    </div>
-
-                    <div class="mt-12 border-t border-border pt-5">
+                    <div class="mx-auto w-full max-w-[42rem]">
                         <a href="/blog" class={backLink}>
-                            <span aria-hidden="true">←</span> back to all posts
+                            <span aria-hidden="true">←</span> all posts
                         </a>
+
+                        <div class="mt-[22px] flex flex-wrap items-center gap-2 font-mono text-xs tabular-nums tracking-[0.02em] text-fg-muted">
+                            {featured && (
+                                <span class="border border-primary/40 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.16em] text-primary">
+                                    featured
+                                </span>
+                            )}
+                            <time datetime={isoDate(date)}>{formatDate(date)}</time>
+                            {catLabel && (
+                                <>
+                                    <span aria-hidden="true" class="opacity-50">·</span>
+                                    <span>{catLabel}</span>
+                                </>
+                            )}
+                            <span aria-hidden="true" class="opacity-50">·</span>
+                            <span>{minutes} min read</span>
+                        </div>
+
+                        <h1 class="mt-3.5 font-display text-[clamp(30px,4.5vw,44px)] font-semibold leading-[1.08] tracking-[-0.025em] text-balance text-foreground">
+                            {title}
+                        </h1>
+                        <p class="mt-5 font-display text-[17px] leading-[1.65] text-pretty text-fg-muted">{description}</p>
+
+                        <div class="mt-6 flex items-center gap-2.5 font-mono text-xs text-fg/80">
+                            <MapleMark size={22} className="text-primary" aria-hidden="true" />
+                            <span>{author}</span>
+                            {authorRole && <span class="text-fg-muted">{authorRole}</span>}
+                        </div>
+
+                        {/* Cover banner — a step wider than the prose for presence. */}
+                        <div class="mt-10 overflow-hidden rounded-lg border border-border md:mt-12 xl:-mx-16">
+                            <PostCover
+                                title={title}
+                                category={category}
+                                cover={cover}
+                                coverAlt={coverAlt}
+                                variant="banner"
+                                drench={featured}
+                            />
+                        </div>
+
+                        {/* On this page — collapsible, small screens only */}
+                        {hasToc && (
+                            <details class="group mt-10 border border-border lg:hidden">
+                                <summary class="flex cursor-pointer list-none items-center justify-between px-4 py-3 font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted [&::-webkit-details-marker]:hidden">
+                                    On this page
+                                    <span class="transition-transform group-open:rotate-180" aria-hidden="true">▾</span>
+                                </summary>
+                                <ul class="m-0 list-none space-y-2.5 border-t border-border px-4 py-3.5">
+                                    {toc.map((h) => (
+                                        <li class:list={[h.depth === 3 && "pl-4"]}>
+                                            <a href={`#${h.slug}`} class="font-mono text-[13px] leading-snug text-fg-muted transition-colors hover:text-foreground">
+                                                {h.text}
+                                            </a>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </details>
+                        )}
+
+                        {/* Body */}
+                        {/* blog-content regrows the docs prose to essay scale (global.css) */}
+                        <div class="docs-content blog-content mt-12 md:mt-14">
+                            <Content />
+                        </div>
+
+                        <div class="mt-14 flex flex-wrap items-center justify-between gap-4 border-t border-border pt-5">
+                            <a href="/blog" class={backLink}>
+                                <span aria-hidden="true">←</span> back to all posts
+                            </a>
+                            <button
+                                type="button"
+                                data-copy-link
+                                class="inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 font-mono text-xs text-fg-muted transition-colors hover:text-primary"
+                            >
+                                <span data-copy-label>copy link</span>
+                                <span aria-hidden="true">⌁</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -144,6 +181,13 @@ const hasToc = toc.length > 0;
                                     </li>
                                 ))}
                             </ul>
+                            <a
+                                href="#top"
+                                data-back-to-top
+                                class="mt-5 inline-flex items-center gap-1.5 font-mono text-[11px] text-fg-muted transition-colors hover:text-primary"
+                            >
+                                <span aria-hidden="true">↑</span> back to top
+                            </a>
                         </nav>
                     </aside>
                 )}
@@ -172,32 +216,68 @@ const hasToc = toc.length > 0;
     <BottomCTA />
     <Footer />
 
-    {hasToc && (
-        <script is:inline>
-            (() => {
-                const links = Array.from(document.querySelectorAll("[data-toc-link]"));
-                if (!links.length) return;
-                const byId = new Map(links.map((l) => [decodeURIComponent(l.getAttribute("href").slice(1)), l]));
-                const heads = Array.from(document.querySelectorAll(".docs-content h2[id], .docs-content h3[id]"));
-                if (!heads.length) return;
-                const setActive = (id) => {
-                    links.forEach((l) => l.removeAttribute("data-active"));
-                    const a = byId.get(id);
-                    if (a) a.setAttribute("data-active", "true");
-                };
-                const obs = new IntersectionObserver(
-                    (entries) => {
-                        const visible = entries.filter((e) => e.isIntersecting);
-                        if (visible.length) {
-                            visible.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-                            setActive(visible[0].target.id);
-                        }
-                    },
-                    { rootMargin: "-80px 0px -70% 0px", threshold: 0 },
-                );
-                heads.forEach((h) => obs.observe(h));
-                setActive(heads[0].id);
-            })();
-        </script>
-    )}
+    <script is:inline>
+        (() => {
+            const article = document.querySelector("article");
+            const heads = Array.from(document.querySelectorAll(".docs-content h2[id], .docs-content h3[id]"));
+
+            /* Section permalinks — hover-revealed "#" on every heading. */
+            for (const h of heads) {
+                const a = document.createElement("a");
+                a.className = "heading-anchor";
+                a.href = `#${h.id}`;
+                a.textContent = "#";
+                a.setAttribute("aria-label", `Link to “${h.textContent.trim()}”`);
+                h.appendChild(a);
+            }
+
+            /* Reading progress across the article body. */
+            const bar = document.querySelector("[data-read-progress]");
+            const onScroll = () => {
+                if (!bar || !article) return;
+                const rect = article.getBoundingClientRect();
+                const total = rect.height - window.innerHeight;
+                const read = total > 0 ? Math.min(1, Math.max(0, -rect.top / total)) : 0;
+                // Tailwind's scale-x-0 is the CSS `scale` property, so drive that.
+                bar.style.scale = `${read} 1`;
+            };
+
+            /* TOC active state — the last heading above the reading line wins,
+               so scrolling back up hands the highlight back correctly. */
+            const links = Array.from(document.querySelectorAll("[data-toc-link]"));
+            const byId = new Map(links.map((l) => [decodeURIComponent(l.getAttribute("href").slice(1)), l]));
+            const setActive = () => {
+                if (!links.length || !heads.length) return;
+                const line = 96;
+                let current = heads[0];
+                for (const h of heads) {
+                    if (h.getBoundingClientRect().top <= line) current = h;
+                    else break;
+                }
+                links.forEach((l) => l.removeAttribute("data-active"));
+                const a = byId.get(current.id);
+                if (a) a.setAttribute("data-active", "true");
+            };
+
+            let raf = 0;
+            const onFrame = () => {
+                raf = 0;
+                onScroll();
+                setActive();
+            };
+            addEventListener("scroll", () => { if (!raf) raf = requestAnimationFrame(onFrame); }, { passive: true });
+            onFrame();
+
+            /* Copy-link with inline confirmation. */
+            const copy = document.querySelector("[data-copy-link]");
+            const label = document.querySelector("[data-copy-label]");
+            copy?.addEventListener("click", () => {
+                navigator.clipboard.writeText(location.origin + location.pathname).then(() => {
+                    if (!label) return;
+                    label.textContent = "copied";
+                    setTimeout(() => { label.textContent = "copy link"; }, 1600);
+                });
+            });
+        })();
+    </script>
 </Layout>
