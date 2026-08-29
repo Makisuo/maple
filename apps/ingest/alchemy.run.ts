@@ -57,22 +57,27 @@ const COLLECTOR_DOCKERFILE = resolve(COLLECTOR_CONTEXT, "Dockerfile")
 const INGEST_PORT = 3474
 
 /**
- * WAL cap, deliberately well below Fargate's 20 GB of included ephemeral
- * storage — that 20 GB also holds the image and the OS, and the gateway's own
- * default (`INGEST_QUEUE_MAX_BYTES` = 20 GiB, `apps/ingest/src/main.rs`) would
- * sit exactly on the line. 8 GiB still buys hours of buffering at current
- * volume; raising it means paying for ephemeral storage beyond the free tier.
+ * WAL cap. Sized against the paid `ephemeralStorage` on the service below
+ * (60 GiB), not Fargate's 20 GB free tier: the lane-full 503s of the shard-46
+ * incident were a capacity limit, and the storage to fix it costs ~$3/task/mo
+ * (~$0.0001/GB-hour beyond the included 20 GB) — cheap against dropping
+ * customer data. 48 GiB over 12 lanes is 4 GiB per lane, and the remaining
+ * ~12 GB of the allowance holds the image and the OS.
  *
  * The per-lane budget is `INGEST_QUEUE_MAX_BYTES / (WAL_SHARDS * lanes)`, so
- * the Tinybird mirror's third lane would have cut every lane's share from 1 GiB
- * to 683 MiB at exactly the moment Tinybird-bound traffic doubled. 12 GiB over
- * 12 lanes restores the 1 GiB per lane that 8 GiB gave across 8, and still
- * leaves ~8 GB of the ephemeral allowance for the image and the OS.
- *
- * Drop back to 8 GiB once the mirror is removed, or every lane silently gains
- * headroom nobody sized for.
+ * removing the Tinybird mirror's lane (8 lanes) silently grows each share to
+ * 6 GiB — resize this when that happens rather than inheriting headroom
+ * nobody chose.
  */
-const WAL_MAX_BYTES = 12 * 1024 * 1024 * 1024
+const WAL_MAX_BYTES = 48 * 1024 * 1024 * 1024
+
+/**
+ * Task-level ephemeral storage, GiB. Must hold WAL_MAX_BYTES plus the image
+ * and OS. The WAL still dies with the task — this buys buffering depth, while
+ * the shutdown drain + scale-in protection (`task_protection.rs`) keep task
+ * replacement from discarding what it holds.
+ */
+const EPHEMERAL_STORAGE_GIB = 60
 
 /**
  * Pinned rather than derived. The gateway defaults to `num_cpus * 2`, which
@@ -384,9 +389,29 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 				})
 			: undefined
 
+		// The gateway marks its own task scale-in-protected while the WAL holds
+		// backlog (`apps/ingest/src/task_protection.rs`). The ECS agent endpoint it
+		// PUTs to authorizes against the task role, which therefore needs this
+		// action on the cluster's tasks — the cluster ARN differs from a task ARN
+		// only in the resource prefix.
+		const taskProtectionPolicy = yield* AWS.IAM.Policy("ingest-task-protection", {
+			policyName: name("ingest-task-protection"),
+			policyDocument: {
+				Version: "2012-10-17",
+				Statement: [
+					{
+						Effect: "Allow",
+						Action: ["ecs:UpdateTaskProtection"],
+						Resource: [`${cluster.clusterArn.replace(":cluster/", ":task/")}/*`],
+					},
+				],
+			},
+		})
+
 		const service = yield* AWS.ECS.Service("ingest", {
 			cluster,
 			serviceName: name("ingest"),
+			taskRoleManagedPolicyArns: [taskProtectionPolicy.policyArn],
 
 			// Alchemy creates a private ECR repository and pushes under a content-hash
 			// tag, rebuilding only when the context hash changes — so a deploy that
@@ -420,6 +445,11 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 			runtimePlatform: { cpuArchitecture: "ARM64", operatingSystemFamily: "LINUX" },
 			cpu: taskSize.cpu,
 			memory: taskSize.memory,
+			ephemeralStorage: { sizeInGiB: EPHEMERAL_STORAGE_GIB },
+			// SIGTERM → SIGKILL window (Fargate caps it at 120s). The binary's
+			// shutdown drain (`INGEST_SHUTDOWN_DRAIN_SECS`, default 90) must finish
+			// inside it, after axum has drained in-flight requests.
+			container: { stopTimeout: 120 },
 
 			desiredCount: resolveIngestDesiredCount(stage),
 			// prd autoscales on CPU between this count and a burst ceiling; alchemy
@@ -551,6 +581,12 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 				// keeps ingesting until its cached decision expires.
 				...(yield* optionalPlain("AUTUMN_ENTITLEMENT_ALLOW_TTL_SECS")),
 				...(yield* optionalPlain("AUTUMN_ENTITLEMENT_DENY_TTL_SECS")),
+				// The binary's default is 1s, sized for the pre-#657 world where the
+				// check/finalize flow did the metering. Batched track flushes only
+				// need to keep Autumn roughly current between reconciliations, and
+				// 30s cuts the ~2M balances.track calls/day by ~30x.
+				...(yield* optionalPlain("AUTUMN_FLUSH_INTERVAL_SECS", "30")),
+				...(yield* optionalPlain("INGEST_SHUTDOWN_DRAIN_SECS")),
 				...(yield* optionalPlain("COMMIT_SHA", process.env.GITHUB_SHA?.trim())),
 				// `satisfies` rather than a bare literal: alchemy types `env` as
 				// `Record<string, any>`, which is what let a spread `Config` object

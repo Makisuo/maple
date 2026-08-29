@@ -11,6 +11,7 @@
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 mod autumn;
+mod task_protection;
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -168,6 +169,10 @@ struct AppConfig {
     /// terminated by Cloudflare. Off simply writes `''`, which is what the
     /// column held before this existed — it cannot regress anything.
     trust_proxy_geo: bool,
+    /// How long a graceful shutdown may spend exporting the WAL backlog before
+    /// exiting anyway. Must fit inside the ECS `stopTimeout` (SIGTERM → SIGKILL
+    /// window) or the drain is cut off mid-flight.
+    shutdown_drain_secs: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -569,6 +574,14 @@ impl AppConfig {
             false,
         )?;
 
+        // 90s fits inside the deployed 120s stopTimeout with margin for the
+        // in-flight-request drain that runs before it.
+        let shutdown_drain_secs = parse_u64(
+            "INGEST_SHUTDOWN_DRAIN_SECS",
+            std::env::var("INGEST_SHUTDOWN_DRAIN_SECS").ok(),
+            90,
+        )?;
+
         Ok(Self {
             port,
             otlp_grpc_port,
@@ -593,6 +606,7 @@ impl AppConfig {
             replay_blob_store,
             internal_org_id,
             trust_proxy_geo,
+            shutdown_drain_secs,
         })
     }
 }
@@ -2038,6 +2052,14 @@ async fn main() {
         None
     };
 
+    // Handle kept out of AppState for the post-shutdown WAL drain, plus the
+    // scale-in protection loop (a no-op off ECS — see `task_protection`).
+    let drain_pipeline = telemetry_pipeline.clone();
+    let drain_deadline = Duration::from_secs(config.shutdown_drain_secs);
+    if let Some(pipeline) = telemetry_pipeline.clone() {
+        task_protection::spawn(pipeline);
+    }
+
     let autumn_tracker = config.autumn_secret_key.as_ref().map(|key| {
         AutumnTracker::spawn(
             key.clone(),
@@ -2227,6 +2249,23 @@ async fn main() {
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await;
+
+    // Intake has stopped (graceful shutdown drained in-flight requests), but
+    // the WAL sits on ephemeral storage that dies with the task — export what
+    // it still holds before exiting. The export workers stay alive until the
+    // process ends, so this only has to wait for them.
+    if let Some(pipeline) = drain_pipeline {
+        let remaining = pipeline.drain_wal(drain_deadline).await;
+        if remaining == 0 {
+            info!("WAL drained clean on shutdown");
+        } else {
+            warn!(
+                remaining_bytes = remaining,
+                deadline_secs = drain_deadline.as_secs(),
+                "Shutdown drain deadline hit with WAL backlog remaining; frames will replay if this task's storage survives"
+            );
+        }
+    }
 
     if let Some(providers) = telemetry_providers {
         // Flush buffered spans on graceful exit. Errors here are non-fatal —
@@ -7221,6 +7260,7 @@ mod tests {
                 replay_max_session_bytes: 1024 * 1024 * 1024,
                 replay_blob_store: None,
                 trust_proxy_geo: false,
+                shutdown_drain_secs: 1,
             },
             #[expect(
                 clippy::useless_conversion,
