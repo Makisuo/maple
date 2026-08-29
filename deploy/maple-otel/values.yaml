@@ -68,7 +68,7 @@ maple:
 # ----- collector image -----
 
 image:
-    repository: ghcr.io/makisuo/maple/otel-collector-maple
+    repository: ghcr.io/mapletechlabs/maple/otel-collector-maple
     # Empty falls back to .Chart.AppVersion. Pin a tag for reproducible
     # rollouts.
     tag: ""

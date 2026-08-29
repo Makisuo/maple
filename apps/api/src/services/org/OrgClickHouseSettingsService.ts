@@ -439,7 +439,7 @@ const decryptToken = (
 // Stays on the latest PUBLISHED tag: this ref lands verbatim in configs
 // customers download and run. Bump only after the release tag's image exists
 // on GHCR (the Docker onboarding modal is gated the same way).
-const COLLECTOR_IMAGE_REF = "ghcr.io/makisuo/maple/otel-collector-maple:0.1.5"
+const COLLECTOR_IMAGE_REF = "ghcr.io/mapletechlabs/maple/otel-collector-maple:0.1.5"
 const COLLECTOR_PASSWORD_ENV = "MAPLE_CLICKHOUSE_PASSWORD"
 
 /**

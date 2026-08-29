@@ -81,7 +81,7 @@ function dockerCommand(token: string) {
 	if (ingestUrl !== HOSTED_INGEST_URL) {
 		lines.push(`  -e MAPLE_ENDPOINT=${ingestUrl} \\`)
 	}
-	lines.push("  ghcr.io/makisuo/maple/otel-collector-maple:0.2.0 \\")
+	lines.push("  ghcr.io/mapletechlabs/maple/otel-collector-maple:0.2.0 \\")
 	lines.push("  --config /etc/otel/docker-config.yaml")
 	return lines.join("\n")
 }

@@ -42,7 +42,7 @@ docker run -d --name maple-agent \
   -v maple-agent-state:/var/lib/otelcol \
   -p 4317:4317 -p 4318:4318 \
   -e MAPLE_INGEST_KEY=YOUR_MAPLE_INGEST_KEY \
-  ghcr.io/makisuo/maple/otel-collector-maple:0.2.0 \
+  ghcr.io/mapletechlabs/maple/otel-collector-maple:0.2.0 \
   --config /etc/otel/docker-config.yaml
 ```
 
@@ -63,7 +63,7 @@ Notes on the flags:
 ```yaml
 services:
   maple-agent:
-    image: ghcr.io/makisuo/maple/otel-collector-maple:0.2.0
+    image: ghcr.io/mapletechlabs/maple/otel-collector-maple:0.2.0
     command: ["--config", "/etc/otel/docker-config.yaml"]
     restart: unless-stopped
     user: "0:0"

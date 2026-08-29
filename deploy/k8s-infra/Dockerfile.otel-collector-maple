@@ -12,7 +12,7 @@
 #   docker buildx build \
 #     --file deploy/k8s-infra/Dockerfile.otel-collector-maple \
 #     --platform linux/amd64,linux/arm64 \
-#     --tag ghcr.io/makisuo/maple/otel-collector-maple:0.1.0 \
+#     --tag ghcr.io/mapletechlabs/maple/otel-collector-maple:0.1.0 \
 #     --push .
 
 ARG OTEL_BUILDER_VERSION=v0.151.0

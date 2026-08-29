@@ -2,7 +2,7 @@
 
 A single-container OpenTelemetry Collector for plain Docker hosts — the non-Kubernetes sibling of
 [`deploy/k8s-infra`](../k8s-infra/README.md). It ships in the same image
-(`ghcr.io/makisuo/maple/otel-collector-maple`); this directory holds the ready-to-run config that
+(`ghcr.io/mapletechlabs/maple/otel-collector-maple`); this directory holds the ready-to-run config that
 gets baked into that image at `/etc/otel/docker-config.yaml`, selected via
 `--config /etc/otel/docker-config.yaml`.
 

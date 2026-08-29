@@ -167,7 +167,7 @@ Operational caveats:
 
 A custom build of `otelcol-contrib` with the `mapleexporter` baked in. The exporter writes JSON-each-row directly into Maple's `traces` / `logs` / `metrics_*` tables, no shim required.
 
-- **Image:** `ghcr.io/makisuo/maple/otel-collector-maple` (multi-arch — amd64 + arm64). Pin a tag (e.g. `0.1.5`); see [the package page](https://github.com/users/makisuo/packages/container/package/maple%2Fotel-collector-maple) for available versions.
+- **Image:** `ghcr.io/mapletechlabs/maple/otel-collector-maple` (multi-arch — amd64 + arm64). Pin a tag (e.g. `0.1.5`); see [the package page](https://github.com/orgs/MapleTechLabs/packages/container/package/maple%2Fotel-collector-maple) for available versions.
 - **Source:** [`packages/otel-collector-maple-exporter/`](../packages/otel-collector-maple-exporter/) — builder config in [`deploy/k8s-infra/builder-config.yaml`](../deploy/k8s-infra/builder-config.yaml), Dockerfile in [`deploy/k8s-infra/Dockerfile.otel-collector-maple`](../deploy/k8s-infra/Dockerfile.otel-collector-maple).
 
 #### Step 1: apply the schema
@@ -207,7 +207,7 @@ Apps then point `OTEL_EXPORTER_OTLP_ENDPOINT` at `http://maple-otel.maple.svc.cl
       -e MAPLE_CLICKHOUSE_PASSWORD=$CH_PASSWORD \
       -v ./collector.yaml:/etc/otel/config.yaml \
       -p 4317:4317 -p 4318:4318 \
-      ghcr.io/makisuo/maple/otel-collector-maple:0.1.5
+      ghcr.io/mapletechlabs/maple/otel-collector-maple:0.1.5
     ```
 
 The rendered YAML carries your `org_id`, ClickHouse URL/user/database, and the standard memory_limiter → k8sattributes → batch → maple pipeline. The password is referenced via `${env:MAPLE_CLICKHOUSE_PASSWORD}` so the file is safe to share.

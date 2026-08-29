@@ -99,7 +99,7 @@ maple:
         # chart auto-switches the pod image to this one. Override only if
         # you've forked + republished the builder.
         image:
-            repository: ghcr.io/makisuo/maple/otel-collector-maple
+            repository: ghcr.io/mapletechlabs/maple/otel-collector-maple
             tag: "0.1.5"
             pullPolicy: IfNotPresent
         # ClickHouse HTTP endpoint. e.g. an in-cluster Altinity-operator CHI:

@@ -50,7 +50,7 @@ Or via the Maple UI under Settings → BYO Backend → ClickHouse.
 ## What's in the box
 
 - OpenTelemetry Collector (custom build, image
-  `ghcr.io/makisuo/maple/otel-collector-maple:<chart appVersion>`)
+  `ghcr.io/mapletechlabs/maple/otel-collector-maple:<chart appVersion>`)
 - Receivers: OTLP gRPC + HTTP
 - Processors: `memory_limiter`, optional `k8sattributes` (default ON,
   with cluster-scoped RBAC for pod/namespace/deployment lookup),

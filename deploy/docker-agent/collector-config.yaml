@@ -1,4 +1,4 @@
-# Maple Docker agent — baked into ghcr.io/makisuo/maple/otel-collector-maple
+# Maple Docker agent — baked into ghcr.io/mapletechlabs/maple/otel-collector-maple
 # at /etc/otel/docker-config.yaml so hosted onboarding is a single `docker run`
 # (see the install modal in apps/web and docs/guides/docker-infrastructure).
 #
