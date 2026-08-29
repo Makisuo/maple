@@ -79,11 +79,20 @@ Docker has no k8sattributes/operator analog to inject identity into app telemetr
 
 ## Release coupling
 
-The install one-liner, docs guide, and baked `/etc/otel/docker-config.yaml` all name the
-`otel-collector-maple:0.2.0` image — which exists only after the `otel-collector-maple-v0.2.0`
-tag is pushed (tag-driven workflow). Push the tag and smoke one live agent (confirm
-`container.cpu.utilization` rows arrive through the hosted gateway) before announcing. The
-BYO-ClickHouse `renderCollectorYaml()` deliberately stays on the latest *published* tag.
+The install one-liner, docs guide, and baked `/etc/otel/docker-config.yaml` all name
+`otel-collector-maple:0.2.0`, published from the `otel-collector-maple-v0.2.0` tag (tag-driven
+workflow — merging to main publishes nothing).
+
+Two things bite here. The image name is derived from `github.repository_owner`, so since the move
+to the MapleTechLabs org everything publishes to `ghcr.io/mapletechlabs/...`; the pre-move
+`ghcr.io/makisuo/...` packages still exist, are still public, and are frozen at 0.1.5. And a GHCR
+package created by a workflow starts **private** — visibility is per-package and has to be flipped
+once by hand, so a freshly published image is not pullable by users until someone does.
+
+Before announcing: confirm the package is public with an anonymous pull, then smoke one live agent
+— `container.cpu.utilization` rows arriving through the hosted gateway, and the compose
+project/service facets populating (the query tests assert SQL strings only, so they cannot prove
+that path). The BYO-ClickHouse `renderCollectorYaml()` tracks the latest *published* tag.
 
 ## Not built yet, and why
 
