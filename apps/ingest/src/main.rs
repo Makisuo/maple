@@ -665,6 +665,9 @@ struct IngestKeyResolver {
     store: Arc<dyn KeyStore>,
     lookup_hmac_key: String,
     cache: Cache<String, IngestKeyIdentity>,
+    // Authoritative "no such key" results, so an unknown-key flood is absorbed
+    // here instead of amplifying into a Postgres lookup per request.
+    negative_cache: Cache<String, ()>,
     routing: Arc<OrgRoutingResolver>,
 }
 
@@ -2059,6 +2062,12 @@ async fn main() {
         .time_to_live(Duration::from_secs(config.ingest_key_cache_ttl_secs))
         .max_capacity(1_000)
         .build();
+    // Short TTL so a freshly created key starts working within seconds even
+    // after the SDK raced ahead of provisioning.
+    let ingest_key_negative_cache = Cache::builder()
+        .time_to_live(Duration::from_secs(30))
+        .max_capacity(10_000)
+        .build();
 
     let cloudflare_connector_cache = Cache::builder()
         .time_to_live(Duration::from_secs(config.ingest_key_cache_ttl_secs))
@@ -2093,6 +2102,7 @@ async fn main() {
             store: Arc::clone(&store),
             lookup_hmac_key: config.lookup_hmac_key.clone(),
             cache: ingest_key_cache,
+            negative_cache: ingest_key_negative_cache,
             routing: Arc::clone(&org_routing_resolver),
         },
         org_inflight_limiter: OrgInFlightLimiter::new(config.org_max_in_flight),
@@ -2867,6 +2877,14 @@ async fn handle_replay_meta_inner(
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
 
+    let _org_inflight_permit = state
+        .org_inflight_limiter
+        .try_acquire(&org_id)
+        .ok_or_else(|| {
+            warn!(org_id = %org_id, "Per-org in-flight ingest limit exceeded");
+            ApiError::too_many_requests("Per-org ingest limit exceeded")
+        })?;
+
     let pipeline = native_rows_pipeline_for(
         state,
         destination,
@@ -3044,6 +3062,14 @@ async fn handle_session_events_inner(
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
 
+    let _org_inflight_permit = state
+        .org_inflight_limiter
+        .try_acquire(&org_id)
+        .ok_or_else(|| {
+            warn!(org_id = %org_id, "Per-org in-flight ingest limit exceeded");
+            ApiError::too_many_requests("Per-org ingest limit exceeded")
+        })?;
+
     // Same Autumn gate as the metadata endpoint. Automatic session events
     // (clicks, navigations, errors, ...) are not separately metered —
     // `browser_sessions` remains their billed unit — but they must still be
@@ -3220,6 +3246,14 @@ async fn handle_product_events_inner(
     );
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
+
+    let _org_inflight_permit = state
+        .org_inflight_limiter
+        .try_acquire(&org_id)
+        .ok_or_else(|| {
+            warn!(org_id = %org_id, "Per-org in-flight ingest limit exceeded");
+            ApiError::too_many_requests("Per-org ingest limit exceeded")
+        })?;
 
     // Product events are their own metered feature, but they are NOT gated on
     // it — same reasoning as the `type == "custom"` rows on `/v1/sessionEvents`.
@@ -3408,6 +3442,14 @@ async fn handle_replay_blob_inner(
     );
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
+
+    let _org_inflight_permit = state
+        .org_inflight_limiter
+        .try_acquire(&org_id)
+        .ok_or_else(|| {
+            warn!(org_id = %org_id, "Per-org in-flight ingest limit exceeded");
+            ApiError::too_many_requests("Per-org ingest limit exceeded")
+        })?;
 
     let pipeline = native_rows_pipeline_for(
         state,
@@ -5115,6 +5157,10 @@ impl IngestKeyResolver {
         }
         Span::current().record("maple.ingest.cache_hit", false);
 
+        if self.negative_cache.get(raw_key).await.is_some() {
+            return Ok(None);
+        }
+
         let key_type = infer_ingest_key_type(raw_key);
         let Some(key_type) = key_type else {
             return Ok(None);
@@ -5132,6 +5178,9 @@ impl IngestKeyResolver {
         // the key identity cached while the separate org-routing cache refreshes
         // ClickHouse readiness on its own TTL.
         let Some(row) = self.store.fetch_ingest_key(&key_hash, hash_column).await? else {
+            // Only a genuine "no row" is cached — store errors surface above and
+            // must stay retryable.
+            self.negative_cache.insert(raw_key.to_owned(), ()).await;
             return Ok(None);
         };
 
@@ -6953,6 +7002,10 @@ mod tests {
                 .time_to_live(Duration::from_mins(1))
                 .max_capacity(16)
                 .build(),
+            negative_cache: Cache::builder()
+                .time_to_live(Duration::from_secs(30))
+                .max_capacity(16)
+                .build(),
             routing,
         }
     }
@@ -7181,6 +7234,10 @@ mod tests {
                 lookup_hmac_key: "test-hmac-key".to_owned(),
                 cache: Cache::builder()
                     .time_to_live(Duration::from_mins(1))
+                    .max_capacity(16)
+                    .build(),
+                negative_cache: Cache::builder()
+                    .time_to_live(Duration::from_secs(30))
                     .max_capacity(16)
                     .build(),
                 routing: Arc::clone(&routing),
@@ -8588,5 +8645,22 @@ mod tests {
             .await
             .expect("resolve should succeed");
         assert!(resolved.is_none());
+    }
+
+    #[tokio::test]
+    async fn resolve_ingest_key_negative_caches_unknown_keys() {
+        // A repeated unknown key must be answered from the negative cache, not
+        // by a store lookup per request — that's the unauthenticated
+        // DB-amplification path.
+        let store = Arc::new(FakeKeyStore::default());
+        let resolver = make_resolver(Arc::clone(&store));
+        for _ in 0..3 {
+            let resolved = resolver
+                .resolve_ingest_key("maple_sk_unknown")
+                .await
+                .expect("resolve should succeed");
+            assert!(resolved.is_none());
+        }
+        assert_eq!(store.ingest_key_fetches.load(Ordering::Relaxed), 1);
     }
 }
