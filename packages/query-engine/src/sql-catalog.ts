@@ -999,6 +999,52 @@ export function undecodedColumns(
 }
 
 /** Pipe names in `warehouseQueries` that no fixture covers. */
+/**
+ * Tables that hold pre-aggregated buckets, and the raw per-row tables a query
+ * splices against them. A query naming BOTH is reconstructing a window from two
+ * tiers, and its boundary is the thing `./ch/queries/rollup-splice` exists to
+ * own.
+ */
+const ROLLUP_TABLE_RE = /\b(\w+_(?:hourly|minutely|daily)|\w+_aggregates_\w+)\b/
+const RAW_TABLE_RE =
+	/\bFROM\s+(?:traces|logs|service_map_spans|service_map_children|service_overview_spans)\b/
+
+/**
+ * The `firstFullBucket` fragment `makeGrain` emits. Structural rather than a
+ * string match on the whole expression: what matters is that the boundary is
+ * *computed* — floor, compare to the unrounded start, advance one bucket only
+ * when it is not already aligned — not that it is spelled a particular way.
+ */
+const SPLICE_BOUNDARY_RE = /=\s*toStartOf\w+\([\s\S]*?\+ INTERVAL 1 (?:HOUR|MINUTE)\)/
+
+/**
+ * Two-tier queries whose window boundary does not come from `rollup-splice`.
+ *
+ * A rollup tier and a raw tier have to tile the window exactly once — no gap, no
+ * overlap. Written by hand that is two inequalities that must stay each other's
+ * complement, and the failure is silent: counts inflate or drop, nothing errors.
+ * The service-map family carried both outcomes at once — `serviceDependencies`
+ * hand-rolled it correctly, `serviceDbEdges` hand-rolled the same boundary with
+ * the start floored to the hour, and for every non-aligned window the DB numbers
+ * read high against the service edges drawn beside them.
+ *
+ * There is deliberately no allowlist. A single-tier query never trips this (it
+ * names one class of table); a genuinely approximate one — `serviceHealthSnapshot`
+ * floors to the hour on purpose — reads only its rollup and so never trips it
+ * either. If a new query needs to be exempt, that is a signal the rule found
+ * something, not that the rule needs a hole.
+ */
+export function unsplicedTwoTierQueries(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<string> {
+	return entries
+		.filter(
+			(entry) =>
+				ROLLUP_TABLE_RE.test(entry.sql) &&
+				RAW_TABLE_RE.test(entry.sql) &&
+				!SPLICE_BOUNDARY_RE.test(entry.sql),
+		)
+		.map((entry) => entry.id)
+}
+
 export function uncoveredPipes(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<WarehouseQueryName> {
 	const covered = new Set(entries.map((entry) => entry.name))
 	return warehouseQueries.filter((name) => !covered.has(name))

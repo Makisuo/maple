@@ -37,6 +37,7 @@ import {
 	Traces,
 } from "../tables"
 import { unionAll } from "@maple-dev/clickhouse-builder"
+import { edgeCondition, interiorConditions } from "./rollup-splice"
 import { CHNumber, CHNumberOrZero } from "../schema"
 import * as T from "@maple-dev/clickhouse-builder/types"
 import type { QueryBuilderError } from "@maple-dev/clickhouse-builder"
@@ -46,9 +47,6 @@ import type { QueryBuilderError } from "@maple-dev/clickhouse-builder"
 // they're niche and only this builder uses them; promote later if reused.
 const _toFloat64 = defineFn<[CH.Expr<unknown>], number>("toFloat64", T.float64)
 const _matchRegex = defineCondFn<[CH.Expr<string>, string]>("match")
-const _leastDateTime = defineFn<[CH.Expr<string>, CH.Expr<string>], string>("least", T.dateTimeString)
-const _greatestDateTime = defineFn<[CH.Expr<string>, CH.Expr<string>], string>("greatest", T.dateTimeString)
-const _addHours = defineFn<[CH.Expr<string>, CH.Expr<number>], string>("addHours", T.dateTimeString)
 
 // Service dependencies
 
@@ -119,9 +117,21 @@ function serviceMapEdgeJoinSource(opts: {
 	rangeEnd: CH.Expr<string>
 	deploymentEnv?: string
 	parentServiceName?: string
+	/**
+	 * Restrict both sides to the two PARTIAL hours at the ends of the range —
+	 * the read path's live branch, complementing whatever the hourly rollup
+	 * already sealed. The rollup's own caller leaves this off: it aggregates one
+	 * whole hour, which has no partial ends.
+	 *
+	 * Applied to parent and child alike, so an edge is counted only when both
+	 * spans fall in the same slice. That is already how the rollup defines an
+	 * hourly edge, so the live branch and the sealed buckets agree.
+	 */
+	edgeHoursOnly?: boolean
 }) {
 	const envFilter = (deploymentEnv: CH.Expr<string>) =>
 		opts.deploymentEnv ? deploymentEnv.eq(opts.deploymentEnv) : undefined
+	const edgeOnly = opts.edgeHoursOnly ? edgeCondition("Timestamp") : undefined
 
 	const parentSpans = from(ServiceMapSpans)
 		.select(($) => ({
@@ -138,6 +148,7 @@ function serviceMapEdgeJoinSource(opts: {
 			$.Timestamp.lt(opts.rangeEnd),
 			$.OrgId.eq(param.string("orgId")),
 			envFilter($.DeploymentEnv),
+			edgeOnly,
 			opts.parentServiceName ? $.ServiceName.eq(opts.parentServiceName) : undefined,
 		])
 
@@ -155,6 +166,7 @@ function serviceMapEdgeJoinSource(opts: {
 			$.Timestamp.lt(opts.rangeEnd),
 			$.OrgId.eq(param.string("orgId")),
 			envFilter($.DeploymentEnv),
+			edgeOnly,
 		])
 
 	// In a join the main subquery's columns auto-qualify with its alias
@@ -276,10 +288,11 @@ export interface ServiceDependenciesForServiceOpts {
  * outer computes `sum(durations) / sum(calls)` rather than `avg(avgDurationMs)`
  * — averaging averages would ignore each branch's relative call count.
  *
- * Only complete interior hours come from the hourly rollup. The partial start
- * and end hours are read from raw spans so neither edge includes data outside
- * the requested half-open window. `startEdgeEnd` also collapses a same-hour
- * request into one raw branch; the end branch is then empty.
+ * Only complete interior hours come from the hourly rollup; the two partial
+ * hours at the ends are read from raw spans. Both predicates come from
+ * `./rollup-splice`, so the tiers tile the window exactly once by construction
+ * rather than by two hand-written inequalities agreeing. A window inside a
+ * single hour has an empty interior and is served entirely by the raw branch.
  */
 export function serviceDependenciesQueryBase(opts: { serviceName?: string; deploymentEnv?: string }) {
 	const envFilterMv = (deploymentEnv: CH.Expr<string>) =>
@@ -287,15 +300,6 @@ export function serviceDependenciesQueryBase(opts: { serviceName?: string; deplo
 
 	const startDateTime = CH.toDateTime(param.dateTimeString("startTime"))
 	const endDateTime = CH.toDateTime(param.dateTimeString("endTime"))
-	const startHour = CH.toStartOfHour(startDateTime)
-	const endHour = CH.toStartOfHour(endDateTime)
-	const firstHourBoundary = CH.if_(
-		startDateTime.eq(startHour),
-		startDateTime,
-		_addHours(startHour, CH.lit(1)),
-	)
-	const startEdgeEnd = _leastDateTime(endDateTime, firstHourBoundary)
-	const endEdgeStart = _greatestDateTime(startEdgeEnd, endHour)
 
 	// Hourly branch — only sealed, complete buckets inside the requested window.
 	const hourlyBranch = from(ServiceMapEdgesHourly)
@@ -316,22 +320,28 @@ export function serviceDependenciesQueryBase(opts: { serviceName?: string; deplo
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			opts.serviceName ? $.SourceService.eq(opts.serviceName) : undefined,
-			$.Hour.gte(startEdgeEnd),
-			$.Hour.lt(endHour),
+			...interiorConditions($.Hour),
 			envFilterMv($.DeploymentEnv),
 		])
 		.groupBy("sourceService", "targetService")
 
-	// Raw topology JOIN for one partial-hour edge — the rollup has not yet sealed
-	// the in-progress hour into `service_map_edges_hourly`. Shares its join source
-	// with the rollup's own builder so the two stay in lockstep, then re-aggregates
-	// dropping `Hour` into the `bucket*` shape.
-	const liveJoinBranch = (rangeStart: CH.Expr<string>, rangeEnd: CH.Expr<string>) =>
+	// Raw topology JOIN for the two partial hours the rollup has not sealed into
+	// `service_map_edges_hourly`. Shares its join source with the rollup's own
+	// builder so the two stay in lockstep, then re-aggregates dropping `Hour`
+	// into the `bucket*` shape.
+	//
+	// One branch over the whole window rather than a start-edge and an end-edge
+	// branch: `edgeHoursOnly` is the exact complement of the hourly interior, so
+	// a single pass covers both ends. That also runs the join once instead of
+	// twice, and stops dropping the rare pair whose parent lands in the leading
+	// partial hour and whose child lands in the trailing one.
+	const liveJoinBranch = () =>
 		serviceMapEdgeJoinSource({
-			rangeStart,
-			rangeEnd,
+			rangeStart: startDateTime,
+			rangeEnd: endDateTime,
 			deploymentEnv: opts.deploymentEnv,
 			parentServiceName: opts.serviceName,
+			edgeHoursOnly: true,
 		})
 			.select(($) => ({
 				sourceService: $.ServiceName,
@@ -345,13 +355,10 @@ export function serviceDependenciesQueryBase(opts: { serviceName?: string; deplo
 			.where(($) => [$.ServiceName.neq($.c.ServiceName)])
 			.groupBy("sourceService", "targetService")
 
-	const startLiveBranch = liveJoinBranch(startDateTime, startEdgeEnd)
-	const endLiveBranch = liveJoinBranch(endEdgeStart, endDateTime)
-
 	// Outer wrap: re-aggregate across both branches so avg duration uses
 	// branch-summed numerators/denominators (avoids averaging averages). With
 	// no further joins, columns from the union are accessed bare.
-	return fromUnion(unionAll(hourlyBranch, startLiveBranch, endLiveBranch), "edges")
+	return fromUnion(unionAll(hourlyBranch, liveJoinBranch()), "edges")
 		.select(($) => ({
 			sourceService: $.sourceService,
 			targetService: $.targetService,
@@ -480,17 +487,23 @@ function serviceDbEdgesQueryBase(opts: { serviceName?: string; deploymentEnv?: s
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			opts.serviceName ? $.ServiceName.eq(opts.serviceName) : undefined,
-			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("startTime")))),
-			$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))),
+			...interiorConditions($.Hour),
 			$.DbSystem.neq(""),
 			opts.deploymentEnv ? $.DeploymentEnv.eq(opts.deploymentEnv) : undefined,
 		])
 		.groupBy("sourceService", "dbSystem", "dbNamespace")
 
-	// Raw fallback for the in-progress hour only (the MV branch stops at
-	// `toStartOfHour(endTime)`). Reads per-row `SampleRate` directly so no
-	// inline weight math is needed, and carries `bucketDurationSumMs`
-	// separately so the outer can do a properly-weighted average.
+	// Raw branch for the two PARTIAL hours at the ends of the window — the exact
+	// complement of the hourly interior above (`edgeCondition` is defined as that
+	// complement). Reads per-row `SampleRate` directly so no inline weight math is
+	// needed, and carries `bucketDurationSumMs` separately so the outer can do a
+	// properly-weighted average.
+	//
+	// This used to read only the trailing in-progress hour while the hourly branch
+	// started at `toStartOfHour(startTime)`, so every request whose start was not
+	// hour-aligned counted the whole leading hour — including spans BEFORE the
+	// window. `snapRangeForCache` floors a 12h window to a 5-minute grid, so the
+	// start was essentially never aligned and the inflation was always on.
 	const recentBranch = from(Traces)
 		.select(($) => ({
 			sourceService: $.ServiceName,
@@ -509,8 +522,9 @@ function serviceDbEdgesQueryBase(opts: { serviceName?: string; deploymentEnv?: s
 			// time, so this keeps the raw in-progress-hour branch consistent and
 			// avoids phantom edges from unnamed spans.
 			opts.serviceName ? $.ServiceName.eq(opts.serviceName) : $.ServiceName.neq(""),
-			$.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
 			$.Timestamp.lte(param.dateTimeString("endTime")),
+			edgeCondition("Timestamp"),
 			$.SpanKind.in_("Client", "Producer"),
 			dbSystemExpr($).neq(""),
 			opts.deploymentEnv ? deploymentEnvExpr($.ResourceAttributes).eq(opts.deploymentEnv) : undefined,
@@ -698,8 +712,7 @@ const signaturesHourlyFilters = (
 	params: ServiceDbQuerySummaryParams,
 ) => [
 	$.OrgId.eq(param.string("orgId")),
-	$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("startTime")))),
-	$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))),
+	...interiorConditions($.Hour),
 	$.DbSystem.eq(params.dbSystem),
 	// `undefined` = unscoped; `''` is a real value (the legacy/unknown node).
 	// Collapse sealed hex → sentinel so a `dbNamespace: "hyperdrive"` filter also
@@ -710,10 +723,11 @@ const signaturesHourlyFilters = (
 ]
 
 // Filters for the raw `traces` branch. `scope` selects the time window:
-//  - "currentHour": only the in-progress hour the rollup hasn't sealed yet
-//    (UNION-ed with the sealed rollup branch)
-//  - "fullWindow":  the whole [start, end] window (sub-hour timeseries, which
-//    the hourly rollup can't express)
+//  - "edge":       the two PARTIAL hours at the ends of the window, the exact
+//                  complement of `signaturesHourlyFilters`' interior (UNION-ed
+//                  with the sealed rollup branch)
+//  - "fullWindow": the whole [start, end] window (sub-hour timeseries, which
+//                  the hourly rollup can't express)
 // DbSystem/DbNamespace equality goes through the shared write-side coalesce
 // expressions so raw-hour rows land on the same identity as sealed ones.
 const serviceDbRawFilters = (
@@ -726,13 +740,12 @@ const serviceDbRawFilters = (
 		ResourceAttributes: CH.ColumnRef<"ResourceAttributes", StringMap>
 	},
 	params: ServiceDbQuerySummaryParams,
-	scope: "currentHour" | "fullWindow",
+	scope: "edge" | "fullWindow",
 ) => [
 	$.OrgId.eq(param.string("orgId")),
-	scope === "currentHour"
-		? $.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime"))))
-		: $.Timestamp.gte(CH.toDateTime(param.dateTimeString("startTime"))),
+	$.Timestamp.gte(CH.toDateTime(param.dateTimeString("startTime"))),
 	$.Timestamp.lte(CH.toDateTime(param.dateTimeString("endTime"))),
+	scope === "edge" ? edgeCondition("Timestamp") : undefined,
 	$.SpanKind.in_("Client", "Producer"),
 	$.ServiceName.neq(""),
 	dbSystemExpr($).eq(params.dbSystem),
@@ -785,7 +798,7 @@ export function serviceDbQuerySummarySQL(
 			bSvc: CH.rawExpr(UNIQ_SERVICE_STATE_EXPR, UNIQ_SERVICE_STATE),
 			bQ: CH.rawExpr(DB_DURATION_TDIGEST_STATE_EXPR, DB_DURATION_STATE),
 		}))
-		.where(($) => serviceDbRawFilters($, params, "currentHour"))
+		.where(($) => serviceDbRawFilters($, params, "edge"))
 
 	const query = fromUnion(unionAll(sealed, recent), "branches")
 		.select(($) => ({
@@ -870,7 +883,7 @@ export function serviceDbQueryTimeseriesSQL(
 			bWDur: CH.sum(_toFloat64($.Duration).mul($.SampleRate).div(1000000)),
 			bQ: CH.rawExpr(DB_DURATION_TDIGEST_STATE_EXPR, DB_DURATION_STATE),
 		}))
-		.where(($) => serviceDbRawFilters($, params, "currentHour"))
+		.where(($) => serviceDbRawFilters($, params, "edge"))
 		.groupBy("bucket")
 
 	const query = fromUnion(unionAll(sealed, recent), "buckets")
@@ -934,7 +947,7 @@ export function serviceDbTopQueriesSQL(
 			bQ: CH.rawExpr(DB_DURATION_TDIGEST_STATE_EXPR, DB_DURATION_STATE),
 			bLastSeen: CH.max_(CH.toDateTime($.Timestamp)),
 		}))
-		.where(($) => serviceDbRawFilters($, params, "currentHour"))
+		.where(($) => serviceDbRawFilters($, params, "edge"))
 		.groupBy("queryKey")
 
 	// Re-aggregate the two branches per shape.
@@ -1055,14 +1068,14 @@ export function serviceExternalEdgesSQL(
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(opts.serviceName),
-			$.Hour.gte(startHour),
-			$.Hour.lt(endHour),
+			...interiorConditions($.Hour),
 			$.TargetName.neq(""),
 			opts.deploymentEnv ? $.DeploymentEnv.eq(opts.deploymentEnv) : undefined,
 		])
 		.groupBy("sourceService", "targetType", "targetSystem", "targetName")
 
-	// Recent branch: raw `traces` for the in-progress hour only. Mirrors the
+	// Recent branch: raw `traces` for the two PARTIAL hours at the ends of the
+	// window — the exact complement of the hourly interior above. Mirrors the
 	// `multiIf` precedence the MV uses (messaging > rpc > http) so both branches
 	// produce identical row shapes for the same span.
 	const recentEdges = from(Traces)
@@ -1110,8 +1123,9 @@ export function serviceExternalEdgesSQL(
 			return [
 				$.OrgId.eq(param.string("orgId")),
 				$.ServiceName.eq(opts.serviceName),
-				$.Timestamp.gte(endHour),
+				$.Timestamp.gte(param.dateTimeString("startTime")),
 				$.Timestamp.lte(param.dateTimeString("endTime")),
+				edgeCondition("Timestamp"),
 				CH.inList($.SpanKind, ["Client", "Producer"]),
 				attr("db.system.name").eq(""),
 				attr("server.address")

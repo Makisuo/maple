@@ -84,6 +84,39 @@ back to a raw scan measured at ~7s p95.
 A rollup whose target is empty is indistinguishable from a rollup nobody queries. Neither the
 schema lint nor the SQL catalog can catch this; only looking at row counts can.
 
+### A two-tier read takes its boundary from `rollup-splice`, never by hand
+
+The raw edge and the rollup interior have to tile the window exactly once. Written by hand
+that is two inequalities which must stay each other's exact complement, and when they drift
+nothing errors — the counts simply come out wrong, on a chart that looks fine.
+
+`packages/query-engine/src/ch/queries/rollup-splice.ts` owns that boundary:
+`interiorConditions(bucketColumn, grain)` for the rollup branch, `edgeCondition(tsColumn,
+grain)` for the raw branch, defined as its complement. Traces, logs, services and
+service-operations use them.
+
+The service-map family did not, and drifted in both directions at once. `serviceDependencies`
+hand-rolled the boundary correctly. `serviceDbEdges`, `serviceExternalEdges` and the
+db-query-shape drill-down hand-rolled the same boundary with the interior floored to
+`toStartOfHour(startTime)` while their raw branch covered only the trailing hour — so every
+window whose start was not hour-aligned counted the whole leading hour, including spans
+outside the window. The web app snaps a 12h range to a 5-minute grid, so the start was
+essentially never aligned. The DB nodes on the service map read high against the service
+edges drawn beside them, permanently, and the boundary-exact e2e reproduces it as a *phantom
+database node* built entirely from rows before the window began.
+
+Two things made it survive: nothing forced the shared helper, and those queries had no
+fixture in the SQL catalog at all, so neither the DESCRIBE sweep nor any structural gate ever
+looked at them.
+
+Both are closed now. `unsplicedTwoTierQueries` in `sql-catalog.ts` fails any query naming both
+a rollup table and a raw table whose boundary is not a computed `firstFullBucket`, and
+`service-map-parity.clickhouse.e2e.test.ts` compares the spliced result against a flat scan
+with spans seeded exactly on each seam. **There is no allowlist on that gate.** A single-tier
+query never trips it, and a deliberately-approximate one (`serviceHealthSnapshot` floors to
+the hour on purpose) reads only its rollup and never trips it either. A new query that needs
+an exemption is the gate finding something, not the gate needing a hole.
+
 ### A routing guard must be tested on the tier it selects, not on a table name
 
 `canUseAnnualServiceOverview` required `allMetrics === true`. Alert evaluation

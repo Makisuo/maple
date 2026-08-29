@@ -1476,7 +1476,378 @@ SELECT
         GROUP BY hourTs
         FORMAT JSON
 
--- builder:service-map:serviceDependenciesForServiceQuery:default  [32f3ee6f]
+-- builder:service-map:serviceDbEdgesForServiceQuery:default  [e68b8bd1]
+SELECT
+          sourceService AS sourceService,
+          dbSystem AS dbSystem,
+          dbNamespace AS dbNamespace,
+          sum(bucketCallCount) AS callCount,
+          sum(bucketErrorCount) AS errorCount,
+          sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
+          max(bucketMaxDurationMs) AS p95DurationMs,
+          sum(bucketEstimatedSpanCount) AS estimatedSpanCount
+        FROM (
+SELECT
+          ServiceName AS sourceService,
+          DbSystem AS dbSystem,
+          if(match(DbNamespace, '^([0-9a-fA-F]{32}|.*[.]hyperdrive[.]local)$'), 'hyperdrive', DbNamespace) AS dbNamespace,
+          sum(CallCount) AS bucketCallCount,
+          sum(ErrorCount) AS bucketErrorCount,
+          sum(DurationSumMs) AS bucketDurationSumMs,
+          max(MaxDurationMs) AS bucketMaxDurationMs,
+          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
+        FROM service_map_db_edges_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND ServiceName = 'web'
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND DbSystem != ''
+        GROUP BY sourceService, dbSystem, dbNamespace
+UNION ALL
+SELECT
+          ServiceName AS sourceService,
+          coalesce(nullIf(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system']) AS dbSystem,
+          if(match(coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name']), '^([0-9a-fA-F]{32}|.*[.]hyperdrive[.]local)$'), 'hyperdrive', coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name'])) AS dbNamespace,
+          count() AS bucketCallCount,
+          countIf(StatusCode = 'Error') AS bucketErrorCount,
+          sum(Duration / 1000000) AS bucketDurationSumMs,
+          max(Duration / 1000000) AS bucketMaxDurationMs,
+          sum(SampleRate) AS bucketEstimatedSpanCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND ServiceName = 'web'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+          AND SpanKind IN ('Client', 'Producer')
+          AND coalesce(nullIf(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system']) != ''
+        GROUP BY sourceService, dbSystem, dbNamespace
+) AS edges
+        GROUP BY sourceService, dbSystem, dbNamespace
+        ORDER BY callCount DESC
+        LIMIT 200
+        FORMAT JSON
+
+-- builder:service-map:serviceDbEdgesSQL:default  [901efdaf]
+SELECT
+          sourceService AS sourceService,
+          dbSystem AS dbSystem,
+          dbNamespace AS dbNamespace,
+          sum(bucketCallCount) AS callCount,
+          sum(bucketErrorCount) AS errorCount,
+          sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
+          max(bucketMaxDurationMs) AS p95DurationMs,
+          sum(bucketEstimatedSpanCount) AS estimatedSpanCount
+        FROM (
+SELECT
+          ServiceName AS sourceService,
+          DbSystem AS dbSystem,
+          if(match(DbNamespace, '^([0-9a-fA-F]{32}|.*[.]hyperdrive[.]local)$'), 'hyperdrive', DbNamespace) AS dbNamespace,
+          sum(CallCount) AS bucketCallCount,
+          sum(ErrorCount) AS bucketErrorCount,
+          sum(DurationSumMs) AS bucketDurationSumMs,
+          max(MaxDurationMs) AS bucketMaxDurationMs,
+          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
+        FROM service_map_db_edges_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND DbSystem != ''
+        GROUP BY sourceService, dbSystem, dbNamespace
+UNION ALL
+SELECT
+          ServiceName AS sourceService,
+          coalesce(nullIf(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system']) AS dbSystem,
+          if(match(coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name']), '^([0-9a-fA-F]{32}|.*[.]hyperdrive[.]local)$'), 'hyperdrive', coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name'])) AS dbNamespace,
+          count() AS bucketCallCount,
+          countIf(StatusCode = 'Error') AS bucketErrorCount,
+          sum(Duration / 1000000) AS bucketDurationSumMs,
+          max(Duration / 1000000) AS bucketMaxDurationMs,
+          sum(SampleRate) AS bucketEstimatedSpanCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND ServiceName != ''
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+          AND SpanKind IN ('Client', 'Producer')
+          AND coalesce(nullIf(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system']) != ''
+        GROUP BY sourceService, dbSystem, dbNamespace
+) AS edges
+        GROUP BY sourceService, dbSystem, dbNamespace
+        ORDER BY callCount DESC
+        LIMIT 200
+        FORMAT JSON
+
+-- builder:service-map:serviceDbEdgesSQL:env-scoped  [83649f53]
+SELECT
+          sourceService AS sourceService,
+          dbSystem AS dbSystem,
+          dbNamespace AS dbNamespace,
+          sum(bucketCallCount) AS callCount,
+          sum(bucketErrorCount) AS errorCount,
+          sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
+          max(bucketMaxDurationMs) AS p95DurationMs,
+          sum(bucketEstimatedSpanCount) AS estimatedSpanCount
+        FROM (
+SELECT
+          ServiceName AS sourceService,
+          DbSystem AS dbSystem,
+          if(match(DbNamespace, '^([0-9a-fA-F]{32}|.*[.]hyperdrive[.]local)$'), 'hyperdrive', DbNamespace) AS dbNamespace,
+          sum(CallCount) AS bucketCallCount,
+          sum(ErrorCount) AS bucketErrorCount,
+          sum(DurationSumMs) AS bucketDurationSumMs,
+          max(MaxDurationMs) AS bucketMaxDurationMs,
+          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
+        FROM service_map_db_edges_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND DbSystem != ''
+          AND DeploymentEnv = 'production'
+        GROUP BY sourceService, dbSystem, dbNamespace
+UNION ALL
+SELECT
+          ServiceName AS sourceService,
+          coalesce(nullIf(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system']) AS dbSystem,
+          if(match(coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name']), '^([0-9a-fA-F]{32}|.*[.]hyperdrive[.]local)$'), 'hyperdrive', coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name'])) AS dbNamespace,
+          count() AS bucketCallCount,
+          countIf(StatusCode = 'Error') AS bucketErrorCount,
+          sum(Duration / 1000000) AS bucketDurationSumMs,
+          max(Duration / 1000000) AS bucketMaxDurationMs,
+          sum(SampleRate) AS bucketEstimatedSpanCount
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND ServiceName != ''
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+          AND SpanKind IN ('Client', 'Producer')
+          AND coalesce(nullIf(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system']) != ''
+          AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) = 'production'
+        GROUP BY sourceService, dbSystem, dbNamespace
+) AS edges
+        GROUP BY sourceService, dbSystem, dbNamespace
+        ORDER BY callCount DESC
+        LIMIT 200
+        FORMAT JSON
+
+-- builder:service-map:serviceDbQuerySummarySQL:default  [75954ced]
+SELECT
+          sum(bCount) AS queryCount,
+          sum(bEst) AS estimatedQueryCount,
+          sum(bErr) AS errorCount,
+          sum(bEstErr) AS estimatedErrorCount,
+          if(sum(bEst) > 0, sum(bEstErr) / sum(bEst), 0) AS errorRate,
+          if(sum(bEst) > 0, sum(bWDur) / sum(bEst), 0) AS avgDurationMs,
+          if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), 1) / 1000000, 0) AS p50DurationMs,
+          if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), 2) / 1000000, 0) AS p95DurationMs,
+          uniqMerge(bSvc) AS activeServiceCount
+        FROM (
+SELECT
+          sum(CallCount) AS bCount,
+          sum(EstimatedCount) AS bEst,
+          sum(ErrorCount) AS bErr,
+          sum(EstimatedErrorCount) AS bEstErr,
+          sum(WeightedDurationSumMs) AS bWDur,
+          uniqState(toString(ServiceName)) AS bSvc,
+          quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles) AS bQ
+        FROM service_map_db_query_shapes_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND DbSystem = 'postgresql'
+UNION ALL
+SELECT
+          count() AS bCount,
+          sum(SampleRate) AS bEst,
+          countIf(StatusCode = 'Error') AS bErr,
+          sumIf(SampleRate, StatusCode = 'Error') AS bEstErr,
+          sum(toFloat64(Duration) * SampleRate / 1000000) AS bWDur,
+          uniqState(toString(ServiceName)) AS bSvc,
+          quantilesTDigestWeightedState(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0))) AS bQ
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp <= toDateTime('2026-01-03 14:15:00')
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+          AND SpanKind IN ('Client', 'Producer')
+          AND ServiceName != ''
+          AND coalesce(nullIf(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system']) = 'postgresql'
+) AS branches
+        FORMAT JSON
+
+-- builder:service-map:serviceDbQueryTimeseriesSQL:hourly-buckets  [341c6689]
+SELECT
+          bucket AS bucket,
+          sum(bCount) AS queryCount,
+          sum(bEst) AS estimatedQueryCount,
+          sum(bErr) AS errorCount,
+          if(sum(bEst) > 0, sum(bEstErr) / sum(bEst), 0) AS errorRate,
+          if(sum(bEst) > 0, sum(bWDur) / sum(bEst), 0) AS avgDurationMs,
+          if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), 1) / 1000000, 0) AS p50DurationMs,
+          if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), 2) / 1000000, 0) AS p95DurationMs
+        FROM (
+SELECT
+          toStartOfInterval(Hour, INTERVAL 3600 SECOND) AS bucket,
+          sum(CallCount) AS bCount,
+          sum(EstimatedCount) AS bEst,
+          sum(ErrorCount) AS bErr,
+          sum(EstimatedErrorCount) AS bEstErr,
+          sum(WeightedDurationSumMs) AS bWDur,
+          quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles) AS bQ
+        FROM service_map_db_query_shapes_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND DbSystem = 'postgresql'
+        GROUP BY bucket
+UNION ALL
+SELECT
+          toStartOfInterval(toDateTime(Timestamp), INTERVAL 3600 SECOND) AS bucket,
+          count() AS bCount,
+          sum(SampleRate) AS bEst,
+          countIf(StatusCode = 'Error') AS bErr,
+          sumIf(SampleRate, StatusCode = 'Error') AS bEstErr,
+          sum(toFloat64(Duration) * SampleRate / 1000000) AS bWDur,
+          quantilesTDigestWeightedState(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0))) AS bQ
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp <= toDateTime('2026-01-03 14:15:00')
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+          AND SpanKind IN ('Client', 'Producer')
+          AND ServiceName != ''
+          AND coalesce(nullIf(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system']) = 'postgresql'
+        GROUP BY bucket
+) AS buckets
+        GROUP BY bucket
+        ORDER BY bucket ASC
+        LIMIT 2000
+        FORMAT JSON
+
+-- builder:service-map:serviceDbQueryTimeseriesSQL:sub-hour-buckets  [e1315d1d]
+SELECT
+          toStartOfInterval(toDateTime(Timestamp), INTERVAL 300 SECOND) AS bucket,
+          count() AS queryCount,
+          sum(SampleRate) AS estimatedQueryCount,
+          countIf(StatusCode = 'Error') AS errorCount,
+          if(sum(SampleRate) > 0, sumIf(SampleRate, StatusCode = 'Error') / sum(SampleRate), 0) AS errorRate,
+          if(sum(SampleRate) > 0, sum(toFloat64(Duration) * SampleRate) / sum(SampleRate) / 1000000, 0) AS avgDurationMs,
+          if(count() > 0, arrayElement(quantilesTDigestWeighted(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0))), 1) / 1000000, 0) AS p50DurationMs,
+          if(count() > 0, arrayElement(quantilesTDigestWeighted(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0))), 2) / 1000000, 0) AS p95DurationMs
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp <= toDateTime('2026-01-03 14:15:00')
+          AND SpanKind IN ('Client', 'Producer')
+          AND ServiceName != ''
+          AND coalesce(nullIf(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system']) = 'postgresql'
+        GROUP BY bucket
+        ORDER BY bucket ASC
+        LIMIT 2000
+        FORMAT JSON
+
+-- builder:service-map:serviceDbTopQueriesSQL:default  [d9f3469a]
+SELECT
+          queryKey AS queryKey,
+          if(sampleStatement != '', substring(trimBoth(replaceRegexpAll(replaceRegexpAll(replaceRegexpAll(replaceRegexpAll(sampleStatement, '\'[^\']*\'', '?'), '(?i)\\bin\\s*\\([^)]*\\)', 'IN (?)'), '[0-9]+(\\.[0-9]+)?', '?'), '\\s+', ' ')), 1, 220), fallbackLabel) AS queryLabel,
+          sampleStatement AS sampleStatement,
+          sampleService AS sampleService,
+          serviceCount AS serviceCount,
+          queryCount AS queryCount,
+          estimatedQueryCount AS estimatedQueryCount,
+          errorCount AS errorCount,
+          errorRate AS errorRate,
+          avgDurationMs AS avgDurationMs,
+          p50DurationMs AS p50DurationMs,
+          p95DurationMs AS p95DurationMs,
+          lastSeen AS lastSeen
+        FROM (SELECT
+          queryKey AS queryKey,
+          any(bLabel) AS fallbackLabel,
+          anyIf(bStatement, bStatement != '') AS sampleStatement,
+          any(bSampleService) AS sampleService,
+          uniqMerge(bServices) AS serviceCount,
+          sum(bCount) AS queryCount,
+          sum(bEst) AS estimatedQueryCount,
+          sum(bErr) AS errorCount,
+          if(sum(bEst) > 0, sum(bEstErr) / sum(bEst), 0) AS errorRate,
+          if(sum(bEst) > 0, sum(bWDur) / sum(bEst), 0) AS avgDurationMs,
+          if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), 1) / 1000000, 0) AS p50DurationMs,
+          if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), 2) / 1000000, 0) AS p95DurationMs,
+          max(bLastSeen) AS lastSeen
+        FROM (
+SELECT
+          QueryKey AS queryKey,
+          any(QueryLabel) AS bLabel,
+          any(SampleStatement) AS bStatement,
+          any(toString(ServiceName)) AS bSampleService,
+          uniqState(toString(ServiceName)) AS bServices,
+          sum(CallCount) AS bCount,
+          sum(EstimatedCount) AS bEst,
+          sum(ErrorCount) AS bErr,
+          sum(EstimatedErrorCount) AS bEstErr,
+          sum(WeightedDurationSumMs) AS bWDur,
+          quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles) AS bQ,
+          max(Hour) AS bLastSeen
+        FROM service_map_db_query_shapes_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND DbSystem = 'postgresql'
+        GROUP BY queryKey
+UNION ALL
+SELECT
+          coalesce(
+  nullIf(SpanAttributes['db.query.fingerprint'], ''),
+  nullIf(SpanAttributes['db.statement.fingerprint'], ''),
+  nullIf(if(coalesce(nullIf(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement']) != '', toString(cityHash64(replaceRegexpAll(replaceRegexpAll(replaceRegexpAll(replaceRegexpAll(replaceRegexpAll(lower(coalesce(nullIf(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement'])), '\'[^\']*\'', '?'), '\\bin\\s*\\([^)]*\\)', 'in (?)'), '[0-9]+(\\.[0-9]+)?', '?'), '\\s+', ' '), '^\\s+|\\s+$', ''))), ''), ''),
+  toString(cityHash64(coalesce(
+  nullIf(SpanAttributes['db.query.summary'], ''),
+  nullIf(if(SpanAttributes['db.operation.name'] != '', trimBoth(concat(SpanAttributes['db.operation.name'], if(coalesce(nullIf(SpanAttributes['db.collection.name'], ''), SpanAttributes['db.namespace']) != '', concat(' ', coalesce(nullIf(SpanAttributes['db.collection.name'], ''), SpanAttributes['db.namespace'])), ''))), ''), ''),
+  nullIf(if(coalesce(nullIf(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement']) != '', trimBoth(concat(upper(extract(coalesce(nullIf(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement']), '^\\s*(\\w+)')), if(extract(coalesce(nullIf(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement']), '(?i)(?:from|into|update|join|table)\\s+\\W?([\\w.]+)') != '', concat(' ', extract(coalesce(nullIf(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement']), '(?i)(?:from|into|update|join|table)\\s+\\W?([\\w.]+)')), ''))), ''), ''),
+  nullIf(SpanAttributes['query.context'], ''),
+  nullIf(SpanAttributes['db.operation.name'], ''),
+  nullIf(SpanAttributes['db.operation'], ''),
+  SpanName
+)))
+) AS queryKey,
+          any(substring(coalesce(
+  nullIf(SpanAttributes['db.query.summary'], ''),
+  nullIf(if(SpanAttributes['db.operation.name'] != '', trimBoth(concat(SpanAttributes['db.operation.name'], if(coalesce(nullIf(SpanAttributes['db.collection.name'], ''), SpanAttributes['db.namespace']) != '', concat(' ', coalesce(nullIf(SpanAttributes['db.collection.name'], ''), SpanAttributes['db.namespace'])), ''))), ''), ''),
+  nullIf(if(coalesce(nullIf(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement']) != '', trimBoth(concat(upper(extract(coalesce(nullIf(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement']), '^\\s*(\\w+)')), if(extract(coalesce(nullIf(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement']), '(?i)(?:from|into|update|join|table)\\s+\\W?([\\w.]+)') != '', concat(' ', extract(coalesce(nullIf(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement']), '(?i)(?:from|into|update|join|table)\\s+\\W?([\\w.]+)')), ''))), ''), ''),
+  nullIf(SpanAttributes['query.context'], ''),
+  nullIf(SpanAttributes['db.operation.name'], ''),
+  nullIf(SpanAttributes['db.operation'], ''),
+  SpanName
+), 1, 220)) AS bLabel,
+          any(substring(coalesce(nullIf(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement']), 1, 1000)) AS bStatement,
+          any(toString(ServiceName)) AS bSampleService,
+          uniqState(toString(ServiceName)) AS bServices,
+          count() AS bCount,
+          sum(SampleRate) AS bEst,
+          countIf(StatusCode = 'Error') AS bErr,
+          sumIf(SampleRate, StatusCode = 'Error') AS bEstErr,
+          sum(toFloat64(Duration) * SampleRate / 1000000) AS bWDur,
+          quantilesTDigestWeightedState(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0))) AS bQ,
+          max(toDateTime(Timestamp)) AS bLastSeen
+        FROM traces
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= toDateTime('2026-01-01 10:30:00')
+          AND Timestamp <= toDateTime('2026-01-03 14:15:00')
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+          AND SpanKind IN ('Client', 'Producer')
+          AND ServiceName != ''
+          AND coalesce(nullIf(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system']) = 'postgresql'
+        GROUP BY queryKey
+) AS shapes
+        GROUP BY queryKey) AS shape
+        ORDER BY estimatedQueryCount DESC
+        LIMIT 10
+        FORMAT JSON
+
+-- builder:service-map:serviceDependenciesForServiceQuery:default  [e782d401]
 SELECT
           sourceService AS sourceService,
           targetService AS targetService,
@@ -1497,7 +1868,7 @@ SELECT
         FROM service_map_edges_hourly
         WHERE OrgId = 'org_sql_catalog'
           AND SourceService = 'web'
-          AND Hour >= least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
         GROUP BY sourceService, targetService
 UNION ALL
@@ -1519,8 +1890,9 @@ SELECT
         FROM service_map_spans
         WHERE SpanKind IN ('Client', 'Producer')
           AND Timestamp >= toDateTime('2026-01-01 10:30:00')
-          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
           AND OrgId = 'org_sql_catalog'
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
           AND ServiceName = 'web') AS p
         INNER JOIN (SELECT
           TraceId AS TraceId,
@@ -1531,43 +1903,9 @@ SELECT
           TraceState AS TraceState
         FROM service_map_children
         WHERE Timestamp >= toDateTime('2026-01-01 10:30:00')
-          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
-          AND OrgId = 'org_sql_catalog') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
-        WHERE p.ServiceName != c.ServiceName
-        GROUP BY sourceService, targetService
-UNION ALL
-SELECT
-          p.ServiceName AS sourceService,
-          c.ServiceName AS targetService,
-          count() AS bucketCallCount,
-          countIf(c.StatusCode = 'Error') AS bucketErrorCount,
-          sum(c.Duration / 1000000) AS bucketDurationSumMs,
-          max(c.Duration / 1000000) AS bucketMaxDurationMs,
-          sum(multiIf(match(c.TraceState, 'th:[0-9a-f]+'), 1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001), 1.0)) AS bucketEstimatedSpanCount
-        FROM (SELECT
-          OrgId AS OrgId,
-          Timestamp AS Timestamp,
-          TraceId AS TraceId,
-          SpanId AS SpanId,
-          ServiceName AS ServiceName,
-          DeploymentEnv AS DeploymentEnv
-        FROM service_map_spans
-        WHERE SpanKind IN ('Client', 'Producer')
-          AND Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
           AND Timestamp < toDateTime('2026-01-03 14:15:00')
           AND OrgId = 'org_sql_catalog'
-          AND ServiceName = 'web') AS p
-        INNER JOIN (SELECT
-          TraceId AS TraceId,
-          ParentSpanId AS ParentSpanId,
-          ServiceName AS ServiceName,
-          Duration AS Duration,
-          StatusCode AS StatusCode,
-          TraceState AS TraceState
-        FROM service_map_children
-        WHERE Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-          AND Timestamp < toDateTime('2026-01-03 14:15:00')
-          AND OrgId = 'org_sql_catalog') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))) AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
         WHERE p.ServiceName != c.ServiceName
         GROUP BY sourceService, targetService
 ) AS edges
@@ -1576,7 +1914,7 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceDependenciesSQL:default  [cb71f1fc]
+-- builder:service-map:serviceDependenciesSQL:default  [334767d1]
 SELECT
           sourceService AS sourceService,
           targetService AS targetService,
@@ -1596,7 +1934,7 @@ SELECT
           sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
         FROM service_map_edges_hourly
         WHERE OrgId = 'org_sql_catalog'
-          AND Hour >= least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
         GROUP BY sourceService, targetService
 UNION ALL
@@ -1618,8 +1956,9 @@ SELECT
         FROM service_map_spans
         WHERE SpanKind IN ('Client', 'Producer')
           AND Timestamp >= toDateTime('2026-01-01 10:30:00')
-          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
-          AND OrgId = 'org_sql_catalog') AS p
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
+          AND OrgId = 'org_sql_catalog'
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))) AS p
         INNER JOIN (SELECT
           TraceId AS TraceId,
           ParentSpanId AS ParentSpanId,
@@ -1629,42 +1968,9 @@ SELECT
           TraceState AS TraceState
         FROM service_map_children
         WHERE Timestamp >= toDateTime('2026-01-01 10:30:00')
-          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
-          AND OrgId = 'org_sql_catalog') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
-        WHERE p.ServiceName != c.ServiceName
-        GROUP BY sourceService, targetService
-UNION ALL
-SELECT
-          p.ServiceName AS sourceService,
-          c.ServiceName AS targetService,
-          count() AS bucketCallCount,
-          countIf(c.StatusCode = 'Error') AS bucketErrorCount,
-          sum(c.Duration / 1000000) AS bucketDurationSumMs,
-          max(c.Duration / 1000000) AS bucketMaxDurationMs,
-          sum(multiIf(match(c.TraceState, 'th:[0-9a-f]+'), 1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001), 1.0)) AS bucketEstimatedSpanCount
-        FROM (SELECT
-          OrgId AS OrgId,
-          Timestamp AS Timestamp,
-          TraceId AS TraceId,
-          SpanId AS SpanId,
-          ServiceName AS ServiceName,
-          DeploymentEnv AS DeploymentEnv
-        FROM service_map_spans
-        WHERE SpanKind IN ('Client', 'Producer')
-          AND Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
           AND Timestamp < toDateTime('2026-01-03 14:15:00')
-          AND OrgId = 'org_sql_catalog') AS p
-        INNER JOIN (SELECT
-          TraceId AS TraceId,
-          ParentSpanId AS ParentSpanId,
-          ServiceName AS ServiceName,
-          Duration AS Duration,
-          StatusCode AS StatusCode,
-          TraceState AS TraceState
-        FROM service_map_children
-        WHERE Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-          AND Timestamp < toDateTime('2026-01-03 14:15:00')
-          AND OrgId = 'org_sql_catalog') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
+          AND OrgId = 'org_sql_catalog'
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))) AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
         WHERE p.ServiceName != c.ServiceName
         GROUP BY sourceService, targetService
 ) AS edges
@@ -1673,7 +1979,7 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceDependenciesSQL:env-scoped  [6f861053]
+-- builder:service-map:serviceDependenciesSQL:env-scoped  [4ada5514]
 SELECT
           sourceService AS sourceService,
           targetService AS targetService,
@@ -1693,7 +1999,7 @@ SELECT
           sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
         FROM service_map_edges_hourly
         WHERE OrgId = 'org_sql_catalog'
-          AND Hour >= least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
           AND DeploymentEnv = 'production'
         GROUP BY sourceService, targetService
@@ -1716,9 +2022,10 @@ SELECT
         FROM service_map_spans
         WHERE SpanKind IN ('Client', 'Producer')
           AND Timestamp >= toDateTime('2026-01-01 10:30:00')
-          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
           AND OrgId = 'org_sql_catalog'
-          AND DeploymentEnv = 'production') AS p
+          AND DeploymentEnv = 'production'
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))) AS p
         INNER JOIN (SELECT
           TraceId AS TraceId,
           ParentSpanId AS ParentSpanId,
@@ -1728,45 +2035,10 @@ SELECT
           TraceState AS TraceState
         FROM service_map_children
         WHERE Timestamp >= toDateTime('2026-01-01 10:30:00')
-          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
-          AND OrgId = 'org_sql_catalog'
-          AND DeploymentEnv = 'production') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
-        WHERE p.ServiceName != c.ServiceName
-        GROUP BY sourceService, targetService
-UNION ALL
-SELECT
-          p.ServiceName AS sourceService,
-          c.ServiceName AS targetService,
-          count() AS bucketCallCount,
-          countIf(c.StatusCode = 'Error') AS bucketErrorCount,
-          sum(c.Duration / 1000000) AS bucketDurationSumMs,
-          max(c.Duration / 1000000) AS bucketMaxDurationMs,
-          sum(multiIf(match(c.TraceState, 'th:[0-9a-f]+'), 1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001), 1.0)) AS bucketEstimatedSpanCount
-        FROM (SELECT
-          OrgId AS OrgId,
-          Timestamp AS Timestamp,
-          TraceId AS TraceId,
-          SpanId AS SpanId,
-          ServiceName AS ServiceName,
-          DeploymentEnv AS DeploymentEnv
-        FROM service_map_spans
-        WHERE SpanKind IN ('Client', 'Producer')
-          AND Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
           AND Timestamp < toDateTime('2026-01-03 14:15:00')
           AND OrgId = 'org_sql_catalog'
-          AND DeploymentEnv = 'production') AS p
-        INNER JOIN (SELECT
-          TraceId AS TraceId,
-          ParentSpanId AS ParentSpanId,
-          ServiceName AS ServiceName,
-          Duration AS Duration,
-          StatusCode AS StatusCode,
-          TraceState AS TraceState
-        FROM service_map_children
-        WHERE Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-          AND Timestamp < toDateTime('2026-01-03 14:15:00')
-          AND OrgId = 'org_sql_catalog'
-          AND DeploymentEnv = 'production') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
+          AND DeploymentEnv = 'production'
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))) AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
         WHERE p.ServiceName != c.ServiceName
         GROUP BY sourceService, targetService
 ) AS edges
@@ -1775,7 +2047,7 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceExternalEdgesSQL:default  [9e00902d]
+-- builder:service-map:serviceExternalEdgesSQL:default  [105b06bf]
 SELECT
           sourceService AS sourceService,
           targetType AS targetType,
@@ -1800,7 +2072,7 @@ SELECT
         FROM service_external_edges_hourly
         WHERE OrgId = 'org_sql_catalog'
           AND ServiceName = 'web'
-          AND Hour >= toStartOfHour(toDateTime('2026-01-01 10:30:00'))
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
           AND TargetName != ''
         GROUP BY sourceService, targetType, targetSystem, targetName
@@ -1818,8 +2090,9 @@ SELECT
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
           AND ServiceName = 'web'
-          AND Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
           AND SpanKind IN ('Client', 'Producer')
           AND SpanAttributes['db.system.name'] = ''
           AND ((((((SpanAttributes['server.address'] != '' OR SpanAttributes['http.host'] != '') OR SpanAttributes['url.authority'] != '') OR coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '') OR SpanAttributes['messaging.system'] != '') OR SpanAttributes['rpc.service'] != '') OR SpanAttributes['rpc.system'] != '')
@@ -1840,7 +2113,7 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceExternalEdgesSQL:env-scoped  [f135f8aa]
+-- builder:service-map:serviceExternalEdgesSQL:env-scoped  [5c36476e]
 SELECT
           sourceService AS sourceService,
           targetType AS targetType,
@@ -1865,7 +2138,7 @@ SELECT
         FROM service_external_edges_hourly
         WHERE OrgId = 'org_sql_catalog'
           AND ServiceName = 'web'
-          AND Hour >= toStartOfHour(toDateTime('2026-01-01 10:30:00'))
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
           AND TargetName != ''
           AND DeploymentEnv = 'production'
@@ -1884,8 +2157,9 @@ SELECT
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
           AND ServiceName = 'web'
-          AND Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+          AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
           AND SpanKind IN ('Client', 'Producer')
           AND SpanAttributes['db.system.name'] = ''
           AND ((((((SpanAttributes['server.address'] != '' OR SpanAttributes['http.host'] != '') OR SpanAttributes['url.authority'] != '') OR coalesce(nullIf(SpanAttributes['messaging.destination.name'], ''), SpanAttributes['messaging.destination']) != '') OR SpanAttributes['messaging.system'] != '') OR SpanAttributes['rpc.service'] != '') OR SpanAttributes['rpc.system'] != '')
@@ -6424,7 +6698,7 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- pipe:service_dependencies:default:baseline  [6f861053]
+-- pipe:service_dependencies:default:baseline  [4ada5514]
 SELECT
           sourceService AS sourceService,
           targetService AS targetService,
@@ -6444,7 +6718,7 @@ SELECT
           sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
         FROM service_map_edges_hourly
         WHERE OrgId = 'org_sql_catalog'
-          AND Hour >= least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
           AND DeploymentEnv = 'production'
         GROUP BY sourceService, targetService
@@ -6467,9 +6741,10 @@ SELECT
         FROM service_map_spans
         WHERE SpanKind IN ('Client', 'Producer')
           AND Timestamp >= toDateTime('2026-01-01 10:30:00')
-          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
+          AND Timestamp < toDateTime('2026-01-03 14:15:00')
           AND OrgId = 'org_sql_catalog'
-          AND DeploymentEnv = 'production') AS p
+          AND DeploymentEnv = 'production'
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))) AS p
         INNER JOIN (SELECT
           TraceId AS TraceId,
           ParentSpanId AS ParentSpanId,
@@ -6479,45 +6754,10 @@ SELECT
           TraceState AS TraceState
         FROM service_map_children
         WHERE Timestamp >= toDateTime('2026-01-01 10:30:00')
-          AND Timestamp < least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1)))
-          AND OrgId = 'org_sql_catalog'
-          AND DeploymentEnv = 'production') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
-        WHERE p.ServiceName != c.ServiceName
-        GROUP BY sourceService, targetService
-UNION ALL
-SELECT
-          p.ServiceName AS sourceService,
-          c.ServiceName AS targetService,
-          count() AS bucketCallCount,
-          countIf(c.StatusCode = 'Error') AS bucketErrorCount,
-          sum(c.Duration / 1000000) AS bucketDurationSumMs,
-          max(c.Duration / 1000000) AS bucketMaxDurationMs,
-          sum(multiIf(match(c.TraceState, 'th:[0-9a-f]+'), 1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001), 1.0)) AS bucketEstimatedSpanCount
-        FROM (SELECT
-          OrgId AS OrgId,
-          Timestamp AS Timestamp,
-          TraceId AS TraceId,
-          SpanId AS SpanId,
-          ServiceName AS ServiceName,
-          DeploymentEnv AS DeploymentEnv
-        FROM service_map_spans
-        WHERE SpanKind IN ('Client', 'Producer')
-          AND Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
           AND Timestamp < toDateTime('2026-01-03 14:15:00')
           AND OrgId = 'org_sql_catalog'
-          AND DeploymentEnv = 'production') AS p
-        INNER JOIN (SELECT
-          TraceId AS TraceId,
-          ParentSpanId AS ParentSpanId,
-          ServiceName AS ServiceName,
-          Duration AS Duration,
-          StatusCode AS StatusCode,
-          TraceState AS TraceState
-        FROM service_map_children
-        WHERE Timestamp >= greatest(least(toDateTime('2026-01-03 14:15:00'), if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toDateTime('2026-01-01 10:30:00'), addHours(toStartOfHour(toDateTime('2026-01-01 10:30:00')), 1))), toStartOfHour(toDateTime('2026-01-03 14:15:00')))
-          AND Timestamp < toDateTime('2026-01-03 14:15:00')
-          AND OrgId = 'org_sql_catalog'
-          AND DeploymentEnv = 'production') AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
+          AND DeploymentEnv = 'production'
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))) AS c ON (p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId)
         WHERE p.ServiceName != c.ServiceName
         GROUP BY sourceService, targetService
 ) AS edges
