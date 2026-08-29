@@ -5,22 +5,17 @@
 //! client. That is the whole reason this module exists.
 //!
 //! Deliberately not `aws-sdk-s3`: we issue exactly one verb (`PUT`) against one
-//! bucket with a known-length in-memory payload. Signing that is ~100 lines on
-//! top of the `hmac`/`sha2`/`chrono`/`reqwest` crates the binary already links
-//! for ingest-key hashing, versus pulling the whole smithy stack in for it.
-//!
-//! Scope: replay chunk payloads only. If this ever grows a second caller or a
-//! second verb, that is the moment to reconsider the dependency.
+//! bucket with a known-length in-memory payload. SigV4 signing lives in
+//! `aws.rs`, shared with the WAL segment store, and costs a few hundred lines
+//! against the whole smithy stack.
 
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
-type HmacSha256 = Hmac<Sha256>;
+use crate::aws::{amz_date, authorization_header, hex, host_from_endpoint, uri_encode_path, SigningParams};
 
-const ALGORITHM: &str = "AWS4-HMAC-SHA256";
 const SERVICE: &str = "s3";
 
 /// Object-key scheme version. Bumping this is how a future key layout change
@@ -403,147 +398,6 @@ impl ReplayBlobStore {
     }
 }
 
-struct SigningParams<'a> {
-    method: &'a str,
-    canonical_uri: &'a str,
-    canonical_query: &'a str,
-    /// Lowercase header names; sorted internally, so call order is free.
-    headers: &'a [(String, String)],
-    payload_sha256: &'a str,
-    now: DateTime<Utc>,
-    access_key_id: &'a str,
-    secret_access_key: &'a str,
-    region: &'a str,
-    service: &'a str,
-}
-
-fn authorization_header(params: &SigningParams) -> String {
-    let mut headers: Vec<(String, String)> = params
-        .headers
-        .iter()
-        .map(|(name, value)| (name.to_ascii_lowercase(), value.trim().to_owned()))
-        .collect();
-    headers.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let signed_headers = headers
-        .iter()
-        .map(|(name, _)| name.as_str())
-        .collect::<Vec<_>>()
-        .join(";");
-    let canonical_headers = headers
-        .iter()
-        .fold(String::new(), |mut out, (name, value)| {
-            out.push_str(name);
-            out.push(':');
-            out.push_str(value);
-            out.push('\n');
-            out
-        });
-
-    let canonical_request = format!(
-        "{}\n{}\n{}\n{}\n{}\n{}",
-        params.method,
-        params.canonical_uri,
-        params.canonical_query,
-        canonical_headers,
-        signed_headers,
-        params.payload_sha256,
-    );
-
-    let datestamp = params.now.format("%Y%m%d").to_string();
-    let scope = format!(
-        "{}/{}/{}/aws4_request",
-        datestamp, params.region, params.service
-    );
-    let string_to_sign = format!(
-        "{}\n{}\n{}\n{}",
-        ALGORITHM,
-        amz_date(params.now),
-        scope,
-        hex(&Sha256::digest(canonical_request.as_bytes())),
-    );
-
-    let signing_key = signing_key(
-        params.secret_access_key,
-        &datestamp,
-        params.region,
-        params.service,
-    );
-    let signature = hex(&hmac(&signing_key, string_to_sign.as_bytes()));
-
-    format!(
-        "{ALGORITHM} Credential={}/{scope}, SignedHeaders={signed_headers}, Signature={signature}",
-        params.access_key_id,
-    )
-}
-
-fn signing_key(secret_access_key: &str, datestamp: &str, region: &str, service: &str) -> Vec<u8> {
-    let mut key = hmac(
-        format!("AWS4{secret_access_key}").as_bytes(),
-        datestamp.as_bytes(),
-    );
-    key = hmac(&key, region.as_bytes());
-    key = hmac(&key, service.as_bytes());
-    hmac(&key, b"aws4_request")
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "HMAC accepts keys of any length, so `new_from_slice` cannot fail here"
-)]
-fn hmac(key: &[u8], data: &[u8]) -> Vec<u8> {
-    let mut mac = HmacSha256::new_from_slice(key).expect("hmac accepts any key length");
-    mac.update(data);
-    mac.finalize().into_bytes().to_vec()
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(char::from(HEX_LOWER[usize::from(byte >> 4)]));
-        out.push(char::from(HEX_LOWER[usize::from(byte & 0x0f)]));
-    }
-    out
-}
-
-const HEX_LOWER: &[u8; 16] = b"0123456789abcdef";
-const HEX_UPPER: &[u8; 16] = b"0123456789ABCDEF";
-
-fn amz_date(now: DateTime<Utc>) -> String {
-    now.format("%Y%m%dT%H%M%SZ").to_string()
-}
-
-/// RFC 3986 encoding for a URI path: `/` stays a separator, everything outside
-/// the unreserved set is percent-encoded with uppercase hex. Replay keys only
-/// ever contain unreserved characters, but a signature that disagrees with the
-/// request line by one byte is a 403 with no useful message, so encode properly
-/// rather than trusting the caller.
-fn uri_encode_path(path: &str) -> String {
-    let mut out = String::with_capacity(path.len());
-    for byte in path.as_bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
-                out.push(*byte as char);
-            }
-            _ => {
-                out.push('%');
-                out.push(char::from(HEX_UPPER[usize::from(byte >> 4)]));
-                out.push(char::from(HEX_UPPER[usize::from(byte & 0x0f)]));
-            }
-        }
-    }
-    out
-}
-
-fn host_from_endpoint(endpoint: &str) -> String {
-    endpoint
-        .split_once("://")
-        .map_or(endpoint, |(_, rest)| rest)
-        .split('/')
-        .next()
-        .unwrap_or("")
-        .to_owned()
-}
 
 #[cfg(test)]
 mod tests {

@@ -188,6 +188,7 @@ there is no Prometheus `/metrics` endpoint. At high QPS set `OTEL_TRACES_SAMPLER
 `api-v2.md` (v2 public API spec) · `error-issue-lifecycle.md` (how an error becomes an issue,
 gets diagnosed, fixed and verified — read before touching `apps/api/src/services/errors/`) ·
 `sampling-throughput.md` · `persistence.md` ·
+`ingest-wal-durability.md` (WAL segments, the S3 tier, and what survives a task dying) ·
 `docker-container-monitoring.md` (Docker agent → `/infra/containers` lifecycle + its invariants) ·
 `warehouse-rollups.md` (MV/rollup tiering contract — read before adding a materialized view) ·
 `sst-fork-workflow.md` · `local-mode.md` (single-binary CLI + embedded chDB) ·
