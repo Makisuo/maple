@@ -23,8 +23,9 @@ re-derived differently. The k8s sibling of this lifecycle is
    the pod queries.
 3. **Query.** `packages/query-engine/src/ch/queries/containers.ts` mirrors the pod slice:
    list/summary/detail/counters/timeseries/facets, fixtured in the SQL catalog gate.
-4. **Serve.** Five `/internal/query-engine/container-*` endpoints
-   (`apps/api/src/routes/internal/query-engine.http.ts`), contracts in
+4. **Serve.** Five container endpoints under `/internal/query-engine` — `list-containers`,
+   `containers-summary`, `container-detail-summary`, `container-infra-timeseries`,
+   `container-facets` (`apps/api/src/routes/internal/query-engine.http.ts`), contracts in
    `packages/domain/src/http/query-engine.ts`.
 5. **Render.** `/infra/containers` list + `/infra/containers/$containerName?host=` detail,
    the `container.name`-keyed correlation group on span/log Infrastructure tabs, and the
@@ -50,6 +51,13 @@ re-derived differently. The k8s sibling of this lifecycle is
 - **Counters detail groups per host before differencing.** `restartsDelta = maxIf − minIf` over
   two hosts' independent cumulative counters would fabricate a delta from their offset; the
   query differences per `host.name`, then sums.
+- **Compose labels are promoted from datapoint to resource.** `container_labels_to_metric_labels`
+  lands `compose.project`/`compose.service` as *datapoint* attributes, but every container query
+  reads them from `ResourceAttributes` — so `transform/compose` in the agent config moves them.
+  docker_stats emits one Resource per container, so a plain transform is safe here; the Fargate
+  prometheus path in the k8s chart needs `groupbyattrs` first because one Resource covers many
+  pods. The query tests assert SQL strings only, so they cannot catch a regression here — it
+  shows up as permanently empty project/service facets.
 - **Scopes are `saturated | elevated | stale` — deliberately no `unbounded`.** Running without
   limits is the norm in plain Docker, so the pod "burning CPU with nothing capping it" bucket
   doesn't transfer.
@@ -77,7 +85,7 @@ tag is pushed (tag-driven workflow). Push the tag and smoke one live agent (conf
 `container.cpu.utilization` rows arrive through the hosted gateway) before announcing. The
 BYO-ClickHouse `renderCollectorYaml()` deliberately stays on the latest *published* tag.
 
-## Deferred
+## Not built yet, and why
 
 `service_platforms_hourly` ContainerId/ContainerName columns + the `"docker"` service-map
 platform badge (warehouse migration — read [warehouse-rollups.md](warehouse-rollups.md) first),

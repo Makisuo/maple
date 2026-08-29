@@ -263,8 +263,8 @@ groups on `(container.name, host.name)` — Docker names are only unique per hos
 | `container.name`       | Container identity: list/detail views and the span/log Infrastructure tab detect key.    |
 | `container.id`         | Facet cardinality (recreated containers keep their name, not their id) and correlation.  |
 | `container.image.name` | Image facet + display chip.                                                              |
-| `compose.project`      | Mapped from the `com.docker.compose.project` label by the agent; project facet.          |
-| `compose.service`      | Mapped from the `com.docker.compose.service` label by the agent; service facet.          |
+| `compose.project`      | From the `com.docker.compose.project` label, promoted to resource by the agent; facet.   |
+| `compose.service`      | From the `com.docker.compose.service` label, promoted to resource by the agent; facet.   |
 
 To correlate **app telemetry** with containers, the app's spans must also carry `container.id`
 (or at least `container.name`). `@maple/effect-sdk` auto-detects Docker identity best-effort

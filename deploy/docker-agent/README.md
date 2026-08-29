@@ -20,21 +20,10 @@ variant, what lights up in the product) lives at
 the engineering end-to-end (attributes → queries → UI, and the design decisions) at
 [`docs/docker-container-monitoring.md`](../../docs/docker-container-monitoring.md).
 
-## Run
+## What the install one-liner assumes
 
-```bash
-docker run -d --name maple-agent \
-  --restart unless-stopped --user 0:0 \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  -v /var/lib/docker/containers:/var/lib/docker/containers:ro \
-  -v maple-agent-state:/var/lib/otelcol \
-  -p 4317:4317 -p 4318:4318 \
-  -e MAPLE_INGEST_KEY=YOUR_MAPLE_INGEST_KEY \
-  ghcr.io/makisuo/maple/otel-collector-maple:0.2.0 \
-  --config /etc/otel/docker-config.yaml
-```
-
-Env contract:
+The one-liner itself and its Compose equivalent live in the docs guide linked above, kept in one
+place so the image tag can't drift between copies. This README owns the contract behind it.
 
 | Variable            | Required | Meaning                                                        |
 | ------------------- | -------- | -------------------------------------------------------------- |
@@ -50,8 +39,10 @@ Notes that are easy to get wrong:
   `maple-agent-state` volume persists filelog checkpoints across restarts.
 - The environment stamp uses `insert`, not `upsert`: app OTLP passing through the agent keeps its
   own `deployment.environment.*`; only unlabeled data (docker_stats, filelog) gets the agent's.
-- Compose labels (`com.docker.compose.project`/`service`) are mapped to the `compose.project` /
-  `compose.service` resource attributes — the Docker analog of the k8s namespace/workload facets.
+- Compose labels (`com.docker.compose.project`/`service`) become `compose.project` /
+  `compose.service` — the Docker analog of the k8s namespace/workload facets. The receiver sets
+  them as datapoint attributes; `transform/compose` promotes them to resource, which is where the
+  container queries read them. Drop that processor and the project/service facets go empty.
 
 ## Config and image lifecycle
 

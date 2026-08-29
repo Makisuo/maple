@@ -26,6 +26,9 @@ All signals are exported over OTLP HTTP to Maple's ingest gateway.
 
 - Docker Engine with the default `json-file` logging driver (for log collection)
 - A **private ingest key** — copy it from **Settings → Ingestion** in the Maple UI
+- Ports 4317 and 4318 free on the host. If you already run a collector there, drop the `-p` flags
+  below and keep pointing your apps at the existing one — the agent still collects container
+  metrics and logs without them.
 
 ## Install
 
@@ -92,6 +95,7 @@ filter by project and service.
 | `container.network.io.usage.rx_bytes`/`tx_bytes` | Network I/O chart                               |
 | `container.blockio.io_service_bytes_recursive` | Block I/O chart (by operation)                    |
 | `container.restarts`, `container.uptime`       | Restart count and uptime on the detail page       |
+| `container.cpu.limit`, `container.pids.count`  | Served on the container API; not charted yet      |
 
 Identity rides on resource attributes: `container.name`, `container.id`, `container.image.name`,
 `container.runtime`, and `host.name` (detected from the Docker daemon, so it reports the host —
@@ -132,6 +136,8 @@ If your containers set a custom `hostname:`, the fallback can't fire — set
 
 - **Nothing after two minutes** — check the agent's own logs: `docker logs maple-agent`. A `401`
   from the exporter means the ingest key is wrong or was rotated.
+- **`port is already allocated`** — another collector already owns 4317/4318 on this host. Drop the
+  `-p` flags (see Prerequisites) or remap them.
 - **`permission denied` on the socket** — the agent isn't running as root (`--user 0:0`), or the
   socket lives elsewhere (rootless Docker uses `$XDG_RUNTIME_DIR/docker.sock`; rootless setups
   aren't supported by the one-liner yet).

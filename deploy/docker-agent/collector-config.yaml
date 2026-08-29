@@ -29,8 +29,9 @@ receivers:
   docker_stats:
     endpoint: unix:///var/run/docker.sock
     collection_interval: 30s
-    # Compose labels become resource attributes — Maple's Docker analog of
-    # the k8s namespace/workload facets.
+    # Compose labels — Maple's Docker analog of the k8s namespace/workload
+    # facets. This lands them as DATAPOINT attributes; transform/compose
+    # below promotes them to resource, which is where the queries read them.
     container_labels_to_metric_labels:
       com.docker.compose.project: compose.project
       com.docker.compose.service: compose.service
@@ -98,6 +99,22 @@ processors:
         value: ${env:MAPLE_ENVIRONMENT:-production}
         action: insert
 
+  # container_labels_to_metric_labels sets datapoint attributes, but every
+  # container query reads compose.project/service from ResourceAttributes.
+  # docker_stats emits one Resource per container, so promoting them here
+  # can't clobber a sibling container's value (unlike the Fargate prometheus
+  # path in the k8s chart, which needs groupbyattrs to split first).
+  # The nil guards keep this a no-op for app OTLP flowing through the agent.
+  transform/compose:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(resource.attributes["compose.project"], attributes["compose.project"]) where attributes["compose.project"] != nil
+          - set(resource.attributes["compose.service"], attributes["compose.service"]) where attributes["compose.service"] != nil
+          - delete_key(attributes, "compose.project")
+          - delete_key(attributes, "compose.service")
+
   batch:
     send_batch_size: 2000
     timeout: 10s
@@ -114,7 +131,7 @@ service:
   pipelines:
     metrics:
       receivers: [otlp, docker_stats]
-      processors: [memory_limiter, resourcedetection, resource/env, batch]
+      processors: [memory_limiter, resourcedetection, resource/env, transform/compose, batch]
       exporters: [otlphttp/maple]
     traces:
       receivers: [otlp]
