@@ -855,6 +855,26 @@ impl TelemetryPipeline {
         Ok(pipeline)
     }
 
+    /// Bytes committed to the primary WAL lanes and not yet exported.
+    pub async fn wal_backlog_bytes(&self) -> u64 {
+        self.inner.wal.backlog_bytes().await
+    }
+
+    /// Wait for the primary lanes to export everything they hold, up to
+    /// `deadline`. The export workers run until process exit, so this only
+    /// watches the backlog shrink; it returns the bytes still unexported
+    /// (0 means the WAL drained clean).
+    pub async fn drain_wal(&self, deadline: Duration) -> u64 {
+        let started = Instant::now();
+        loop {
+            let backlog = self.wal_backlog_bytes().await;
+            if backlog == 0 || started.elapsed() >= deadline {
+                return backlog;
+            }
+            sleep(Duration::from_millis(250)).await;
+        }
+    }
+
     pub async fn accept_traces(
         &self,
         org_id: &str,
@@ -1488,6 +1508,35 @@ impl ShardedWal {
         })
         .await
         .map_err(|error| format!("join WAL append: {error}"))?
+    }
+
+    /// Unexported bytes across the primary lanes. Mirror lanes are excluded on
+    /// purpose: the mirror is best-effort, so a stalled mirror target must not
+    /// hold shutdown open or pin a task against scale-in.
+    async fn backlog_bytes(&self) -> u64 {
+        let lanes: Vec<Arc<WalShard>> = self
+            .lanes
+            .iter()
+            .filter(|lane| lane.destination != ExportDestination::TinybirdMirror)
+            .map(Arc::clone)
+            .collect();
+        tokio::task::spawn_blocking(move || {
+            lanes
+                .iter()
+                .map(|lane| {
+                    let Ok(file) = lane.file.lock() else { return 0 };
+                    let size = file.metadata().map_or(0, |meta| meta.len());
+                    // The persisted cursor is a plain file offset. Reading it
+                    // under the append mutex keeps it consistent with `size`
+                    // across a concurrent truncate or compaction.
+                    let cursor = read_cursor(&lane.cursor_path);
+                    drop(file);
+                    size.saturating_sub(cursor)
+                })
+                .sum()
+        })
+        .await
+        .unwrap_or(0)
     }
 
     async fn replay(&self, lane: usize) -> Result<Vec<QueuedFrame>, String> {
@@ -4798,6 +4847,79 @@ mod tests {
         assert_eq!(
             mirror.authorization, "Bearer mirror-token",
             "the mirror lane must authenticate against the mirror workspace"
+        );
+
+        drop(std::fs::remove_dir_all(queue_dir));
+    }
+
+    #[tokio::test]
+    async fn drain_wal_reports_zero_once_the_export_workers_catch_up() {
+        let (primary_url, mut primary_rx) = spawn_fake_tinybird().await;
+
+        let queue_dir = unique_test_dir("drain-clean");
+        let mut cfg = test_cfg();
+        cfg.endpoint = primary_url;
+        cfg.queue_dir = queue_dir.clone();
+        cfg.wal_shards = 1;
+        cfg.batch_max_wait = Duration::from_millis(1);
+
+        let pipeline = TelemetryPipeline::new(
+            cfg,
+            Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        pipeline
+            .accept_logs("org_drain", &populated_log_request())
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), primary_rx.recv())
+            .await
+            .expect("the export worker should deliver the batch")
+            .unwrap();
+
+        let remaining = pipeline.drain_wal(Duration::from_secs(5)).await;
+        assert_eq!(remaining, 0, "a delivered batch must leave no backlog");
+
+        drop(std::fs::remove_dir_all(queue_dir));
+    }
+
+    #[tokio::test]
+    async fn drain_wal_reports_the_backlog_when_the_destination_is_unreachable() {
+        let queue_dir = unique_test_dir("drain-stuck");
+        let mut cfg = test_cfg();
+        // Nothing listens here, so the committed frame can never export.
+        cfg.endpoint = "http://127.0.0.1:1".to_owned();
+        cfg.queue_dir = queue_dir.clone();
+        cfg.wal_shards = 1;
+
+        let pipeline = TelemetryPipeline::new(
+            cfg,
+            Client::builder()
+                .timeout(Duration::from_millis(100))
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        pipeline
+            .accept_logs("org_stuck", &populated_log_request())
+            .await
+            .unwrap();
+
+        assert!(
+            pipeline.wal_backlog_bytes().await > 0,
+            "a committed, unexported frame must count as backlog"
+        );
+        let remaining = pipeline.drain_wal(Duration::from_millis(300)).await;
+        assert!(
+            remaining > 0,
+            "the drain deadline must hand back the bytes it could not export"
         );
 
         drop(std::fs::remove_dir_all(queue_dir));
