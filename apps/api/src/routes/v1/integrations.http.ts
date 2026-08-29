@@ -42,7 +42,7 @@ import {
 } from "@maple/domain/http"
 import { cloudflareAnalyticsState } from "@maple/db"
 import { EdgeCacheService } from "@maple/cache"
-import { and, eq } from "drizzle-orm"
+import { and, desc, eq } from "drizzle-orm"
 import { Effect, Option, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
@@ -312,8 +312,14 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 												eq(cloudflareAnalyticsState.orgId, tenant.orgId),
 												eq(cloudflareAnalyticsState.dataset, HTTP_DATASET),
 												eq(cloudflareAnalyticsState.zoneName, payload.zoneName),
+												// A zone that moved between accounts (or belongs to one
+												// the grant no longer covers) leaves a disabled row
+												// behind; picking it would address the token to an
+												// account outside the grant and hard-fail the request.
+												eq(cloudflareAnalyticsState.enabled, true),
 											),
 										)
+										.orderBy(desc(cloudflareAnalyticsState.updatedAt))
 										.limit(1),
 								)
 								.pipe(

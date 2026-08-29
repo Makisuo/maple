@@ -170,14 +170,16 @@ const BACKFILL_MS = 24 * 60 * 60_000
  */
 const MAX_WINDOW_MS = 60 * 60_000
 /**
- * Hard per-org call budget per tick so a pathological backfill can't blow the 300/5min limit.
- * Cloudflare's GraphQL rate limit is per ACCOUNT-holder, but our budget is per org and the tick
- * runs `ORG_CONCURRENCY` orgs at a time: at 50 the six polled orgs could ask for 300 queries in
- * one tick — exactly the limit — which is how we rate-limited ourselves into ~1.7k
- * `Rate limiter budget depleted` errors a day. 20 keeps a full tick well under the ceiling;
- * backfill is resumable by construction, so a smaller budget only makes history land slower.
+ * Hard per-GRANT call budget per tick so a pathological backfill can't blow the 300/5min limit.
+ * Cloudflare's GraphQL rate limit is per ACCOUNT-holder — one grant is one holder however many
+ * accounts it covers — and the tick runs `ORG_CONCURRENCY` orgs at a time: at 50 the six polled
+ * orgs could ask for 300 queries in one tick — exactly the limit — which is how we rate-limited
+ * ourselves into ~1.7k `Rate limiter budget depleted` errors a day. 20 keeps a full tick well
+ * under the ceiling; backfill is resumable by construction, so a smaller budget only makes
+ * history land slower. The budget is therefore shared across a grant's accounts (threaded from
+ * `pollOrg` into each `pollConnection`), never one budget per account.
  */
-const MAX_CALLS_PER_ORG_TICK = 20
+const MAX_CALLS_PER_GRANT_TICK = 20
 const LEASE_MS = 4 * 60_000
 /**
  * How long an org sits out after Cloudflare rate-limits it — Cloudflare's own message says "try
@@ -1422,7 +1424,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 						: []
 
 			for (const plan of plans) {
-				if (budget.calls >= MAX_CALLS_PER_ORG_TICK) return wrote
+				if (budget.calls >= MAX_CALLS_PER_GRANT_TICK) return wrote
 				budget.calls += 1
 				const result = yield* graphqlQuery(
 					accessToken,
@@ -1881,8 +1883,14 @@ export class CloudflareAnalyticsService extends Context.Service<
 		const pollConnection = Effect.fn("CloudflareAnalyticsService.pollConnection")(function* (
 			orgId: OrgId,
 			accountId: string,
+			// Shared across every account of the grant — Cloudflare meters the grant's holder, so
+			// a per-account budget would multiply a tick's calls by the account count.
+			budget: { calls: number },
 		) {
 			yield* Effect.annotateCurrentSpan({ orgId, "maple.cloudflare.account_id": accountId })
+			// The budget is the grant's running total; this account's own spend is the delta, so
+			// the org summary's `callsMade` stays a sum rather than counting siblings' calls again.
+			const callsAtStart = budget.calls
 			// A skip used to be silent — the reason only ever landed in the returned summary, which
 			// nothing read for a plain tick. Annotating the poll span means every skip is now
 			// visible on the trace even when the tick rollup below doesn't (yet) escalate it.
@@ -1954,9 +1962,11 @@ export class CloudflareAnalyticsService extends Context.Service<
 					const zonesResult = yield* Effect.result(listZones(accessToken, accountId, apiBaseUrl))
 					if (Result.isFailure(zonesResult)) {
 						const error = zonesResult.failure
-						if (error instanceof IntegrationsRevokedError) {
-							yield* oauth.markConnectionRevoked(orgId, accountId)
-						}
+						// A 401/403 on an ACCOUNT-scoped call means Maple lost access to this
+						// account, not that the grant died — losing an account must not stamp the
+						// shared connection revoked and stop the grant's other accounts. Disabling
+						// this account's rows is what stops it being re-polled; only a failed token
+						// refresh (above) is grant-wide.
 						yield* recordConnectionError(orgId, accountId, error.message, now, {
 							disable: error instanceof IntegrationsRevokedError,
 						})
@@ -2005,7 +2015,6 @@ export class CloudflareAnalyticsService extends Context.Service<
 					rows = yield* loadStateRows(orgId, accountId)
 				}
 
-				const budget = { calls: 0 }
 				const settingsWrote = yield* refreshSettings(accessToken, accountId, rows, now, budget)
 				if (settingsWrote) rows = yield* loadStateRows(orgId, accountId)
 
@@ -2039,7 +2048,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 					!(yield* Ref.get(revokedRef)) &&
 					!(yield* Ref.get(deliveryBlockedRef)) &&
 					!(yield* Ref.get(rateLimitedRef)) &&
-					budget.calls < MAX_CALLS_PER_ORG_TICK
+					budget.calls < MAX_CALLS_PER_GRANT_TICK
 				) {
 					const work = buildWorkItems(rows, now)
 					if (work.length === 0) break
@@ -2047,7 +2056,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 
 					for (const item of work) {
 						if (
-							budget.calls >= MAX_CALLS_PER_ORG_TICK ||
+							budget.calls >= MAX_CALLS_PER_GRANT_TICK ||
 							(yield* Ref.get(revokedRef)) ||
 							(yield* Ref.get(deliveryBlockedRef)) ||
 							(yield* Ref.get(rateLimitedRef))
@@ -2062,11 +2071,11 @@ export class CloudflareAnalyticsService extends Context.Service<
 							Effect.catchTags({
 								"@maple/http/errors/IntegrationsRevokedError": (error) =>
 									// Stop this connection's loop; the seam disables + records health
-									// connection-wide. Also stamp the connection so pollAllOrgs skips it
-									// until reconnect (a mid-poll 401 never goes through the refresh path
-									// that stamps).
-									oauth.markConnectionRevoked(orgId, accountId).pipe(
-										Effect.andThen(Ref.set(revokedRef, true)),
+									// connection-wide. The grant is NOT stamped revoked: a mid-poll
+									// 401/403 is account-scoped (access to this account was removed),
+									// and stamping would stop the grant's other accounts too. Disabling
+									// this account's rows is what keeps it from being re-polled.
+									Ref.set(revokedRef, true).pipe(
 										Effect.as(
 											allPartsFailed(item, "revoked", error.message, {
 												orgWide: true,
@@ -2178,13 +2187,13 @@ export class CloudflareAnalyticsService extends Context.Service<
 				const rowsIngested = yield* Ref.get(rowsIngestedRef)
 				// Metrics ship through the ingest gateway (see emitMetrics), so Autumn metering
 				// happens there — no self-report here.
-				yield* Effect.annotateCurrentSpan("maple.cloudflare.calls", budget.calls)
+				yield* Effect.annotateCurrentSpan("maple.cloudflare.calls", budget.calls - callsAtStart)
 				yield* Effect.annotateCurrentSpan("maple.cloudflare.rows_ingested", rowsIngested)
 				yield* Effect.annotateCurrentSpan("maple.cloudflare.dataset_failures", datasetFailures.length)
 				return {
 					accountId,
 					skipped: null,
-					callsMade: budget.calls,
+					callsMade: budget.calls - callsAtStart,
 					rowsIngested,
 					failures: datasetFailures,
 				} satisfies PollConnectionSummary
@@ -2220,9 +2229,9 @@ export class CloudflareAnalyticsService extends Context.Service<
 		})
 
 		/**
-		 * Poll every connected account of one org, sequentially — Cloudflare's GraphQL
-		 * budget is per account, so sequencing accounts costs nothing on rate limits
-		 * while keeping one org's Postgres traffic bounded. Revoked and
+		 * Poll every connected account of one org, sequentially, sharing ONE call budget —
+		 * Cloudflare meters the grant's holder, not the individual accounts, so a per-account
+		 * budget would multiply a tick's calls by the account count. Revoked and
 		 * scope-incapable connections are skipped without touching their state rows
 		 * (the status endpoint already surfaces both conditions per account).
 		 */
@@ -2230,19 +2239,22 @@ export class CloudflareAnalyticsService extends Context.Service<
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			const status = yield* oauth.getStatus(orgId)
 			const summaries: Array<PollConnectionSummary> = []
+			// One budget for the whole grant, spent by the accounts in order.
+			const budget = { calls: 0 }
 			for (const account of status.accounts) {
-				if (account.revoked) continue
-				if (!hasAnalyticsScopes(account.scope)) {
+				// Revocation is grant-wide (one token), but record it per account so the tick
+				// rollup names the real cause instead of falling through to "not connected".
+				if (account.revoked || !hasAnalyticsScopes(account.scope)) {
 					summaries.push({
 						accountId: account.accountId,
-						skipped: "missing analytics scopes",
+						skipped: account.revoked ? "revoked" : "missing analytics scopes",
 						callsMade: 0,
 						rowsIngested: 0,
 						failures: [],
 					})
 					continue
 				}
-				summaries.push(yield* pollConnection(orgId, account.accountId))
+				summaries.push(yield* pollConnection(orgId, account.accountId, budget))
 			}
 			if (summaries.length === 0) {
 				yield* Effect.annotateCurrentSpan("maple.cloudflare.skip_reason", "not connected")
@@ -2682,18 +2694,15 @@ export class CloudflareAnalyticsService extends Context.Service<
 			// Manual recovery path: also clear the revocation stamp so pollAllOrgs
 			// picks the connection up again (reconnect clears it via upsertConnection,
 			// but resetOrgState may be invoked without a fresh OAuth round-trip).
+			// Never filtered by `accountId`: the stamp lives on the org's single grant row,
+			// whose externalUserId only ever holds the grant's FIRST account — filtering by it
+			// would match nothing for every other account and leave the org stuck revoked.
 			yield* dbExecute((db) =>
 				db
 					.update(oauthConnections)
 					.set({ revokedAt: null })
 					.where(
-						and(
-							eq(oauthConnections.orgId, orgId),
-							eq(oauthConnections.provider, "cloudflare"),
-							...(accountId === undefined
-								? []
-								: [eq(oauthConnections.externalUserId, accountId)]),
-						),
+						and(eq(oauthConnections.orgId, orgId), eq(oauthConnections.provider, "cloudflare")),
 					),
 			)
 		})
