@@ -583,7 +583,7 @@ describe("SlackInternalRouter (usage)", () => {
 					)
 					assert.strictEqual(response.status, 200)
 					const body = yield* Effect.promise(() => response.json())
-					assert.deepStrictEqual(body, { tracked: true })
+					assert.deepStrictEqual(body, { forwarded: true })
 
 					assert.strictEqual(autumn.calls.length, 2)
 					for (const call of autumn.calls) {
@@ -692,7 +692,7 @@ describe("SlackInternalRouter (usage)", () => {
 		)
 	})
 
-	it.effect("answers tracked:false without a worker env (nothing to bill against)", () => {
+	it.effect("answers forwarded:false without a worker env (nothing to bill against)", () => {
 		const testDb = createTestDb(trackedDbs)
 		const autumn = stubAutumnFetch()
 		return Effect.gen(function* () {
@@ -718,7 +718,7 @@ describe("SlackInternalRouter (usage)", () => {
 					)
 					assert.strictEqual(response.status, 200)
 					const body = yield* Effect.promise(() => response.json())
-					assert.deepStrictEqual(body, { tracked: false })
+					assert.deepStrictEqual(body, { forwarded: false })
 					assert.strictEqual(autumn.calls.length, 0)
 				}),
 			)
@@ -754,7 +754,7 @@ describe("SlackInternalRouter (usage)", () => {
 					)
 					assert.strictEqual(response.status, 200)
 					const body = yield* Effect.promise(() => response.json())
-					assert.deepStrictEqual(body, { tracked: false })
+					assert.deepStrictEqual(body, { forwarded: false })
 					assert.strictEqual(autumn.calls.length, 0)
 				}),
 				AUTUMN_ENV,

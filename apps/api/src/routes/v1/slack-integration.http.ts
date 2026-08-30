@@ -359,9 +359,14 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 			return yield* slack.orgIdForTeam(teamId).pipe(
 				Effect.flatMap(
 					Effect.fnUntraced(function* (orgId) {
+						// `forwarded` means exactly "handed to the Autumn tracker", nothing
+						// stronger: the tracker is fire-and-forget past this point (it skips
+						// silently without AUTUMN_SECRET_KEY and for the unbilled internal
+						// org, and logs-not-throws on an Autumn rejection), so this endpoint
+						// deliberately cannot confirm that usage was recorded.
 						const env = Option.getOrUndefined(workerEnv)
-						const tracked = env !== undefined && (usage.inputTokens > 0 || usage.outputTokens > 0)
-						if (tracked) {
+						const forwarded = env !== undefined && (usage.inputTokens > 0 || usage.outputTokens > 0)
+						if (forwarded) {
 							yield* Effect.tryPromise(() =>
 								trackTokenUsage(env, {
 									orgId,
@@ -379,7 +384,7 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 							)
 						}
 						yield* logAccess(teamId, "found", 200)
-						return yield* HttpServerResponse.json({ tracked })
+						return yield* HttpServerResponse.json({ forwarded })
 					}),
 				),
 				Effect.catchTags({
