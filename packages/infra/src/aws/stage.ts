@@ -271,19 +271,6 @@ export function stageDeploysElectric(stage: MapleStage): boolean {
 }
 
 /**
- * Suffix Electric appends to the publication and slot it reads
- * (`electric_publication_<id>` / `electric_slot_<id>`), created by
- * `0051_electric_publication_maple`.
- *
- * `maple` rather than Electric's `default` because the hosted source held the
- * `default` pair and two services cannot share one slot — a separate stream is
- * what let the two run side by side through the cutover. Do not simplify it back
- * afterwards: that rename rebuilds the slot, forcing a full re-snapshot of every
- * shape for every connected client.
- */
-export const ELECTRIC_REPLICATION_STREAM_ID = "maple"
-
-/**
  * Fargate task size for Electric per stage.
  *
  * Eight low-write control-plane tables, so this is sized for the BEAM's floor

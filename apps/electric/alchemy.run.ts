@@ -4,7 +4,6 @@ import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import type { MapleRegion } from "@maple/infra/aws"
 import {
-	ELECTRIC_REPLICATION_STREAM_ID,
 	resolveAwsRegion,
 	resolveAwsResourceName,
 	resolveElectricCidrBlock,
@@ -192,10 +191,11 @@ export const createMapleElectric = ({ stage, domains, region }: CreateMapleElect
 				// The publication is owned by a Drizzle migration: PlanetScale cannot
 				// reassign table ownership, so Electric can never be the owner it would
 				// need to be to manage publishing itself. Prod parity with local docker.
+				//
+				// ELECTRIC_REPLICATION_STREAM_ID is left at Electric's `default`, which
+				// resolves to `electric_publication_default` — the publication those
+				// migrations already own and keep correct.
 				ELECTRIC_MANUAL_TABLE_PUBLISHING: "true",
-				// Names the publication AND the slot — see ELECTRIC_REPLICATION_STREAM_ID
-				// for why this is not Electric's `default`, and why changing it is not free.
-				ELECTRIC_REPLICATION_STREAM_ID: ELECTRIC_REPLICATION_STREAM_ID,
 				// ELECTRIC_STORAGE_DIR is left at the image's default, on task-local
 				// storage that dies with the task. Losing it costs a re-snapshot of
 				// eight small tables plus a `must-refetch` for connected clients, and

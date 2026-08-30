@@ -48,7 +48,7 @@ apps/electric-sync Worker — /api/sync/shape  (src/routes/shape.http.ts, a raw 
   streams Electric's response back (buffers the long-poll body)
 
 Electric (apps/electric on ECS Fargate in prod / docker `electric` locally)
-  ← logical replication ← PlanetScale Postgres (direct 5432, publication electric_publication_maple)
+  ← logical replication ← PlanetScale Postgres (direct 5432, publication electric_publication_default)
 
 writes: endpoint captures the Postgres txid on the mutating statement
   (`pg_current_xact_id()::xid::text`, apps/api/src/lib/electric-txid.ts) and returns it;
@@ -181,8 +181,8 @@ like local docker does.
    replication cannot run through PSBouncer or Hyperdrive) and `ELECTRIC_SECRET`.
    Both reach the task through Secrets Manager, never the task definition's
    plaintext `env`.
-4. **Migrate,** then `alchemy deploy`. `0051_electric_publication_maple` creates
-   the second publication the service reads (see below).
+4. **Migrate,** then `alchemy deploy`. No new migration is needed — the service
+   reads the publication `0009`/`0011`/`0014`/`0037` already maintain.
 5. **DNS.** The certificate lands `PENDING_VALIDATION` on the first deploy and the
    443 listener fails; the deploy workflows recover on their own by creating the
    validation CNAME and redeploying (`scripts/acm-cert-validate.sh`, which now
@@ -194,24 +194,19 @@ like local docker does.
    `curl -g 'https://sync.maple.dev/api/sync/shape?shape=dashboards&offset=-1' -H "authorization: Bearer <token>"`.
 7. **Cut over:** set `ELECTRIC_URL=https://electric.maple.dev` and clear
    `ELECTRIC_SOURCE_ID`, then redeploy the sync worker. Reverting is the same env
-   change backwards, which is the entire point of the parallel publication.
+   change backwards, which is the entire point of running the two side by side.
 
-### Why there are two publications
+### The publication
 
-`ELECTRIC_REPLICATION_STREAM_ID=maple` (in `packages/infra/src/aws/stage.ts`) makes
-the self-hosted service read `electric_publication_maple` over `electric_slot_maple`,
-rather than the `…_default` pair Electric Cloud held. Without that, the new service
-could only start after the Cloud source was deleted — a cutover with no way back.
+`ELECTRIC_MANUAL_TABLE_PUBLISHING=true`, and `ELECTRIC_REPLICATION_STREAM_ID` is
+left at Electric's `default` — so it reads `electric_publication_default`, the
+migration-owned publication, and opens `electric_slot_default` for itself.
 
-While both exist, **a migration that adds or removes a synced table must touch
-both.** `migrations.test.ts` asserts they carry the same set, so forgetting fails
-the suite instead of silently starving a shape.
-
-Once the Cloud source is deleted, drop `electric_publication_default` in a
-follow-up migration and `electric_publication_maple` is simply the publication.
-Do **not** instead rename the stream back to `default`: that drops and rebuilds
-the slot, forcing a full re-snapshot of every shape for every connected client,
-to save a suffix.
+Electric Cloud never used that pair: it created its own generated
+`cloud_electric_pub_*` / `cloud_electric_slot_*`. That is why the self-hosted
+service can run beside it on the same database with no collision, and why
+flipping `ELECTRIC_URL` between them is a reversible env change rather than a
+leap.
 
 ## PR previews (no Electric source — dormant since 2026-08, now also Cloud-less)
 

@@ -140,18 +140,6 @@ describe("bundled migrations", () => {
 			expect(row.relreplident, `${row.relname} replica identity`).toBe("f")
 		}
 
-		// `electric_publication_maple` (0051) is the self-hosted service's own
-		// stream. While both exist they must carry the same tables — publishing to
-		// only one starves whichever service reads the other, and the symptom is a
-		// shape that never delivers a change. Once `electric_publication_default`
-		// is dropped, delete this and point the assertions above at `…_maple`.
-		const mapleMembers = await pg.query<{ tablename: string }>(
-			"select tablename from pg_publication_tables where pubname = 'electric_publication_maple'",
-		)
-		expect(mapleMembers.rows.map((r) => r.tablename).sort()).toEqual(
-			members.rows.map((r) => r.tablename).sort(),
-		)
-
 		// The scheduler claim lock (0027) must stay out of the publication: it is
 		// written once per enabled rule per minute, which is precisely the churn that
 		// splitting it off `alert_rules` was meant to keep off the replication stream.
