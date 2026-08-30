@@ -84,6 +84,9 @@ interface SessionWaterfallProps {
 	/** A span sent here from another view's inspection panel: its row is scrolled
 	 *  to and marked, with no panel over it. */
 	revealedSpanId: string | undefined
+	/** A turn sent here from the Overview's session shape: its header row is
+	 *  scrolled to and marked, and the spans under it read as its content. */
+	revealedTurnId: string | undefined
 	/** Raised with a span id to open it, `undefined` to close. */
 	onSelectSpan: (spanId: string | undefined) => void
 	/** The popover's tab, shared with the other views. */
@@ -103,6 +106,7 @@ export function SessionWaterfall({
 	onToggleTurn,
 	selectedSpanId,
 	revealedSpanId,
+	revealedTurnId,
 	onSelectSpan,
 	spanTab,
 	onSpanTabChange,
@@ -189,11 +193,27 @@ export function SessionWaterfall({
 		[],
 	)
 	useEffect(() => {
-		if (didInitialScroll.current || landingSpanId === undefined) return
+		if (didInitialScroll.current) return
 		// Not before the scroller exists: the list element attaches in a layout
 		// effect, so on the render that mounts this view there is nothing to
 		// scroll and the link would silently land at the top.
 		if (getScrollElement() === null) return
+		// A revealed turn wins over a revealed span: it is the later of the two
+		// gestures, and its header is what the reader was sent to see.
+		if (revealedTurnId !== undefined) {
+			const turnIndex = rows.findIndex((row) => row.kind === "turn" && row.turn.id === revealedTurnId)
+			if (turnIndex === -1) return
+			didInitialScroll.current = true
+			virtualizer.scrollToIndex(turnIndex, { align: "center" })
+			correctionFrame.current = requestAnimationFrame(() => {
+				const header = [...document.querySelectorAll("[data-turn-row]")].find(
+					(candidate) => candidate.getAttribute("data-turn-row") === revealedTurnId,
+				)
+				header?.scrollIntoView({ block: "center" })
+			})
+			return
+		}
+		if (landingSpanId === undefined) return
 		// Nor before the row is in the list: a span the filter is hiding, or one
 		// inside a collapsed turn, has nowhere to land yet — leaving the landing
 		// unspent means it still happens if the reader clears the filter.
@@ -210,7 +230,15 @@ export function SessionWaterfall({
 			)
 			row?.scrollIntoView({ block: "center" })
 		})
-	}, [landingSpanId, spanRowIndexById, setFocusedId, virtualizer, getScrollElement])
+	}, [
+		landingSpanId,
+		revealedTurnId,
+		rows,
+		spanRowIndexById,
+		setFocusedId,
+		virtualizer,
+		getScrollElement,
+	])
 
 
 	return (
@@ -286,6 +314,7 @@ export function SessionWaterfall({
 											turns={turns}
 											axis={axis}
 											collapsed={collapsedTurns.has(row.turn.id)}
+											revealed={revealedTurnId === row.turn.id}
 											onToggle={() => onToggleTurn(row.turn.id)}
 										/>
 									)}
@@ -431,6 +460,7 @@ function TurnHeader({
 	turns,
 	axis,
 	collapsed,
+	revealed,
 	onToggle,
 }: {
 	row: Extract<WaterfallRow, { kind: "turn" }>
@@ -438,6 +468,8 @@ function TurnHeader({
 	turns: readonly SessionTurn[]
 	axis: SessionAxis
 	collapsed: boolean
+	/** The turn the reader was sent here to see: marked until they move on. */
+	revealed: boolean
 	onToggle: () => void
 }) {
 	const { turn } = row
@@ -454,7 +486,18 @@ function TurnHeader({
 	const traceId = turn.traceIds[0]
 
 	return (
-		<div className="flex h-full w-full items-center rounded-md bg-card px-2.5 text-left text-xs hover:bg-accent/40">
+		<div
+			// The row the landing correction below scrolls to, a frame after the
+			// virtualizer drew it.
+			data-turn-row={turn.id}
+			// The mark is a background colour; this is how the page's tests — and
+			// anything else looking for it — find the turn wearing it.
+			data-revealed={revealed || undefined}
+			className={cn(
+				"flex h-full w-full items-center rounded-md bg-card px-2.5 text-left text-xs hover:bg-accent/40",
+				revealed && "border-l-2 border-l-primary bg-primary/12",
+			)}
+		>
 			<span className={COL_SPAN}>
 				<button
 					type="button"
