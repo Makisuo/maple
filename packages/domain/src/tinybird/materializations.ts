@@ -25,6 +25,7 @@ import {
 	errorEvents,
 	errorEventsByTime,
 	errorFingerprintsMinutely,
+	aiTraceIndex,
 	traceDetailSpans,
 	traceListMv,
 	attributeKeysHourly,
@@ -45,6 +46,11 @@ import {
 	DB_STATEMENT_SQL,
 	DB_SYSTEM_ATTR_SQL,
 } from "./db-query-shape-sql"
+import {
+	MAPLE_AI_SESSION_ID_ATTR,
+	MAPLE_AI_VENDOR_ID_ATTR,
+	MAPLE_AI_VENDOR_VERSION_ATTR,
+} from "../gen-ai"
 import { DEPLOYMENT_ENV_SQL, MESSAGING_DESTINATION_SQL } from "./semconv-renames"
 import { NORMALIZED_SPAN_NAME_SQL } from "./span-display-name"
 
@@ -958,6 +964,42 @@ export const traceDetailSpansMv = defineMaterializedView("trace_detail_spans_mv"
           SpanAttributes,
           ResourceAttributes
         FROM traces
+      `,
+		}),
+	],
+})
+
+/**
+ * Populates `ai_trace_index` with only the spans the ingest gateway stamped as
+ * GenAI (`maple_ai.vendor.id`). The write filter is the read side's detection
+ * predicate (`hasVendorId` in `query-engine-integrations/src/ai/ai-sessions.ts`)
+ * moved to insert time; both are built from the same `MAPLE_AI_*` constants so
+ * they cannot drift apart silently.
+ *
+ * A missing Map key reads back as `''`, so the single `!= ''` comparison is
+ * both the presence check and the non-empty check.
+ */
+export const aiTraceIndexMv = defineMaterializedView("ai_trace_index_mv", {
+	description:
+		"Populates ai_trace_index with GenAI agent spans (maple_ai.vendor.id stamped), pre-extracting the maple_ai.* and failure attributes to plain columns.",
+	datasource: aiTraceIndex,
+	nodes: [
+		node({
+			name: "ai_trace_index_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          Timestamp,
+          TraceId,
+          SpanAttributes['${MAPLE_AI_SESSION_ID_ATTR}'] AS SessionId,
+          SpanAttributes['${MAPLE_AI_VENDOR_ID_ATTR}'] AS VendorId,
+          SpanAttributes['${MAPLE_AI_VENDOR_VERSION_ATTR}'] AS VendorVersion,
+          ServiceName,
+          StatusCode,
+          SpanAttributes['error.type'] AS ErrorType,
+          SpanAttributes['gen_ai.response.status'] AS ResponseStatus
+        FROM traces
+        WHERE SpanAttributes['${MAPLE_AI_VENDOR_ID_ATTR}'] != ''
       `,
 		}),
 	],

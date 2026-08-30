@@ -3,6 +3,10 @@ import { tinybirdProjectManifest } from "../generated/tinybird-project-manifest"
 
 const RETENTION_DAYS = {
 	alert_checks: 365,
+	// Raw-tier sibling of trace_detail_spans: rebuilt from `traces`, so holding
+	// it past the source's own retention would store rows detection can no
+	// longer cross-check against a raw trace.
+	ai_trace_index: 30,
 	attribute_keys_hourly: 90,
 	attribute_values_hourly: 90,
 	error_events: 90,

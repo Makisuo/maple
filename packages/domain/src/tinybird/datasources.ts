@@ -1080,6 +1080,52 @@ export const traceDetailSpans = defineDatasource("trace_detail_spans", {
 export type TraceDetailSpansRow = InferRow<typeof traceDetailSpans>
 
 /**
+ * Filtered projection of GenAI agent spans — every span the ingest gateway
+ * stamped with `maple_ai.vendor.id` — for the Agent Sessions read path
+ * (`aiSessionListQuery` detection + `aiSessionFacetsQuery`).
+ *
+ * Why it exists: detecting agent traces by `mapContains(SpanAttributes, …)` on
+ * raw `traces` cannot be indexed at this shape. GenAI spans are ~0.01% of rows
+ * but arrive continuously — about one per index granule — so the
+ * `mapKeys(SpanAttributes)` bloom index prunes nothing and the scan reads the
+ * fat Map column for every span in the window (measured 2026-08-29: ~3.6s for
+ * one hour, timeout at a day). This table holds only those spans, pre-extracted
+ * to plain columns, so the same detection is a scan of ~10k narrow rows per day.
+ *
+ * `StatusCode`/`ErrorType`/`ResponseStatus` carry the failure signal of the
+ * agent spans themselves (the list's `errorSpanCount` attribute half), so the
+ * list query can stop reading Map columns outside the per-trace fan-out.
+ *
+ * Session ids live only on the turn-owning spans, so `SessionId` is '' for most
+ * rows — resolution to a session key stays per-TRACE at read time, exactly as
+ * documented in `query-engine-integrations/src/ai/ai-sessions.ts`.
+ */
+export const aiTraceIndex = defineDatasource("ai_trace_index", {
+	description:
+		"GenAI agent spans only (maple_ai.vendor.id stamped), pre-extracted to plain columns. Detection/facet surface for the Agent Sessions pages. Populated by materialized view.",
+	jsonPaths: false,
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		Timestamp: t.dateTime64(9),
+		TraceId: t.string(),
+		SessionId: t.string(),
+		VendorId: t.string().lowCardinality(),
+		VendorVersion: t.string().lowCardinality(),
+		ServiceName: t.string().lowCardinality(),
+		StatusCode: t.string().lowCardinality(),
+		ErrorType: t.string().lowCardinality(),
+		ResponseStatus: t.string().lowCardinality(),
+	},
+	engine: engine.mergeTree({
+		partitionKey: "toDate(Timestamp)",
+		sortingKey: ["OrgId", "Timestamp", "TraceId"],
+		ttl: "toDate(Timestamp) + INTERVAL 30 DAY",
+	}),
+})
+
+export type AiTraceIndexRow = InferRow<typeof aiTraceIndex>
+
+/**
  * OpenTelemetry sum/counter metrics datasource
  */
 export const metricsSum = defineDatasource("metrics_sum", {

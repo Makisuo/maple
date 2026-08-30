@@ -106,6 +106,25 @@ export const TraceDetailSpans = table("trace_detail_spans", {
 	ResourceAttributes: T.map(T.string, T.string),
 })
 
+/**
+ * Filtered projection of GenAI agent spans (`maple_ai.vendor.id` stamped),
+ * pre-extracted to plain columns — the Agent Sessions detection/facet surface.
+ * `SessionId` is `''` on most rows: vendors stamp the session key only on the
+ * turn-owning spans, so session resolution stays per-trace at read time.
+ */
+export const AiTraceIndex = table("ai_trace_index", {
+	OrgId: orgId,
+	Timestamp: dateTime64,
+	TraceId: T.string,
+	SessionId: T.string,
+	VendorId: T.string,
+	VendorVersion: T.string,
+	ServiceName: T.string,
+	StatusCode: T.string,
+	ErrorType: T.string,
+	ResponseStatus: T.string,
+})
+
 export const TraceListMv = table("trace_list_mv", {
 	OrgId: orgId,
 	TraceId: T.string,

@@ -21,6 +21,7 @@ import { migration_0019_mv_sweep } from "./0019_mv_sweep"
 import { migration_0020_semconv_key_renames } from "./0020_semconv_key_renames"
 import { migration_0021_product_events } from "./0021_product_events"
 import { migration_0022_service_map_edge_quantiles } from "./0022_service_map_edge_quantiles"
+import { migration_0023_ai_trace_index } from "./0023_ai_trace_index"
 
 /**
  * A migration statement is either a raw SQL string (structural DDL) or a
@@ -74,6 +75,7 @@ export const migrations: ReadonlyArray<ClickHouseMigration> = [
 	migration_0020_semconv_key_renames,
 	migration_0021_product_events,
 	migration_0022_service_map_edge_quantiles,
+	migration_0023_ai_trace_index,
 ] as const
 
 /** Highest migration `version` bundled — i.e. the schema level a fully-applied
