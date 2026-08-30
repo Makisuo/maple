@@ -252,9 +252,11 @@ const CHAT_TURN_FAILED = "Maple couldn't complete this response."
  *
  * Two more deliberate choices:
  *
- *   - **In the `finally`, not on the happy path.** A turn that failed or was aborted
- *     mid-stream still spent whatever the provider had already served. Metering
- *     follows the spend, not the outcome.
+ *   - **In the `finally`, not on the happy path.** A turn that failed or was stopped
+ *     is still billed for every step the provider actually served — the loop accounts
+ *     a step's usage before it checks whether the turn survived. Metering follows the
+ *     spend, not the outcome. (A step interrupted before the provider's terminal event
+ *     reports no usage at all, so that much is unbillable rather than unbilled.)
  *   - **Keyed on the message id**, which identifies the turn: the session claims one
  *     per turn and never reuses it, so a turn that somehow ran twice still meters
  *     once, and a restarted investigation's new turn is real new spend that bills.

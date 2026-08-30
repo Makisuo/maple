@@ -12,12 +12,20 @@ import {
 	LLMClient,
 	LLMEvent,
 	Tool,
+	Usage,
 	type FinishReason,
 	type LLMRequest,
 	type LanguageModel,
 } from "@opencode-ai/ai"
 import { CloudflareWorkersAI } from "@opencode-ai/ai/providers/cloudflare"
-import { makeTurnObservability, runChatTurn, type ChatTurnEvent, type TurnCompletion } from "./index"
+import {
+	makeTurnObservability,
+	makeTurnUsage,
+	runChatTurn,
+	type ChatTurnEvent,
+	type TurnCompletion,
+	type TurnUsage,
+} from "./index"
 import { MAX_STEP_ATTEMPTS } from "./budgets"
 import { DEFAULT_RULESET } from "../permissions"
 import type { AgentDefinition } from "../agents"
@@ -47,10 +55,12 @@ const MODEL: LanguageModel = CloudflareWorkersAI.configure({
 /** A text delta, as the provider-neutral event the turn folds. */
 const textDelta = (text: string): LLMEvent => ({ type: "text-delta", id: "t1", text }) as LLMEvent
 
-const finish = (reason: FinishReason = "stop"): LLMEvent => ({
-	type: "finish",
-	reason: { normalized: reason },
-})
+const finish = (reason: FinishReason = "stop", usage?: Usage): LLMEvent =>
+	({
+		type: "finish",
+		reason: { normalized: reason },
+		...(usage === undefined ? undefined : { usage }),
+	}) as LLMEvent
 
 const reasoningDelta = (text: string): LLMEvent => ({ type: "reasoning-delta", id: "r1", text }) as LLMEvent
 
@@ -160,6 +170,7 @@ interface CollectOverrides {
 	readonly softStop?: () => boolean
 	readonly agent?: AgentDefinition
 	readonly completion?: TurnCompletion
+	readonly usage?: TurnUsage
 }
 
 const collect = (steps: ReadonlyArray<Step>, overrides: CollectOverrides = {}) => {
@@ -177,6 +188,7 @@ const collect = (steps: ReadonlyArray<Step>, overrides: CollectOverrides = {}) =
 		...(overrides.softStop ? { softStop: overrides.softStop } : undefined),
 		...(overrides.agent ? { agent: overrides.agent } : undefined),
 		...(overrides.completion ? { completion: overrides.completion } : undefined),
+		...(overrides.usage ? { usage: overrides.usage } : undefined),
 	}).pipe(
 		Stream.runCollect,
 		Effect.map((events) => Array.from(events) as ChatTurnEvent[]),
@@ -299,6 +311,20 @@ describe("runChatTurn", () => {
 			// An abort already recorded the terminal event on the session; emitting another here would
 			// double-close the turn in the durable log.
 			assert.isEmpty(terminal(events))
+		}),
+	)
+
+	it.live("still accounts a settled step's tokens when the turn is superseded", () =>
+		Effect.gen(function* () {
+			const usage = makeTurnUsage()
+			yield* collectEvents(
+				[[textDelta("hi"), finish("stop", new Usage({ inputTokens: 900, outputTokens: 120 }))]],
+				{ isCurrent: () => false, usage },
+			)
+
+			// The step completed, so the provider served and charged for it. Stopping the turn
+			// silences the log, not the bill — the session runner meters what this holds.
+			assert.deepEqual(usage, { input: 900, output: 120, cacheRead: 0 })
 		}),
 	)
 })
