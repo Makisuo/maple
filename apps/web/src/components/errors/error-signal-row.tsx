@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router"
 
 import type { ErrorIssueId } from "@maple/domain/http"
 import { ServiceDot } from "@maple/ui/components/service-dot"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 
@@ -40,9 +41,14 @@ function formatLastSeen(iso: string): string {
 const SURGE_THRESHOLD = 2.5
 
 /**
- * Comment and PR marks for a row. Deliberately muted — the lane answers "is
- * anyone on this?" without competing with severity and the incident chip, and
- * a row nobody has touched stays empty rather than showing a line of zeros.
+ * Comment and PR marks for a row. Deliberately muted — they answer "is anyone
+ * on this?" without competing with severity and the incident chip, and a row
+ * nobody has touched draws nothing rather than a line of zeros.
+ *
+ * They ride at the end of the identity lane rather than in a column of their
+ * own. As a column they held 64px on every row to say something about roughly
+ * a third of them, and that 64px was taken from the error message — the lane
+ * the list is actually read by.
  */
 function SignalActivity({
 	commentCount,
@@ -56,7 +62,7 @@ function SignalActivity({
 	const prCount = openPullRequestCount + mergedPullRequestCount
 	if (commentCount === 0 && prCount === 0) return null
 	return (
-		<>
+		<span className="ml-auto flex shrink-0 items-center gap-2 pl-3">
 			{commentCount > 0 ? (
 				<span
 					className="flex items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
@@ -82,7 +88,7 @@ function SignalActivity({
 					{prCount}
 				</span>
 			) : null}
-		</>
+		</span>
 	)
 }
 
@@ -94,14 +100,21 @@ function SignalActivity({
  */
 const LANE = {
 	severity: "w-[60px] shrink-0",
+	/** The lane that grows, and the last one to give ground. Every other lane
+	 *  now switches on at the width where the identity can still afford it —
+	 *  at 600px this row used to truncate `TypeError` to `Type…` while a 56px
+	 *  sparkline and a mostly-empty activity column kept their space. */
 	identity: "min-w-0 flex-1",
-	spark: "hidden w-[56px] shrink-0 @lg/page:block",
-	count: "hidden w-[52px] shrink-0 @xl/page:block",
-	service: "hidden w-[92px] shrink-0 @md/page:block",
+	/** Trend and count are one fact — "how much, and in what shape" — so they
+	 *  share a lane and read as a pair. The count arrives first (@lg); the
+	 *  shape needs real width to say anything, so it waits for @2xl. */
+	volume: "hidden w-[52px] shrink-0 items-center justify-end gap-2 @lg/page:flex @2xl/page:w-[148px]",
+	spark: "hidden min-w-0 flex-1 @2xl/page:block",
+	count: "w-[52px] shrink-0 text-right",
+	service: "hidden w-[92px] shrink-0 @xl/page:block",
 	// Sized to the longest label: "Open incident"/"Investigating" run ~98px in
 	// 11px Geist Mono plus the dot — 92px forced them onto two lines.
-	state: "hidden w-[104px] shrink-0 @2xl/page:block",
-	activity: "hidden w-[64px] shrink-0 @xl/page:block",
+	state: "hidden w-[104px] shrink-0 @3xl/page:block",
 	actor: "w-5 shrink-0",
 	lastSeen: "w-[64px] shrink-0",
 } as const
@@ -131,13 +144,59 @@ export function ErrorSignalHeader() {
 		>
 			<span className={LANE.severity} />
 			<span className={LANE.identity}>Error</span>
-			<span className={LANE.spark}>Trend</span>
-			<span className={cn(LANE.count, "text-right")}>Events</span>
+			<span className={LANE.volume}>
+				<span className={LANE.spark}>Trend</span>
+				<span className={LANE.count}>Events</span>
+			</span>
 			<span className={LANE.service}>Service</span>
 			<span className={LANE.state}>Status</span>
-			<span className={LANE.activity}>Activity</span>
 			<span className={LANE.actor} />
 			<span className={cn(LANE.lastSeen, "text-right")}>Last seen</span>
+		</div>
+	)
+}
+
+/**
+ * A row that has not arrived yet.
+ *
+ * Lives here, next to `LANE`, because a placeholder drawn to different geometry
+ * than the thing it stands in for is what makes a list jump when it loads. Six
+ * full-width bars said "something is coming"; these say "these columns are
+ * coming", and every lane lands in the pixel column it will occupy.
+ */
+export function ErrorSignalRowSkeleton({ index }: { index: number }) {
+	// Fixed widths rather than random ones: a list that reshuffles its own
+	// placeholder on every render reads as activity, and there is none.
+	const identityWidth = ["72%", "48%", "61%", "39%", "55%", "44%"][index % 6]
+
+	return (
+		<div className={cn(ROW_SHELL, "h-11")} aria-hidden="true">
+			<span className={cn(LANE.severity, "flex items-center")}>
+				<Skeleton className="h-5 w-12 rounded-sm" />
+			</span>
+			<span className={LANE.identity}>
+				<Skeleton className="h-3.5" style={{ width: identityWidth }} />
+			</span>
+			<span className={LANE.volume}>
+				<span className={LANE.spark}>
+					<Skeleton className="h-4 w-full" />
+				</span>
+				<span className={LANE.count}>
+					<Skeleton className="ml-auto h-3 w-8" />
+				</span>
+			</span>
+			<span className={LANE.service}>
+				<Skeleton className="h-3 w-16" />
+			</span>
+			<span className={LANE.state}>
+				<Skeleton className="h-3 w-20" />
+			</span>
+			<span className={LANE.actor}>
+				<Skeleton className="size-5 rounded-full" />
+			</span>
+			<span className={cn(LANE.lastSeen, "flex justify-end")}>
+				<Skeleton className="h-3 w-7" />
+			</span>
 		</div>
 	)
 }
@@ -206,62 +265,73 @@ export function ErrorSignalRow({
 					/>
 				</span>
 
-				{/* Identity dominates. The type holds its width up to 60% of the lane
-				    and the message gives way first — a row whose title truncates to
-				    "Connect…" has lost the only thing you scan for. */}
+				{/* Identity dominates. The message only appears once the lane is wide
+				    enough for both (@4xl); below that the type takes the whole lane,
+				    because a row whose title truncates to "Connect…" has lost the only
+				    thing you scan for, and a half-truncated pair loses both. Where both
+				    fit, the type holds up to 60% and the message gives way first. */}
 				<span className={cn(LANE.identity, "flex items-baseline gap-2")}>
 					<span
-						className="max-w-[60%] shrink-0 truncate font-medium text-foreground"
+						className="min-w-0 truncate font-medium text-foreground @4xl/page:max-w-[60%] @4xl/page:shrink-0"
 						title={signal.title}
 					>
 						{signal.title}
 					</span>
 					{signal.detail ? (
 						<span
-							className="hidden min-w-0 flex-1 truncate text-muted-foreground @md/page:inline"
+							className="hidden min-w-0 flex-1 truncate text-muted-foreground @4xl/page:inline"
 							title={signal.detail}
 						>
 							{signal.detail}
 						</span>
 					) : null}
-				</span>
-
-				<span className={LANE.spark}>
-					<SignalSpark
-						values={dense}
-						severity={signal.severity}
-						surging={isSurging}
-						label={
-							isSurging
-								? `Surging — ${formatNumber(signal.windowCount ?? 0)} occurrences, concentrated at the end of the window`
-								: `${formatNumber(signal.windowCount ?? 0)} occurrences over the window`
-						}
+					<SignalActivity
+						commentCount={signal.commentCount}
+						openPullRequestCount={signal.openPullRequestCount}
+						mergedPullRequestCount={signal.mergedPullRequestCount}
 					/>
 				</span>
 
-				<span
-					className={cn(LANE.count, "text-right text-xs tabular-nums")}
-					title={
-						signal.windowCount === null
-							? `No occurrences in this window · ${signal.totalCount.toLocaleString()} all time`
-							: `${signal.windowCount.toLocaleString()} in this window · ${signal.totalCount.toLocaleString()} all time`
-					}
-				>
-					{signal.windowCount === null ? (
-						<span className="text-muted-foreground/50">—</span>
-					) : (
-						<span
-							className={isSurging ? "font-medium text-destructive" : "text-muted-foreground"}
-						>
-							{formatNumber(signal.windowCount)}
-						</span>
-					)}
+				<span className={LANE.volume}>
+					<span className={LANE.spark}>
+						<SignalSpark
+							values={dense}
+							severity={signal.severity}
+							surging={isSurging}
+							label={
+								isSurging
+									? `Surging — ${formatNumber(signal.windowCount ?? 0)} occurrences, concentrated at the end of the window`
+									: `${formatNumber(signal.windowCount ?? 0)} occurrences over the window`
+							}
+						/>
+					</span>
+
+					<span
+						className={cn(LANE.count, "text-xs tabular-nums")}
+						title={
+							signal.windowCount === null
+								? `No occurrences in this window · ${signal.totalCount.toLocaleString()} all time`
+								: `${signal.windowCount.toLocaleString()} in this window · ${signal.totalCount.toLocaleString()} all time`
+						}
+					>
+						{signal.windowCount === null ? (
+							<span className="text-muted-foreground/50">—</span>
+						) : (
+							<span
+								className={
+									isSurging ? "font-medium text-destructive" : "text-muted-foreground"
+								}
+							>
+								{formatNumber(signal.windowCount)}
+							</span>
+						)}
+					</span>
 				</span>
 
 				<span
 					className={cn(
 						LANE.service,
-						"items-center gap-1.5 text-xs text-muted-foreground @md/page:flex",
+						"items-center gap-1.5 text-xs text-muted-foreground @xl/page:flex",
 					)}
 					title={signal.serviceName}
 				>
@@ -271,14 +341,6 @@ export function ErrorSignalRow({
 
 				<span className={LANE.state}>
 					<SignalStateChip state={signal.state} withConfidence={false} />
-				</span>
-
-				<span className={cn(LANE.activity, "items-center gap-2 @xl/page:flex")}>
-					<SignalActivity
-						commentCount={signal.commentCount}
-						openPullRequestCount={signal.openPullRequestCount}
-						mergedPullRequestCount={signal.mergedPullRequestCount}
-					/>
 				</span>
 
 				<span className={LANE.actor}>
