@@ -282,6 +282,29 @@ deploy/celld-self-host/
   k8s/
 ```
 
+### Images
+
+`Dockerfile.celld` is a production graph, not a copy of the monorepo:
+
+1. `turbo prune @maple/api @maple/alerting @maple/electric-sync @maple/clickhouse-cli`
+2. strip root tooling (`oxlint` / `alchemy` / `knip`)
+3. build `clickhouse-builder` + `effect-sdk` `dist/`
+4. `bun install --production` (no wrangler / workerd / vitest)
+5. slim runtime: `oven/bun:1.4.0-slim` + celld + esbuild
+
+Migrate uses `bun run --cwd packages/db db:migrate:pg` (`drizzle-orm` migrator),
+not `drizzle-kit`, so the runtime image does not need that devDependency.
+
+Measured on arm64 (one image; api/sync/alerting share layers):
+
+| Image                         | Approx                                                   |
+| ----------------------------- | -------------------------------------------------------- |
+| `maple-celld`                 | 559 MB (was 3.35 GB with a full-workspace `bun install`) |
+| `maple-web`                   | 75 MB                                                    |
+| `maple-pg-ws-proxy`           | 185 MB (`bun` slim base)                                 |
+| `maple-otel`                  | 29 MB                                                    |
+| ClickHouse / Electric / Caddy | upstream                                                 |
+
 ## VPS notes
 
 A VPS bring-up is the data plane plus one celld process per public Worker:

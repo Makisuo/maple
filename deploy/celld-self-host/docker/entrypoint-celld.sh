@@ -1,7 +1,7 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Production celld: deploy the Worker into the fleet bucket, then serve it.
 # Not `celld dev` — that uses PROJECT/.celld/dev and shares nothing with prod.
-set -euo pipefail
+set -eu
 
 APP_DIR="${CELLD_APP_DIR:?CELLD_APP_DIR required}"
 PORT="${CELLD_PORT:?CELLD_PORT required}"
@@ -14,7 +14,7 @@ REGION="${AWS_REGION:-us-east-1}"
 cd "$APP_DIR"
 export PATH="/usr/local/bin:/root/.bun/bin:${PATH}"
 export CELLD_ESBUILD="${CELLD_ESBUILD:-$(command -v esbuild)}"
-if [[ -z "${CELLD_ESBUILD}" ]]; then
+if [ -z "${CELLD_ESBUILD}" ]; then
 	echo "celld-entrypoint: esbuild not on PATH" >&2
 	exit 1
 fi
@@ -27,11 +27,12 @@ mkdir -p "$CELLD_WATCH"
 echo "celld-entrypoint: deploy $CONFIG → $BUCKET ($ENDPOINT)"
 "$CELLD_BIN" deploy "$CONFIG" --bucket "$BUCKET" --endpoint "$ENDPOINT" --region "$REGION"
 
-echo "celld-entrypoint: listen 0.0.0.0:${PORT}"
+LISTEN_HOST="${CELLD_LISTEN_HOST:-0.0.0.0}"
+echo "celld-entrypoint: listen ${LISTEN_HOST}:${PORT}"
 exec "$CELLD_BIN" \
 	--bucket "$BUCKET" \
 	--endpoint "$ENDPOINT" \
 	--region "$REGION" \
-	--listen "0.0.0.0:${PORT}" \
+	--listen "${LISTEN_HOST}:${PORT}" \
 	--internal-listen "127.0.0.1:0" \
 	--trust-forwarded-headers

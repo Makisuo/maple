@@ -28,7 +28,7 @@ spec:
               set -euo pipefail
               export PATH="/usr/local/bin:/root/.bun/bin:$PATH"
               cd /app
-              bun run --cwd packages/db db:migrate
+              bun run --cwd packages/db db:migrate:pg
               bun run --cwd packages/clickhouse-cli start apply \
                 --url="$CLICKHOUSE_URL" \
                 --user="$CLICKHOUSE_USER" \

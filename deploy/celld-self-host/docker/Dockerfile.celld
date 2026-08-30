@@ -1,47 +1,80 @@
-# celld Worker runtime. Same Maple Worker sources as Cloudflare; no alchemy.
-# Build from repo root: docker build -f deploy/celld-self-host/docker/Dockerfile.celld .
+# celld Worker runtime. Production graph only: api + electric-sync + alerting
+# (+ clickhouse-cli / db for the migrate job). Build from repo root:
+#   docker build -f deploy/celld-self-host/docker/Dockerfile.celld .
+
 FROM oven/bun:1.4.0 AS base
 WORKDIR /app
 
+FROM base AS pruner
+COPY . .
+RUN bunx turbo prune \
+	@maple/api \
+	@maple/alerting \
+	@maple/electric-sync \
+	@maple/clickhouse-cli \
+	--docker --out-dir /app/out
+
+FROM base AS deps
+COPY --from=pruner /app/out/json/ ./
+COPY --from=pruner /app/out/bun.lock ./bun.lock
+COPY bunfig.toml ./
+COPY patches ./patches
+# turbo prune keeps the root package.json, including oxlint/alchemy/knip.
+# Those are not Worker runtime. Drop them before bun install.
+RUN bun -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("package.json","utf8")); p.devDependencies={}; p.scripts={}; fs.writeFileSync("package.json", JSON.stringify(p,null,2));'
+RUN bun install --ignore-scripts || bun install --ignore-scripts
+
+FROM deps AS build
+COPY --from=pruner /app/out/full/ ./
+# `out/full` restores the original root package.json; strip tooling again.
+RUN bun -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("package.json","utf8")); p.devDependencies={}; p.scripts={}; fs.writeFileSync("package.json", JSON.stringify(p,null,2));'
+# Re-install with full sources so workspace bins (tsdown) resolve, then emit
+# dist/ for packages whose package.json exports point at dist/, not src/.
+RUN bun install --ignore-scripts || bun install --ignore-scripts
+RUN bun run --cwd lib/clickhouse-builder build && \
+	bun run --cwd packages/effect-sdk build
+
+# Drop workspace devDependencies (wrangler/workerd/miniflare/vitest).
+# Postgres migrate uses packages/db/scripts/migrate-pg.ts (drizzle-orm), not drizzle-kit.
+FROM build AS prod
+RUN rm -rf node_modules && bun install --production --ignore-scripts
+
+FROM oven/bun:1.4.0-slim AS runtime
+WORKDIR /app
+
 ARG CELLD_VERSION=v0.4.0
-ARG TARGETARCH=arm64
+ARG TARGETARCH
+ARG ESBUILD_VERSION=0.24.2
 
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends ca-certificates curl gzip \
 	&& rm -rf /var/lib/apt/lists/*
 
 RUN set -euo pipefail; \
-	case "$TARGETARCH" in \
-		amd64) asset=celld-x86_64-unknown-linux-gnu.gz ;; \
-		arm64) asset=celld-aarch64-unknown-linux-gnu.gz ;; \
-		*) echo "unsupported TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
+	arch="${TARGETARCH:-}"; \
+	if [ -z "$arch" ]; then \
+		case "$(uname -m)" in \
+			aarch64|arm64) arch=arm64 ;; \
+			x86_64|amd64) arch=amd64 ;; \
+			*) echo "unsupported arch $(uname -m)" >&2; exit 1 ;; \
+		esac; \
+	fi; \
+	case "$arch" in \
+		amd64) asset=celld-x86_64-unknown-linux-gnu.gz; plat=linux-x64 ;; \
+		arm64) asset=celld-aarch64-unknown-linux-gnu.gz; plat=linux-arm64 ;; \
+		*) echo "unsupported TARGETARCH=$arch" >&2; exit 1 ;; \
 	esac; \
 	curl -fsSL "https://github.com/denoland/celld/releases/download/${CELLD_VERSION}/${asset}" \
 		| gzip -d > /usr/local/bin/celld; \
 	chmod +x /usr/local/bin/celld; \
-	celld --version
-
-COPY package.json bun.lock bunfig.toml turbo.json ./
-COPY apps ./apps
-COPY packages ./packages
-COPY lib ./lib
-COPY patches ./patches
-
-ARG ESBUILD_VERSION=0.24.2
-RUN set -euo pipefail; \
-	case "$TARGETARCH" in \
-		amd64) plat=linux-x64 ;; \
-		arm64) plat=linux-arm64 ;; \
-		*) echo "unsupported TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
-	esac; \
 	curl -fsSL "https://registry.npmjs.org/@esbuild/${plat}/-/${plat}-${ESBUILD_VERSION}.tgz" \
 		| tar -xz -C /tmp; \
 	install -m 0755 /tmp/package/bin/esbuild /usr/local/bin/esbuild; \
+	rm -rf /tmp/package; \
+	celld --version; \
 	esbuild --version
 
-# Workspace install can flake on npm (pglite/alchemy are unused at celld runtime).
-RUN bun install || bun install
-
+COPY --from=prod /app /app
 COPY deploy/celld-self-host/docker/entrypoint-celld.sh /entrypoint-celld.sh
 RUN chmod +x /entrypoint-celld.sh
 
