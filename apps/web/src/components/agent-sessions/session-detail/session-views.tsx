@@ -125,6 +125,11 @@ export function SessionViews({
 	 *  a turn folded shut would put the reader on a header with nothing under it. */
 	const openTurnInTraceView = (turnId: string) => {
 		clearRevealed()
+		// The Overview never showed the filter box, so a query left behind by an
+		// earlier visit to Traces is invisible from where this click was made —
+		// and one that matches nothing in this turn would drop the very row the
+		// reader was sent to. Crossing from a view with no filter clears it.
+		setQuery("")
 		setRevealedTurnId(turnId)
 		setCollapsedTurns((previous) => {
 			if (!previous.has(turnId)) return previous
@@ -257,73 +262,91 @@ export function SessionViews({
 
 			{/* Overview, Trace and Transcript carry the bottom padding the page
 			    scroller gave up (`pb-0`, so the Flow floor can pin flush — see the
-			    route); the Flow view stays unpadded for the same reason. Only the
-			    active view sees the span selection: an outgoing panel stays
-			    mounted until its exit transition completes, and two views holding
-			    the inspection overlay open would stack two scrims. */}
+			    route); the Flow view stays unpadded for the same reason.
+
+			    Each panel renders its view only while that view is the active one.
+			    The panel ELEMENTS outlive the switch — a Tabs panel unmounts only
+			    once its exit transition reports complete, an animation frame or
+			    more after the tab changed — and a view left standing that long is
+			    not free. The waterfall measures its own offset inside the page
+			    scroller as it mounts, so the Overview still in the page above it
+			    moved that measurement by the Overview's whole height, and "Open in
+			    Traces view" scrolled to a row a screenful and more from where the
+			    row actually was. It also means a list the reader had scrolled
+			    comes back as a fresh mount rather than waking up mid-session with
+			    a stale scroll — and, as before, that only one view holds the
+			    inspection overlay, so no switch can stack two scrims. */}
 			<TabsContent value="overview" className="flex flex-[1_1_auto] flex-col pb-4">
-				<SessionOverview
-					turns={turns}
-					summary={summary}
-					selectedSpanId={view === "overview" ? selectedSpanId : undefined}
-					onSelectSpan={selectSpan}
-					spanTab={spanTab}
-					onSpanTabChange={setSpanTab}
-					toolResults={toolResults}
-					onOpenTraceView={openInTraceView}
-					onOpenTurnInTraceView={openTurnInTraceView}
-				/>
+				{view === "overview" && (
+					<SessionOverview
+						turns={turns}
+						summary={summary}
+						selectedSpanId={selectedSpanId}
+						onSelectSpan={selectSpan}
+						spanTab={spanTab}
+						onSpanTabChange={setSpanTab}
+						toolResults={toolResults}
+						onOpenTraceView={openInTraceView}
+						onOpenTurnInTraceView={openTurnInTraceView}
+					/>
+				)}
 			</TabsContent>
 			<TabsContent value="trace" className="flex flex-[1_1_auto] flex-col pb-4">
-				<SessionWaterfall
-					turns={turns}
-					summary={summary}
-					query={query}
-					agentSpansOnly={agentSpansOnly}
-					collapseIdle={collapseIdle}
-					collapsedTurns={collapsedTurns}
-					onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
-					selectedSpanId={view === "trace" ? selectedSpanId : undefined}
-					revealedSpanId={revealedSpanId}
-					revealedTurnId={revealedTurnId}
-					onSelectSpan={selectSpan}
-					spanTab={spanTab}
-					onSpanTabChange={setSpanTab}
-					toolResults={toolResults}
-				/>
+				{view === "trace" && (
+					<SessionWaterfall
+						turns={turns}
+						summary={summary}
+						query={query}
+						agentSpansOnly={agentSpansOnly}
+						collapseIdle={collapseIdle}
+						collapsedTurns={collapsedTurns}
+						onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
+						selectedSpanId={selectedSpanId}
+						revealedSpanId={revealedSpanId}
+						revealedTurnId={revealedTurnId}
+						onSelectSpan={selectSpan}
+						spanTab={spanTab}
+						onSpanTabChange={setSpanTab}
+						toolResults={toolResults}
+					/>
+				)}
 			</TabsContent>
 			<TabsContent value="flow" className="flex flex-[1_1_auto] flex-col">
-				<SessionFlow
-					turns={turns}
-					mergeRepeats={mergeRepeats}
-					query={query}
-					agentSpansOnly={agentSpansOnly}
-					zoom={zoom}
-					onZoomChange={setZoom}
-					selectedSpanId={view === "flow" ? selectedSpanId : undefined}
-					onSelectSpan={selectSpan}
-					spanTab={spanTab}
-					onSpanTabChange={setSpanTab}
-					toolResults={toolResults}
-					onOpenTraceView={openInTraceView}
-				/>
+				{view === "flow" && (
+					<SessionFlow
+						turns={turns}
+						mergeRepeats={mergeRepeats}
+						query={query}
+						agentSpansOnly={agentSpansOnly}
+						zoom={zoom}
+						onZoomChange={setZoom}
+						selectedSpanId={selectedSpanId}
+						onSelectSpan={selectSpan}
+						spanTab={spanTab}
+						onSpanTabChange={setSpanTab}
+						toolResults={toolResults}
+						onOpenTraceView={openInTraceView}
+					/>
+				)}
 			</TabsContent>
 			<TabsContent value="transcript" className="flex flex-[1_1_auto] flex-col pb-4">
-				<SessionTranscript
-					turns={turns}
-					toolResults={toolResults}
-					query={query}
-					showThinking={showThinking}
-					showPayloads={showPayloads}
-					truncated={truncated}
-					collapsedTurns={collapsedTurns}
-					onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
-					openRows={openRows}
-					onToggleRow={(key) => setOpenRows((previous) => toggled(previous, key))}
-					selectedSpanId={selectedSpanId}
-					onSelectSpan={selectSpan}
-					onOpenTraceView={openInTraceView}
-				/>
+				{view === "transcript" && (
+					<SessionTranscript
+						turns={turns}
+						toolResults={toolResults}
+						query={query}
+						showThinking={showThinking}
+						showPayloads={showPayloads}
+						truncated={truncated}
+						collapsedTurns={collapsedTurns}
+						onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
+						openRows={openRows}
+						onToggleRow={(key) => setOpenRows((previous) => toggled(previous, key))}
+						selectedSpanId={selectedSpanId}
+						onSelectSpan={selectSpan}
+						onOpenTraceView={openInTraceView}
+					/>
+				)}
 			</TabsContent>
 		</Tabs>
 	)

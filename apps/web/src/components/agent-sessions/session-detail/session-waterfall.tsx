@@ -172,8 +172,26 @@ export function SessionWaterfall({
 	// the middle of the viewport, clear of both edges, so it reads with the rows
 	// around it rather than hard against the ruler or the fold. Once, on mount —
 	// after that the URL follows the reader rather than leading them.
+	//
+	// It aims twice. The first aim is the virtualizer's, and it is made against a
+	// number — this list's offset inside the page scroller — measured while the
+	// page was still settling into the view switch that brought the reader here.
+	// The second is the row's own: a frame later the row exists in the DOM, and
+	// an element can be asked where it is without anything having to have been
+	// measured correctly first.
 	const landingSpanId = revealedSpanId ?? selectedSpanId
 	const didInitialScroll = useRef(false)
+	// The correcting frame is held here and cancelled only on unmount: the effect
+	// below re-runs on every render (`getScrollElement` is a fresh closure each
+	// time), and a cleanup that cancelled per run would cancel the correction
+	// before the frame it is waiting for ever arrived.
+	const correctionFrame = useRef<number>(undefined)
+	useEffect(
+		() => () => {
+			if (correctionFrame.current !== undefined) cancelAnimationFrame(correctionFrame.current)
+		},
+		[],
+	)
 	useEffect(() => {
 		if (didInitialScroll.current) return
 		// Not before the scroller exists: the list element attaches in a layout
@@ -183,17 +201,35 @@ export function SessionWaterfall({
 		// A revealed turn wins over a revealed span: it is the later of the two
 		// gestures, and its header is what the reader was sent to see.
 		if (revealedTurnId !== undefined) {
-			const index = rows.findIndex((row) => row.kind === "turn" && row.turn.id === revealedTurnId)
-			if (index === -1) return
+			const turnIndex = rows.findIndex((row) => row.kind === "turn" && row.turn.id === revealedTurnId)
+			if (turnIndex === -1) return
 			didInitialScroll.current = true
-			virtualizer.scrollToIndex(index, { align: "center" })
+			virtualizer.scrollToIndex(turnIndex, { align: "center" })
+			correctionFrame.current = requestAnimationFrame(() => {
+				const header = [...document.querySelectorAll("[data-turn-row]")].find(
+					(candidate) => candidate.getAttribute("data-turn-row") === revealedTurnId,
+				)
+				header?.scrollIntoView({ block: "center" })
+			})
 			return
 		}
 		if (landingSpanId === undefined) return
+		// Nor before the row is in the list: a span the filter is hiding, or one
+		// inside a collapsed turn, has nowhere to land yet — leaving the landing
+		// unspent means it still happens if the reader clears the filter.
+		const index = spanRowIndexById.get(landingSpanId)
+		if (index === undefined) return
 		didInitialScroll.current = true
 		setFocusedId(landingSpanId)
-		const index = spanRowIndexById.get(landingSpanId)
-		if (index !== undefined) virtualizer.scrollToIndex(index, { align: "center" })
+		virtualizer.scrollToIndex(index, { align: "center" })
+		correctionFrame.current = requestAnimationFrame(() => {
+			// Read off the drawn rows rather than through a selector: a span id is
+			// warehouse data, not something to interpolate into one.
+			const row = [...document.querySelectorAll("[data-span-row]")].find(
+				(candidate) => candidate.getAttribute("data-span-row") === landingSpanId,
+			)
+			row?.scrollIntoView({ block: "center" })
+		})
 	}, [
 		landingSpanId,
 		revealedTurnId,
@@ -203,6 +239,7 @@ export function SessionWaterfall({
 		virtualizer,
 		getScrollElement,
 	])
+
 
 	return (
 		<div className="@container flex grow flex-col">
@@ -450,6 +487,9 @@ function TurnHeader({
 
 	return (
 		<div
+			// The row the landing correction below scrolls to, a frame after the
+			// virtualizer drew it.
+			data-turn-row={turn.id}
 			// The mark is a background colour; this is how the page's tests — and
 			// anything else looking for it — find the turn wearing it.
 			data-revealed={revealed || undefined}
@@ -568,6 +608,9 @@ function SpanRow({
 			type="button"
 			onClick={onClick}
 			aria-current={selected || undefined}
+			// How the landing above finds this row once it has been drawn, to
+			// correct its own aim against where the row actually is.
+			data-span-row={span.spanId}
 			// The mark is a background colour; this is how the page's tests — and
 			// anything else looking for it — find the row wearing it.
 			data-revealed={revealed || undefined}
