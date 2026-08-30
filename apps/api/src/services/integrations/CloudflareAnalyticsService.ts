@@ -1011,6 +1011,7 @@ interface CloudflareAnalyticsZoneStatusFields {
 	readonly lastSyncedAt: number | null
 	readonly lastError: string | null
 	readonly watermarkAt: number | null
+	readonly backfillAt: number | null
 }
 
 interface CloudflareAnalyticsWorkersStatusFields {
@@ -1018,6 +1019,7 @@ interface CloudflareAnalyticsWorkersStatusFields {
 	readonly lastSyncedAt: number | null
 	readonly lastError: string | null
 	readonly watermarkAt: number | null
+	readonly backfillAt: number | null
 }
 
 /** One connected account's collection state. */
@@ -2412,12 +2414,14 @@ export class CloudflareAnalyticsService extends Context.Service<
 				lastSyncedAt: row.lastSuccessAt == null ? null : dateToMs(row.lastSuccessAt),
 				lastError: row.lastError,
 				watermarkAt: row.watermarkAt == null ? null : dateToMs(row.watermarkAt),
+				backfillAt: row.backfillAt == null ? null : dateToMs(row.backfillAt),
 			})
 			const toWorkers = (row: CloudflareAnalyticsStateRow): CloudflareAnalyticsWorkersStatusFields => ({
 				enabled: row.enabled,
 				lastSyncedAt: row.lastSuccessAt == null ? null : dateToMs(row.lastSuccessAt),
 				lastError: row.lastError,
 				watermarkAt: row.watermarkAt == null ? null : dateToMs(row.watermarkAt),
+				backfillAt: row.backfillAt == null ? null : dateToMs(row.backfillAt),
 			})
 			const accountIds = [...new Set(rows.map((row) => row.accountId))].sort()
 			const accounts = accountIds.map((accountId): CloudflareAnalyticsAccountStatus => {
@@ -2611,6 +2615,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 					connectedByUserId: null,
 					scope: null,
 					analyticsCapable: false,
+					connectedAt: null,
 					accounts: [],
 					zones: [],
 					workers: null,
@@ -2652,6 +2657,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 				connectedByUserId: decodeUserIdSync(primary.connectedByUserId),
 				scope: primary.scope,
 				analyticsCapable: accounts.some((account) => account.analyticsCapable && !account.revoked),
+				connectedAt: connection.connectedAt,
 				accounts,
 				zones: mergedZones,
 				workers: mergedWorkers,

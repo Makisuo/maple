@@ -88,6 +88,12 @@ export class CloudflareAnalyticsZoneStatus extends Schema.Class<CloudflareAnalyt
 	lastError: Schema.NullOr(Schema.String),
 	/** Last successfully-ingested 5-min bucket (epoch ms) — how far the poller has caught up. */
 	watermarkAt: Schema.NullOr(Schema.Number),
+	/**
+	 * History frontier (epoch ms): the poller walks this DOWN toward the 24h floor after the
+	 * head is live, so it doubles as backfill progress. Null before the first head poll seeds
+	 * it, and once history is complete. optionalKey only for deploy-window compat; always sent.
+	 */
+	backfillAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 }) {}
 
 /** Account-level Workers invocation-metrics collection state. */
@@ -99,6 +105,8 @@ export class CloudflareAnalyticsWorkersStatus extends Schema.Class<CloudflareAna
 	lastError: Schema.NullOr(Schema.String),
 	/** Last successfully-ingested 5-min bucket (epoch ms) — how far the poller has caught up. */
 	watermarkAt: Schema.NullOr(Schema.Number),
+	/** History frontier (epoch ms) — see {@link CloudflareAnalyticsZoneStatus.backfillAt}. */
+	backfillAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 }) {}
 
 /**
@@ -136,6 +144,12 @@ export class CloudflareIntegrationStatus extends Schema.Class<CloudflareIntegrat
 	connectedByUserId: Schema.NullOr(UserId),
 	scope: Schema.NullOr(Schema.String),
 	analyticsCapable: Schema.Boolean,
+	/**
+	 * When the grant was first established (epoch ms) — how the UI tells a normal
+	 * still-collecting first few minutes from a connection that has stopped producing data.
+	 * optionalKey only for deploy-window compat; always sent when connected.
+	 */
+	connectedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 	/** optionalKey only for deploy-window compat; always sent. */
 	accounts: Schema.optionalKey(Schema.Array(CloudflareConnectedAccountStatus)),
 	zones: Schema.Array(CloudflareAnalyticsZoneStatus),

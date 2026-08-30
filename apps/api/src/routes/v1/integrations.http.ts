@@ -79,6 +79,13 @@ const GITHUB_MESSAGE_TYPE = "maple:integration:github"
 const CLOUDFLARE_MESSAGE_TYPE = "maple:integration:cloudflare"
 const PLANETSCALE_MESSAGE_TYPE = "maple:integration:planetscale"
 
+/**
+ * How long the Cloudflare callback waits on the post-connect prime poll. Long enough for zone
+ * discovery plus a first window on an ordinary account, short enough that a slow or many-zoned
+ * one still gets its success page promptly — the cron finishes whatever is left.
+ */
+const CLOUDFLARE_PRIME_TIMEOUT = "12 seconds"
+
 const resolveRequestOrigin = (req: HttpServerRequest.HttpServerRequest): string => {
 	const headers = req.headers as Record<string, string | undefined>
 	const forwardedHost = headers["x-forwarded-host"]
@@ -1085,6 +1092,27 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 					cloudflareAnalytics.resetOrgState(result.orgId).pipe(
 						Effect.catchCause((cause) =>
 							Effect.logWarning("cloudflare post-connect state reset failed", {
+								orgId: result.orgId,
+								error: summarizeCause(cause),
+							}),
+						),
+					),
+				),
+				// Prime the org before the popup reports success. Without this the integration is
+				// entirely blank — no zones, no Workers, no data — until the alerting cron's next
+				// */5 tick discovers them, which reads as "connecting did nothing". `resetOrgState`
+				// above cleared `discoveredAt`, so this poll rediscovers and then spends what call
+				// budget it has on the newest window.
+				//
+				// Bounded and best-effort: discovery (the part that makes the UI stop looking
+				// empty) commits in the first seconds, and whatever polling the timeout cuts short
+				// resumes on the next tick — a lease released by interruption or expiry, never a
+				// failed callback page.
+				Effect.tap((result) =>
+					cloudflareAnalytics.pollOrg(result.orgId).pipe(
+						Effect.timeout(CLOUDFLARE_PRIME_TIMEOUT),
+						Effect.catchCause((cause) =>
+							Effect.logWarning("cloudflare post-connect prime poll incomplete", {
 								orgId: result.orgId,
 								error: summarizeCause(cause),
 							}),

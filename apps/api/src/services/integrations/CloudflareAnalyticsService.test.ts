@@ -1536,6 +1536,7 @@ describe("CloudflareAnalyticsService", () => {
 				lastSyncedAt: T0 - 5 * MIN,
 				lastError: null,
 				watermarkAt: T0 - 15 * MIN,
+				backfillAt: null,
 			})
 			assert.strictEqual(status.workers?.lastError, "boom")
 			assert.strictEqual(status.workers?.watermarkAt, null)
