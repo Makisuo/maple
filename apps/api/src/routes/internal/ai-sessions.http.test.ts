@@ -6,9 +6,9 @@ import {
 	CurrentTenant,
 	V1SchemaErrors,
 	V1UnexpectedErrors,
+	WarehouseConfigError,
 } from "@maple/domain/http"
 
-import { WarehouseConfigError } from "@maple/domain/http"
 import { WarehouseResponseLimitError } from "@maple/query-engine/execution"
 import { Context, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
@@ -398,17 +398,31 @@ describe("POST /internal/ai-sessions/facets", () => {
  * is a real misconfiguration that has to stay a loud 502.
  */
 describe("missing ai_trace_index degrade", () => {
-	const missingIndex = () =>
+	// One disjunct of `isMissingTable` per test, because the two backends
+	// produce different shapes: the Tinybird gateway says "Resource … not
+	// found" with no clickhouseType (the managed fleet's shape, detected by the
+	// message regex alone), while direct ClickHouse carries UNKNOWN_TABLE.
+	// Pinning both keeps either half of the predicate from being "simplified"
+	// away without a test noticing.
+	const tinybirdShape = () =>
 		Effect.fail(
 			new WarehouseConfigError({
-				message: "ClickHouse error: Unknown table expression identifier 'ai_trace_index'",
+				message: "Resource 'ai_trace_index' not found",
 				pipeName: "listAiSessions",
+			}),
+		)
+
+	const clickhouseShape = () =>
+		Effect.fail(
+			new WarehouseConfigError({
+				message: "Unknown table expression identifier in scope SELECT",
+				pipeName: "aiSessionsFacets",
 				clickhouseType: "UNKNOWN_TABLE",
 			}),
 		)
 
 	it("answers the list with an empty 200 when the index is absent", async () => {
-		const harness = makeHarness({ compiledQuery: missingIndex })
+		const harness = makeHarness({ compiledQuery: tinybirdShape })
 		try {
 			const response = await harness.post("/internal/ai-sessions/list", WINDOW)
 			expect(response.status).toBe(200)
@@ -419,7 +433,7 @@ describe("missing ai_trace_index degrade", () => {
 	})
 
 	it("answers the facets with empty dimensions when the index is absent", async () => {
-		const harness = makeHarness({ compiledQuery: missingIndex })
+		const harness = makeHarness({ compiledQuery: clickhouseShape })
 		try {
 			const response = await harness.post("/internal/ai-sessions/facets", WINDOW)
 			expect(response.status).toBe(200)

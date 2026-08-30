@@ -17,13 +17,6 @@ import * as Integrations from "@maple/query-engine-integrations"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 
 /**
- * Dashboard-only AI agent session reads.
- *
- * Serves the Agent Sessions page (behind the `agent_tracing` org rollout flag).
- * The flag hides the surface, not the data — scoping is `CurrentTenant`, like
- * every other warehouse read.
- */
-/**
  * Empty result instead of a 502 when `ai_trace_index` is absent — it ships in
  * a `requiredForIngest: false` migration, so a BYO-ClickHouse cluster gains it
  * only when an admin applies migration 0023, and nothing reconciles that (see
@@ -50,6 +43,13 @@ const emptyWhenIndexMissing =
 			}),
 		)
 
+/**
+ * Dashboard-only AI agent session reads.
+ *
+ * Serves the Agent Sessions page (behind the `agent_tracing` org rollout flag).
+ * The flag hides the surface, not the data — scoping is `CurrentTenant`, like
+ * every other warehouse read.
+ */
 export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 	MapleInternalApi,
 	"aiSessionsInternal",
