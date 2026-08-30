@@ -300,6 +300,7 @@ function Waterfall(props: {
 	onToggleTurn?: (turnId: string) => void
 	selectedSpanId?: string
 	revealedSpanId?: string
+	revealedTurnId?: string
 	onSelectSpan?: (spanId: string | undefined) => void
 	spanTab?: SpanDetailTab
 }) {
@@ -314,6 +315,7 @@ function Waterfall(props: {
 			onToggleTurn={props.onToggleTurn ?? noop}
 			selectedSpanId={props.selectedSpanId}
 			revealedSpanId={props.revealedSpanId}
+			revealedTurnId={props.revealedTurnId}
 			onSelectSpan={props.onSelectSpan ?? noop}
 			spanTab={props.spanTab}
 			onSpanTabChange={noop}
@@ -379,6 +381,7 @@ describe("SessionOverview", () => {
 		initialSpanId?: string
 		onSelectSpan?: (spanId: string | undefined) => void
 		onOpenTraceView?: () => void
+		onOpenTurnInTraceView?: (turnId: string) => void
 	}) {
 		const [selectedSpanId, setSelectedSpanId] = useState<string | undefined>(props.initialSpanId)
 		return (
@@ -393,6 +396,7 @@ describe("SessionOverview", () => {
 				spanTab={undefined}
 				onSpanTabChange={noop}
 				onOpenTraceView={props.onOpenTraceView ?? noop}
+				onOpenTurnInTraceView={props.onOpenTurnInTraceView ?? noop}
 			/>
 		)
 	}
@@ -480,14 +484,29 @@ describe("SessionOverview", () => {
 	})
 
 	// The shape strip replaces the turn digest: one cell per turn, colored by
-	// what the findings attribute to it, each opening the turn's anchor span.
-	it("draws one cell per turn and opens the turn's anchor from a click", () => {
+	// what the findings attribute to it. A cell is a whole turn, so it crosses to
+	// Traces and lands on that turn — opening its root span in the overlay
+	// answered a question nobody asked of a strip of turns.
+	it("draws one cell per turn and sends a click to that turn in Traces", () => {
 		const onSelectSpan = vi.fn()
-		render(<Overview onSelectSpan={onSelectSpan} />)
+		const onOpenTurnInTraceView = vi.fn()
+		render(<Overview onSelectSpan={onSelectSpan} onOpenTurnInTraceView={onOpenTurnInTraceView} />)
 
-		const cellTwo = screen.getByRole("button", { name: "2" })
-		fireEvent.click(cellTwo)
-		expect(onSelectSpan).toHaveBeenCalledWith("agent-2")
+		fireEvent.click(screen.getByRole("button", { name: "2" }))
+		expect(onOpenTurnInTraceView).toHaveBeenCalledWith(turns[1]!.id)
+		expect(onSelectSpan).not.toHaveBeenCalled()
+	})
+
+	// A tool called ten times and failing every time reads nothing like one that
+	// never failed; the rail used to draw both as the same bar.
+	it("separates a tool's failed calls from its successful ones", () => {
+		render(<Overview />)
+
+		// run_tests: one call, and it errored.
+		expect(screen.getByTitle("1 failed")).toBeTruthy()
+		expect(screen.getByTitle("0 ok · 1 errored")).toBeTruthy()
+		// read_file and grep_repo ran clean, and say so by having nothing to say.
+		expect(screen.getAllByTitle("1 ok · 0 errored").length).toBe(2)
 	})
 
 	it("says no cost was reported rather than pricing tokens itself", () => {
@@ -543,6 +562,16 @@ describe("SessionOverview", () => {
 })
 
 describe("SessionWaterfall", () => {
+	// The Overview's session shape sends the reader here by turn, not by span:
+	// the header is what they were sent to, so it wears the mark.
+	it("marks the turn header the reader was sent to", () => {
+		render(<Waterfall revealedTurnId={turns[1]!.id} />)
+
+		const marked = document.querySelectorAll("[data-revealed]")
+		expect(marked.length).toBe(1)
+		expect(marked[0]!.textContent).toContain("Turn 2")
+	})
+
 	it("groups spans under their turn and marks the idle between them", () => {
 		render(<Waterfall />)
 
