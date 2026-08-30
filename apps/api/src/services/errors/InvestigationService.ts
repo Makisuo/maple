@@ -1014,8 +1014,11 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 
 				// Deliberately does NOT meter. `request.inputTokens`/`outputTokens` are persisted onto
 				// the row above for display, but the charge is raised per *turn* in
-				// `chat/turn-runner.ts` — see `meterInvestigationTurn`. Metering here billed an
-				// investigation once, on its first diagnosis, and every follow-up turn (and every turn
+				// `chat/turn-runner.ts` — see `meterTurn`. Every caller that supplies usage here is a
+				// chat-session turn, and the runner meters that turn in full, including whatever it
+				// spends after this call. Metering here as well double-billed the turn; metering here
+				// *instead* under-billed it, because this key is the investigation id: a superseding
+				// diagnosis deduplicates against the first, so every follow-up turn (and every turn
 				// that failed before reaching this tool) was free. This path also carries no usage at
 				// all when reached over internal RPC, which never populates those fields.
 

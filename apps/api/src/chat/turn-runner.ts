@@ -31,11 +31,11 @@ import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/effect-clo
 import { LLM, Message, type LanguageModel, type LLMClientService } from "@opencode-ai/ai"
 import { Cause, Effect, Layer, ManagedRuntime, Option, Schema, Stream } from "effect"
 import type { ChatSession } from "./ChatSession"
+import type { TurnUsage } from "./loop"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { summarizeCause } from "@/platform/describe-cause"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { InvestigationId } from "@maple/domain/primitives"
-import type { TurnUsage } from "./loop"
 
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
@@ -205,7 +205,9 @@ const compactIfNeeded = (
 		)
 		// Housekeeping is still spend. The compaction call is billed to the same turn as the answer
 		// it follows — it is charged to us either way, and a turn that hides it under-reports what
-		// the conversation cost.
+		// the conversation cost. Safe to mutate here: the near-limit check above has already read
+		// `usage.input`, and `submit_diagnosis` — the only mid-turn reader — ran long before the
+		// answer this is compacting behind.
 		addUsage(usage, response.usage)
 
 		const summary = response.text.trim()
@@ -255,35 +257,44 @@ const METERING_TIMEOUT = "5 seconds"
 const CHAT_TURN_FAILED = "Maple couldn't complete this response."
 
 /**
- * Meter one investigation turn's token spend into Autumn.
+ * Meter what this turn spent into the org's AI usage, alongside the fan-out workflow's triage
+ * passes and the Slack agent.
  *
- * **Per turn, not per diagnosis.** This used to hang off `submit_diagnosis`, keyed on the bare
- * investigation id, which billed an investigation exactly once however much it went on to cost:
- * every follow-up turn the user asked for was free, and so was any turn that errored or ran out of
- * steps before reaching the tool. The key carries the turn (`messageId`), so each turn bills once
- * and a retried turn does not double-bill — the same reason the fan-out workflow keys on its
- * attempt rather than on the investigation.
+ * **One meter per turn, and this is it.** Two things used to bill the same tokens from different
+ * angles: `submit_diagnosis` billed the running total it reports to `InvestigationService`, keyed
+ * on the bare investigation id, so an investigation was charged exactly once however much it went
+ * on to cost — every follow-up turn was free, and so was any turn that errored or ran out of steps
+ * before reaching the tool. Suppressing this one in its favour lost the charge entirely, because a
+ * superseding diagnosis deduplicates against the first. So the investigation still records its
+ * tokens on the row, and this bills them, once, per turn.
  *
- * `turn-` keeps this key space disjoint from the fan-out's `<id>:<attempt>`. Both meter the same
- * investigation under the same `triage` source, so an unprefixed turn id could collide with an
- * attempt number and silently deduplicate a real charge.
+ * **Source and key follow the session.** An investigation session bills as `triage`, keyed
+ * `<investigationId>:turn-<messageId>` — the `turn-` prefix keeps the key space disjoint from the
+ * fan-out's `<id>:<attempt>` under that same source, where an unprefixed turn id could collide
+ * with an attempt number and silently swallow a real charge. Every other session is an attended
+ * chat turn and bills as `chat`, keyed `<sessionId>:<messageId>`. Either way the key carries the
+ * turn, so a turn that somehow ran twice still meters once, and a restarted investigation's new
+ * turn is real new spend that bills.
  *
- * Investigations only: a plain chat session has no investigation id and stays unmetered here.
+ * `usage` is the turn's whole total: every step, every sub-agent (they share the parent's
+ * accumulator), and the compaction that runs after the answer.
+ *
+ * **In a finalizer, not on the happy path.** A turn that failed, was stopped, or ran out of steps
+ * is still billed for every step the provider actually served — the loop accounts a step's usage
+ * before it checks whether the turn survived. Metering follows the spend, not the outcome. (A step
+ * interrupted before the provider's terminal event reports no usage at all, so that much is
+ * unbillable rather than unbilled.)
  */
-export const meterInvestigationTurn = (
+export const meterTurn = (
 	input: Pick<RunChatSessionTurnInput, "sessionId" | "messageId" | "env">,
 	tenant: Pick<TenantContext, "orgId">,
 	usage: { readonly input: number; readonly output: number },
 ): Effect.Effect<void> => {
-	const rawId = investigationIdFromChatSessionId(input.sessionId)
-	if (rawId === undefined) return Effect.void
-	// The same guard `buildDiagnosisCompletion` uses, so the set of sessions that bill is exactly
-	// the set that gets a `submit_diagnosis` tool: an `inv-` suffix that is not a UUID is not an
-	// investigation, and must not be charged as one.
-	const decoded = decodeInvestigationIdOption(rawId)
-	if (Option.isNone(decoded)) return Effect.void
-	const investigationId = decoded.value
 	if (usage.input <= 0 && usage.output <= 0) return Effect.void
+	const billing = investigationBilling(input.sessionId, input.messageId) ?? {
+		source: "chat" as const,
+		idempotencyKey: `${input.sessionId}:${input.messageId}`,
+	}
 	// Bookkeeping must never fail a delivered answer. `trackTokenUsage` already swallows its own
 	// transport errors; the `catch` covers the rest so this can be an infallible Effect.
 	return Effect.promise(() =>
@@ -291,10 +302,29 @@ export const meterInvestigationTurn = (
 			orgId: tenant.orgId,
 			inputTokens: usage.input,
 			outputTokens: usage.output,
-			idempotencyKey: `${investigationId}:turn-${input.messageId}`,
-			source: "triage",
+			idempotencyKey: billing.idempotencyKey,
+			source: billing.source,
 		}).catch(() => undefined),
 	).pipe(Effect.timeout(METERING_TIMEOUT), Effect.ignore)
+}
+
+/**
+ * `triage` billing coordinates for an investigation session, or `undefined` if this is not one.
+ *
+ * The `InvestigationId` decode is the same guard `buildDiagnosisCompletion` uses, so the set of
+ * sessions that bill as triage is exactly the set that gets a `submit_diagnosis` tool: an `inv-`
+ * suffix that is not a UUID is not an investigation, and must not be charged as one. It still
+ * bills — as the plain chat turn it is.
+ */
+const investigationBilling = (
+	sessionId: string,
+	messageId: string,
+): { readonly source: "triage"; readonly idempotencyKey: string } | undefined => {
+	const rawId = investigationIdFromChatSessionId(sessionId)
+	if (rawId === undefined) return undefined
+	const decoded = decodeInvestigationIdOption(rawId)
+	if (Option.isNone(decoded)) return undefined
+	return { source: "triage", idempotencyKey: `${decoded.value}:turn-${messageId}` }
 }
 
 /**
@@ -334,8 +364,9 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 
 	const tenant = toTenantContext(input.tenant)
 	const observability = loop.makeTurnObservability()
-	// Hoisted out of the program: `submit_diagnosis` reads it mid-turn, and the metering finalizer
-	// reads it after the turn has ended — including when it ended by failing.
+	// Hoisted out of the program: `submit_diagnosis` reads it mid-turn — see `TurnUsage`, the tool
+	// is invoked mid-turn so there is no later moment to hand it a total — and the metering
+	// finalizer reads it after the turn has ended, including when it ended by failing.
 	const usage = loop.makeTurnUsage()
 	let recordedTerminal = false
 	const annotateTurn = () =>
@@ -418,7 +449,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 	}).pipe(
 		// `ensuring`, not a trailing statement: a turn that failed, was aborted, or ran out of steps
 		// still burned the tokens it burned, and the pre-`ensuring` shape billed none of them.
-		Effect.ensuring(Effect.suspend(() => meterInvestigationTurn(input, tenant, usage))),
+		Effect.ensuring(Effect.suspend(() => meterTurn(input, tenant, usage))),
 		Effect.tapCause((cause) => {
 			observability.outcome = "error"
 			observability.failureReason ??= "UnhandledTurnFailure"

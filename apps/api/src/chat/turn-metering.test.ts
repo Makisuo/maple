@@ -1,14 +1,17 @@
 /**
- * What an investigation turn charges, and under which idempotency key.
+ * What a chat turn charges, and under which idempotency key.
  *
  * The key is the whole subject. Metering used to hang off `submit_diagnosis` keyed on the bare
  * investigation id, so an investigation was billed once no matter how many turns it went on to
- * cost — and a turn that failed before reaching the tool was billed nothing at all. Every
- * assertion here is about a charge that used to be silently deduplicated away.
+ * cost — and a turn that failed before reaching the tool was billed nothing at all. Most of the
+ * assertions here are about a charge that used to be silently deduplicated away.
+ *
+ * The rest are about the routing: `meterTurn` is the single meter on this path, so it has to
+ * charge an investigation turn as `triage` and an attended chat turn as `chat`, and never both.
  */
 import { Effect } from "effect"
 import { afterEach, assert, beforeEach, describe, it } from "vitest"
-import { meterInvestigationTurn } from "./turn-runner"
+import { meterTurn } from "./turn-runner"
 
 const ORG = "org_test"
 const INVESTIGATION = "0199a4d1-9f3c-7c8e-b2a1-3f5e7d9c1b40"
@@ -52,11 +55,11 @@ afterEach(() => {
 })
 
 const meter = (sessionId: string, messageId: string, input: number, output: number) =>
-	Effect.runPromise(meterInvestigationTurn(turn(sessionId, messageId), tenant, { input, output }))
+	Effect.runPromise(meterTurn(turn(sessionId, messageId), tenant, { input, output }))
 
 const keysFor = (featureId: string) => tracked.filter((t) => t.featureId === featureId).map((t) => t.key)
 
-describe("meterInvestigationTurn", () => {
+describe("meterTurn", () => {
 	it("charges input and output under a key that carries the turn", async () => {
 		await meter(`${ORG}:inv-${INVESTIGATION}`, "msg-1", 1200, 340)
 
@@ -123,9 +126,29 @@ describe("meterInvestigationTurn", () => {
 		assert.deepEqual(tracked, [])
 	})
 
-	it("charges nothing for a session that is not an investigation", async () => {
+	it("charges a plain chat session as `chat`, keyed on the session and the turn", async () => {
 		await meter(`${ORG}:default`, "msg-1", 1000, 100)
-		await meter(`${ORG}:alert-abc`, "msg-1", 1000, 100)
+
+		assert.deepEqual(keysFor("ai_input_tokens"), [`${ORG}:default:msg-1:chat:input`])
+		assert.deepEqual(keysFor("ai_output_tokens"), [`${ORG}:default:msg-1:chat:output`])
+	})
+
+	it("bills an investigation turn once, not once per source", async () => {
+		// The merge hazard this guards: two meters on the same tail, one keyed `triage` and one
+		// `chat`. The source segment makes those keys disjoint, so nothing would deduplicate them
+		// and every investigation turn would bill twice.
+		await meter(`${ORG}:inv-${INVESTIGATION}`, "msg-1", 1000, 100)
+
+		assert.deepEqual(keysFor("ai_input_tokens"), [`${INVESTIGATION}:turn-msg-1:triage:input`])
+		assert.deepEqual(keysFor("ai_output_tokens"), [`${INVESTIGATION}:turn-msg-1:triage:output`])
+	})
+
+	it("survives a tracker that rejects, rather than failing a delivered answer", async () => {
+		// This runs in `Effect.ensuring` on the turn's own program: a defect escaping here would
+		// turn an answer the user already has into a failed turn.
+		globalThis.fetch = () => Promise.reject(new Error("autumn is down"))
+
+		await meter(`${ORG}:inv-${INVESTIGATION}`, "msg-1", 1000, 100)
 
 		assert.deepEqual(tracked, [])
 	})
@@ -141,11 +164,27 @@ describe("meterInvestigationTurn", () => {
 		assert.deepEqual(tracked, [])
 	})
 
-	it("charges nothing for an `inv-` tab whose id is not an investigation id", async () => {
-		// Same guard `submit_diagnosis` applies: the set of sessions that bill is exactly the set
-		// that gets the tool.
+	it("charges an `inv-` tab whose id is not an investigation id as plain chat", async () => {
+		// Same guard `submit_diagnosis` applies: the set of sessions that bill as *triage* is
+		// exactly the set that gets the tool. It is still a turn, so it still bills — as chat.
 		await meter(`${ORG}:inv-not-a-uuid`, "msg-1", 1000, 100)
 
-		assert.deepEqual(tracked, [])
+		assert.deepEqual(keysFor("ai_input_tokens"), [`${ORG}:inv-not-a-uuid:msg-1:chat:input`])
+	})
+
+	it("bounds the tracker request itself, not just the finalizer", async () => {
+		// Belt and braces: `METERING_TIMEOUT` abandons the wait, `TRACK_TIMEOUT_MS` aborts the
+		// request. Without the abort the fetch outlives the turn on an isolate that is winding down.
+		const signals: Array<AbortSignal | null | undefined> = []
+		const passthrough = globalThis.fetch
+		globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+			signals.push(init?.signal)
+			return passthrough(input, init)
+		}
+
+		await meter(`${ORG}:default`, "msg-1", 1000, 100)
+
+		assert.isNotEmpty(signals)
+		for (const signal of signals) assert.instanceOf(signal, AbortSignal)
 	})
 })
