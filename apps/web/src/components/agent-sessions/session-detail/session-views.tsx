@@ -18,6 +18,7 @@ import type { SessionSummary } from "@/lib/agent-sessions/session-summary"
 import type { SessionTurn } from "@/lib/agent-sessions/session-turns"
 import { SessionFlow } from "./session-flow"
 import { SessionOverview } from "./session-overview"
+import { toggled } from "./payload-view"
 import { sessionToolResults } from "@/lib/agent-sessions/span-detail"
 import { SessionTranscript } from "./session-transcript"
 import { SessionWaterfall } from "./session-waterfall"
@@ -300,12 +301,6 @@ export function SessionViews({
 			</TabsContent>
 		</Tabs>
 	)
-}
-
-function toggled(set: ReadonlySet<string>, id: string): ReadonlySet<string> {
-	const next = new Set(set)
-	if (!next.delete(id)) next.add(id)
-	return next
 }
 
 interface ViewOption {

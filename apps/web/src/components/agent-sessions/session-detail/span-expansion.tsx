@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { Schema } from "effect"
 
@@ -43,9 +43,11 @@ import {
 } from "@/lib/agent-sessions/span-detail"
 import { classifyAiSpan, spanFailed, spanTtftMs } from "@/lib/agent-sessions/session-turns"
 import { callMetaLine, formatCost } from "@/lib/agent-sessions/session-summary"
+import { payload } from "@/lib/agent-sessions/session-transcript"
 import { ClampedText, firstLine } from "./clamped-text"
-import { useJsonPayload, useMessageBody, ViewSegment, ViewSwitch } from "./payload-view"
+import { toggled, useJsonPayload, useMessageBody, ViewSwitch } from "./payload-view"
 import { Pill } from "./pill"
+import { ToolIo } from "./tool-io"
 
 /**
  * The payload of one span. The chrome around it is the caller's — today that is
@@ -463,28 +465,51 @@ function ReasoningPart({ part }: { part: Extract<SpanMessagePart, { kind: "reaso
 /* -------------------------------------------------------------------------- */
 
 function ToolCallsSection({ toolCalls }: { toolCalls: readonly SpanToolCall[] }) {
+	// The expansion does not virtualize, so one disclosure set for every card on
+	// the tab lives here — the same shape the transcript hands its rows.
+	const [openRows, setOpenRows] = useState<ReadonlySet<string>>(() => new Set())
+	const onToggleRow = useCallback((key: string) => {
+		setOpenRows((previous) => toggled(previous, key))
+	}, [])
+
 	if (toolCalls.length === 0) {
 		return <EmptyNote>No tool calls were captured on this span.</EmptyNote>
 	}
 	return (
 		<div className="flex flex-col gap-3 pb-1">
 			{toolCalls.map((call, index) => (
-				<ToolCallCard key={index} call={call} />
+				<ToolCallCard
+					key={index}
+					call={call}
+					keyPrefix={`tool-call-${index}`}
+					openRows={openRows}
+					onToggleRow={onToggleRow}
+				/>
 			))}
 		</div>
 	)
 }
 
 /**
- * One invocation as one card: the call and its result belong to the same event,
- * and two stacked cards made the reader pair them by eye. A selector shows one
- * half at a time — the other stays a click away, never a scroll.
+ * One invocation as one card. The call and its result are the same event, and
+ * `ToolIo` draws both halves at once — the selector that used to show one at a
+ * time made a result nobody captured look exactly like one nobody had clicked.
  */
-function ToolCallCard({ call }: { call: SpanToolCall }) {
-	const [side, setSide] = useState<"arguments" | "result">(
-		call.argumentsText === undefined && call.resultText !== undefined ? "result" : "arguments",
-	)
-	const body = side === "arguments" ? call.argumentsText : call.resultText
+function ToolCallCard({
+	call,
+	keyPrefix,
+	openRows,
+	onToggleRow,
+}: {
+	call: SpanToolCall
+	keyPrefix: string
+	openRows: ReadonlySet<string>
+	onToggleRow: (key: string) => void
+}) {
+	// Same reading of the captured text the transcript gets, emitter truncation
+	// included — the expansion used to render the raw string and miss it.
+	const args = useMemo(() => payload(call.argumentsText), [call.argumentsText])
+	const result = useMemo(() => payload(call.resultText), [call.resultText])
 
 	return (
 		<div className="min-w-0 overflow-hidden rounded-md border border-border/70">
@@ -496,40 +521,28 @@ function ToolCallCard({ call }: { call: SpanToolCall }) {
 						{call.name}
 					</span>
 				)}
-				<span className="ml-auto flex shrink-0 items-center gap-2">
-					{call.id !== undefined && (
-						<span className="max-w-40 truncate font-mono text-[11px] text-muted-foreground/80" title={call.id}>
-							{call.id}
-						</span>
-					)}
+				{call.id !== undefined && (
 					<span
-						role="group"
-						aria-label="Tool payload"
-						className="flex shrink-0 items-center overflow-hidden rounded-sm border border-border"
+						className="ml-auto max-w-40 shrink-0 truncate font-mono text-[11px] text-muted-foreground/80"
+						title={call.id}
 					>
-						<ViewSegment active={side === "arguments"} onSelect={() => setSide("arguments")}>
-							arguments
-						</ViewSegment>
-						<ViewSegment active={side === "result"} onSelect={() => setSide("result")}>
-							result
-						</ViewSegment>
+						{call.id}
 					</span>
-				</span>
+				)}
 			</div>
 			{call.description !== undefined && (
 				<p className="border-border/60 border-t px-2.5 py-1.5 text-muted-foreground text-xs">
 					{call.description}
 				</p>
 			)}
-			{body === undefined ? (
-				<p className="border-border/60 border-t bg-background/50 px-2.5 py-2 text-muted-foreground text-xs italic">
-					{side === "arguments"
-						? "No arguments were captured for this call."
-						: "No result was captured — whether the call succeeded is unknown."}
-				</p>
-			) : (
-				<PayloadBody text={body} copyLabel={side} />
-			)}
+			<ToolIo
+				args={args}
+				result={result}
+				missingResultNote="not captured — whether the call succeeded is unknown."
+				keyPrefix={keyPrefix}
+				openRows={openRows}
+				onToggleRow={onToggleRow}
+			/>
 		</div>
 	)
 }

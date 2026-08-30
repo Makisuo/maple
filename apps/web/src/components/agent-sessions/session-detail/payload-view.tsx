@@ -79,9 +79,8 @@ export function ViewSwitch({
 	)
 }
 
-/** One segment of a two-state switch; shared so a tool card's arguments ↔
- *  result selector reads exactly like the rendered ↔ raw one beside it. */
-export function ViewSegment({
+/** One segment of the two-state switch. */
+function ViewSegment({
 	active,
 	onSelect,
 	children,
@@ -106,4 +105,23 @@ export function ViewSegment({
 			{children}
 		</button>
 	)
+}
+
+/**
+ * Whether a keyed disclosure is open, given the default its section opens with.
+ * Presence in the set means "flipped away from the default", so a toolbar chip
+ * that changes the default still moves every row the reader has not touched.
+ *
+ * The set lives with the caller, never in the row: the transcript virtualizes,
+ * and local state would leave with the row when it scrolls out of view.
+ */
+export function disclosed(openRows: ReadonlySet<string>, key: string, byDefault: boolean): boolean {
+	return openRows.has(key) ? !byDefault : byDefault
+}
+
+/** The set with `id` flipped — the only write the disclosure set ever takes. */
+export function toggled(set: ReadonlySet<string>, id: string): ReadonlySet<string> {
+	const next = new Set(set)
+	if (!next.delete(id)) next.add(id)
+	return next
 }
