@@ -2,7 +2,9 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { Effect, Option, Redacted, Schema } from "effect"
 import { timingSafeEqual } from "node:crypto"
 import { SlackBotResolutionResponseSchema } from "@maple/domain/http"
+import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Env } from "@/platform/Env"
+import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import {
 	SlackIntegrationService,
 	SLACK_CALLBACK_PATH,
@@ -296,7 +298,109 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 			)
 		})
 
+		// AI usage report from the bot — one call per completed Slack agent turn,
+		// so the org's Autumn `ai_input_tokens` / `ai_output_tokens` balances count
+		// Slack traffic like triage runs. The org is resolved server-side from the
+		// team binding; the bot never names an orgId. Fire-and-forget on the bot's
+		// side and best-effort here: a tracking failure logs, it never 5xxs the
+		// report (the idempotency key makes a retry safe anyway).
+
+		const decodeUsageBody = Schema.decodeUnknownOption(
+			Schema.Struct({
+				inputTokens: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+				outputTokens: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+				idempotencyKey: Schema.String.check(
+					Schema.isMinLength(1),
+					Schema.isMaxLength(256),
+					Schema.isTrimmed(),
+				),
+			}),
+		)
+
+		const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
+
+		const handleUsage = Effect.fn("SlackInternal.usage")(function* (
+			req: HttpServerRequest.HttpServerRequest,
+		) {
+			if (!internalToken) {
+				yield* logAccess(undefined, "unauthorized", 401)
+				return errorText("Slack internal service token is not configured", 401)
+			}
+			if (!isValidServiceBearer(req.headers.authorization, internalToken)) {
+				yield* logAccess(undefined, "unauthorized", 401)
+				return errorText("Unauthorized", 401)
+			}
+
+			const params = yield* HttpRouter.params
+			const teamIdOption = decodeTeamIdParam(
+				typeof params.teamId === "string"
+					? Option.getOrUndefined(decodeUriComponentOption(params.teamId))
+					: undefined,
+			)
+			if (Option.isNone(teamIdOption)) {
+				yield* logAccess(undefined, "invalid", 400)
+				return errorText("Missing teamId", 400)
+			}
+			const teamId = teamIdOption.value
+
+			const bodyOption = yield* req.text.pipe(Effect.option)
+			const usageOption = Option.flatMap(bodyOption, (body) =>
+				Option.liftThrowable(() => JSON.parse(body))().pipe(Option.flatMap(decodeUsageBody)),
+			)
+			if (Option.isNone(usageOption)) {
+				yield* logAccess(teamId, "invalid", 400)
+				return errorText(
+					'Body must be JSON: { "inputTokens": int >= 0, "outputTokens": int >= 0, "idempotencyKey": string }',
+					400,
+				)
+			}
+			const usage = usageOption.value
+
+			return yield* slack.orgIdForTeam(teamId).pipe(
+				Effect.flatMap(
+					Effect.fnUntraced(function* (orgId) {
+						const env = Option.getOrUndefined(workerEnv)
+						const tracked = env !== undefined && (usage.inputTokens > 0 || usage.outputTokens > 0)
+						if (tracked) {
+							yield* Effect.tryPromise(() =>
+								trackTokenUsage(env, {
+									orgId,
+									inputTokens: usage.inputTokens,
+									outputTokens: usage.outputTokens,
+									idempotencyKey: usage.idempotencyKey,
+									source: "slack",
+								}),
+							).pipe(
+								Effect.catchCause(() =>
+									Effect.logWarning("Slack usage tracking failed").pipe(
+										Effect.annotateLogs({ teamId, orgId }),
+									),
+								),
+							)
+						}
+						yield* logAccess(teamId, "found", 200)
+						return yield* HttpServerResponse.json({ tracked })
+					}),
+				),
+				Effect.catchTags({
+					"@maple/http/errors/IntegrationsNotConnectedError": () =>
+						logAccess(teamId, "not-found", 404).pipe(
+							Effect.as(errorText("No active Slack installation for this team", 404)),
+						),
+					"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+						Effect.logError("Slack internal usage report failed", {
+							teamId,
+							message: error.message,
+						}).pipe(
+							Effect.andThen(logAccess(teamId, "unavailable", 503)),
+							Effect.as(errorText("Slack workspace lookup unavailable", 503)),
+						),
+				}),
+			)
+		})
+
 		yield* router.add("GET", "/internal/slack/workspaces/:teamId", handle)
 		yield* router.add("POST", "/internal/slack/workspaces/:teamId/revoke", handleRevoke)
+		yield* router.add("POST", "/internal/slack/workspaces/:teamId/usage", handleUsage)
 	}),
 )
