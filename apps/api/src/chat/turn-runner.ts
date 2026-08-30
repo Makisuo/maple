@@ -23,15 +23,19 @@ import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { MCP_ANTICIPATED_ERROR_IDENTIFIERS } from "@/mcp/expected-failures"
 import {
 	decodeChatTurnTenant,
+	investigationIdFromChatSessionId,
 	type ChatMessage,
 	type ChatTurnTenantEncoded,
 } from "@maple/domain/chat-session"
 import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/effect-cloudflare"
 import { LLM, Message, type LanguageModel, type LLMClientService } from "@opencode-ai/ai"
-import { Cause, Effect, Layer, ManagedRuntime, Stream } from "effect"
+import { Cause, Effect, Layer, ManagedRuntime, Option, Schema, Stream } from "effect"
 import type { ChatSession } from "./ChatSession"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { summarizeCause } from "@/platform/describe-cause"
+import { trackTokenUsage } from "@/services/billing/autumn-tracker"
+import { InvestigationId } from "@maple/domain/primitives"
+import type { TurnUsage } from "./loop"
 
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
@@ -145,12 +149,17 @@ export const toLlmMessages = (
 const compactIfNeeded = (
 	input: RunChatSessionTurnInput,
 	model: LanguageModel,
-	usage: { readonly input: number },
+	usage: TurnUsage,
 ): Effect.Effect<void, never, LLMClientService> =>
 	Effect.gen(function* () {
 		const { contextLimitOf, outputLimitOf } = yield* Effect.promise(() => import("../platform/Llm"))
-		const { isNearContextLimit, annotateModelResponse, modelCallAttributes, modelCallSpanName } =
-			yield* Effect.promise(() => import("./loop"))
+		const {
+			addUsage,
+			isNearContextLimit,
+			annotateModelResponse,
+			modelCallAttributes,
+			modelCallSpanName,
+		} = yield* Effect.promise(() => import("./loop"))
 		if (
 			!isNearContextLimit(usage.input, {
 				context: contextLimitOf(model),
@@ -194,6 +203,11 @@ const compactIfNeeded = (
 				},
 			}),
 		)
+		// Housekeeping is still spend. The compaction call is billed to the same turn as the answer
+		// it follows — it is charged to us either way, and a turn that hides it under-reports what
+		// the conversation cost.
+		addUsage(usage, response.usage)
+
 		const summary = response.text.trim()
 		if (summary === "") return
 		input.session.append({ type: "compaction", messageId: input.messageId, summary, throughSeq })
@@ -218,11 +232,70 @@ const compactIfNeeded = (
 		),
 	)
 
+const decodeInvestigationIdOption = Schema.decodeUnknownOption(InvestigationId)
+
 /** Compaction is housekeeping; it must not hold the turn slot open. */
 const COMPACTION_TIMEOUT = "20 seconds"
 
+/**
+ * So is metering, and it runs even later — after the answer, on the way out of the turn.
+ *
+ * `endTurn` sits in the `finally` of `ChatSession.runTurn`, so whatever the metering finalizer
+ * waits on holds the session's turn slot, and the stale-claim reclaim is 15 minutes out
+ * (`TURN_STALE_MS` in `ChatSession.ts`). Unbounded, a POST to Autumn that never answers is a way
+ * for a third party's outage to wedge a conversation — the exact hazard `COMPACTION_TIMEOUT`
+ * exists for, one step later in the same tail.
+ *
+ * On timeout the request is abandoned rather than aborted: it may still land, and if it does not,
+ * one turn goes unbilled. That is the trade the tracker already makes for a failed request.
+ */
+const METERING_TIMEOUT = "5 seconds"
+
 /** Stable copy for the durable/browser event; detailed causes stay server-side. */
 const CHAT_TURN_FAILED = "Maple couldn't complete this response."
+
+/**
+ * Meter one investigation turn's token spend into Autumn.
+ *
+ * **Per turn, not per diagnosis.** This used to hang off `submit_diagnosis`, keyed on the bare
+ * investigation id, which billed an investigation exactly once however much it went on to cost:
+ * every follow-up turn the user asked for was free, and so was any turn that errored or ran out of
+ * steps before reaching the tool. The key carries the turn (`messageId`), so each turn bills once
+ * and a retried turn does not double-bill — the same reason the fan-out workflow keys on its
+ * attempt rather than on the investigation.
+ *
+ * `turn-` keeps this key space disjoint from the fan-out's `<id>:<attempt>`. Both meter the same
+ * investigation under the same `triage` source, so an unprefixed turn id could collide with an
+ * attempt number and silently deduplicate a real charge.
+ *
+ * Investigations only: a plain chat session has no investigation id and stays unmetered here.
+ */
+export const meterInvestigationTurn = (
+	input: Pick<RunChatSessionTurnInput, "sessionId" | "messageId" | "env">,
+	tenant: Pick<TenantContext, "orgId">,
+	usage: { readonly input: number; readonly output: number },
+): Effect.Effect<void> => {
+	const rawId = investigationIdFromChatSessionId(input.sessionId)
+	if (rawId === undefined) return Effect.void
+	// The same guard `buildDiagnosisCompletion` uses, so the set of sessions that bill is exactly
+	// the set that gets a `submit_diagnosis` tool: an `inv-` suffix that is not a UUID is not an
+	// investigation, and must not be charged as one.
+	const decoded = decodeInvestigationIdOption(rawId)
+	if (Option.isNone(decoded)) return Effect.void
+	const investigationId = decoded.value
+	if (usage.input <= 0 && usage.output <= 0) return Effect.void
+	// Bookkeeping must never fail a delivered answer. `trackTokenUsage` already swallows its own
+	// transport errors; the `catch` covers the rest so this can be an infallible Effect.
+	return Effect.promise(() =>
+		trackTokenUsage(input.env, {
+			orgId: tenant.orgId,
+			inputTokens: usage.input,
+			outputTokens: usage.output,
+			idempotencyKey: `${investigationId}:turn-${input.messageId}`,
+			source: "triage",
+		}).catch(() => undefined),
+	).pipe(Effect.timeout(METERING_TIMEOUT), Effect.ignore)
+}
 
 /**
  * Drive one turn to completion.
@@ -261,6 +334,9 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 
 	const tenant = toTenantContext(input.tenant)
 	const observability = loop.makeTurnObservability()
+	// Hoisted out of the program: `submit_diagnosis` reads it mid-turn, and the metering finalizer
+	// reads it after the turn has ended — including when it ended by failing.
+	const usage = loop.makeTurnUsage()
 	let recordedTerminal = false
 	const annotateTurn = () =>
 		Effect.annotateCurrentSpan({
@@ -288,9 +364,6 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 			orgId: tenant.orgId,
 			sessionId: input.sessionId,
 		})
-		// Shared with the turn so `submit_diagnosis` can report what the investigation cost. See
-		// `TurnUsage` — the tool is invoked mid-turn, so there is no later moment to hand it a total.
-		const usage = loop.makeTurnUsage()
 		// One value: the tool *and* whether this turn's answer is a call to it. Passing the tool alone
 		// is what left an autonomous investigation with no way to file its report once it ran out of
 		// steps — see `buildDiagnosisCompletion`.
@@ -343,6 +416,9 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 		yield* annotateTurn()
 		yield* compactIfNeeded(input, model, usage)
 	}).pipe(
+		// `ensuring`, not a trailing statement: a turn that failed, was aborted, or ran out of steps
+		// still burned the tokens it burned, and the pre-`ensuring` shape billed none of them.
+		Effect.ensuring(Effect.suspend(() => meterInvestigationTurn(input, tenant, usage))),
 		Effect.tapCause((cause) => {
 			observability.outcome = "error"
 			observability.failureReason ??= "UnhandledTurnFailure"

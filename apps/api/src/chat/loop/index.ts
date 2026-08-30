@@ -21,6 +21,7 @@
  */
 export { runChatTurn } from "./turn"
 export {
+	addUsage,
 	makeTurnObservability,
 	makeTurnUsage,
 	type ChatTurnEvent,
@@ -31,10 +32,5 @@ export {
 } from "./types"
 export { MAX_STEPS, SUBAGENT_MAX_STEPS } from "./budgets"
 export { dropOldestToolStep, isNearContextLimit } from "./context"
-export {
-	annotateModelResponse,
-	modelCallAttributes,
-	modelCallSpanName,
-	type GenAiIdentity,
-} from "./genai"
+export { annotateModelResponse, modelCallAttributes, modelCallSpanName, type GenAiIdentity } from "./genai"
 export { isRetryableStepFailure, stepRetryDelayMs } from "./retry"
