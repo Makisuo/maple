@@ -9,7 +9,7 @@
 // `spanPopover()` below rather than the render's own container.
 
 import { useState, type ReactNode } from "react"
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 vi.mock("@tanstack/react-router", () => ({
@@ -1146,6 +1146,44 @@ describe("SessionViews", () => {
 
 		fireEvent.click(screen.getAllByText("read_file")[0]!)
 		expect(document.querySelector("[data-revealed]")).toBeNull()
+	})
+
+	// The mark alone is not the landing: the row has to be brought on screen, and
+	// the aim the virtualizer makes on mount is made against a page that is still
+	// settling into the switch. The row corrects it a frame later, from where it
+	// actually is — which is also the only part of the landing jsdom can observe.
+	it("brings the row it sent the reader to on screen, from the row's own position", async () => {
+		const scrollIntoView = vi.fn()
+		const original = Element.prototype.scrollIntoView
+		Element.prototype.scrollIntoView = scrollIntoView
+		try {
+			render(<Views view="flow" />)
+
+			fireEvent.click(screen.getByText("grep_repo"))
+			fireEvent.click(within(spanPopover()).getByRole("button", { name: "Open in Traces view" }))
+
+			await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+
+			expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" })
+			// On the marked row itself, not on whatever happened to be first.
+			expect((scrollIntoView.mock.instances[0] as HTMLElement).dataset.revealed).toBe("true")
+		} finally {
+			Element.prototype.scrollIntoView = original
+		}
+	})
+
+	// A view left behind is not just invisible, it is out of the page: the
+	// waterfall measures its own offset inside the page scroller as it mounts,
+	// and a view still standing above it moves that measurement by its whole
+	// height — which is what sent "Open in Traces view" nowhere near its row.
+	it("takes the view being left out of the page, not just out of sight", () => {
+		render(<Views view="overview" />)
+		expect(screen.getByText(/Completed, with/)).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("tab", { name: /Traces/ }))
+
+		expect(screen.getByText("Model / target")).toBeTruthy()
+		expect(screen.queryByText(/Completed, with/)).toBeNull()
 	})
 
 	// The tab choice lives beside the other cross-view state in SessionViews:
