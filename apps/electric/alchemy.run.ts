@@ -51,7 +51,10 @@ export const createMapleElectric = ({ stage, domains, region, network }: CreateM
 		// task group as an in-place `update`, which left it pointing at an ALB group
 		// in another network — `InvalidGroup.NotFound: You have specified two
 		// resources that belong to different networks`. New ids create them fresh
-		// here. The originals are orphaned in the abandoned VPC; reap both with it.
+		// here — and their PHYSICAL `groupName`s change with them. Renaming only the
+		// logical id was not enough: the previous run had already created
+		// `maple-electric-alb` in the ingest VPC, so the new resource collided with
+		// it (`InvalidGroup.Duplicate`) before alchemy got to delete the old one.
 		//
 		// Two groups because `AWS.ECS.Service` applies `securityGroups` to BOTH the
 		// ALB and the tasks, so the split has to live in the rules: the internet
@@ -61,7 +64,7 @@ export const createMapleElectric = ({ stage, domains, region, network }: CreateM
 		const listenerPort = domains.electric ? 443 : 80
 		const albSecurityGroup = yield* AWS.EC2.SecurityGroup("electric-lb-sg", {
 			vpcId: network.vpcId,
-			groupName: name("electric-alb"),
+			groupName: name("electric-lb"),
 			description: `Maple ElectricSQL - public ${listenerPort === 443 ? "HTTPS" : "HTTP"} to the load balancer`,
 			ingress: [
 				{
@@ -80,7 +83,7 @@ export const createMapleElectric = ({ stage, domains, region, network }: CreateM
 
 		const taskSecurityGroup = yield* AWS.EC2.SecurityGroup("electric-task-sg", {
 			vpcId: network.vpcId,
-			groupName: name("electric"),
+			groupName: name("electric-task"),
 			description: "Maple ElectricSQL sync service",
 			ingress: [
 				{
