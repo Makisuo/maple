@@ -107,7 +107,8 @@ export const buildUpstreamSyncUrl = (args: {
 		// The projection is pinned too — a shape that drops secret / oversized
 		// columns must never let the client widen it back to `SELECT *`.
 		...(def.columns ? { columns: def.columns.join(",") } : undefined),
-		// Electric Cloud source credentials (absent when self-hosting Electric).
+		// `source_id` is Electric Cloud only; `secret` is sent by both (Cloud's
+		// source secret, or self-hosted `ELECTRIC_SECRET`).
 		...(args.sourceId ? { source_id: args.sourceId } : undefined),
 		...(args.secret ? { secret: args.secret } : undefined),
 	} satisfies Record<string, string>
@@ -126,21 +127,19 @@ export const buildUpstreamSyncUrl = (args: {
 }
 
 /**
- * Electric Cloud authenticates every shape request with a source `secret`
- * (paired with `source_id`); self-hosted Electric (local docker) needs neither.
- * A config carrying exactly ONE of the two is incoherent — most commonly a
- * deploy that inherited a shared `ELECTRIC_URL` + `ELECTRIC_SOURCE_ID` from the
- * secret store but no matching `ELECTRIC_SECRET` (e.g. a PR preview whose per-PR
- * Electric source step was skipped because the CLI token isn't provisioned).
- * Forwarding that upstream is a guaranteed 401 `MISSING_SECRET` from Electric
- * Cloud, which surfaces as a hard-broken shape stream in the browser. Instead we
- * treat it as "not configured" and take the same 503 graceful-degrade path as a
- * missing `ELECTRIC_URL`. Pure + exported so the coherence rule is unit-tested.
+ * Both Electric deployments authenticate a shape request with a `secret`; only
+ * Electric Cloud pairs it with a `source_id` naming which source to read.
+ *
+ * So the rule is one-directional. A `source_id` with no `secret` is a deploy
+ * that inherited half its credentials, and forwarding it is a guaranteed 401 —
+ * better treated as "not configured" and taking the 503 graceful-degrade path.
+ * A bare `secret` is not that case: it is exactly how a self-hosted upstream is
+ * addressed. Pure + exported so the rule is unit-tested.
  */
 export const isElectricConfigCoherent = (creds: {
 	readonly sourceId: Option.Option<unknown>
 	readonly secret: Option.Option<unknown>
-}): boolean => Option.isSome(creds.sourceId) === Option.isSome(creds.secret)
+}): boolean => Option.isNone(creds.sourceId) || Option.isSome(creds.secret)
 
 export interface ElectricUpstreamResponse {
 	readonly status: number
@@ -197,7 +196,7 @@ export class ElectricClient extends Context.Service<ElectricClient, ElectricClie
 			// request, and log so the misconfiguration is discoverable in telemetry.
 			if (electricUrl && !configCoherent) {
 				yield* Effect.logWarning(
-					"Electric sync disabled: incoherent Cloud credentials — set both ELECTRIC_SOURCE_ID and ELECTRIC_SECRET, or neither",
+					"Electric sync disabled: ELECTRIC_SOURCE_ID is set without ELECTRIC_SECRET — Electric Cloud needs both (self-hosted needs neither, or ELECTRIC_SECRET alone)",
 				).pipe(
 					Effect.annotateLogs({
 						hasSourceId: Option.isSome(config.ELECTRIC_SOURCE_ID),
@@ -221,7 +220,7 @@ export class ElectricClient extends Context.Service<ElectricClient, ElectricClie
 					: Result.fail(
 							new ElectricNotConfigured({
 								message:
-									"Electric Cloud credentials are half-configured (ELECTRIC_URL set, source_id/secret missing)",
+									"Electric Cloud credentials are half-configured (ELECTRIC_URL + ELECTRIC_SOURCE_ID set, ELECTRIC_SECRET missing)",
 								reason: "incoherent_credentials",
 							}),
 						)

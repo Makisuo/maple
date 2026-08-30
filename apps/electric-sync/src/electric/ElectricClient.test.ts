@@ -72,8 +72,8 @@ describe("isElectricConfigCoherent", () => {
 		assert.isFalse(isElectricConfigCoherent({ sourceId: Option.some("src_1"), secret: Option.none() }))
 	})
 
-	it("rejects a secret without a source id", () => {
-		assert.isFalse(
+	it("accepts self-hosted with an API secret (secret, no source id)", () => {
+		assert.isTrue(
 			isElectricConfigCoherent({
 				sourceId: Option.none(),
 				secret: Option.some(Redacted.make("sh_secret")),
@@ -358,6 +358,35 @@ describe("ElectricClient.fetchShape", () => {
 				}),
 			),
 		),
+	)
+
+	it.effect("attaches a self-hosted API secret with no source id", () =>
+		Effect.gen(function* () {
+			const recorded: Array<RecordedRequest> = []
+			const electric = yield* ElectricClient
+			// The whole point: a secret with no source id is a SERVED request, not the
+			// 503 an incoherent-credentials config takes.
+			yield* electric
+				.fetchShape(syncRequest("dashboards"), "org_live")
+				.pipe(withFetch(recorded, () => Response.json([])))
+
+			const { params } = parse(recorded[0]?.url ?? "")
+			assert.strictEqual(params.get("secret"), "sh_selfhosted")
+			assert.isNull(params.get("source_id"))
+		}).pipe(
+			Effect.provide(clientLayer({ ELECTRIC_SECRET: Option.some(Redacted.make("sh_selfhosted")) })),
+		),
+	)
+
+	it.effect("still refuses a source id with no secret", () =>
+		Effect.gen(function* () {
+			const electric = yield* ElectricClient
+			const error = yield* electric.fetchShape(syncRequest("dashboards"), "org_live").pipe(Effect.flip)
+
+			assert.strictEqual(error._tag, "@maple/electric-sync/ElectricNotConfigured")
+			if (error._tag !== "@maple/electric-sync/ElectricNotConfigured") throw new Error("unreachable")
+			assert.strictEqual(error.reason, "incoherent_credentials")
+		}).pipe(Effect.provide(clientLayer({ ELECTRIC_SOURCE_ID: Option.some("src_1") }))),
 	)
 
 	it.effect("turns a transport failure into a typed unreachable error", () =>

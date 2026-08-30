@@ -245,3 +245,38 @@ export function stageEnablesReplayBlobs(stage: MapleStage): boolean {
 export function resolveCollectorTaskSize(stage: MapleStage): IngestTaskSize {
 	return stage.kind === "prd" ? { cpu: 512, memory: 1024 } : { cpu: 256, memory: 1024 }
 }
+
+/**
+ * VPC CIDR for the Electric service, per Maple region. Kept clear of the ingest
+ * ranges (10.2x) so the two could be peered later without renumbering.
+ */
+export function resolveElectricCidrBlock(region: MapleRegion): string {
+	switch (region) {
+		case "us":
+			return "10.30.0.0/16"
+		case "eu":
+			return "10.31.0.0/16"
+	}
+}
+
+/**
+ * Whether a stage runs its own ElectricSQL sync service.
+ *
+ * PR previews are excluded for the same reason they get no Electric config at
+ * all: no PlanetScale branch, so nothing to replicate from. Dev stages use the
+ * docker `electric` service.
+ */
+export function stageDeploysElectric(stage: MapleStage): boolean {
+	return stage.kind === "prd" || stage.kind === "stg"
+}
+
+/**
+ * Fargate task size for Electric per stage.
+ *
+ * Eight low-write control-plane tables, so this is sized for the BEAM's floor
+ * rather than for throughput. Raise it when a shape's snapshot query, not its
+ * change stream, becomes the cost.
+ */
+export function resolveElectricTaskSize(stage: MapleStage): IngestTaskSize {
+	return stage.kind === "prd" ? { cpu: 512, memory: 1024 } : { cpu: 256, memory: 512 }
+}
