@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { formatRelativeTimeOrDate, toEpochMs } from "@maple/ui/lib/time-format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
-import { ChatBubbleSparkleIcon } from "@/components/icons"
+import { SquareSparkleIcon } from "@/components/icons"
 import { vendorIcon } from "@/lib/agent-sessions/vendor-icon"
 import { sessionRowId } from "@/lib/agent-sessions/session-window"
 import { vendorLabel } from "@/lib/agent-sessions/vendor-label"
@@ -39,7 +39,7 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 			<Empty>
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
-						<ChatBubbleSparkleIcon />
+						<SquareSparkleIcon />
 					</EmptyMedia>
 					<EmptyTitle>No agent sessions yet</EmptyTitle>
 					<EmptyDescription>

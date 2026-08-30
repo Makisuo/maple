@@ -2,7 +2,6 @@ import {
 	BellIcon,
 	ChartBarHorizontalIcon,
 	ChartLineIcon,
-	ChatBubbleSparkleIcon,
 	CircleWarningIcon,
 	CloudflareIcon,
 	ComputerIcon,
@@ -18,6 +17,7 @@ import {
 	PlayRotateClockwiseIcon,
 	PulseIcon,
 	ServerIcon,
+	SquareSparkleIcon,
 } from "@/components/icons"
 import { PLANETSCALE_COLOR } from "@/components/infra/planetscale/metrics"
 import type { OrganizationFeatureFlags } from "@/lib/organization-feature-flags"
@@ -119,7 +119,7 @@ const exploreItem = (flags?: OrganizationFeatureFlags): NavItem => ({
 		// purpose: a caller with no organization context yet hides the row rather
 		// than flashing it (see `navGroups`).
 		...(flags?.agentTracing
-			? [{ title: "Agent Sessions", href: "/agent-sessions", icon: ChatBubbleSparkleIcon }]
+			? [{ title: "Agent Sessions", href: "/agent-sessions", icon: SquareSparkleIcon }]
 			: []),
 	],
 })
