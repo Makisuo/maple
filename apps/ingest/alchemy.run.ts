@@ -435,7 +435,10 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 		// Scoped to the one prefix the gateway uses. ListBucket is on the bucket
 		// itself (the others are on objects), which is why it is a separate
 		// statement — orphan claiming lists owners and segments.
-		const walSegmentsPolicy = yield* AWS.IAM.Policy("ingest-wal-segments", {
+		// Its own logical id: alchemy keys resources by id and silently hands back
+		// the FIRST registration for a repeat, so sharing the bucket's id returned
+		// the Bucket here and `policyArn` resolved to undefined at AttachRolePolicy.
+		const walSegmentsPolicy = yield* AWS.IAM.Policy("ingest-wal-segments-access", {
 			policyName: name("ingest-wal-segments"),
 			policyDocument: {
 				Version: "2012-10-17",
