@@ -14,7 +14,7 @@ export interface TrackTokenUsageOptions {
 	readonly inputTokens: number
 	readonly outputTokens: number
 	readonly idempotencyKey: string
-	readonly source: "triage"
+	readonly source: "triage" | "slack"
 }
 
 interface TrackEvent {

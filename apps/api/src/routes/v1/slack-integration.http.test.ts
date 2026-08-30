@@ -2,6 +2,7 @@ import { createCipheriv, randomBytes } from "node:crypto"
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
+import { layerFromEnvRecord } from "@maple/effect-cloudflare/worker-environment"
 import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
@@ -96,14 +97,22 @@ const makeConfig = (tokens: { slack?: string; shared?: string } = {}) =>
 		}),
 	)
 
-const makeRouterLayer = (testDb: TestDb, tokens: { slack?: string; shared?: string } = {}) =>
-	SlackInternalRouter.pipe(
+const makeRouterLayer = (
+	testDb: TestDb,
+	tokens: { slack?: string; shared?: string } = {},
+	workerEnv?: Record<string, unknown>,
+) => {
+	const layer = SlackInternalRouter.pipe(
 		Layer.provide(SlackIntegrationService.layer),
 		Layer.provide(Layer.mergeAll(ApiKeysService.layer, OAuthStateRepository.layer)),
 		Layer.provide(testDb.layer),
 		Layer.provide(Env.layer),
 		Layer.provide(makeConfig(tokens)),
 	)
+	// The usage route reads WorkerEnvironment via serviceOption — absent means
+	// "no Autumn config, skip tracking", which is what every non-usage test wants.
+	return workerEnv === undefined ? layer : layer.pipe(Layer.provide(layerFromEnvRecord(workerEnv)))
+}
 
 const TEAM_PATH = "/internal/slack/workspaces"
 
@@ -141,8 +150,9 @@ const withHandler = (
 	testDb: TestDb,
 	tokens: { slack?: string; shared?: string },
 	body: (handler: (request: Request) => Promise<Response>) => Effect.Effect<void>,
+	workerEnv?: Record<string, unknown>,
 ) => {
-	const { handler, dispose } = HttpRouter.toWebHandler(makeRouterLayer(testDb, tokens), {
+	const { handler, dispose } = HttpRouter.toWebHandler(makeRouterLayer(testDb, tokens, workerEnv), {
 		disableLogger: true,
 	})
 	return body((request) => handler(request)).pipe(Effect.ensuring(Effect.promise(dispose)))
@@ -490,6 +500,270 @@ describe("SlackInternalRouter (revoke)", () => {
 				)
 				assert.strictEqual(notJson.status, 400)
 			}),
+		)
+	})
+})
+
+// POST /internal/slack/workspaces/:teamId/usage — the bot reports each turn's
+// token totals here so Slack agent traffic counts into the org's Autumn AI
+// usage, alongside triage runs.
+
+describe("SlackInternalRouter (usage)", () => {
+	const AUTUMN_ENV = {
+		AUTUMN_SECRET_KEY: "autumn-sk",
+		AUTUMN_API_URL: "https://autumn.test",
+	}
+
+	const postUsage = (
+		handler: (request: Request) => Promise<Response>,
+		teamId: string,
+		body: unknown,
+		bearer?: string,
+	) =>
+		Effect.promise(() =>
+			handler(
+				new Request(`http://api.localhost${TEAM_PATH}/${teamId}/usage`, {
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						...(bearer !== undefined ? { authorization: bearer } : undefined),
+					},
+					body: JSON.stringify(body),
+				}),
+			),
+		)
+
+	/**
+	 * `trackTokenUsage` posts to Autumn through the bare global `fetch`
+	 * (promise-land, not Effect's HttpClient), so stubbing the global is the
+	 * seam. Nothing else in these tests fetches: requests hit the handler
+	 * directly and orgIdForTeam only touches PGlite.
+	 */
+	const stubAutumnFetch = () => {
+		const realFetch = globalThis.fetch
+		const calls: Array<{
+			url: string
+			authorization: string | undefined
+			body: Record<string, unknown>
+		}> = []
+		globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+			// SAFETY: the tracker under test always POSTs a JSON object body; the
+			// assertions on `body` fail loudly if that ever stops holding.
+			calls.push({
+				url: String(input instanceof Request ? input.url : input),
+				authorization: new Headers(init?.headers).get("authorization") ?? undefined,
+				body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+			})
+			return new Response("{}", { status: 200 })
+		}) as typeof fetch
+		return { calls, restore: () => void (globalThis.fetch = realFetch) }
+	}
+
+	it.effect("meters one input and one output Autumn event for the bound org", () => {
+		const testDb = createTestDb(trackedDbs)
+		const autumn = stubAutumnFetch()
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_u1",
+					orgId: "org_u1",
+					teamId: "T-U1",
+					teamName: "UsageOrg",
+					botToken: "xoxb-u1",
+					apiKey: "maple_ak_u1",
+				}),
+			)
+			yield* withHandler(
+				testDb,
+				{ slack: "slack-secret-token" },
+				Effect.fnUntraced(function* (handler) {
+					const response = yield* postUsage(
+						handler,
+						"T-U1",
+						{ inputTokens: 120, outputTokens: 45, idempotencyKey: "sess-1:turn-1" },
+						"Bearer maple_svc_slack-secret-token",
+					)
+					assert.strictEqual(response.status, 200)
+					const body = yield* Effect.promise(() => response.json())
+					assert.deepStrictEqual(body, { forwarded: true })
+
+					assert.strictEqual(autumn.calls.length, 2)
+					for (const call of autumn.calls) {
+						assert.strictEqual(call.url, "https://autumn.test/v1/balances.track")
+						assert.strictEqual(call.authorization, "Bearer autumn-sk")
+						assert.strictEqual(call.body.customer_id, "org_u1")
+					}
+					const byFeature = new Map(autumn.calls.map((call) => [call.body.feature_id, call.body]))
+					assert.deepStrictEqual(byFeature.get("ai_input_tokens"), {
+						customer_id: "org_u1",
+						feature_id: "ai_input_tokens",
+						value: 120,
+						idempotency_key: "sess-1:turn-1:slack:input",
+					})
+					assert.deepStrictEqual(byFeature.get("ai_output_tokens"), {
+						customer_id: "org_u1",
+						feature_id: "ai_output_tokens",
+						value: 45,
+						idempotency_key: "sess-1:turn-1:slack:output",
+					})
+				}),
+				AUTUMN_ENV,
+			)
+		}).pipe(
+			Effect.provide(testDb.layer),
+			Effect.ensuring(Effect.sync(() => autumn.restore())),
+		)
+	})
+
+	it.effect("returns 404 for an unknown team without touching Autumn", () => {
+		const testDb = createTestDb(trackedDbs)
+		const autumn = stubAutumnFetch()
+		return withHandler(
+			testDb,
+			{ slack: "slack-secret-token" },
+			Effect.fnUntraced(function* (handler) {
+				const response = yield* postUsage(
+					handler,
+					"T-UNKNOWN",
+					{ inputTokens: 10, outputTokens: 5, idempotencyKey: "sess:turn" },
+					"Bearer maple_svc_slack-secret-token",
+				)
+				assert.strictEqual(response.status, 404)
+				assert.strictEqual(autumn.calls.length, 0)
+			}),
+			AUTUMN_ENV,
+		).pipe(Effect.ensuring(Effect.sync(() => autumn.restore())))
+	})
+
+	it.effect("rejects an unauthenticated report with 401", () => {
+		const testDb = createTestDb(trackedDbs)
+		return withHandler(
+			testDb,
+			{ slack: "slack-secret-token" },
+			Effect.fnUntraced(function* (handler) {
+				const response = yield* postUsage(handler, "T-U1", {
+					inputTokens: 10,
+					outputTokens: 5,
+					idempotencyKey: "sess:turn",
+				})
+				assert.strictEqual(response.status, 401)
+			}),
+		)
+	})
+
+	it.effect("rejects malformed usage bodies with 400", () => {
+		const testDb = createTestDb(trackedDbs)
+		return withHandler(
+			testDb,
+			{ slack: "slack-secret-token" },
+			Effect.fnUntraced(function* (handler) {
+				const bearer = "Bearer maple_svc_slack-secret-token"
+
+				const negative = yield* postUsage(
+					handler,
+					"T-X",
+					{ inputTokens: -1, outputTokens: 5, idempotencyKey: "k" },
+					bearer,
+				)
+				assert.strictEqual(negative.status, 400)
+
+				const fractional = yield* postUsage(
+					handler,
+					"T-X",
+					{ inputTokens: 1.5, outputTokens: 5, idempotencyKey: "k" },
+					bearer,
+				)
+				assert.strictEqual(fractional.status, 400)
+
+				const missingKey = yield* postUsage(
+					handler,
+					"T-X",
+					{ inputTokens: 1, outputTokens: 5 },
+					bearer,
+				)
+				assert.strictEqual(missingKey.status, 400)
+
+				const emptyKey = yield* postUsage(
+					handler,
+					"T-X",
+					{ inputTokens: 1, outputTokens: 5, idempotencyKey: "" },
+					bearer,
+				)
+				assert.strictEqual(emptyKey.status, 400)
+			}),
+		)
+	})
+
+	it.effect("answers forwarded:false without a worker env (nothing to bill against)", () => {
+		const testDb = createTestDb(trackedDbs)
+		const autumn = stubAutumnFetch()
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_u2",
+					orgId: "org_u2",
+					teamId: "T-U2",
+					teamName: "NoEnvOrg",
+					botToken: "xoxb-u2",
+					apiKey: "maple_ak_u2",
+				}),
+			)
+			yield* withHandler(
+				testDb,
+				{ slack: "slack-secret-token" },
+				Effect.fnUntraced(function* (handler) {
+					const response = yield* postUsage(
+						handler,
+						"T-U2",
+						{ inputTokens: 10, outputTokens: 5, idempotencyKey: "sess:turn" },
+						"Bearer maple_svc_slack-secret-token",
+					)
+					assert.strictEqual(response.status, 200)
+					const body = yield* Effect.promise(() => response.json())
+					assert.deepStrictEqual(body, { forwarded: false })
+					assert.strictEqual(autumn.calls.length, 0)
+				}),
+			)
+		}).pipe(
+			Effect.provide(testDb.layer),
+			Effect.ensuring(Effect.sync(() => autumn.restore())),
+		)
+	})
+
+	it.effect("accepts an all-zero report but does not post to Autumn", () => {
+		const testDb = createTestDb(trackedDbs)
+		const autumn = stubAutumnFetch()
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_u3",
+					orgId: "org_u3",
+					teamId: "T-U3",
+					teamName: "ZeroOrg",
+					botToken: "xoxb-u3",
+					apiKey: "maple_ak_u3",
+				}),
+			)
+			yield* withHandler(
+				testDb,
+				{ slack: "slack-secret-token" },
+				Effect.fnUntraced(function* (handler) {
+					const response = yield* postUsage(
+						handler,
+						"T-U3",
+						{ inputTokens: 0, outputTokens: 0, idempotencyKey: "sess:turn" },
+						"Bearer maple_svc_slack-secret-token",
+					)
+					assert.strictEqual(response.status, 200)
+					const body = yield* Effect.promise(() => response.json())
+					assert.deepStrictEqual(body, { forwarded: false })
+					assert.strictEqual(autumn.calls.length, 0)
+				}),
+				AUTUMN_ENV,
+			)
+		}).pipe(
+			Effect.provide(testDb.layer),
+			Effect.ensuring(Effect.sync(() => autumn.restore())),
 		)
 	})
 })
