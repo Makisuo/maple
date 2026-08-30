@@ -37,7 +37,6 @@ import {
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm"
 import { Clock, Context, Duration, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
-import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { applyDiagnosisWrites, subjectTypeOf } from "@/services/errors/apply-diagnosis"
 import { AUTONOMOUS_KICKOFF_LEAD, buildIncidentContextMessage } from "@/workflows/incident-context"
 import { routeInvestigation, type InvestigationRoute } from "@/services/errors/investigation-route"
@@ -1011,34 +1010,14 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					// A human follow-up that re-diagnoses a ranked fan-out orphans the lens
 					// verdicts: they explain a cause that is no longer on screen.
 					...(row.fanoutState === "ranked" ? { fanoutState: "superseded" as const } : undefined),
-				}).pipe(
-					Effect.mapError(makePersistenceError),
-					Effect.provideService(Database, database),
-				)
+				}).pipe(Effect.mapError(makePersistenceError), Effect.provideService(Database, database))
 
-				const env = Option.getOrUndefined(workerEnv)
-				if (env && (request.inputTokens || request.outputTokens)) {
-					// Keyed on the investigation id (one diagnosis per investigation): a
-					// re-diagnosis updates the report but is intentionally NOT re-billed,
-					// matching the once-per-investigation timeline event above. A tracking
-					// failure must not fail the diagnosis write, but is surfaced as a log.
-					yield* Effect.tryPromise(() =>
-						trackTokenUsage(env, {
-							orgId,
-							inputTokens: request.inputTokens ?? 0,
-							outputTokens: request.outputTokens ?? 0,
-							idempotencyKey: id,
-							source: "triage",
-						}),
-					).pipe(
-						Effect.catchCause((cause) =>
-							Effect.logWarning("token usage tracking failed").pipe(
-								Effect.annotateLogs({ investigationId: id, cause: summarizeCause(cause) }),
-							),
-						),
-					)
-				}
-
+				// The token counts land on the row, but are NOT metered here. Every caller that
+				// supplies them is a chat-session turn, and the session runner meters that turn
+				// in full — including whatever the turn spends after this call. Metering here as
+				// well double-billed it; metering here *instead* under-billed it, because this
+				// key is the investigation id and a superseding diagnosis deduplicates against
+				// the first one. One meter, at the turn boundary, keyed on the turn.
 				const updated = yield* loadRow(orgId, id)
 				return yield* documentFor(orgId, updated ?? row)
 			})

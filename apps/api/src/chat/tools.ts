@@ -90,14 +90,6 @@ export const buildDiagnosisCompletion = (
 					outputTokens: usage.output,
 				}),
 			).pipe(
-				// The diagnosis write meters the running total above into the org's AI usage
-				// under `triage`, so the session runner must not bill the same turn again as
-				// `chat`. On success only: a write that failed metered nothing.
-				Effect.tap(() =>
-					Effect.sync(() => {
-						usage.metered = true
-					}),
-				),
 				Effect.as("Diagnosis recorded."),
 				// Named failures only. `catchCause` + `String(cause)` fed the model a rendered
 				// Effect cause — stack frames, and connection details out of a DatabaseError.

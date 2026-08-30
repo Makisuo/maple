@@ -192,25 +192,9 @@ export interface TurnUsage {
 	input: number
 	output: number
 	cacheRead: number
-	/**
-	 * Set when a mid-turn consumer has already metered these tokens into the org's
-	 * AI usage, so the session runner does not bill them a second time.
-	 *
-	 * Exactly one consumer sets it today: `submit_diagnosis`, which hands the running
-	 * total to `InvestigationService` and is billed there under `triage`. The runner
-	 * meters the whole turn as `chat` otherwise, and the two keys are deliberately
-	 * different — without this flag, an investigation follow-up that files a
-	 * superseding diagnosis would be charged for the same tokens twice.
-	 */
-	metered: boolean
 }
 
-export const makeTurnUsage = (): TurnUsage => ({
-	input: 0,
-	output: 0,
-	cacheRead: 0,
-	metered: false,
-})
+export const makeTurnUsage = (): TurnUsage => ({ input: 0, output: 0, cacheRead: 0 })
 
 /**
  * Low-cardinality facts collected by the loop and emitted once on the enclosing turn span.

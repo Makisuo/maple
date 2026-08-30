@@ -133,13 +133,15 @@ describe("toLlmMessages with a compaction", () => {
 const stubAutumnFetch = () => {
 	const realFetch = globalThis.fetch
 	const calls: Array<Record<string, unknown>> = []
+	const signals: Array<AbortSignal | null | undefined> = []
 	globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
 		// SAFETY: the tracker under test always POSTs a JSON object body; the assertions
 		// below fail loudly if that ever stops holding.
 		calls.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+		signals.push(init?.signal)
 		return new Response("{}", { status: 200 })
 	}) as typeof fetch
-	return { calls, restore: () => void (globalThis.fetch = realFetch) }
+	return { calls, signals, restore: () => void (globalThis.fetch = realFetch) }
 }
 
 const AUTUMN_ENV = { AUTUMN_SECRET_KEY: "autumn-sk", AUTUMN_API_URL: "https://autumn.test" }
@@ -177,19 +179,9 @@ describe("meterTurn", () => {
 					],
 				]),
 			)
-		} finally {
-			autumn.restore()
-		}
-	})
-
-	it("bills nothing when `submit_diagnosis` already metered the turn as triage", async () => {
-		const autumn = stubAutumnFetch()
-		try {
-			// The double-billing case: an investigation follow-up that files a superseding
-			// diagnosis reports this same total to `InvestigationService`.
-			await meterTurn(TURN, orgId, { ...makeTurnUsage(), input: 1200, output: 340, metered: true })
-
-			assert.lengthOf(autumn.calls, 0)
+			// Bounded, because this is awaited while the session's turn slot is still
+			// held — see `TRACK_TIMEOUT_MS`.
+			for (const signal of autumn.signals) assert.instanceOf(signal, AbortSignal)
 		} finally {
 			autumn.restore()
 		}

@@ -237,20 +237,27 @@ const COMPACTION_TIMEOUT = "20 seconds"
 const CHAT_TURN_FAILED = "Maple couldn't complete this response."
 
 /**
- * Meter what this turn spent into the org's AI usage, alongside autonomous triage
- * and the Slack agent.
+ * Meter what this turn spent into the org's AI usage, alongside the fan-out
+ * workflow's triage passes and the Slack agent.
+ *
+ * **The only meter on this path**, deliberately. `submit_diagnosis` used to bill the
+ * running total it reports to `InvestigationService`, which is the same turn from a
+ * different angle: metering both double-billed a diagnosis turn, and suppressing this
+ * one in its favour lost the charge entirely, because that key is the investigation id
+ * and a superseding diagnosis deduplicates against the first. So the investigation
+ * still records the tokens on its row, and this bills them, once, per turn.
  *
  * `usage` is the turn's whole total: every step, every sub-agent (they share the
  * parent's accumulator), and the compaction that runs after the answer.
  *
- * Two deliberate choices:
+ * Two more deliberate choices:
  *
  *   - **In the `finally`, not on the happy path.** A turn that failed or was aborted
  *     mid-stream still spent whatever the provider had already served. Metering
  *     follows the spend, not the outcome.
  *   - **Keyed on the message id**, which identifies the turn: the session claims one
  *     per turn and never reuses it, so a turn that somehow ran twice still meters
- *     once.
+ *     once, and a restarted investigation's new turn is real new spend that bills.
  *
  * Exported for tests; the only production caller is the `finally` below.
  */
@@ -263,8 +270,6 @@ export const meterTurn = async (
 	orgId: TenantContext["orgId"],
 	usage: TurnUsage,
 ): Promise<void> => {
-	// `submit_diagnosis` already billed this turn under `triage`; see `TurnUsage.metered`.
-	if (usage.metered) return
 	await trackTokenUsage(input.env, {
 		orgId,
 		inputTokens: usage.input,

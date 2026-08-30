@@ -12,6 +12,16 @@ import { AUTUMN_API_VERSION, AUTUMN_TRACK_PATH } from "@/services/billing/autumn
 
 const DEFAULT_AUTUMN_API_URL = "https://api.useautumn.com"
 
+/**
+ * Ceiling on one track call.
+ *
+ * Every caller awaits this from somewhere that is holding something open — a chat
+ * turn holds the session's turn slot until it resolves, so an unbounded stall would
+ * leave a finished conversation unable to accept the next message. A dropped meter
+ * event is the cheaper failure, and it is already the failure mode for a non-2xx.
+ */
+const TRACK_TIMEOUT_MS = 5_000
+
 export interface TrackTokenUsageOptions {
 	readonly orgId: string
 	readonly inputTokens: number
@@ -46,6 +56,7 @@ const postTrack = async (
 				value: event.value,
 				idempotency_key: event.idempotencyKey,
 			}),
+			signal: AbortSignal.timeout(TRACK_TIMEOUT_MS),
 		})
 		if (!response.ok) {
 			const body = await response.text().catch(() => "")
