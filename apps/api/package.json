@@ -29,7 +29,7 @@
 		"bench:startup-cpu": "bun run scripts/bench-startup-cpu.ts"
 	},
 	"dependencies": {
-		"@clerk/backend": "^2.30.1",
+		"@clerk/backend": "^3.16.12",
 		"@clickhouse/client-web": "catalog:clickhouse",
 		"@distilled.cloud/cloudflare": "1.0.0-rc.6",
 		"@distilled.cloud/core": "1.0.0-rc.6",

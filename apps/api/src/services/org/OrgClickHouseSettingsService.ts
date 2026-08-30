@@ -436,7 +436,10 @@ const decryptToken = (
 // here is the single edit needed to roll customers onto a newer maple-otel
 // collector — the generated YAML and the documented `docker run …` command
 // both pick it up.
-const COLLECTOR_IMAGE_REF = "ghcr.io/makisuo/maple/otel-collector-maple:0.1.5"
+// Stays on the latest PUBLISHED tag: this ref lands verbatim in configs
+// customers download and run. Bump only after the release tag's image exists
+// on GHCR (the Docker onboarding modal is gated the same way).
+const COLLECTOR_IMAGE_REF = "ghcr.io/mapletechlabs/maple/otel-collector-maple:0.2.0"
 const COLLECTOR_PASSWORD_ENV = "MAPLE_CLICKHOUSE_PASSWORD"
 
 /**
@@ -478,6 +481,12 @@ const renderCollectorYaml = (input: {
 		"        endpoint: 0.0.0.0:4317",
 		"      http:",
 		"        endpoint: 0.0.0.0:4318",
+		"  # Uncomment to monitor local Docker containers (requires running the",
+		"  # collector with -v /var/run/docker.sock:/var/run/docker.sock:ro and",
+		"  # --user 0:0, and adding docker_stats to the metrics pipeline below).",
+		"  # docker_stats:",
+		"  #   endpoint: unix:///var/run/docker.sock",
+		"  #   collection_interval: 30s",
 		"",
 		"processors:",
 		"  memory_limiter:",
@@ -1586,6 +1595,14 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		// done so by ~20ms, the entire 40-249ms band is 0.5% of reads, and anything
 		// past that is hung rather than slow. A longer deadline would buy almost no
 		// extra hits and charge the full deadline to every hung read.
+		//
+		// `skipReadWhenSlotsHeld` because this bucket's timeouts are exactly the
+		// reads issued while other outbound I/O holds a connection slot — a shape
+		// the per-isolate breaker can never learn, since each isolate reads this
+		// bucket at most once per memo window (measured: the most timeouts of any
+		// bucket, zero breaker skips). With `compute` a ~20ms indexed row read,
+		// skipping straight to Postgres beats a 40ms deadline gamble that loses
+		// 27% of the time at a p50 of 621ms per loss.
 		const readSharedOrPostgres = (orgId: OrgId) =>
 			edgeCache
 				.getOrCompute(
@@ -1594,6 +1611,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 						key: orgId,
 						ttlSeconds: ORG_CH_CONFIG_CACHE_TTL_SECONDS,
 						schema: CachedChSettingsEnvelope,
+						skipReadWhenSlotsHeld: true,
 					},
 					readSettingsFromPostgres(orgId).pipe(Effect.map((settings) => ({ settings }))),
 				)

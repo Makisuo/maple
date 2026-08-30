@@ -4,7 +4,7 @@
 // tidy: fourteen turns so the Overview's digest elides its middle, idle gaps of
 // wildly different lengths, two models, five tools, per-call usage and cost, a
 // sub-agent handoff, and a final turn that dies on a context-window error
-// reported at two levels — the roll-up the counting rules exist for. Six more
+// reported at two levels — the roll-up the counting rules exist for. Seven more
 // turns after those carry what the Transcript view needs and the fourteen do
 // not produce (see `buildTranscriptTurns`) — the last three a dispatched
 // fan-out that overlaps in time and so lands as concurrent CHAPTERS.
@@ -256,12 +256,16 @@ function toolResult(tool: string): string | undefined {
 	}
 }
 
+/** The gateway stamps a vendor on every AI span, so the fixture carries one too
+ *  — it is what puts a framework mark beside the label in the header and rows. */
+const VENDOR_ID = "claude_agent_sdk"
+
 export function buildAgentSessionFixture(): readonly AiSessionSpan[] {
 	const base = buildBaseTurns()
 	const baseEndMs = Math.max(...base.map((span) => spanStartMs(span) + span.durationMs)) - T0
-	return [...base, ...buildTranscriptTurns(baseEndMs + 2 * MINUTE)].sort(
-		(a, b) => spanStartMs(a) - spanStartMs(b),
-	)
+	return [...base, ...buildTranscriptTurns(baseEndMs + 2 * MINUTE)]
+		.sort((a, b) => spanStartMs(a) - spanStartMs(b))
+		.map((span) => ({ ...span, vendorId: VENDOR_ID }))
 }
 
 /**
@@ -478,7 +482,53 @@ function buildTranscriptTurns(startMs: number): readonly AiSessionSpan[] {
 		...richTurn(startMs),
 		...captureOffTurn(startMs + 3 * MINUTE),
 		...mixedCaptureTurn(startMs + 5 * MINUTE),
+		...jsonBodiesTurn(startMs + 6 * MINUTE),
 		...parallelTurns(startMs + 7 * MINUTE),
+	]
+}
+
+/** A turn whose message bodies are JSON documents, not prose — an event-driven
+ *  agent fed a webhook payload, answering with a structured verdict. The
+ *  transcript renders these as JSON: `{"a":1}` set as markdown is one paragraph
+ *  with the structure collapsed. */
+function jsonBodiesTurn(t: number): readonly AiSessionSpan[] {
+	const event = JSON.stringify({
+		event: "invoice.payment_failed",
+		attempt: 3,
+		invoice: { id: "in_1PxK2m", amount_due: 4900, currency: "usd" },
+		customer: { id: "cus_9f2K", email: "billing@acme.dev" },
+	})
+	const verdict = JSON.stringify({
+		action: "retry",
+		delay_seconds: 3600,
+		reason: "card_declined is retryable and the customer has no dunning hold",
+	})
+	return [
+		agentSpan({
+			spanId: "json-agent",
+			traceId: "trace-json",
+			startMs: t,
+			durationMs: 4 * SECOND,
+			agentName: "dunning-agent",
+			serviceName: "billing",
+		}),
+		llmSpan({
+			spanId: "json-l1",
+			parentSpanId: "json-agent",
+			traceId: "trace-json",
+			startMs: t + SECOND,
+			durationMs: 1_900,
+			spanName: "chat claude-haiku-4-5",
+			model: "claude-haiku-4-5",
+			ttftSeconds: 0.21,
+			serviceName: "billing",
+			genAi: {
+				...usage(1_800, 96, 0.004),
+				inputMessages: userMessages(event),
+				outputMessages: assistantText(verdict),
+				responseFinishReasons: ["end_turn"],
+			},
+		}),
 	]
 }
 

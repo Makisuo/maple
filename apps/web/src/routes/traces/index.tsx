@@ -18,6 +18,9 @@ import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-r
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { AutocompleteValuesProvider } from "@/hooks/use-autocomplete-values"
+import { ActiveFilterChips } from "@maple/ui/components/filters/active-filter-chips"
+import { traceFilterChips } from "@/lib/traces/trace-filter-chips"
+import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 
 const ContainsMatchMode = Schema.optional(Schema.Literals(["contains"]))
 
@@ -90,6 +93,7 @@ export const Route = createFileRoute("/traces/")({
 function TracesPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
+	const pinnedNamespace = useGlobalNamespace()
 
 	const handleApplyWhereClause = React.useCallback(
 		(newClause: string) => {
@@ -99,6 +103,35 @@ function TracesPage() {
 		},
 		[navigate],
 	)
+
+	const activeFilterChips = React.useMemo(
+		() =>
+			traceFilterChips(search)
+				// URL namespace filters are ignored while the org-global pin is on —
+				// chips for them would suggest they still apply.
+				.filter(
+					(chip) =>
+						pinnedNamespace === null ||
+						(chip.param !== "namespaces" && chip.param !== "excludedNamespaces"),
+				)
+				.map((chip) => ({
+					id: chip.param,
+					label: chip.label,
+					values: chip.values,
+					negated: chip.negated,
+					onRemove: () => navigate({ search: (prev) => ({ ...prev, [chip.param]: undefined }) }),
+				})),
+		[search, navigate, pinnedNamespace],
+	)
+
+	const clearFacetFilters = React.useCallback(() => {
+		navigate({
+			search: (prev) => ({
+				...prev,
+				...Object.fromEntries(traceFilterChips(prev).map((chip) => [chip.param, undefined])),
+			}),
+		})
+	}, [navigate])
 
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		search.startTime,
@@ -186,6 +219,7 @@ function TracesPage() {
 										</Button>
 									</div>
 								)}
+								<ActiveFilterChips chips={activeFilterChips} onClearAll={clearFacetFilters} />
 								<TracesTable filters={search} />
 							</DashboardLayout.Scroll>
 						</DashboardLayout.Content>

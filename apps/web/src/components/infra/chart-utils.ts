@@ -4,7 +4,7 @@
 // value formatting used by tooltips, legend chips, and axes. Series colors come
 // from `resolveSeriesColors` — a host/pod/zone keeps its color across windows.
 
-import { formatBytesPerSecond, formatLoad, formatPercent } from "@maple/ui/lib/format"
+import { formatBytes, formatBytesPerSecond, formatLoad, formatPercent } from "@maple/ui/lib/format"
 
 /**
  * Bucket width for the timeseries charts: aim for ~100 points, floored at the
@@ -18,7 +18,7 @@ export function chartBucketSeconds(startTime: string, endTime: string): number {
 }
 
 /** Every value unit an infra chart can carry. Drives unit-aware formatting. */
-export type ChartUnit = "percent" | "cores" | "seconds" | "load" | "bytes_per_second"
+export type ChartUnit = "percent" | "cores" | "seconds" | "load" | "bytes_per_second" | "bytes"
 
 /** Compact, human duration ("45s", "12m", "3h 20m", "2d 4h"). */
 export function formatSeconds(seconds: number): string {
@@ -50,6 +50,8 @@ export function formatValueWithUnit(value: number, unit: ChartUnit): string {
 			return formatLoad(value)
 		case "bytes_per_second":
 			return formatBytesPerSecond(value)
+		case "bytes":
+			return formatBytes(value)
 	}
 }
 

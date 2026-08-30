@@ -1,7 +1,7 @@
 // BOUNDARY: Test doubles mirror intentionally untyped external callbacks.
 import { describe, expect, it } from "vitest"
-import { Schema } from "effect"
-import { compileCH } from "@maple-dev/clickhouse-builder"
+import { Schema, Effect } from "effect"
+import { compileUnsafe } from "@maple-dev/clickhouse-builder"
 import {
 	auditAttributeKeyInventoryQuery,
 	auditAttributeKeyInventoryRowSchema,
@@ -32,14 +32,14 @@ const baseParams = {
 
 /** Compiled up front: the builders return differently-shaped queries, and only the SQL is compared. */
 const compiledQueries: ReadonlyArray<readonly [string, string]> = [
-	["auditAttributeKeyInventoryQuery", compileCH(auditAttributeKeyInventoryQuery(), baseParams).sql],
-	["auditSpanShapeByServiceQuery", compileCH(auditSpanProfileByServiceQuery(), baseParams).sql],
-	["auditSamplingByServiceQuery", compileCH(auditSamplingByServiceQuery(), baseParams).sql],
-	["auditLogSeverityByServiceQuery", compileCH(auditLogSeverityByServiceQuery(), baseParams).sql],
-	["auditMetricLabelCardinalityQuery", compileCH(auditMetricLabelCardinalityQuery(), baseParams).sql],
-	["auditPeerValueInventoryQuery", compileCH(auditPeerValueInventoryQuery(), baseParams).sql],
-	["auditDbEdgeIdentityQuery", compileCH(auditDbEdgeIdentityQuery(), baseParams).sql],
-	["auditLogCorrelationQuery", compileCH(auditLogCorrelationQuery(), baseParams).sql],
+	["auditAttributeKeyInventoryQuery", compileUnsafe(auditAttributeKeyInventoryQuery(), baseParams).sql],
+	["auditSpanShapeByServiceQuery", compileUnsafe(auditSpanProfileByServiceQuery(), baseParams).sql],
+	["auditSamplingByServiceQuery", compileUnsafe(auditSamplingByServiceQuery(), baseParams).sql],
+	["auditLogSeverityByServiceQuery", compileUnsafe(auditLogSeverityByServiceQuery(), baseParams).sql],
+	["auditMetricLabelCardinalityQuery", compileUnsafe(auditMetricLabelCardinalityQuery(), baseParams).sql],
+	["auditPeerValueInventoryQuery", compileUnsafe(auditPeerValueInventoryQuery(), baseParams).sql],
+	["auditDbEdgeIdentityQuery", compileUnsafe(auditDbEdgeIdentityQuery(), baseParams).sql],
+	["auditLogCorrelationQuery", compileUnsafe(auditLogCorrelationQuery(), baseParams).sql],
 ]
 
 describe("setup-audit query invariants", () => {
@@ -52,7 +52,7 @@ describe("setup-audit query invariants", () => {
 
 describe("auditAttributeKeyInventoryQuery", () => {
 	it("reads all four scopes in one grouped pass over the hourly rollup", () => {
-		const { sql } = compileCH(auditAttributeKeyInventoryQuery(), baseParams)
+		const { sql } = compileUnsafe(auditAttributeKeyInventoryQuery(), baseParams)
 		expect(sql).toContain("FROM attribute_keys_hourly")
 		expect(sql).toContain("AttributeScope IN ('span', 'resource', 'log', 'metric')")
 		expect(sql).toContain("GROUP BY scope, attributeKey")
@@ -62,7 +62,7 @@ describe("auditAttributeKeyInventoryQuery", () => {
 
 describe("auditSpanShapeByServiceQuery", () => {
 	it("splits weighted counts by span kind and flags non-Title-Case literals", () => {
-		const { sql } = compileCH(auditSpanProfileByServiceQuery(), baseParams)
+		const { sql } = compileUnsafe(auditSpanProfileByServiceQuery(), baseParams)
 		expect(sql).toContain("FROM traces_aggregates_hourly")
 		expect(sql).toContain("sumIf(WeightedCount, SpanKind = 'Server')")
 		expect(sql).toContain("sumIf(WeightedCount, DeploymentEnv = '')")
@@ -72,7 +72,7 @@ describe("auditSpanShapeByServiceQuery", () => {
 	})
 
 	it("snaps both window bounds to the hour so partial windows still match the rollup", () => {
-		const { sql } = compileCH(auditSpanProfileByServiceQuery(), baseParams)
+		const { sql } = compileUnsafe(auditSpanProfileByServiceQuery(), baseParams)
 		expect(sql).toContain("Hour >= toStartOfHour(toDateTime('2024-01-01 00:00:00'))")
 		expect(sql).toContain("Hour <= toStartOfHour(toDateTime('2024-01-02 00:00:00'))")
 	})
@@ -80,7 +80,7 @@ describe("auditSpanShapeByServiceQuery", () => {
 
 describe("auditSamplingByServiceQuery", () => {
 	it("returns raw and extrapolated counts separately rather than a ratio", () => {
-		const { sql } = compileCH(auditSamplingByServiceQuery(), baseParams)
+		const { sql } = compileUnsafe(auditSamplingByServiceQuery(), baseParams)
 		expect(sql).toContain("FROM service_overview_hourly")
 		expect(sql).toContain("sum(SpanCount)")
 		expect(sql).toContain("sum(EstimatedSpanCount)")
@@ -92,7 +92,7 @@ describe("auditSamplingByServiceQuery", () => {
 
 describe("auditMetricLabelCardinalityQuery", () => {
 	it("uses approximate uniq so an exploded-label org cannot exhaust query memory", () => {
-		const { sql } = compileCH(auditMetricLabelCardinalityQuery(), baseParams)
+		const { sql } = compileUnsafe(auditMetricLabelCardinalityQuery(), baseParams)
 		expect(sql).toContain("AttributeScope = 'metric'")
 		expect(sql).toContain("uniq(AttributeValue)")
 		expect(sql).not.toContain("uniqExact")
@@ -101,7 +101,7 @@ describe("auditMetricLabelCardinalityQuery", () => {
 
 describe("auditPeerValueInventoryQuery", () => {
 	it("restricts to the dependency-naming keys and drops empty values", () => {
-		const { sql } = compileCH(auditPeerValueInventoryQuery(), baseParams)
+		const { sql } = compileUnsafe(auditPeerValueInventoryQuery(), baseParams)
 		expect(sql).toContain("AttributeScope = 'span'")
 		expect(sql).toContain(
 			"AttributeKey IN ('peer.service', 'db.system', 'db.system.name', 'messaging.system', 'rpc.system')",
@@ -113,7 +113,7 @@ describe("auditPeerValueInventoryQuery", () => {
 
 describe("auditDbEdgeIdentityQuery", () => {
 	it("counts calls whose database namespace is empty", () => {
-		const { sql } = compileCH(auditDbEdgeIdentityQuery(), baseParams)
+		const { sql } = compileUnsafe(auditDbEdgeIdentityQuery(), baseParams)
 		expect(sql).toContain("FROM service_map_db_edges_hourly")
 		expect(sql).toContain("sumIf(CallCount, DbNamespace = '')")
 		expect(sql).toContain("DbSystem != ''")
@@ -122,7 +122,7 @@ describe("auditDbEdgeIdentityQuery", () => {
 
 describe("auditLogCorrelationQuery", () => {
 	it("reads narrow columns and prunes on both timestamp columns", () => {
-		const { sql } = compileCH(auditLogCorrelationQuery(), baseParams)
+		const { sql } = compileUnsafe(auditLogCorrelationQuery(), baseParams)
 		expect(sql).toContain("FROM logs")
 		expect(sql).toContain("countIf(TraceId = '')")
 		expect(sql).toContain("countIf(upper(SeverityText) IN ('ERROR', 'FATAL'))")
@@ -155,7 +155,7 @@ describe("trace-completeness joins", () => {
 	}
 
 	it("auditOrphanSpansSQL left-joins children to parents over a lagged window", () => {
-		const { sql } = auditOrphanSpansSQL(window)
+		const { sql } = Effect.runSync(auditOrphanSpansSQL(window))
 		expect(sql).toContain("FROM service_map_children")
 		expect(sql).toContain("LEFT JOIN")
 		expect(sql).toContain("FROM service_map_spans")
@@ -171,7 +171,7 @@ describe("trace-completeness joins", () => {
 	})
 
 	it("auditRootlessTracesSQL joins observed traces against the root-span index", () => {
-		const { sql } = auditRootlessTracesSQL(window)
+		const { sql } = Effect.runSync(auditRootlessTracesSQL(window))
 		expect(sql).toContain("FROM trace_list_mv")
 		expect(sql).toContain("argMin(ServiceName, Timestamp) AS entryService")
 		expect(sql).toContain("countIf(r.TraceId = '')")
@@ -179,12 +179,12 @@ describe("trace-completeness joins", () => {
 	})
 
 	it("applies the trace-sampling modulus to both sides of each join, or neither", () => {
-		const unsampled = auditOrphanSpansSQL(window).sql
+		const unsampled = Effect.runSync(auditOrphanSpansSQL(window)).sql
 		expect(unsampled).not.toContain("cityHash64")
 
 		for (const sql of [
-			auditOrphanSpansSQL({ ...window, traceSampleModulus: 16 }).sql,
-			auditRootlessTracesSQL({ ...window, traceSampleModulus: 16 }).sql,
+			Effect.runSync(auditOrphanSpansSQL({ ...window, traceSampleModulus: 16 })).sql,
+			Effect.runSync(auditRootlessTracesSQL({ ...window, traceSampleModulus: 16 })).sql,
 		]) {
 			// Both sides, so every span of a kept trace survives and per-trace correctness is exact.
 			expect(sql.match(/cityHash64\(TraceId\) % 16 = 0/g)).toHaveLength(2)
@@ -192,8 +192,10 @@ describe("trace-completeness joins", () => {
 	})
 
 	it("clamps a nonsensical modulus rather than emitting it", () => {
-		expect(auditOrphanSpansSQL({ ...window, traceSampleModulus: 0 }).sql).not.toContain("cityHash64")
-		expect(auditOrphanSpansSQL({ ...window, traceSampleModulus: 99_999 }).sql).toContain(
+		expect(Effect.runSync(auditOrphanSpansSQL({ ...window, traceSampleModulus: 0 })).sql).not.toContain(
+			"cityHash64",
+		)
+		expect(Effect.runSync(auditOrphanSpansSQL({ ...window, traceSampleModulus: 99_999 })).sql).toContain(
 			"cityHash64(TraceId) % 1024 = 0",
 		)
 	})
@@ -202,14 +204,16 @@ describe("trace-completeness joins", () => {
 		// Neither outer query carries an OrgId predicate — the scope comes from
 		// both join sides being scoped. Asserting it by hand is what these used to
 		// do, and an omitted filter would have sailed through the executor's gate.
-		expect(auditOrphanSpansSQL(window).tenantScope).toBe("org")
-		expect(auditRootlessTracesSQL(window).tenantScope).toBe("org")
+		expect(Effect.runSync(auditOrphanSpansSQL(window)).tenantScope).toBe("single-tenant")
+		expect(Effect.runSync(auditRootlessTracesSQL(window)).tenantScope).toBe("single-tenant")
 	})
 
 	it("escapes the org id so an embedded quote cannot terminate the literal", () => {
-		const { sql } = auditOrphanSpansSQL({ ...window, orgId: "org_'; DROP TABLE traces; --" })
+		const { sql } = Effect.runSync(
+			auditOrphanSpansSQL({ ...window, orgId: "org_'; DROP TABLE traces; --" }),
+		)
 		// The injected quote is escaped, so the whole payload stays inside one string literal.
-		expect(sql).toContain("OrgId = 'org_\\'; DROP TABLE traces; --'")
+		expect(sql).toContain("OrgId = 'org_\\'\\x3B DROP TABLE traces\\x3B --'")
 		expect(sql).not.toContain("OrgId = 'org_'")
 	})
 })

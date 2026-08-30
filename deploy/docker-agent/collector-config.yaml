@@ -1,0 +1,143 @@
+# Maple Docker agent — baked into ghcr.io/mapletechlabs/maple/otel-collector-maple
+# at /etc/otel/docker-config.yaml so hosted onboarding is a single `docker run`
+# (see the install modal in apps/web and docs/guides/docker-infrastructure).
+#
+# Collects per-container metrics via docker_stats (socket must be mounted
+# read-only), container logs via filelog over the json-file driver (optional
+# mount), and accepts app OTLP on 4317/4318. The container must run as root
+# (`--user 0:0`): the docker socket and /var/lib/docker/containers are not
+# readable by the distroless nonroot user.
+#
+# Env contract: MAPLE_INGEST_KEY (required), MAPLE_ENDPOINT (self-hosted
+# override), MAPLE_ENVIRONMENT (deployment environment, default "production").
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  file_storage:
+    directory: /var/lib/otelcol
+    create_directory: true
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    collection_interval: 30s
+    # Compose labels — Maple's Docker analog of the k8s namespace/workload
+    # facets. This lands them as DATAPOINT attributes; transform/compose
+    # below promotes them to resource, which is where the queries read them.
+    container_labels_to_metric_labels:
+      com.docker.compose.project: compose.project
+      com.docker.compose.service: compose.service
+    metrics:
+      container.uptime:
+        enabled: true
+      container.restarts:
+        enabled: true
+      container.cpu.limit:
+        enabled: true
+      container.pids.count:
+        enabled: true
+
+  # Docker json-file driver logs. Requires mounting /var/lib/docker/containers
+  # read-only; without the mount the glob matches nothing and the receiver
+  # idles harmlessly.
+  filelog/docker:
+    include:
+      - /var/lib/docker/containers/*/*-json.log
+    start_at: end
+    storage: file_storage
+    include_file_path: true
+    operators:
+      # json-file lines are {"log": "...", "stream": "stdout", "time": "..."}
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.time
+          layout: "%Y-%m-%dT%H:%M:%S.%LZ"
+      - type: regex_parser
+        parse_from: attributes["log.file.path"]
+        regex: "/containers/(?P<container_id>[0-9a-f]{64})/"
+      - type: move
+        from: attributes.container_id
+        to: resource["container.id"]
+      - type: move
+        from: attributes.log
+        to: body
+      - type: remove
+        field: attributes.time
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # docker_stats does not emit host.name — the docker detector reads the
+  # daemon's info over the mounted socket and reports the HOST's hostname.
+  # The system detector alone would report the agent container's own hostname.
+  resourcedetection:
+    detectors: [env, docker, system]
+    override: false
+
+  # Dual-emit both environment keys; Maple's MVs coalesce them (see
+  # DEPLOYMENT_ENV_SQL in packages/domain/src/tinybird/semconv-renames.ts).
+  # `insert`, not `upsert`: app OTLP passing through the agent keeps its own
+  # deployment.environment.* — only unlabeled data (docker_stats, filelog)
+  # gets the agent's environment.
+  resource/env:
+    attributes:
+      - key: deployment.environment.name
+        value: ${env:MAPLE_ENVIRONMENT:-production}
+        action: insert
+      - key: deployment.environment
+        value: ${env:MAPLE_ENVIRONMENT:-production}
+        action: insert
+
+  # container_labels_to_metric_labels sets datapoint attributes, but every
+  # container query reads compose.project/service from ResourceAttributes.
+  # docker_stats emits one Resource per container, so promoting them here
+  # can't clobber a sibling container's value (unlike the Fargate prometheus
+  # path in the k8s chart, which needs groupbyattrs to split first).
+  # The nil guards keep this a no-op for app OTLP flowing through the agent.
+  transform/compose:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(resource.attributes["compose.project"], attributes["compose.project"]) where attributes["compose.project"] != nil
+          - set(resource.attributes["compose.service"], attributes["compose.service"]) where attributes["compose.service"] != nil
+          - delete_key(attributes, "compose.project")
+          - delete_key(attributes, "compose.service")
+
+  batch:
+    send_batch_size: 2000
+    timeout: 10s
+
+exporters:
+  otlphttp/maple:
+    endpoint: ${env:MAPLE_ENDPOINT:-https://ingest.maple.dev}
+    compression: gzip
+    headers:
+      x-maple-ingest-key: ${env:MAPLE_INGEST_KEY}
+
+service:
+  extensions: [health_check, file_storage]
+  pipelines:
+    metrics:
+      receivers: [otlp, docker_stats]
+      processors: [memory_limiter, resourcedetection, resource/env, transform/compose, batch]
+      exporters: [otlphttp/maple]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, resource/env, batch]
+      exporters: [otlphttp/maple]
+    logs:
+      receivers: [otlp, filelog/docker]
+      processors: [memory_limiter, resourcedetection, resource/env, batch]
+      exporters: [otlphttp/maple]

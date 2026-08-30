@@ -4,17 +4,18 @@ import {
 	Context,
 	Duration,
 	Effect,
-	Fiber,
+	FiberMap,
 	Layer,
 	Metric,
+	Queue,
 	Ref,
 	Result,
 	Schedule,
 	Schema,
 	Semaphore,
 } from "effect"
-import { ScrapeResultReport, type InternalScrapeTarget } from "@maple/domain/http"
-import { ApiClient, ApiRequestError } from "./ApiClient"
+import { ScrapeResultReport, ScrapeTargetId, type InternalScrapeTarget } from "@maple/domain/http"
+import { ApiClient } from "./ApiClient"
 import { convertFamiliesToOtlp } from "./prometheus/otlp"
 import { parsePrometheusText } from "./prometheus/parser"
 import { OtlpIngest } from "./OtlpIngest"
@@ -33,7 +34,7 @@ export interface ScrapeSchedulerApi {
 	 * keep one scrape-loop fiber per target, flush scrape results back to the
 	 * API periodically. Only exits on interruption.
 	 */
-	readonly run: Effect.Effect<never, ApiRequestError>
+	readonly run: Effect.Effect<never>
 	readonly stats: Effect.Effect<SchedulerStats>
 }
 
@@ -76,12 +77,17 @@ const DELIVERY_BLOCKED_BACKOFF_MS = Duration.toMillis(DELIVERY_BLOCKED_BACKOFF)
  *   nowhere to go until the org's subscription is fixed, so back off instead of
  *   paying for a scrape whose result is discarded (prod hit this at full
  *   cadence, ~7.2k failures in 6h across the fleet).
+ * - `target_error` — the target answered with a server error (5xx other than
+ *   503). A target stuck on HTTP 500 held full cadence forever, minting an
+ *   Error span (and an alert-feeding error event) every interval; back off
+ *   like a rate limit so a broken target is probed, not hammered.
  * - `scrape_failed` — anything else; hold the configured cadence.
  */
 export const ScrapeFailureReason = Schema.Literals([
 	"rate_limited",
 	"auth_failed",
 	"delivery_blocked",
+	"target_error",
 	"scrape_failed",
 ])
 export type ScrapeFailureReason = typeof ScrapeFailureReason.Type
@@ -137,6 +143,14 @@ class ScrapeAttemptFailed extends Schema.TaggedError<ScrapeAttemptFailed>()(
 		message: Schema.String,
 		reason: ScrapeFailureReason,
 		retryAfterMs: Schema.NullOr(Schema.Number),
+		statusCode: Schema.NullOr(Schema.Number),
+		// Target identity travels on the failure itself, not just the span
+		// attributes: the error event/issue built from this failure is what a
+		// triage sees first, and "target returned HTTP 500" with no identity
+		// forced a trace-attribute hunt that came up empty.
+		targetId: ScrapeTargetId,
+		targetName: Schema.String,
+		targetHost: Schema.String,
 	},
 ) {
 	get outcome(): ScrapeOutcome {
@@ -144,6 +158,7 @@ class ScrapeAttemptFailed extends Schema.TaggedError<ScrapeAttemptFailed>()(
 			reason: this.reason,
 			message: this.message,
 			retryAfterMs: this.retryAfterMs,
+			statusCode: this.statusCode,
 		})
 	}
 }
@@ -165,6 +180,8 @@ export const backoffLogMessage = (reason: ScrapeFailureReason): string => {
 			return "Scrape auth rejected, backing off"
 		case "delivery_blocked":
 			return "Scrape delivery blocked by the ingest gateway, backing off"
+		case "target_error":
+			return "Scrape target returning server errors, backing off"
 		case "scrape_failed":
 			return "Scrape failed, backing off"
 	}
@@ -174,7 +191,7 @@ export const backoffLogMessage = (reason: ScrapeFailureReason): string => {
  * The target period before a target's next scrape. The happy path returns the
  * configured interval; the caller ({@link ScrapeScheduler}'s target loop)
  * subtracts the scrape's own elapsed time so the happy-path cadence stays
- * start-to-start. A rate-limited or auth-rejected scrape escalates
+ * start-to-start. A rate-limited, auth-rejected, or server-erroring scrape escalates
  * exponentially — honoring `Retry-After` when it is longer — capped at
  * {@link MAX_BACKOFF_MS} so the target keeps probing for recovery (an auth fix
  * needs no restart: the credential is resolved server-side per scrape); a
@@ -248,10 +265,15 @@ const targetFingerprint = (target: InternalScrapeTarget): string =>
 		Object.entries(target.labels).sort(([a], [b]) => (a < b ? -1 : 1)),
 	])
 
-interface TargetEntry {
-	readonly fingerprint: string
-	readonly fiber: Fiber.Fiber<unknown, unknown>
-}
+/**
+ * FiberMap key for a target's scrape loop. The fingerprint is part of the key
+ * on purpose: "this target's config changed" and "this target was removed"
+ * both reduce to "a running key is no longer desired", so one interrupt path
+ * in {@link reconcile} covers both, and the FiberMap owns the fiber lifecycle
+ * (interrupt-on-replace, removal on completion) that a hand-rolled
+ * `Ref<Map<string, Fiber>>` had to re-implement.
+ */
+const loopKey = (target: InternalScrapeTarget): string => `${targetKey(target)}|${targetFingerprint(target)}`
 
 /**
  * Send `results` to `send` in chunks of `chunkSize`, stopping at the first
@@ -274,65 +296,6 @@ export const sendResultsInChunks = <E>(
 		return { unsent: [], error: null }
 	})
 
-/**
- * The pending scrape-result buffer. Contents, capacity, ordering and the
- * `scraper.buffered_results` gauge used to be four independent statements
- * (`enqueue` never touched the gauge at all; a flush zeroed it, sent over the
- * network, then set it to the unsent count — losing anything enqueued in the
- * meantime, and losing the whole batch outright if the flush was interrupted
- * after the drain). Every transition below is atomic under one mutex, and the
- * gauge is written from the same critical section that changed the contents, so
- * the reported size is always the size that is actually buffered.
- *
- * Network I/O must stay OUTSIDE the lock: `take` drains and returns, the caller
- * sends, then `requeue` puts back whatever did not make it.
- */
-export interface ResultBuffer {
-	/** Append one result, dropping the oldest when at capacity. */
-	readonly enqueue: (result: ScrapeResultReport) => Effect.Effect<void>
-	/** Atomically drain everything buffered (gauge → 0). */
-	readonly take: Effect.Effect<ReadonlyArray<ScrapeResultReport>>
-	/** Put undelivered results back in front, keeping the newest at capacity. */
-	readonly requeue: (results: ReadonlyArray<ScrapeResultReport>) => Effect.Effect<void>
-	readonly size: Effect.Effect<number>
-}
-
-export const makeResultBuffer = (capacity: number): Effect.Effect<ResultBuffer> =>
-	Effect.gen(function* () {
-		const ref = yield* Ref.make<ReadonlyArray<ScrapeResultReport>>([])
-		const mutex = yield* Semaphore.make(1)
-
-		// Every transition: mutate contents and publish the resulting size in one
-		// critical section, so no interleaving can leave the gauge disagreeing
-		// with the buffer.
-		const transition = (
-			update: (buffered: ReadonlyArray<ScrapeResultReport>) => ReadonlyArray<ScrapeResultReport>,
-		) =>
-			mutex.withPermits(1)(
-				Effect.gen(function* () {
-					const next = update(yield* Ref.get(ref))
-					yield* Ref.set(ref, next)
-					yield* Metric.update(bufferedResults, next.length)
-				}),
-			)
-
-		return {
-			enqueue: (result) => transition((buffered) => [...buffered, result].slice(-capacity)),
-			take: mutex.withPermits(1)(
-				Effect.gen(function* () {
-					const drained = yield* Ref.getAndSet(ref, [])
-					yield* Metric.update(bufferedResults, 0)
-					return drained
-				}),
-			),
-			requeue: (results) =>
-				results.length === 0
-					? Effect.void
-					: transition((buffered) => [...results, ...buffered].slice(-capacity)),
-			size: Effect.map(Ref.get(ref), (buffered) => buffered.length),
-		} satisfies ResultBuffer
-	})
-
 export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSchedulerApi>()(
 	"@maple/scraper/ScrapeScheduler",
 	{
@@ -342,9 +305,19 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 			const otlp = yield* OtlpIngest
 
 			const semaphore = yield* Semaphore.make(env.SCRAPER_CONCURRENCY)
-			const results = yield* makeResultBuffer(MAX_BUFFERED_RESULTS)
-			const fibersRef = yield* Ref.make(new Map<string, TargetEntry>())
+			// Sliding: at capacity the oldest buffered result is dropped for the
+			// newest, so an unreachable API cannot grow memory unboundedly.
+			const results = yield* Queue.sliding<ScrapeResultReport>(MAX_BUFFERED_RESULTS)
 			const lastReconcileRef = yield* Ref.make<number | null>(null)
+			// Loop count as of the last reconcile, for {@link stats}: the FiberMap
+			// itself lives inside `run`'s scope (see below), not the service.
+			const activeLoopsRef = yield* Ref.make(0)
+
+			// The gauge is republished after every queue transition rather than
+			// mutated inside one; the queue is the single source of truth for size.
+			const publishBufferGauge = Effect.suspend(() =>
+				Metric.update(bufferedResults, Queue.sizeUnsafe(results)),
+			)
 
 			const recordOutcome = (
 				target: InternalScrapeTarget,
@@ -352,7 +325,8 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 				durationMs: number,
 				outcome: ScrapeOutcome,
 			) =>
-				results.enqueue(
+				Queue.offer(
+					results,
 					new ScrapeResultReport({
 						targetId: target.id,
 						scrapedAt,
@@ -366,29 +340,54 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 								}
 							: undefined),
 					}),
-				)
+				).pipe(Effect.flatMap(() => publishBufferGauge))
 
 			const scrapeOnce = (target: InternalScrapeTarget) =>
 				semaphore.withPermits(1)(
 					Effect.gen(function* () {
 						const scrapeTimeMs = yield* Clock.currentTimeMillis
+						const targetHost = hostFromUrl(target.url)
 
-						const outcome: ScrapeOutcome = yield* Effect.gen(function* () {
-							const attempt = yield* Effect.gen(function* () {
+						// Every failure path fails with a ScrapeAttemptFailed carrying the
+						// target's identity, built where the failure is understood.
+						const attemptFailed = (fields: {
+							readonly message: string
+							readonly reason: ScrapeFailureReason
+							readonly retryAfterMs?: number | null
+							readonly statusCode?: number | null
+						}) =>
+							new ScrapeAttemptFailed({
+								message: fields.message,
+								reason: fields.reason,
+								retryAfterMs: fields.retryAfterMs ?? null,
+								statusCode: fields.statusCode ?? null,
+								targetId: target.id,
+								targetName: target.name,
+								targetHost,
+							})
+
+						const attempt: Effect.Effect<ScrapeOutcome, ScrapeAttemptFailed> = Effect.gen(
+							function* () {
 								const response = yield* api.scrapeTarget(target.id, target.subTargetKey)
 								if (response.status < 200 || response.status >= 300) {
-									return scrapeFailed({
-										message: `target returned HTTP ${response.status}`,
+									return yield* attemptFailed({
+										// Identity in the message so the error issue and its
+										// fingerprint name the target instead of pooling every
+										// broken target under one anonymous "HTTP 500".
+										message: `target "${target.name}" (${targetHost}) returned HTTP ${response.status}`,
 										reason:
 											response.status === 429 || response.status === 503
 												? "rate_limited"
 												: response.status === 401 || response.status === 403
 													? "auth_failed"
-													: "scrape_failed",
+													: response.status >= 500
+														? "target_error"
+														: "scrape_failed",
 										retryAfterMs:
 											response.retryAfterSeconds !== null
 												? response.retryAfterSeconds * 1000
 												: null,
+										statusCode: response.status,
 									})
 								}
 
@@ -397,7 +396,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 									targetId: target.id,
 									targetName: target.name,
 									serviceName: target.serviceName ?? target.name,
-									instance: hostFromUrl(target.url),
+									instance: targetHost,
 									targetLabels: target.labels,
 									scrapeTimeMs,
 								})
@@ -424,64 +423,55 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 										converted.dataPointCounts.gauge +
 										converted.dataPointCounts.histogram,
 								})
-							}).pipe(
-								Effect.catch((error) => {
-									const gatewayStatus =
-										error._tag === "@maple/scraper/OtlpIngestError" ? error.status : null
-									return Effect.succeed(
-										scrapeFailed({
-											message: error.message,
-											// The gateway's 402 is the one failure in here that a
-											// retry provably cannot clear.
-											reason:
-												gatewayStatus === 402 ? "delivery_blocked" : "scrape_failed",
-											statusCode: gatewayStatus,
-										}),
-									)
+							},
+						).pipe(
+							Effect.catchTags({
+								"@maple/scraper/ApiRequestError": (error) =>
+									attemptFailed({ message: error.message, reason: "scrape_failed" }),
+								"@maple/scraper/OtlpIngestError": (error) =>
+									attemptFailed({
+										message: error.message,
+										// The gateway's 402 is the one failure in here that a
+										// retry provably cannot clear.
+										reason: error.status === 402 ? "delivery_blocked" : "scrape_failed",
+										statusCode: error.status,
+									}),
+							}),
+							Effect.catchDefect((defect) =>
+								attemptFailed({
+									message: Cause.pretty(Cause.die(defect)),
+									reason: "scrape_failed",
 								}),
-								Effect.catchDefect((defect) =>
-									Effect.succeed(
-										scrapeFailed({
-											message: Cause.pretty(Cause.die(defect)),
-											reason: "scrape_failed",
-										}),
-									),
-								),
-							)
+							),
+						)
 
-							if (attempt._tag === "Failure") {
-								// `error.type` buckets the failure so the reason is groupable
-								// without parsing the free-text message — the same field the
-								// retry policy and the backoff log line read.
-								yield* Effect.annotateCurrentSpan("error.type", attempt.reason)
-								if (attempt.statusCode != null) {
-									yield* Effect.annotateCurrentSpan(
-										"http.response.status_code",
-										attempt.statusCode,
-									)
-								}
-								// A billing block is an expected, caller-side condition (our own
-								// gateway answering 402), not a fault of this scrape: per the
-								// repo's OTEL posture only 5xx is `Error`. Returning the outcome
-								// instead of failing leaves the span `Ok` with the reason on its
-								// attributes, so a blocked org stops minting an Error span (and a
-								// new error fingerprint) every single interval, forever. The Warn
-								// log below still reports it.
-								if (attempt.reason === "delivery_blocked") {
-									yield* Effect.annotateCurrentSpan(
+						const outcome: ScrapeOutcome = yield* attempt.pipe(
+							// `error.type` buckets the failure so the reason is groupable
+							// without parsing the free-text message — the same field the
+							// retry policy and the backoff log line read.
+							Effect.tapError((failure) =>
+								Effect.annotateCurrentSpan({
+									"error.type": failure.reason,
+									...(failure.statusCode != null
+										? { "http.response.status_code": failure.statusCode }
+										: undefined),
+								}),
+							),
+							// A billing block is an expected, caller-side condition (our own
+							// gateway answering 402), not a fault of this scrape: per the
+							// repo's OTEL posture only 5xx is `Error`. Recovering inside the
+							// span leaves it `Ok` with the reason on its attributes, so a
+							// blocked org stops minting an Error span (and a new error
+							// fingerprint) every single interval, forever. The Warn log below
+							// still reports it.
+							Effect.catchIf(
+								(failure) => failure.reason === "delivery_blocked",
+								(failure) =>
+									Effect.annotateCurrentSpan(
 										"maple.scrape.outcome",
 										"delivery_blocked",
-									)
-									return attempt
-								}
-								return yield* new ScrapeAttemptFailed({
-									message: attempt.message,
-									reason: attempt.reason,
-									retryAfterMs: attempt.retryAfterMs ?? null,
-								})
-							}
-							return attempt
-						}).pipe(
+									).pipe(Effect.as(failure.outcome)),
+							),
 							Effect.withSpan("scraper.scrape_target", {
 								// Each scrape is its own trace. Target loops are forked from
 								// inside `reconcile`, so the forked fiber inherits the
@@ -497,6 +487,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 									orgId: target.orgId,
 									"maple.scraper.target_id": target.id,
 									"maple.scraper.target_name": target.name,
+									"maple.scraper.target_host": targetHost,
 									"maple.scraper.interval_seconds": target.scrapeIntervalSeconds,
 									...(target.subTargetKey
 										? {
@@ -518,7 +509,12 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 							yield* Effect.logWarning("Scrape failed").pipe(
 								Effect.annotateLogs({
 									targetId: target.id,
+									targetName: target.name,
+									targetHost,
 									orgId: target.orgId,
+									...(target.subTargetKey
+										? { subTargetKey: target.subTargetKey }
+										: undefined),
 									reason: outcome.reason,
 									error: outcome.message,
 								}),
@@ -572,85 +568,97 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 				return Effect.flatMap(Effect.sleep(Duration.millis(jitterMs)), () => loop(0))
 			}
 
-			const reconcile = Effect.gen(function* () {
-				const targets = yield* api.listTargets()
-				const current = yield* Ref.get(fibersRef)
-				const next = new Map<string, TargetEntry>()
+			const reconcile = (loops: FiberMap.FiberMap<string>) =>
+				Effect.gen(function* () {
+					const targets = yield* api.listTargets()
 
-				// Collapse the list to one target per `targetKey` (last wins). The
-				// fork decision below reads `existing` from the *previous* map, so
-				// two rows sharing a key would each fork a loop fiber while only the
-				// last is tracked in `next` — the rest leak, uninterrupted, every
-				// reconcile. (Prod hit this: PlanetScale discovery returned many rows
-				// that all collapsed to subTargetKey "metrics.psdb.cloud".) The API
-				// also dedupes now; this keeps the scheduler correct regardless.
-				const deduped = new Map<string, InternalScrapeTarget>()
-				for (const target of targets) deduped.set(targetKey(target), target)
-				const duplicateTargetsDropped = targets.length - deduped.size
+					// Collapse the list to one target per `targetKey` (last wins): two
+					// rows sharing a key must not each run a loop fiber. (Prod hit this:
+					// PlanetScale discovery returned many rows that all collapsed to
+					// subTargetKey "metrics.psdb.cloud".) The API also dedupes now; this
+					// keeps the scheduler correct regardless.
+					const deduped = new Map<string, InternalScrapeTarget>()
+					for (const target of targets) deduped.set(targetKey(target), target)
+					const duplicateTargetsDropped = targets.length - deduped.size
 
-				yield* Effect.forEach(
-					deduped.values(),
-					(target) =>
-						Effect.gen(function* () {
-							const key = targetKey(target)
-							const fingerprint = targetFingerprint(target)
-							const existing = current.get(key)
-							if (existing && existing.fingerprint === fingerprint) {
-								next.set(key, existing)
-								return
-							}
-							if (existing) yield* Fiber.interrupt(existing.fiber)
-							const fiber = yield* Effect.forkChild(targetLoop(target))
-							next.set(key, { fingerprint, fiber })
-						}),
-					{ discard: true },
-				)
+					const desired = new Map<string, InternalScrapeTarget>()
+					for (const target of deduped.values()) desired.set(loopKey(target), target)
 
-				yield* Effect.forEach(
-					current,
-					([id, entry]) => (next.has(id) ? Effect.void : Fiber.interrupt(entry.fiber)),
-					{ discard: true },
-				)
-
-				yield* Ref.set(fibersRef, next)
-				yield* Ref.set(lastReconcileRef, yield* Clock.currentTimeMillis)
-				yield* Metric.update(activeTargets, next.size)
-				yield* Effect.annotateCurrentSpan({
-					"maple.scraper.active_targets": next.size,
-					"maple.scraper.duplicate_targets_dropped": duplicateTargetsDropped,
-				})
-				if (duplicateTargetsDropped > 0) {
-					yield* Effect.logWarning("Dropped duplicate scrape targets sharing one key").pipe(
-						Effect.annotateLogs({ duplicateTargetsDropped, distinctTargets: next.size }),
+					// Interrupt stale loops (target removed, or config changed — either
+					// way its {@link loopKey} is no longer desired) BEFORE forking
+					// replacements, so an old and a new loop for the same target never
+					// scrape concurrently.
+					yield* Effect.forEach(
+						Array.from(loops, ([key]) => key),
+						(key) => (desired.has(key) ? Effect.void : FiberMap.remove(loops, key)),
+						{ discard: true },
 					)
-				}
-			}).pipe(
-				Effect.withSpan("scraper.reconcile"),
-				// A failed list fetch keeps the current fibers running untouched.
-				Effect.catch((error) =>
-					Effect.logWarning("Failed to refresh scrape target list").pipe(
-						Effect.annotateLogs({ error: error.message }),
+					// An unchanged target's running loop is left untouched. The fork is a
+					// plain child fork (not FiberMap.run's detached one) so the loop
+					// inherits the run fiber's scheduler and clock; the map only does the
+					// bookkeeping — interrupt on removal, drop entries on completion.
+					yield* Effect.forEach(
+						desired,
+						([key, target]) =>
+							Effect.flatMap(FiberMap.has(loops, key), (running) =>
+								running
+									? Effect.void
+									: Effect.flatMap(Effect.forkChild(targetLoop(target)), (fiber) =>
+											FiberMap.set(loops, key, fiber),
+										),
+							),
+						{ discard: true },
+					)
+
+					yield* Ref.set(lastReconcileRef, yield* Clock.currentTimeMillis)
+					const running = yield* FiberMap.size(loops)
+					yield* Ref.set(activeLoopsRef, running)
+					yield* Metric.update(activeTargets, running)
+					yield* Effect.annotateCurrentSpan({
+						"maple.scraper.active_targets": running,
+						"maple.scraper.duplicate_targets_dropped": duplicateTargetsDropped,
+					})
+					if (duplicateTargetsDropped > 0) {
+						yield* Effect.logWarning("Dropped duplicate scrape targets sharing one key").pipe(
+							Effect.annotateLogs({ duplicateTargetsDropped, distinctTargets: desired.size }),
+						)
+					}
+				}).pipe(
+					Effect.withSpan("scraper.reconcile"),
+					// A failed list fetch keeps the current fibers running untouched.
+					Effect.catch((error) =>
+						Effect.logWarning("Failed to refresh scrape target list").pipe(
+							Effect.annotateLogs({ error: error.message }),
+						),
 					),
-				),
-			)
+				)
 
 			const flushResults = Effect.gen(function* () {
-				const batch = yield* results.take
+				const batch = yield* Queue.clear(results)
+				yield* publishBufferGauge
 				if (batch.length === 0) return
-				// `pending` shrinks as chunks land, so an interrupt mid-flush re-buffers
-				// exactly what was never delivered instead of dropping the whole batch
-				// (the drain already emptied the buffer).
-				const pending = yield* Ref.make(batch)
-				// Send in chunks so one POST never overwhelms the API Worker; re-buffer
-				// only what didn't make it (in front) and retry on the next flush.
-				const { error } = yield* sendResultsInChunks(batch, RESULTS_FLUSH_CHUNK_SIZE, (chunk) =>
-					api
-						.reportResults(chunk)
-						.pipe(Effect.tap(() => Ref.update(pending, (rest) => rest.slice(chunk.length)))),
-				).pipe(Effect.onInterrupt(() => Effect.flatMap(Ref.get(pending), results.requeue)))
-				const unsent = yield* Ref.get(pending)
+				// `pending` shrinks as chunks land; the `ensuring` below re-buffers
+				// exactly what was never delivered — whether the flush failed or was
+				// interrupted mid-flight (the drain already emptied the queue, so
+				// dropping `pending` would lose the batch outright).
+				const pending = yield* Ref.make<ReadonlyArray<ScrapeResultReport>>(batch)
+				const requeuePending = Effect.gen(function* () {
+					const rest = yield* Ref.get(pending)
+					if (rest.length === 0) return
+					yield* Queue.offerAll(results, rest)
+					yield* publishBufferGauge
+				})
+				// Send in chunks so one POST never overwhelms the API Worker; the
+				// remainder retries on the next flush.
+				const { error, unsent } = yield* sendResultsInChunks(
+					batch,
+					RESULTS_FLUSH_CHUNK_SIZE,
+					(chunk) =>
+						api
+							.reportResults(chunk)
+							.pipe(Effect.tap(() => Ref.update(pending, (rest) => rest.slice(chunk.length)))),
+				).pipe(Effect.ensuring(requeuePending))
 				if (unsent.length > 0) {
-					yield* results.requeue(unsent)
 					yield* Effect.logWarning("Failed to report scrape results").pipe(
 						Effect.annotateLogs({
 							error: error?.message ?? "unknown",
@@ -660,22 +668,30 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 				}
 			}).pipe(Effect.withSpan("scraper.flush_results"))
 
-			const run = Effect.gen(function* () {
-				yield* Effect.forkChild(
-					flushResults.pipe(Effect.repeat(Schedule.spaced(RESULTS_FLUSH_INTERVAL))),
-				)
-				return yield* reconcile.pipe(
-					Effect.repeat(Schedule.spaced(Duration.seconds(env.SCRAPER_RECONCILE_INTERVAL_SECONDS))),
-					Effect.flatMap(() => Effect.never),
-				)
-			}) as Effect.Effect<never, ApiRequestError>
+			// The FiberMap is created inside `run`'s own scope, so the scrape loops
+			// live and die with the run fiber — interrupting `run` stops scraping —
+			// rather than with the layer that built this service.
+			const run = Effect.scoped(
+				Effect.gen(function* () {
+					const loops = yield* FiberMap.make<string>()
+					yield* Effect.forkChild(
+						flushResults.pipe(Effect.repeat(Schedule.spaced(RESULTS_FLUSH_INTERVAL))),
+					)
+					yield* reconcile(loops).pipe(
+						Effect.repeat(
+							Schedule.spaced(Duration.seconds(env.SCRAPER_RECONCILE_INTERVAL_SECONDS)),
+						),
+					)
+					return yield* Effect.never
+				}),
+			)
 
 			const stats = Effect.gen(function* () {
-				const fibers = yield* Ref.get(fibersRef)
+				const activeLoops = yield* Ref.get(activeLoopsRef)
 				const lastReconcileAt = yield* Ref.get(lastReconcileRef)
-				const pendingResults = yield* results.size
+				const pendingResults = yield* Queue.size(results)
 				return {
-					activeTargets: fibers.size,
+					activeTargets: activeLoops,
 					lastReconcileAt,
 					pendingResults,
 				} satisfies SchedulerStats

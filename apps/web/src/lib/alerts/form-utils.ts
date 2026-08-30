@@ -1,3 +1,4 @@
+import { isValidRawSql } from "@maple/domain/raw-sql"
 import {
 	AlertCheckDocument,
 	AlertDeliveryEventDocument,
@@ -394,11 +395,10 @@ export function isRulePreviewReady(form: RuleFormState): boolean {
 	}
 	if (form.signalType === "builder_query") return deriveRuleQueryIssues(form).length === 0
 	if (form.signalType === "raw_query") {
-		return (
-			form.rawQuerySql.trim().length > 0 &&
-			form.rawQuerySql.includes("$__orgFilter") &&
-			deriveRuleQueryIssues(form).length === 0
-		)
+		// The alert workload additionally requires $__timeFilter, and the shared
+		// validator covers the deny list, statement shape and terminal clauses that
+		// this used to leave for the server to discover.
+		return isValidRawSql(form.rawQuerySql.trim(), "alert") && deriveRuleQueryIssues(form).length === 0
 	}
 	return deriveRuleQueryIssues(form).length === 0
 }

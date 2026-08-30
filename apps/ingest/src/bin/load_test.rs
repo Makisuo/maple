@@ -52,6 +52,10 @@ struct LoadConfig {
     max_rss_mb: Option<u64>,
     min_rps: Option<f64>,
     queue_dir: PathBuf,
+    /// Round-trip latency the fake Autumn adds to every billing call. `None`
+    /// leaves `AUTUMN_SECRET_KEY` unset, which is how ingest ran before billing
+    /// existed and how CI runs by default.
+    autumn_latency_ms: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -65,6 +69,17 @@ struct FakeTinybirdState {
     imports: Arc<AtomicU64>,
     rows: Arc<AtomicU64>,
     bytes: Arc<AtomicU64>,
+}
+
+/// Stand-in for Autumn. Counts every billing call and holds each one open for
+/// `latency`, which is what makes the difference between a per-request check
+/// and a cached one visible in the request percentiles.
+#[derive(Clone)]
+struct FakeAutumnState {
+    checks: Arc<AtomicU64>,
+    tracks: Arc<AtomicU64>,
+    finalizes: Arc<AtomicU64>,
+    latency: Duration,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -100,6 +115,14 @@ struct LoadSummary {
     max_rss_mb: f64,
     max_cpu_percent: f64,
     avg_cpu_percent: f64,
+    autumn_latency_ms: u64,
+    /// Billing calls made across the whole run. `autumn_calls_per_request` is
+    /// the headline: 2.0 is a check plus a finalize on every request, ~0.0 is a
+    /// warm decision cache.
+    autumn_checks: u64,
+    autumn_tracks: u64,
+    autumn_finalizes: u64,
+    autumn_calls_per_request: f64,
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -119,7 +142,27 @@ async fn main() -> Result<(), DynError> {
         }
     });
 
-    let mut ingest = spawn_ingest(&cfg, &format!("http://{fake_addr}"))?;
+    // Autumn lives on its own listener so its injected latency cannot queue
+    // behind the export path's requests.
+    let autumn_state = FakeAutumnState::new(cfg.autumn_latency_ms.unwrap_or(0));
+    let autumn_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await?;
+    let autumn_addr = autumn_listener.local_addr()?;
+    let autumn_app = Router::new()
+        .route("/v1/balances.check", post(fake_autumn_check))
+        .route("/v1/balances.track", post(fake_autumn_track))
+        .route("/v1/balances.finalize", post(fake_autumn_finalize))
+        .with_state(autumn_state.clone());
+    tokio::spawn(async move {
+        if let Err(error) = axum::serve(autumn_listener, autumn_app).await {
+            eprintln!("fake Autumn server failed: {error}");
+        }
+    });
+
+    let mut ingest = spawn_ingest(
+        &cfg,
+        &format!("http://{fake_addr}"),
+        &format!("http://{autumn_addr}"),
+    )?;
     wait_for_ingest_health(cfg.ingest_port).await?;
 
     let (sample_tx, sample_rx) = mpsc::unbounded_channel();
@@ -160,6 +203,11 @@ async fn main() -> Result<(), DynError> {
         max_rss_mb: monitor_summary.max_rss_kib as f64 / 1024.0,
         max_cpu_percent: monitor_summary.max_cpu_percent,
         avg_cpu_percent: monitor_summary.avg_cpu_percent,
+        autumn_latency_ms: cfg.autumn_latency_ms.unwrap_or(0),
+        autumn_checks: autumn_state.checks.load(Ordering::Relaxed),
+        autumn_tracks: autumn_state.tracks.load(Ordering::Relaxed),
+        autumn_finalizes: autumn_state.finalizes.load(Ordering::Relaxed),
+        autumn_calls_per_request: autumn_state.total_calls() as f64 / successes.max(1) as f64,
     };
 
     let pretty = serde_json::to_string_pretty(&summary)?;
@@ -198,6 +246,7 @@ impl LoadConfig {
             min_rps: env_optional_f64("LOAD_TEST_MIN_RPS")?,
             queue_dir: std::env::var("LOAD_TEST_QUEUE_DIR")
                 .map_or_else(|_| unique_temp_dir("maple-ingest-load-wal"), PathBuf::from),
+            autumn_latency_ms: env_optional_u64("LOAD_TEST_AUTUMN_LATENCY_MS")?,
         })
     }
 }
@@ -231,6 +280,46 @@ impl Default for FakeTinybirdState {
             bytes: Arc::new(AtomicU64::new(0)),
         }
     }
+}
+
+impl FakeAutumnState {
+    fn new(latency_ms: u64) -> Self {
+        Self {
+            checks: Arc::new(AtomicU64::new(0)),
+            tracks: Arc::new(AtomicU64::new(0)),
+            finalizes: Arc::new(AtomicU64::new(0)),
+            latency: Duration::from_millis(latency_ms),
+        }
+    }
+
+    fn total_calls(&self) -> u64 {
+        self.checks.load(Ordering::Relaxed)
+            + self.tracks.load(Ordering::Relaxed)
+            + self.finalizes.load(Ordering::Relaxed)
+    }
+}
+
+async fn fake_autumn_check(State(state): State<FakeAutumnState>) -> axum::Json<serde_json::Value> {
+    state.checks.fetch_add(1, Ordering::Relaxed);
+    sleep(state.latency).await;
+    axum::Json(serde_json::json!({
+        "allowed": true,
+        "balance": { "remaining": 1_000_000, "unlimited": false, "overage_allowed": true }
+    }))
+}
+
+async fn fake_autumn_track(State(state): State<FakeAutumnState>) -> axum::Json<serde_json::Value> {
+    state.tracks.fetch_add(1, Ordering::Relaxed);
+    sleep(state.latency).await;
+    axum::Json(serde_json::json!({ "success": true }))
+}
+
+async fn fake_autumn_finalize(
+    State(state): State<FakeAutumnState>,
+) -> axum::Json<serde_json::Value> {
+    state.finalizes.fetch_add(1, Ordering::Relaxed);
+    sleep(state.latency).await;
+    axum::Json(serde_json::json!({ "success": true }))
 }
 
 async fn fake_tinybird_import(
@@ -286,7 +375,11 @@ fn decode_body(headers: &HeaderMap, body: &[u8]) -> Option<String> {
     }
 }
 
-fn spawn_ingest(cfg: &LoadConfig, tinybird_host: &str) -> Result<Child, DynError> {
+fn spawn_ingest(
+    cfg: &LoadConfig,
+    tinybird_host: &str,
+    autumn_host: &str,
+) -> Result<Child, DynError> {
     if !cfg.ingest_bin.exists() {
         return Err(format!(
             "ingest binary not found at {}. Run `cargo build --release --bin maple-ingest --bin load_test` first, or set LOAD_TEST_INGEST_BIN.",
@@ -319,6 +412,11 @@ fn spawn_ingest(cfg: &LoadConfig, tinybird_host: &str) -> Result<Child, DynError
         .env("RUST_LOG", "warn")
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    if cfg.autumn_latency_ms.is_some() {
+        command
+            .env("AUTUMN_SECRET_KEY", "am_sk_load_test")
+            .env("AUTUMN_API_URL", autumn_host);
+    }
     Ok(command.spawn()?)
 }
 

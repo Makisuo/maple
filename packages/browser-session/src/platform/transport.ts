@@ -54,7 +54,7 @@ export function ingestHeaders(config: Pick<IngestConfig, "ingestKey" | "sdk">): 
 // Rate-limited per call site, so a broken endpoint surfaces each distinct
 // failure rather than whichever one happened to warn first.
 const lastWarnAt = new Map<string, number>()
-function warnDropped(what: string, error: unknown): void {
+export function warnDropped(what: string, error: unknown): void {
 	const now = Date.now()
 	if (now - (lastWarnAt.get(what) ?? 0) < 30_000) return
 	lastWarnAt.set(what, now)
@@ -77,14 +77,35 @@ export function keepaliveFor(requested: boolean, bytes: number): boolean {
 	return requested && bytes <= MAX_KEEPALIVE_BYTES
 }
 
-/** gzip a byte buffer using the native CompressionStream (no library). */
+/**
+ * Smallest well-formed gzip stream: a 10-byte header plus an 8-byte trailer.
+ * Anything shorter cannot carry a complete member, whatever it contains.
+ */
+const GZIP_MIN_BYTES = 18
+
+/**
+ * gzip a byte buffer using the native CompressionStream (no library).
+ *
+ * Throws rather than returning a partial stream. The write and close promises
+ * used to be discarded, so a page torn down mid-compression still resolved
+ * `arrayBuffer()` — with only the bytes already flushed — and the caller posted
+ * a 3-byte header stub as if it were a complete chunk. Ingest rejected those as
+ * corrupt gzip; they were 82% of all replay-blob failures, overwhelmingly from
+ * crawlers, which tear the page down on nearly every session.
+ */
 export async function gzip(bytes: Uint8Array): Promise<Uint8Array> {
 	const stream = new CompressionStream("gzip")
 	const writer = stream.writable.getWriter()
-	void writer.write(bytes as BufferSource)
-	void writer.close()
-	const buffer = await new Response(stream.readable).arrayBuffer()
-	return new Uint8Array(buffer)
+	// Both halves are started before either is awaited: awaiting the write first
+	// deadlocks once the chunk exceeds the stream's internal queue, because
+	// nothing is draining the readable end yet.
+	const written = writer.write(bytes as BufferSource).then(() => writer.close())
+	const [buffer] = await Promise.all([new Response(stream.readable).arrayBuffer(), written])
+	const out = new Uint8Array(buffer)
+	if (out.length < GZIP_MIN_BYTES || out[0] !== 0x1f || out[1] !== 0x8b || out[2] !== 0x08) {
+		throw new Error(`gzip produced ${out.length} bytes, not a complete gzip stream`)
+	}
+	return out
 }
 
 /** POST session metadata (NDJSON, single row). `keepalive` for the final unload write. */

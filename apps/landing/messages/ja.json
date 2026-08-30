@@ -149,10 +149,10 @@
 	"bill_v_first_class": "First-class",
 	"bill_footnote": "\u7af6\u5408\u30bb\u30eb\u306f\u516c\u958b\u5b9a\u4fa1\u306e\u8981\u7d04\u3067\u3059 \u2014 \u6700\u65b0\u306e\u6570\u5b57\u306f\u5404\u30d9\u30f3\u30c0\u30fc\u306e\u6599\u91d1\u30da\u30fc\u30b8\u3067\u3054\u78ba\u8a8d\u304f\u3060\u3055\u3044\u3002Maple\u306e\u30ec\u30fc\u30c8\u306f\u516c\u8868\u3055\u308c\u3066\u3044\u308b\u4e00\u5f8bGB\u5358\u4fa1\u3067\u3059\u3002\u6708\u984d\u30b3\u30b9\u30c8\u306e\u8a66\u7b97\u306b\u306f\u8a08\u7b97\u30c4\u30fc\u30eb\u3092\u3054\u5229\u7528\u304f\u3060\u3055\u3044\u3002",
 	"bill_link_calculator": "Pricing calculator \u2192",
-	"bill_link_vs_dd": "Full vs Datadog",
-	"bill_link_vs_gf": "Full vs Grafana Cloud",
-	"bill_link_vs_nr": "Full vs New Relic",
-	"bill_link_vs_dash0": "Full vs Dash0",
+	"bill_link_vs_dd": "Maple vs Datadog",
+	"bill_link_vs_gf": "Maple vs Grafana Cloud",
+	"bill_link_vs_nr": "Maple vs New Relic",
+	"bill_link_vs_dash0": "Maple vs Dash0",
 
 	"start_endpoint_label": "Endpoint",
 

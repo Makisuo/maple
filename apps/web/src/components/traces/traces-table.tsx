@@ -3,6 +3,8 @@ import { TableSkeleton } from "@maple/ui/components/ui/table-skeleton"
 import * as React from "react"
 import { Result } from "@/lib/effect-atom"
 import { Link, useNavigate } from "@tanstack/react-router"
+import { ExcludedEmptyHint } from "@maple/ui/components/filters/excluded-empty-hint"
+import { traceFilterChips } from "@/lib/traces/trace-filter-chips"
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
@@ -35,6 +37,9 @@ interface TracesTableViewProps {
 	sortBy: TraceSortKey
 	sortDir: TraceSortDir
 	onSortChange: (key: TraceSortKey) => void
+	/** Flattened active exclusions, for the empty state's hint. */
+	excludedValues: ReadonlyArray<string>
+	clearExclusions: () => void
 }
 
 /**
@@ -223,6 +228,8 @@ function TracesTableView({
 	sortBy,
 	sortDir,
 	onSortChange,
+	excludedValues,
+	clearExclusions,
 }: TracesTableViewProps) {
 	const { effectiveTimezone } = useTimezonePreference()
 	const scrollContainerRef = React.useRef<HTMLDivElement>(null)
@@ -415,8 +422,13 @@ function TracesTableView({
 						</thead>
 						<tbody>
 							<tr>
-								<td colSpan={TRACE_COLUMNS.length} className="h-24 text-center">
+								<td colSpan={TRACE_COLUMNS.length} className="px-4 py-8 text-center">
 									No traces found
+									<ExcludedEmptyHint
+										excluded={excludedValues}
+										onClear={clearExclusions}
+										className="mx-auto max-w-lg"
+									/>
 								</td>
 							</tr>
 						</tbody>
@@ -567,6 +579,18 @@ export function TracesTable({ filters }: TracesTableProps) {
 		fetchNextPage,
 	} = useInfiniteTraces(filters)
 
+	// An empty list under an exclusion cannot explain itself — the filter is defined by what is
+	// absent, so it reads exactly like telemetry that stopped arriving.
+	const excludedChips = traceFilterChips(filters ?? {}).filter((chip) => chip.negated)
+	const excludedValues = excludedChips.flatMap((chip) => chip.values)
+	const clearExclusions = () =>
+		navigateTraces({
+			search: (prev) => ({
+				...prev,
+				...Object.fromEntries(excludedChips.map((chip) => [chip.param, undefined])),
+			}),
+		})
+
 	const onShowNoise = React.useCallback(() => {
 		navigateTraces({ search: (prev) => ({ ...prev, hideNoise: false }) })
 	}, [navigateTraces])
@@ -616,6 +640,8 @@ export function TracesTable({ filters }: TracesTableProps) {
 				sortBy={sortBy}
 				sortDir={sortDir}
 				onSortChange={onSortChange}
+				excludedValues={excludedValues}
+				clearExclusions={clearExclusions}
 			/>
 		))
 		.render()

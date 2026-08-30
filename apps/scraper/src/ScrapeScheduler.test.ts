@@ -8,7 +8,6 @@ import {
 	backoffLogMessage,
 	DELIVERY_BLOCKED_BACKOFF,
 	initialJitterMs,
-	makeResultBuffer,
 	nextScrapeDelayMs,
 	outcomeError,
 	scrapeFailed,
@@ -609,6 +608,33 @@ describe("ScrapeScheduler", () => {
 		}),
 	)
 
+	it.effect("backs off a target stuck on HTTP 500 and names it in the failure", () =>
+		Effect.gen(function* () {
+			// The prod regression: a target answering 500 held full cadence forever,
+			// minting an anonymous "target returned HTTP 500" error every interval.
+			const tracer = makeCapturingTracer()
+			const harness = makeHarness([mkTarget(TARGET_A, 10, { name: "payments-db" })])
+			harness.scrapeImpl = () => Effect.succeed(proxyResponse({ status: 500, body: "boom" }))
+			yield* startScheduler.pipe(Effect.provide([harnessLayer(harness), tracer.layer]))
+
+			// Exponential backoff from scrape end: t=0 fails → +10s → t=10 fails →
+			// +20s → t=30 fails → +40s. Fixed cadence would have scraped 7x by t=60.
+			yield* TestClock.adjust(Duration.seconds(60))
+			assert.strictEqual(harness.scrapeCalls.length, 3)
+
+			const spans = endedSpansNamed(tracer.ended, "scraper.scrape_target")
+			assert.isTrue(Exit.isFailure(spans[0]!.exit))
+			assert.strictEqual(spans[0]!.attributes.get("error.type"), "target_error")
+			assert.strictEqual(spans[0]!.attributes.get("http.response.status_code"), 500)
+			assert.strictEqual(spans[0]!.attributes.get("maple.scraper.target_host"), "example.com")
+
+			const error = harness.reportedResults[0]?.error ?? ""
+			assert.include(error, "payments-db")
+			assert.include(error, "example.com")
+			assert.include(error, "HTTP 500")
+		}),
+	)
+
 	it.effect("holds the configured cadence on a generic failure instead of backing off", () =>
 		Effect.gen(function* () {
 			// A transport error is not a signal that the upstream wants us to slow
@@ -907,12 +933,18 @@ describe("ScrapeOutcome", () => {
 	// span's `error.type` and the log line each re-derived from four parallel
 	// booleans — and a delivery-blocked (402) scrape logged itself as
 	// "Scrape rate-limited, backing off".
-	const reasons = ["rate_limited", "auth_failed", "delivery_blocked", "scrape_failed"] as const
+	const reasons = [
+		"rate_limited",
+		"auth_failed",
+		"delivery_blocked",
+		"target_error",
+		"scrape_failed",
+	] as const
 
 	it("backs off for every reason a retry cannot immediately clear, and only those", () => {
 		assert.deepStrictEqual(
 			reasons.map((reason) => shouldBackOff(scrapeFailed({ reason, message: reason }))),
-			[true, true, true, false],
+			[true, true, true, true, false],
 		)
 		assert.isFalse(shouldBackOff(scrapeSucceeded({ samplesScraped: 0, samplesPostMetricRelabeling: 0 })))
 	})
@@ -932,72 +964,6 @@ describe("ScrapeOutcome", () => {
 		)
 		assert.isNull(outcomeError(scrapeSucceeded({ samplesScraped: 3, samplesPostMetricRelabeling: 3 })))
 	})
-})
-
-describe("ResultBuffer", () => {
-	const decodeId = Schema.decodeUnknownSync(ScrapeTargetId)
-	const mkReport = (scrapedAt: number) =>
-		new ScrapeResultReport({ targetId: decodeId(TARGET_A), scrapedAt, error: null })
-	const gauge = Effect.map(Metric.value(bufferedResults), (state) => state.value)
-
-	it.effect("keeps the gauge equal to the buffer size across every transition", () =>
-		Effect.gen(function* () {
-			const buffer = yield* makeResultBuffer(10)
-			yield* Effect.forEach([0, 1, 2].map(mkReport), buffer.enqueue, { discard: true })
-			assert.strictEqual(yield* buffer.size, 3)
-			assert.strictEqual(yield* gauge, 3)
-
-			const drained = yield* buffer.take
-			assert.lengthOf(drained, 3)
-			assert.strictEqual(yield* buffer.size, 0)
-			assert.strictEqual(yield* gauge, 0)
-
-			yield* buffer.requeue(drained)
-			assert.strictEqual(yield* buffer.size, 3)
-			assert.strictEqual(yield* gauge, 3)
-		}),
-	)
-
-	it.effect("requeues in front of results enqueued while the flush was in flight", () =>
-		Effect.gen(function* () {
-			const buffer = yield* makeResultBuffer(10)
-			yield* buffer.enqueue(mkReport(1))
-			const inFlight = yield* buffer.take
-			// A scrape lands mid-flush; the requeue must not clobber it, and the
-			// gauge must count both (it used to be set to the unsent count alone).
-			yield* buffer.enqueue(mkReport(2))
-			yield* buffer.requeue(inFlight)
-
-			assert.strictEqual(yield* buffer.size, 2)
-			assert.strictEqual(yield* gauge, 2)
-			assert.deepStrictEqual(
-				(yield* buffer.take).map((r) => r.scrapedAt),
-				[1, 2],
-			)
-		}),
-	)
-
-	it.effect("caps at capacity by dropping the oldest, gauge included", () =>
-		Effect.gen(function* () {
-			const buffer = yield* makeResultBuffer(3)
-			yield* Effect.forEach([0, 1, 2, 3, 4].map(mkReport), buffer.enqueue, { discard: true })
-			assert.strictEqual(yield* buffer.size, 3)
-			assert.strictEqual(yield* gauge, 3)
-			assert.deepStrictEqual(
-				(yield* buffer.take).map((r) => r.scrapedAt),
-				[2, 3, 4],
-			)
-
-			// Overflow on requeue drops the oldest too, keeping the newest.
-			yield* buffer.requeue([0, 1, 2, 3].map(mkReport))
-			assert.strictEqual(yield* buffer.size, 3)
-			assert.strictEqual(yield* gauge, 3)
-			assert.deepStrictEqual(
-				(yield* buffer.take).map((r) => r.scrapedAt),
-				[1, 2, 3],
-			)
-		}),
-	)
 })
 
 describe("initialJitterMs", () => {

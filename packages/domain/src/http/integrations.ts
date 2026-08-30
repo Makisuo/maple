@@ -88,6 +88,12 @@ export class CloudflareAnalyticsZoneStatus extends Schema.Class<CloudflareAnalyt
 	lastError: Schema.NullOr(Schema.String),
 	/** Last successfully-ingested 5-min bucket (epoch ms) — how far the poller has caught up. */
 	watermarkAt: Schema.NullOr(Schema.Number),
+	/**
+	 * History frontier (epoch ms): the poller walks this DOWN toward the 24h floor after the
+	 * head is live, so it doubles as backfill progress. Null before the first head poll seeds
+	 * it, and once history is complete. optionalKey only for deploy-window compat; always sent.
+	 */
+	backfillAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 }) {}
 
 /** Account-level Workers invocation-metrics collection state. */
@@ -99,13 +105,35 @@ export class CloudflareAnalyticsWorkersStatus extends Schema.Class<CloudflareAna
 	lastError: Schema.NullOr(Schema.String),
 	/** Last successfully-ingested 5-min bucket (epoch ms) — how far the poller has caught up. */
 	watermarkAt: Schema.NullOr(Schema.Number),
+	/** History frontier (epoch ms) — see {@link CloudflareAnalyticsZoneStatus.backfillAt}. */
+	backfillAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 }) {}
 
 /**
- * Connection state of the Cloudflare integration. `accountId`/`accountName` identify the single
- * Cloudflare account the OAuth token is scoped to (Maple enforces exactly one account per org).
- * `analyticsCapable` is false when the stored grant predates the analytics scopes — the UI offers
- * an "Update permissions" reconnect; `zones`/`workers` surface the poller's per-dataset state.
+ * One Cloudflare account covered by the org's OAuth grant (a single consent screen may tick
+ * several) with its collection state. `analyticsCapable` is false when the stored grant
+ * predates the analytics scopes — the UI offers an "Update access" reconnect; `revoked` means
+ * Cloudflare rejected the grant (which is grant-wide: one token covers every account) and the
+ * poller skips it until reconnect.
+ */
+export class CloudflareConnectedAccountStatus extends Schema.Class<CloudflareConnectedAccountStatus>(
+	"CloudflareConnectedAccountStatus",
+)({
+	accountId: Schema.String,
+	accountName: Schema.NullOr(Schema.String),
+	connectedByUserId: Schema.NullOr(UserId),
+	scope: Schema.String,
+	analyticsCapable: Schema.Boolean,
+	revoked: Schema.Boolean,
+	zones: Schema.Array(CloudflareAnalyticsZoneStatus),
+	workers: Schema.NullOr(CloudflareAnalyticsWorkersStatus),
+}) {}
+
+/**
+ * Connection state of the Cloudflare integration. `accounts` carries every account the org's
+ * grant covers; the top-level `accountId`/`accountName`/`scope`/`zones`/`workers` fields are
+ * the pre-multi-account single-account view (first account + all accounts' zones merged),
+ * kept so bundles from before `accounts` existed keep rendering during a deploy window.
  */
 export class CloudflareIntegrationStatus extends Schema.Class<CloudflareIntegrationStatus>(
 	"CloudflareIntegrationStatus",
@@ -116,6 +144,14 @@ export class CloudflareIntegrationStatus extends Schema.Class<CloudflareIntegrat
 	connectedByUserId: Schema.NullOr(UserId),
 	scope: Schema.NullOr(Schema.String),
 	analyticsCapable: Schema.Boolean,
+	/**
+	 * When the grant was first established (epoch ms) — how the UI tells a normal
+	 * still-collecting first few minutes from a connection that has stopped producing data.
+	 * optionalKey only for deploy-window compat; always sent when connected.
+	 */
+	connectedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	/** optionalKey only for deploy-window compat; always sent. */
+	accounts: Schema.optionalKey(Schema.Array(CloudflareConnectedAccountStatus)),
 	zones: Schema.Array(CloudflareAnalyticsZoneStatus),
 	workers: Schema.NullOr(CloudflareAnalyticsWorkersStatus),
 }) {}
@@ -675,12 +711,12 @@ export const VCS_PULL_REQUESTS_DEFAULT_LIMIT = 50
  * picker lists. Read straight from the provider, never persisted: a stale PR
  * state in a picker is worse than a slightly slower one.
  */
-export class VcsPullRequestsResponse extends Schema.Class<VcsPullRequestsResponse>(
-	"VcsPullRequestsResponse",
-)({
-	repository: Schema.String,
-	pullRequests: Schema.Array(PullRequestSummary),
-}) {}
+export class VcsPullRequestsResponse extends Schema.Class<VcsPullRequestsResponse>("VcsPullRequestsResponse")(
+	{
+		repository: Schema.String,
+		pullRequests: Schema.Array(PullRequestSummary),
+	},
+) {}
 
 export class VcsCommitDetailResponse extends Schema.Class<VcsCommitDetailResponse>("VcsCommitDetailResponse")(
 	{
@@ -1034,7 +1070,9 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 			query: Schema.Struct({
 				repository: Schema.String.check(Schema.isMinLength(1)),
 				limit: Schema.optional(
-					Schema.FiniteFromString.check(Schema.isBetween({ minimum: 1, maximum: VCS_PULL_REQUESTS_MAX_LIMIT })),
+					Schema.FiniteFromString.check(
+						Schema.isBetween({ minimum: 1, maximum: VCS_PULL_REQUESTS_MAX_LIMIT }),
+					),
 				),
 			}),
 			success: VcsPullRequestsResponse,

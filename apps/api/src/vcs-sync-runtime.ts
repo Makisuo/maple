@@ -31,7 +31,7 @@ import { summarizeCause } from "@/platform/describe-cause"
 
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
-	serviceNamespace: "backend",
+	serviceNamespace: "core",
 	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
 })

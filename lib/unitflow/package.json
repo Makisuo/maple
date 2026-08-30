@@ -21,7 +21,7 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
-		"@tanstack/db": "0.6.13",
+		"@tanstack/db": "0.8.5",
 		"effect": "catalog:effect"
 	},
 	"devDependencies": {

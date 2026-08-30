@@ -257,7 +257,11 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 			seen.add(sub.icon)
 			unique.push(sub)
 		}
-		return unique
+		// Truncating by position would silently drop whichever brand lands last
+		// — the same partial-run problem as the every-child guard above — so the
+		// preview is all or nothing. Five fits both sections we ship (Explore
+		// with Agent Sessions on, Infrastructure) at the tightened gap below.
+		return unique.length > 5 ? undefined : unique
 	}, [isOpen, subItems])
 
 	// The sub-list can't render at 48px, so the rail turns the row into a menu.
@@ -306,7 +310,7 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 					// Cloudflare orange hardcode their fill, PlanetScale takes the tint —
 					// so the cluster is recognisable at 12px instead of four grey smudges.
 					// Non-brand children (Explore's signals, Hosts) stay muted.
-					<span className="flex shrink-0 items-center gap-1.5 text-muted-foreground group-data-[collapsible=icon]:hidden">
+					<span className="flex shrink-0 items-center gap-1 text-muted-foreground group-data-[collapsible=icon]:hidden">
 						{preview.map((sub) =>
 							sub.icon ? (
 								<sub.icon

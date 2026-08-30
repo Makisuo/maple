@@ -42,7 +42,7 @@ import {
 } from "@maple/domain/http"
 import { cloudflareAnalyticsState } from "@maple/db"
 import { EdgeCacheService } from "@maple/cache"
-import { and, eq } from "drizzle-orm"
+import { and, desc, eq, ne } from "drizzle-orm"
 import { Effect, Option, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
@@ -78,6 +78,13 @@ const HAZEL_MESSAGE_TYPE = "maple:integration:hazel"
 const GITHUB_MESSAGE_TYPE = "maple:integration:github"
 const CLOUDFLARE_MESSAGE_TYPE = "maple:integration:cloudflare"
 const PLANETSCALE_MESSAGE_TYPE = "maple:integration:planetscale"
+
+/**
+ * How long the Cloudflare callback waits on the post-connect prime poll. Long enough for zone
+ * discovery plus a first window on an ordinary account, short enough that a slow or many-zoned
+ * one still gets its success page promptly — the cron finishes whatever is left.
+ */
+const CLOUDFLARE_PRIME_TIMEOUT = "12 seconds"
 
 const resolveRequestOrigin = (req: HttpServerRequest.HttpServerRequest): string => {
 	const headers = req.headers as Record<string, string | undefined>
@@ -297,19 +304,33 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 						const startMs = Math.floor(payload.startTime / MINUTE) * MINUTE
 						const endMs = Math.max(Math.ceil(payload.endTime / MINUTE) * MINUTE, startMs + MINUTE)
 						const compute = Effect.gen(function* () {
-							const { accessToken } = yield* cloudflare.getValidAccessToken(tenant.orgId)
+							// The zone's state row also names the account that owns it, so the token
+							// is minted for the right connection when several accounts are connected.
 							const zoneRows = yield* database
 								.execute((db) =>
 									db
-										.select({ zoneId: cloudflareAnalyticsState.zoneId })
+										.select({
+											zoneId: cloudflareAnalyticsState.zoneId,
+											accountId: cloudflareAnalyticsState.accountId,
+										})
 										.from(cloudflareAnalyticsState)
 										.where(
 											and(
 												eq(cloudflareAnalyticsState.orgId, tenant.orgId),
 												eq(cloudflareAnalyticsState.dataset, HTTP_DATASET),
 												eq(cloudflareAnalyticsState.zoneName, payload.zoneName),
+												// A zone that moved between accounts (or belongs to one
+												// the grant no longer covers) leaves a disabled row
+												// behind; picking it would address the token to an
+												// account outside the grant and hard-fail the request.
+												eq(cloudflareAnalyticsState.enabled, true),
+												// "" is a pre-multi-account orphan (its org had no
+												// connection when the backfill ran) and names no
+												// account to address the token to.
+												ne(cloudflareAnalyticsState.accountId, ""),
 											),
 										)
+										.orderBy(desc(cloudflareAnalyticsState.updatedAt))
 										.limit(1),
 								)
 								.pipe(
@@ -323,14 +344,19 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 											}),
 									),
 								)
-							const zoneId = zoneRows[0]?.zoneId
-							if (zoneId == null) {
+							const zoneRow = zoneRows[0]
+							if (zoneRow == null) {
 								return yield* Effect.fail(
 									new IntegrationsValidationError({
 										message: `Unknown Cloudflare zone: ${payload.zoneName}`,
 									}),
 								)
 							}
+							const zoneId = zoneRow.zoneId
+							const { accessToken } = yield* cloudflare.getValidAccessToken(
+								tenant.orgId,
+								zoneRow.accountId,
+							)
 							const result = yield* graphqlQuery(
 								accessToken,
 								{
@@ -555,8 +581,7 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 								// mid-session.
 								Effect.catchTag(
 									"@maple/api/vcs/VcsSourceRepositoryNotFoundError",
-									(error) =>
-										new IntegrationsValidationError({ message: error.message }),
+									(error) => new IntegrationsValidationError({ message: error.message }),
 								),
 							)
 						yield* Effect.annotateCurrentSpan({ "result.rowCount": pullRequests.length })
@@ -1067,6 +1092,27 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 					cloudflareAnalytics.resetOrgState(result.orgId).pipe(
 						Effect.catchCause((cause) =>
 							Effect.logWarning("cloudflare post-connect state reset failed", {
+								orgId: result.orgId,
+								error: summarizeCause(cause),
+							}),
+						),
+					),
+				),
+				// Prime the org before the popup reports success. Without this the integration is
+				// entirely blank — no zones, no Workers, no data — until the alerting cron's next
+				// */5 tick discovers them, which reads as "connecting did nothing". `resetOrgState`
+				// above cleared `discoveredAt`, so this poll rediscovers and then spends what call
+				// budget it has on the newest window.
+				//
+				// Bounded and best-effort: discovery (the part that makes the UI stop looking
+				// empty) commits in the first seconds, and whatever polling the timeout cuts short
+				// resumes on the next tick — a lease released by interruption or expiry, never a
+				// failed callback page.
+				Effect.tap((result) =>
+					cloudflareAnalytics.pollOrg(result.orgId).pipe(
+						Effect.timeout(CLOUDFLARE_PRIME_TIMEOUT),
+						Effect.catchCause((cause) =>
+							Effect.logWarning("cloudflare post-connect prime poll incomplete", {
 								orgId: result.orgId,
 								error: summarizeCause(cause),
 							}),

@@ -71,7 +71,7 @@ struct HomeView: View {
 					scope: scope
 				)
 			self.model = model
-			await model.loader.loadIfNeeded()
+			await model.start()
 			// Home is a status board: keep it current while it's on screen.
 			// `.task` is cancelled when the tab goes away, so this never runs
 			// off-tab; the scene-phase check keeps it from running off-screen.
@@ -144,8 +144,8 @@ private struct HomeContent: View {
 						count: snapshot.newIssues,
 						singular: "new error issue",
 						plural: "new error issues",
-						detail: snapshot.activeIssues > 0 ? "\(snapshot.activeIssues) still active" : nil,
-						tint: snapshot.newIssues > 0 ? Token.foreground : Token.mutedForeground
+						detail: (snapshot.activeIssues ?? 0) > 0 ? "\(snapshot.activeIssues ?? 0) still active" : nil,
+						tint: (snapshot.newIssues ?? 0) > 0 ? Token.foreground : Token.mutedForeground
 					) { navigation.open(.errors) }
 					Hairline()
 					CountRow(
@@ -153,7 +153,7 @@ private struct HomeContent: View {
 						singular: "anomaly open",
 						plural: "anomalies open",
 						detail: nil,
-						tint: snapshot.openAnomalies > 0 ? Token.foreground : Token.mutedForeground
+						tint: (snapshot.openAnomalies ?? 0) > 0 ? Token.foreground : Token.mutedForeground
 					) { navigation.open(.anomalies) }
 					Hairline()
 				}
@@ -372,7 +372,9 @@ private struct AttentionRow: View {
 }
 
 private struct CountRow: View {
-	let count: Int
+	/// `nil` while the second pass is still loading — drawn as an em dash,
+	/// because "0" would be a claim the data hasn't made yet.
+	let count: Int?
 	let singular: String
 	let plural: String
 	let detail: String?
@@ -382,10 +384,10 @@ private struct CountRow: View {
 	var body: some View {
 		Button(action: action) {
 			HStack(alignment: .firstTextBaseline, spacing: 8) {
-				Text("\(count)")
+				Text(count.map(String.init) ?? "—")
 					.font(Typo.statValue)
 					.tabularNumbers()
-					.foregroundStyle(tint)
+					.foregroundStyle(count == nil ? Token.mutedForeground.opacity(0.5) : tint)
 					.frame(minWidth: 36, alignment: .leading)
 				Text(count == 1 ? singular : plural)
 					.font(Typo.body)

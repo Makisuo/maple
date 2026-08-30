@@ -4,6 +4,8 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@m
 import { formatRelativeTimeOrDate, toEpochMs } from "@maple/ui/lib/time-format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
 import { ChatBubbleSparkleIcon } from "@/components/icons"
+import { vendorIcon } from "@/lib/agent-sessions/vendor-icon"
+import { sessionRowId } from "@/lib/agent-sessions/session-window"
 import { vendorLabel } from "@/lib/agent-sessions/vendor-label"
 
 /** The wire row from `listAiSessions` — one AI agent session, newest first. */
@@ -43,11 +45,11 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 					<EmptyDescription>
 						Trace your AI agents with a supported framework, or emit OpenTelemetry{" "}
 						<code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.8em]">gen_ai</code>{" "}
-						spans with a{" "}
+						spans, and their sessions will show up here. A framework that groups its turns with a{" "}
 						<code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.8em]">
 							maple_ai.session.id
 						</code>{" "}
-						attribute, and their sessions will show up here.
+						attribute gets one session across every trace; anything else gets one per trace.
 					</EmptyDescription>
 				</EmptyHeader>
 			</Empty>
@@ -58,6 +60,7 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 		<div className="@container">
 			{sessions.map((session) => {
 				const hasErrors = session.errorSpanCount > 0
+				const VendorIcon = vendorIcon(session.vendorId)
 				const vendor = vendorLabel(session.vendorId)
 				const secondary =
 					session.vendorVersion && session.vendorVersion !== "0"
@@ -83,8 +86,11 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 						{/* Identity lane: session id, framework underneath */}
 						<div className="min-w-0 flex-1 overflow-hidden">
 							<div className="flex items-center gap-2">
-								<span className="min-w-0 truncate font-mono text-sm font-medium">
-									{session.sessionId}
+								<span
+									className="min-w-0 truncate font-mono text-sm font-medium"
+									title={session.sessionId}
+								>
+									{sessionRowId(session.sessionId)}
 								</span>
 								{/* On phones the right-hand lanes are gone, so the timestamp
 								    anchors the top-right corner of the stacked row. */}
@@ -95,7 +101,10 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 									{formatRelativeTimeOrDate(session.startTime)}
 								</span>
 							</div>
-							<div className="mt-0.5 truncate text-xs text-muted-foreground">{secondary}</div>
+							<div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+								<VendorIcon size={13} className="shrink-0" aria-hidden />
+								<span className="truncate">{secondary}</span>
+							</div>
 							{hasErrors && (
 								<div className="mt-1.5 flex items-center gap-1.5 @2xl:hidden">
 									<ErrorChip count={session.errorSpanCount} />

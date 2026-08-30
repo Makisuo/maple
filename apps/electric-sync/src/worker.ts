@@ -45,7 +45,7 @@ const WorkerPlatformLive = Layer.mergeAll(
 // same runtime as the route that emits spans.
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "electric-sync",
-	serviceNamespace: "backend",
+	serviceNamespace: "core",
 	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
 })

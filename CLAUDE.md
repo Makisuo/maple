@@ -75,6 +75,16 @@ no `castRows` — a cast that looked type-safe hid wire-format drift.
   the SELECT — values above 2^53 corrupt as JS numbers; the SQL-catalog e2e sweep enforces this.
   (2) `rowSchema`s still use `CH.CHNumber`, never `Schema.Number`, so a gateway/readonly cluster
   that refuses the setting (quoted wire) keeps decoding.
+- `CH.compile` reports failures in the Effect channel, and **the unrun Effect is what you hand
+  the warehouse** — `warehouse.compiledQuery(tenant, CH.compile(q, params), …)`. Never
+  `Effect.orDie` a compile at a call site: the executor already does it once, in
+  `resolveCompiledQuery`, because a query built from Maple's own definitions that will not
+  compile is a bug. Wherever a **request field** reaches a `param.*` value or a column
+  comparison (a cursor, a bucket size, a time bound), constrain it at the HTTP boundary —
+  `TinybirdDateTime`, `BucketSeconds`, `WarehouseDateTime` — so a bad value is a 400 rather than
+  a 500. `bucket_seconds: 1.5` and a forged replay cursor were both the latter. A value that
+  genuinely cannot be pre-validated is the one case for `Effect.mapError` at the call site, into
+  a failure the route already returns.
 - `packages/domain/src/tinybird/endpoints.ts` is **type-only** — no `defineEndpoint()` calls.
 
 ## Application database (PlanetScale Postgres)
@@ -178,6 +188,9 @@ there is no Prometheus `/metrics` endpoint. At high QPS set `OTEL_TRACES_SAMPLER
 `api-v2.md` (v2 public API spec) · `error-issue-lifecycle.md` (how an error becomes an issue,
 gets diagnosed, fixed and verified — read before touching `apps/api/src/services/errors/`) ·
 `sampling-throughput.md` · `persistence.md` ·
+`ingest-wal-durability.md` (WAL segments, the S3 tier, and what survives a task dying) ·
+`docker-container-monitoring.md` (Docker agent → `/infra/containers` lifecycle + its invariants) ·
+`service-map-architecture.md` (the map's tiers, its splice invariant, and what a new overlay costs) ·
 `warehouse-rollups.md` (MV/rollup tiering contract — read before adding a materialized view) ·
 `sst-fork-workflow.md` · `local-mode.md` (single-binary CLI + embedded chDB) ·
 `tinybird-pr-branches.md` · `otel-spec/` (OTel spec map @ v1.58.0 — start at its README).

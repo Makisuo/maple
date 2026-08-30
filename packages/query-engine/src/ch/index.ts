@@ -9,6 +9,11 @@
 // compilation, and unions — re-exported from the standalone library.
 export * from "@maple-dev/clickhouse-builder"
 
+// Handwritten SQL. Shadows the builder's `rawCompiledQuery`, whose `reason`
+// is any string, with one that pins Maple's closed `RawSqlReason` union — the
+// explicit export wins over the star re-export above.
+export { type RawSqlReason, rawCompiledQuery } from "./raw-sql"
+
 // Pipe dispatch — maps Tinybird-style pipe names + params to compiled CH SQL.
 // Shared by the cloud WarehouseQueryService and the local CLI executor so both
 // resolve a pipe name to identical SQL.
@@ -206,13 +211,10 @@ export {
 	serviceUsageRowSchema,
 	serviceCatalogQuery,
 	serviceHealthSnapshotQuery,
-	serviceHealthSnapshotRowSchema,
 	serviceHealthBaselineQuery,
 	serviceReleasesTimelineQuery,
-	serviceReleasesTimelineRowSchema,
 	serviceEnvironmentsQuery,
 	serviceApdexTimeseriesQuery,
-	serviceApdexTimeseriesRowSchema,
 	serviceUsageQuery,
 	serviceUsageWithPreviousQuery,
 	servicesFacetsQuery,
@@ -257,9 +259,7 @@ export {
 	errorFingerprintsQuery,
 	errorIssueTimeseriesQuery,
 	errorIssueSampleTracesQuery,
-	ErrorIssueSampleTracesOutputSchema,
 	errorIssueEnvironmentsQuery,
-	ErrorIssueEnvironmentsOutputSchema,
 	errorIssueVersionsSinceQuery,
 	ErrorIssueVersionsSinceOutputSchema,
 	type ErrorIssueVersionsSinceOutput,
@@ -318,7 +318,6 @@ export {
 	activeOrgsByErrorEventsQuery,
 	activeOrgsByTracesQuery,
 	activeOrgsByLogsQuery,
-	ActiveOrgsOutputSchema,
 	type ActiveOrgsOutput,
 } from "./queries/activity"
 
@@ -425,8 +424,6 @@ export {
 export {
 	orgTelemetryPulseQuery,
 	serviceLivenessQuery,
-	serviceLivenessRowSchema,
-	telemetryPulseRowSchema,
 	type ServiceLivenessOpts,
 	type ServiceLivenessOutput,
 	type TelemetryPulseOutput,
@@ -449,7 +446,6 @@ export {
 	fleetUtilizationTimeseriesQuery,
 	listPodsQuery,
 	listPodsSummaryQuery,
-	ListPodsSummaryOutputSchema,
 	podDetailSummaryQuery,
 	podGaugeTimeseriesQuery,
 	podFacetsQuery,
@@ -493,3 +489,27 @@ export {
 	type WorkloadFacetsOutput,
 	type WorkloadKind,
 } from "./queries/infra"
+
+// Queries — Containers (Docker, docker_stats receiver)
+export {
+	listContainersQuery,
+	listContainersSummaryQuery,
+	containerDetailSummaryQuery,
+	containerCountersSummaryQuery,
+	containerGaugeTimeseriesQuery,
+	containerSumTimeseriesQuery,
+	containerFacetsQuery,
+	type ListContainersOpts,
+	type ListContainersOutput,
+	type ListContainersSummaryOutput,
+	type ContainerSortKey,
+	type ContainerScope,
+	type ContainerDetailSummaryOpts,
+	type ContainerDetailSummaryOutput,
+	type ContainerCountersSummaryOpts,
+	type ContainerCountersSummaryOutput,
+	type ContainerGaugeTimeseriesOpts,
+	type ContainerSumTimeseriesOpts,
+	type ContainerTimeseriesOutput,
+	type ContainerFacetsOutput,
+} from "./queries/containers"

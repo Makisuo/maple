@@ -17,6 +17,7 @@ import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryServic
 import { makeWarehouseServiceStub } from "../v2/v2-test-support"
 import { V1ErrorBoundaryLive } from "../v1/error-boundary"
 import { HttpAiSessionsInternalLive } from "./ai-sessions.http"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 /**
  * The truncation contract of `POST /internal/ai-sessions/spans`: what the row
@@ -119,7 +120,8 @@ describe("POST /internal/ai-sessions/spans", () => {
 		// distinguishable from a session that exactly fills it.
 		const rows = Array.from({ length: AI_SESSION_SPANS_MAX_SPANS + 1 }, (_, index) => spanRow(index))
 		const harness = makeHarness({
-			compiledQueryBounded: (_tenant, compiled) => compiled.decodeRows(rows).pipe(Effect.orDie),
+			compiledQueryBounded: (_tenant, compiled) =>
+				compiledQueryOf(compiled).decodeRows(rows).pipe(Effect.orDie),
 		})
 
 		try {
@@ -135,7 +137,9 @@ describe("POST /internal/ai-sessions/spans", () => {
 	it("reports a session that fits as complete", async () => {
 		const harness = makeHarness({
 			compiledQueryBounded: (_tenant, compiled) =>
-				compiled.decodeRows([spanRow(0), spanRow(1)]).pipe(Effect.orDie),
+				compiledQueryOf(compiled)
+					.decodeRows([spanRow(0), spanRow(1)])
+					.pipe(Effect.orDie),
 		})
 
 		try {
@@ -161,12 +165,16 @@ describe("POST /internal/ai-sessions/spans", () => {
 		let spansSql: string | undefined
 		const harness = makeHarness({
 			compiledQuery: (_tenant, compiled) => {
-				windowSql = compiled.sql
-				return compiled.decodeRows([{ ...resolved, spanCount: "9" }]).pipe(Effect.orDie)
+				windowSql = compiledQueryOf(compiled).sql
+				return compiledQueryOf(compiled)
+					.decodeRows([{ ...resolved, spanCount: "9" }])
+					.pipe(Effect.orDie)
 			},
 			compiledQueryBounded: (_tenant, compiled) => {
-				spansSql = compiled.sql
-				return compiled.decodeRows([spanRow(0), spanRow(1)]).pipe(Effect.orDie)
+				spansSql = compiledQueryOf(compiled).sql
+				return compiledQueryOf(compiled)
+					.decodeRows([spanRow(0), spanRow(1)])
+					.pipe(Effect.orDie)
 			},
 		})
 
@@ -187,13 +195,98 @@ describe("POST /internal/ai-sessions/spans", () => {
 		}
 	})
 
+	// A `trace:` id is Maple's own: the vendor exposed no session key, so the
+	// trace IS the session. Both reads must key on the trace id — the session
+	// attribute would match nothing, and the page would report an empty session
+	// for a trace that is right there.
+	it("routes a trace-scoped id to the trace-keyed window and span reads", async () => {
+		const resolved = {
+			startTime: "2026-08-18 09:00:00.000000000",
+			endTime: "2026-08-20 11:00:00.000000000",
+		}
+		let windowSql: string | undefined
+		let spansSql: string | undefined
+		const harness = makeHarness({
+			compiledQuery: (_tenant, compiled) => {
+				windowSql = compiledQueryOf(compiled).sql
+				return compiledQueryOf(compiled)
+					.decodeRows([{ ...resolved, spanCount: "9" }])
+					.pipe(Effect.orDie)
+			},
+			compiledQueryBounded: (_tenant, compiled) => {
+				spansSql = compiledQueryOf(compiled).sql
+				return compiledQueryOf(compiled)
+					.decodeRows([spanRow(0), spanRow(1)])
+					.pipe(Effect.orDie)
+			},
+		})
+
+		try {
+			const response = await harness.post("/internal/ai-sessions/spans", {
+				sessionId: `trace:${TRACE_ID}`,
+			})
+			expect(response.status).toBe(200)
+			expect(response.body.data).toHaveLength(2)
+			expect(windowSql).toContain(`TraceId = '${TRACE_ID}'`)
+			expect(windowSql).not.toContain("maple_ai.session.id")
+			expect(spansSql).toContain(`TraceId = '${TRACE_ID}'`)
+			expect(spansSql).not.toContain("maple_ai.session.id")
+			// The bounds the window read handed back still prune the span read.
+			expect(spansSql).toContain(`Timestamp >= '${resolved.startTime}'`)
+			expect(spansSql).not.toContain("__PARAM_")
+		} finally {
+			await harness.dispose()
+		}
+	})
+
+	// The prefix is not proof: the value behind it reaches a warehouse param, so
+	// anything that is not a trace id must not get there. It falls through to the
+	// session read, where nothing carries it — the empty answer any unknown id gets.
+	it("does not hand a malformed trace-scoped id to the trace-keyed read", async () => {
+		let windowSql: string | undefined
+		let spansRead = false
+		const harness = makeHarness({
+			compiledQuery: (_tenant, compiled) => {
+				windowSql = compiledQueryOf(compiled).sql
+				return compiledQueryOf(compiled)
+					.decodeRows([
+						{
+							startTime: "1970-01-01 00:00:00.000000000",
+							endTime: "1970-01-02 00:00:00.000000000",
+							spanCount: "0",
+						},
+					])
+					.pipe(Effect.orDie)
+			},
+			compiledQueryBounded: (_tenant, compiled) => {
+				spansRead = true
+				return compiledQueryOf(compiled)
+					.decodeRows([spanRow(0)])
+					.pipe(Effect.orDie)
+			},
+		})
+
+		try {
+			const response = await harness.post("/internal/ai-sessions/spans", {
+				sessionId: "trace:not-a-trace-id' OR 1=1",
+			})
+			expect(response.status).toBe(200)
+			expect(response.body).toMatchObject({ data: [], truncated: false })
+			expect(windowSql).toContain("SpanAttributes['maple_ai.session.id'] =")
+			expect(windowSql).not.toContain("TraceId =")
+			expect(spansRead).toBe(false)
+		} finally {
+			await harness.dispose()
+		}
+	})
+
 	it("answers an id nothing in retention carries without reading spans", async () => {
 		let spansRead = false
 		const harness = makeHarness({
 			// `min`/`max` over no rows come back as the epoch, so the count is the
 			// only thing that says the session does not exist.
 			compiledQuery: (_tenant, compiled) =>
-				compiled
+				compiledQueryOf(compiled)
 					.decodeRows([
 						{
 							startTime: "1970-01-01 00:00:00.000000000",
@@ -204,7 +297,9 @@ describe("POST /internal/ai-sessions/spans", () => {
 					.pipe(Effect.orDie),
 			compiledQueryBounded: (_tenant, compiled) => {
 				spansRead = true
-				return compiled.decodeRows([spanRow(0)]).pipe(Effect.orDie)
+				return compiledQueryOf(compiled)
+					.decodeRows([spanRow(0)])
+					.pipe(Effect.orDie)
 			},
 		})
 
@@ -222,8 +317,10 @@ describe("POST /internal/ai-sessions/spans", () => {
 		let compiledSql: string | undefined
 		const harness = makeHarness({
 			compiledQueryBounded: (_tenant, compiled) => {
-				compiledSql = compiled.sql
-				return compiled.decodeRows([spanRow(0)]).pipe(Effect.orDie)
+				compiledSql = compiledQueryOf(compiled).sql
+				return compiledQueryOf(compiled)
+					.decodeRows([spanRow(0)])
+					.pipe(Effect.orDie)
 			},
 		})
 
@@ -239,7 +336,10 @@ describe("POST /internal/ai-sessions/spans", () => {
 
 	it("puts the mapped attribute values on the wire, not just the keys", async () => {
 		const harness = makeHarness({
-			compiledQueryBounded: (_tenant, compiled) => compiled.decodeRows([spanRow(0)]).pipe(Effect.orDie),
+			compiledQueryBounded: (_tenant, compiled) =>
+				compiledQueryOf(compiled)
+					.decodeRows([spanRow(0)])
+					.pipe(Effect.orDie),
 		})
 
 		try {
@@ -266,7 +366,7 @@ describe("POST /internal/ai-sessions/facets", () => {
 	it("splits one union result into the two dimensions the sidebar reads", async () => {
 		const harness = makeHarness({
 			compiledQuery: (_tenant, compiled) =>
-				compiled
+				compiledQueryOf(compiled)
 					.decodeRows([
 						{ facetType: "vendor", name: "eve", count: 7 },
 						{ facetType: "service", name: "agent-runner", count: 4 },

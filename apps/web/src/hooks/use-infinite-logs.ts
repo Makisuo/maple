@@ -3,6 +3,7 @@ import { Result } from "@/lib/effect-atom"
 
 import { listLogs, type Log, type LogsResponse } from "@/api/warehouse/logs"
 import { listLogsResultAtom, type QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
+import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { useTableRefreshTimeRange } from "@/hooks/use-table-refresh-time-range"
 import { mapleRuntime } from "@/lib/registry"
@@ -24,16 +25,27 @@ export interface UseInfiniteLogsReturn {
 function buildQueryParams(
 	filters: LogsSearchParams | undefined,
 	range: { startTime: string; endTime: string },
+	globalNamespace: string | null,
 ) {
+	// The org-global pin overrides URL namespace filters (they stay in the URL
+	// untouched; unpinning restores them). Applied here so the atom page and the
+	// direct pagination fetches below stay byte-for-byte identical.
+	const pinned = globalNamespace !== null
 	return {
 		startTime: range.startTime,
 		endTime: range.endTime,
-		service: filters?.services?.[0],
-		severity: filters?.severities?.[0],
-		deploymentEnv: filters?.deploymentEnvs?.[0],
+		// Every ticked value, not just the first. The sidebar has rendered multi-select checkboxes
+		// since it shipped; `services?.[0]` quietly threw the rest away.
+		services: filters?.services,
+		severities: filters?.severities,
+		deploymentEnvs: filters?.deploymentEnvs,
 		deploymentEnvMatchMode: filters?.deploymentEnvMatchMode,
-		namespace: filters?.namespaces?.[0],
-		namespaceMatchMode: filters?.namespaceMatchMode,
+		namespaces: pinned ? [globalNamespace] : filters?.namespaces,
+		namespaceMatchMode: pinned ? undefined : filters?.namespaceMatchMode,
+		excludedServices: filters?.excludedServices,
+		excludedSeverities: filters?.excludedSeverities,
+		excludedDeploymentEnvs: filters?.excludedDeploymentEnvs,
+		excludedNamespaces: pinned ? undefined : filters?.excludedNamespaces,
 		search: filters?.search,
 	}
 }
@@ -46,9 +58,11 @@ export function useInfiniteLogs(filters: LogsSearchParams | undefined): UseInfin
 		defaultRange: "12h",
 	})
 
+	const globalNamespace = useGlobalNamespace()
+
 	const queryParams = React.useMemo(
-		() => buildQueryParams(filters, { startTime, endTime }),
-		[filters, startTime, endTime],
+		() => buildQueryParams(filters, { startTime, endTime }, globalNamespace),
+		[filters, startTime, endTime, globalNamespace],
 	)
 
 	const filterKey = React.useMemo(() => JSON.stringify(queryParams), [queryParams])

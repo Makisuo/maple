@@ -269,7 +269,8 @@ export interface ServiceMapEdge {
 	callCount: number
 	errorCount: number
 	avgDurationMs: number
-	p95DurationMs: number
+	/** Slowest call in the window, not a percentile — the edge rollup stores a max. */
+	maxDurationMs: number
 }
 
 export interface ServiceMapData {

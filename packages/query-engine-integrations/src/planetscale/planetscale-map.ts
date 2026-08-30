@@ -114,23 +114,6 @@ export interface PlanetScaleBranchConnectionsOutput extends PlanetScaleConnectio
 	readonly branch: string
 }
 
-export const planetscaleDatabaseStatsRowSchema: CompiledQueryRowSchema<PlanetScaleDatabaseStatsOutput> =
-	Schema.Struct({
-		database: Schema.String,
-		cpuMaxPercent: CHNumber,
-		memMaxPercent: CHNumber,
-		replicaLagMaxSeconds: CHNumber,
-	})
-
-export const planetscaleBranchStatsRowSchema: CompiledQueryRowSchema<PlanetScaleBranchStatsOutput> =
-	Schema.Struct({
-		database: Schema.String,
-		branch: Schema.String,
-		cpuMaxPercent: CHNumber,
-		memMaxPercent: CHNumber,
-		replicaLagMaxSeconds: CHNumber,
-	})
-
 export const planetscaleStorageRowSchema: CompiledQueryRowSchema<PlanetScaleStorageOutput> = Schema.Struct({
 	database: Schema.String,
 	storageUsedPercent: CHNumber,
@@ -145,21 +128,6 @@ export const planetscaleBranchStorageRowSchema: CompiledQueryRowSchema<PlanetSca
 		storageCapacityBytes: CHNumber,
 		storageAvailableBytes: CHNumber,
 		storageSamples: CHNumber,
-	})
-
-export const planetscaleConnectionsRowSchema: CompiledQueryRowSchema<PlanetScaleConnectionsOutput> =
-	Schema.Struct({
-		database: Schema.String,
-		connectionsAvg: CHNumber,
-		connectionsMax: CHNumber,
-	})
-
-export const planetscaleBranchConnectionsRowSchema: CompiledQueryRowSchema<PlanetScaleBranchConnectionsOutput> =
-	Schema.Struct({
-		database: Schema.String,
-		branch: Schema.String,
-		connectionsAvg: CHNumber,
-		connectionsMax: CHNumber,
 	})
 
 /**
@@ -185,8 +153,8 @@ export function planetscaleGaugesSQL() {
 				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
 				$.Attributes.get("planetscale_database"),
 			).neq(""),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("database")
 		.limit(500)
@@ -216,8 +184,8 @@ export function planetscaleBranchGaugesSQL() {
 				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
 				$.Attributes.get("planetscale_database"),
 			).eq(param.string("database")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("database", "branch")
 		.limit(500)
@@ -280,8 +248,8 @@ export function planetscaleStorageSQL() {
 				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
 				$.Attributes.get("planetscale_database"),
 			).neq(""),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("database", "branch")
 
@@ -319,8 +287,8 @@ export function planetscaleBranchStorageSQL() {
 				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
 				$.Attributes.get("planetscale_database"),
 			).eq(param.string("database")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("database", "branch")
 
@@ -360,8 +328,8 @@ export function planetscaleConnectionsSQL() {
 				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
 				$.Attributes.get("planetscale_database"),
 			).neq(""),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("database", "t")
 
@@ -398,8 +366,8 @@ export function planetscaleBranchConnectionsSQL() {
 				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
 				$.Attributes.get("planetscale_database"),
 			).eq(param.string("database")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("database", "branch", "t")
 

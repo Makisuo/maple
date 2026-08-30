@@ -110,6 +110,29 @@ describe("visibleFilterOptions", () => {
 		expect(visible.map((o) => o.name)).toEqual(["3"])
 	})
 
+	it("pins excluded options alongside selected ones", () => {
+		const { visible } = visibleFilterOptions({
+			...base,
+			options: ranked,
+			selected: ["/login"],
+			excluded: ["/admin/deep"],
+		})
+		// Both are chosen, so both clear the fold; traffic rank orders them among themselves.
+		expect(visible.slice(0, 2).map((o) => o.name)).toEqual(["/login", "/admin/deep"])
+	})
+
+	it("synthesizes a chosen option the facet no longer returns", () => {
+		// The point of excluding a value is to stop seeing it — often it stops appearing in the
+		// facet too, and a row that never paints is a filter with nowhere to be undone.
+		const { visible } = visibleFilterOptions({
+			...base,
+			options: ranked,
+			selected: [],
+			excluded: ["/webhooks/stripe"],
+		})
+		expect(visible[0]).toEqual({ name: "/webhooks/stripe", count: 0 })
+	})
+
 	it("is case-insensitive", () => {
 		const { visible } = visibleFilterOptions({
 			...base,

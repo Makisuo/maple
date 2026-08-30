@@ -1,5 +1,6 @@
 import { Effect, Option, Redacted } from "effect"
 import * as EnvConfig from "./config.js"
+import { getContainerAttributes } from "./container.js"
 import { getAutoPlatformAttributes } from "./platform.js"
 
 /**
@@ -125,6 +126,10 @@ export const resolveResource = Effect.fn("resolveResource")(function* (config: R
 
 	const attributes: Record<string, unknown> = {}
 	Object.assign(attributes, getAutoPlatformAttributes())
+	// Best-effort Docker identity (container.runtime / container.id) so app
+	// telemetry correlates with docker_stats metrics. Lowest precedence — an
+	// explicit OTEL_RESOURCE_ATTRIBUTES container.id overrides it below.
+	Object.assign(attributes, getContainerAttributes())
 	attributes["maple.sdk.type"] = config.sdkType ?? "server"
 	attributes["service.instance.id"] = getServiceInstanceId()
 	if (environment) {

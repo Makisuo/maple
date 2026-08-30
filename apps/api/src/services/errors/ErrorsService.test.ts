@@ -50,6 +50,7 @@ import { NotificationDispatcher } from "@/services/alerts/NotificationDispatcher
 import { InvestigationService } from "@/services/errors/InvestigationService"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 describe("makePersistenceError", () => {
 	it("omits the cause key when the source has no cause", () => {
 		const err = makePersistenceError(new Error("boom"))
@@ -165,25 +166,29 @@ const makeWarehouseStub = (
 	crossOrgQuery: <T>(tenant: unknown, compiled: CompiledQuery<T>) =>
 		Effect.suspend(() => {
 			const orgId = (tenant as { orgId?: string }).orgId ?? ""
-			return Effect.orDie(compiled.decodeRows(scanRows().length > 0 ? [{ orgId }] : []))
+			return Effect.orDie(
+				compiledQueryOf(compiled).decodeRows(scanRows().length > 0 ? [{ orgId }] : []),
+			)
 		}),
 	compiledQuery: <T>(tenant: unknown, compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
 		Effect.suspend(() => {
 			if (options?.context === "errorIssuesScan") {
 				onScan?.()
-				return Effect.orDie(compiled.decodeRows(scanRows()))
+				return Effect.orDie(compiledQueryOf(compiled).decodeRows(scanRows()))
 			}
 			// listIssues' deployment-environment filter (shaped like ErrorFingerprintsOutput).
 			if (options?.context === "errorIssueEnvFingerprints") {
-				return Effect.orDie(compiled.decodeRows(fingerprintRows?.() ?? []))
+				return Effect.orDie(compiledQueryOf(compiled).decodeRows(fingerprintRows?.() ?? []))
 			}
 			// Active-org discovery reads the same data the scan does, so model that
 			// consistency: surface the org iff it currently has error rows.
 			if (options?.context === "errorActiveOrgsDiscovery") {
 				const orgId = (tenant as { orgId?: string }).orgId ?? ""
-				return Effect.orDie(compiled.decodeRows(scanRows().length > 0 ? [{ orgId }] : []))
+				return Effect.orDie(
+					compiledQueryOf(compiled).decodeRows(scanRows().length > 0 ? [{ orgId }] : []),
+				)
 			}
-			return Effect.orDie(compiled.decodeRows([]))
+			return Effect.orDie(compiledQueryOf(compiled).decodeRows([]))
 		}),
 	compiledQueryFirst: () => Effect.die(new Error("unexpected warehouse query")),
 	ingest: () => Effect.void,
@@ -320,23 +325,27 @@ const makeGatingLayer = (opts: {
 				if (options?.context) opts.profiles?.set(options.context, options.profile)
 				if (opts.failDiscovery) return Effect.die(new Error("discovery down"))
 				const orgId = (tenant as { orgId?: string }).orgId ?? ""
-				return Effect.orDie(compiled.decodeRows(scanRows().length > 0 ? [{ orgId }] : []))
+				return Effect.orDie(
+					compiledQueryOf(compiled).decodeRows(scanRows().length > 0 ? [{ orgId }] : []),
+				)
 			}),
 		compiledQuery: <T>(tenant: unknown, compiled: CompiledQuery<T>, options?: SqlQueryOptions) => {
 			if (options?.context) opts.profiles?.set(options.context, options.profile)
 			if (options?.context === "errorActiveOrgsDiscovery") {
 				if (opts.failDiscovery) return Effect.die(new Error("discovery down"))
 				const orgId = (tenant as { orgId?: string }).orgId ?? ""
-				return Effect.orDie(compiled.decodeRows(scanRows().length > 0 ? [{ orgId }] : []))
+				return Effect.orDie(
+					compiledQueryOf(compiled).decodeRows(scanRows().length > 0 ? [{ orgId }] : []),
+				)
 			}
 			if (options?.context === "errorIssuesScan") {
 				const orgId = (tenant as { orgId?: string }).orgId ?? ""
 				return Effect.suspend(() => {
 					opts.scanned?.add(orgId)
-					return Effect.orDie(compiled.decodeRows(scanRows()))
+					return Effect.orDie(compiledQueryOf(compiled).decodeRows(scanRows()))
 				})
 			}
-			return Effect.orDie(compiled.decodeRows([]))
+			return Effect.orDie(compiledQueryOf(compiled).decodeRows([]))
 		},
 		compiledQueryFirst: () => Effect.die(new Error("unexpected warehouse query")),
 		ingest: () => Effect.void,
@@ -887,6 +896,11 @@ const scanRow = (overrides: Record<string, unknown> = {}): Record<string, unknow
 	topFrame: "checkout/handler.ts:42",
 	count: 3,
 	affectedServicesCount: 1,
+	// The compiled query derives its row schema from the SELECT now, so a fixture
+	// missing a column fails the same way a warehouse that stopped returning one
+	// would. Empty by default: most of these tests are not about build sets, and
+	// a version here would put them on the pre-fix-build path.
+	serviceVersions: [],
 	firstSeen: formatWarehouseDateTime(TICK_MS - 120_000),
 	lastSeen: formatWarehouseDateTime(TICK_MS - 60_000 - 1_000),
 	...overrides,

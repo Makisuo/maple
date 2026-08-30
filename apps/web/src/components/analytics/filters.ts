@@ -23,6 +23,7 @@ export const analyticsFilterSearchFields = {
 	utmMedium: Schema.optional(Schema.String),
 	utmCampaign: Schema.optional(Schema.String),
 	visitorType: Schema.optional(Schema.Literals(["new", "returning"])),
+	traffic: Schema.optional(Schema.Literals(["all", "humans", "bots"])),
 	eventName: Schema.optional(Schema.String),
 }
 
@@ -39,11 +40,34 @@ export interface AnalyticsFilters {
 	utmMedium?: string
 	utmCampaign?: string
 	visitorType?: "new" | "returning"
+	/**
+	 * Which agents count. Never absent once decoded — {@link filtersFromSearch}
+	 * substitutes {@link DEFAULT_TRAFFIC} — so every query on the page states its
+	 * population rather than inheriting one.
+	 */
+	traffic?: "all" | "humans" | "bots"
 	/** Sessions in which a `track(eventName)` call fired. */
 	eventName?: string
 }
 
 export type AnalyticsFilterKey = keyof AnalyticsFilters
+
+/**
+ * Crawlers are excluded unless you ask for them.
+ *
+ * "Visitors" means people, and for most of this page's life it did not: a site
+ * being crawled hard reported Googlebot as ten thousand unique mobile Chrome
+ * users, and every headline, breakdown and funnel on the page inherited that.
+ * A default of `all` keeps the old numbers and asks each customer to discover
+ * the problem themselves, which is the wrong way round — the correct number
+ * should not be the one you have to opt into.
+ *
+ * The cost is that figures move, sharply, on exactly the orgs where they were
+ * most wrong. That is why the bot-share line above the strip reports the split
+ * for the window regardless of this setting, and why `all` stays one click away
+ * in the sidebar's Traffic section.
+ */
+export const DEFAULT_TRAFFIC = "humans" as const
 
 /** Filter key → the singular noun used in chips. Short: these render in 10px mono. */
 export const FILTER_CHIP_LABEL: Record<AnalyticsFilterKey, string> = {
@@ -59,6 +83,7 @@ export const FILTER_CHIP_LABEL: Record<AnalyticsFilterKey, string> = {
 	utmMedium: "utm_medium",
 	utmCampaign: "utm_campaign",
 	visitorType: "visitor",
+	traffic: "traffic",
 	eventName: "event",
 } satisfies Record<AnalyticsFilterKey, string>
 
@@ -76,6 +101,7 @@ export const FILTER_SECTION_LABEL: Record<AnalyticsFilterKey, string> = {
 	utmMedium: "UTM medium",
 	utmCampaign: "UTM campaign",
 	visitorType: "Visitor",
+	traffic: "Traffic",
 	eventName: "Event",
 } satisfies Record<AnalyticsFilterKey, string>
 
@@ -89,10 +115,18 @@ export const filtersFromSearch = (search: Record<string, unknown>): AnalyticsFil
 		if (typeof value !== "string" || value === "") continue
 		if (key === "visitorType") {
 			if (value === "new" || value === "returning") out.visitorType = value
+		} else if (key === "traffic") {
+			// `all` is a value here, not an absence: with a non-`all` default, the
+			// URL has to be able to say "no, actually show me everything".
+			if (value === "all" || value === "humans" || value === "bots") out.traffic = value
 		} else {
 			out[key] = value
 		}
 	}
+	// Applied after the loop, so an explicit `?traffic=` in the URL always wins
+	// over the default and a page loaded from a shared link shows what the sender
+	// was looking at.
+	out.traffic ??= DEFAULT_TRAFFIC
 	return out
 }
 
@@ -112,12 +146,52 @@ const chipValue = (key: AnalyticsFilterKey, value: string): string => {
 	return key === "referrerHost" ? "direct" : "not set"
 }
 
-/** Flatten the filter object into one removable chip per set filter. */
+/**
+ * Flatten the filter object into one removable chip per set filter.
+ *
+ * `traffic` at its default is not a chip. Every chip here is something you did,
+ * and a permanent `traffic:humans` on an otherwise unfiltered page would read as
+ * a filter you forgot to clear — while also making "Clear all" look available on
+ * a page with nothing to clear. Choosing `all` or `bots` is a choice, and does
+ * get a chip.
+ */
 export const activeFilterChips = (filters: AnalyticsFilters): ReadonlyArray<ActiveFilterChip> =>
 	FILTER_KEYS.flatMap((key) => {
 		const value = filters[key]
-		return value ? [{ key, value, label: `${FILTER_CHIP_LABEL[key]}:${chipValue(key, value)}` }] : []
+		if (!value || (key === "traffic" && value === DEFAULT_TRAFFIC)) return []
+		return [{ key, value, label: `${FILTER_CHIP_LABEL[key]}:${chipValue(key, value)}` }]
 	})
+
+/**
+ * The Traffic section is two checkboxes over a three-valued filter, and they
+ * behave the way two checkboxes look like they should: ticking both means both.
+ *
+ * `all` is therefore not a third option competing with the other two — it is
+ * what "Humans and Bots" is called once it reaches the query layer. Unticking
+ * the last remaining box widens to `all` rather than selecting nothing, since a
+ * page filtered to neither population has nothing to show and no way back.
+ */
+export const toggleTraffic = (
+	current: AnalyticsFilters["traffic"],
+	which: "humans" | "bots",
+	on: boolean,
+): "all" | "humans" | "bots" => {
+	const humans = which === "humans" ? on : trafficIncludes(current, "humans")
+	const bots = which === "bots" ? on : trafficIncludes(current, "bots")
+	if (humans && bots) return "all"
+	if (humans) return "humans"
+	if (bots) return "bots"
+	return "all"
+}
+
+/** Whether the current setting counts this population — drives the checkboxes. */
+export const trafficIncludes = (traffic: AnalyticsFilters["traffic"], which: "humans" | "bots"): boolean => {
+	const effective = traffic ?? DEFAULT_TRAFFIC
+	return effective === "all" || effective === which
+}
+
+/** Whether anything is narrowed beyond the page's defaults — drives "Clear all". */
+export const hasActiveFilters = (filters: AnalyticsFilters): boolean => activeFilterChips(filters).length > 0
 
 /**
  * Clicking the already-selected value clears it. A breakdown row is the only

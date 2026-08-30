@@ -18,6 +18,7 @@
 		"db:studio": "drizzle-kit studio --config ./drizzle.config.ts",
 		"db:ensure-privileges": "bun scripts/ensure-privileges.ts",
 		"db:reset-preview": "bun scripts/reset-preview-branch.ts",
+		"db:audit-raw-sql": "bun scripts/audit-raw-sql.ts",
 		"db:normalize-preview": "bun scripts/normalize-preview-ownership.ts",
 		"ps:apply-schema": "bun scripts/planetscale-apply-schema.ts",
 		"db:backfill:dashboards-v3": "bun scripts/backfill-dashboard-datasource-v3.ts"

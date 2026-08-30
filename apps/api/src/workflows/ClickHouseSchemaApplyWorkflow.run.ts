@@ -81,7 +81,7 @@ const bustRuntimeConfigCache = (orgId: OrgId): Promise<void> =>
  */
 const schemaApplyTelemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
-	serviceNamespace: "backend",
+	serviceNamespace: "core",
 	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
 })

@@ -4,7 +4,14 @@ import { OrgId } from "@maple/domain/http"
 import { searchLogs } from "./search-logs"
 import { WarehouseExecutor } from "./WarehouseExecutor"
 import type { WarehouseExecutorApi } from "./WarehouseExecutor"
-import { compilePipeQuery } from "../ch/pipe-dispatch"
+import { compilePipeQuery as lowerPipeQuery } from "../ch/pipe-dispatch"
+import { compiledQueryOf } from "../execution/compiled-input"
+
+/** Lower and compile in one step; a fixture that will not compile should fail. */
+const compilePipeQuery = (...args: Parameters<typeof lowerPipeQuery>) => {
+	const lowered = lowerPipeQuery(...args)
+	return lowered === undefined ? undefined : Effect.runSync(lowered)
+}
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 
@@ -18,8 +25,8 @@ interface CapturedCalls {
 
 const makeMockExecutor = (captured: CapturedCalls): WarehouseExecutorApi => ({
 	orgId: "org_test",
-	compiledQuery: (compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
-	compiledQueryFirst: (compiled) => compiled.decodeFirstRow([]).pipe(Effect.orDie),
+	compiledQuery: (compiled) => compiledQueryOf(compiled).decodeRows([]).pipe(Effect.orDie),
+	compiledQueryFirst: (compiled) => compiledQueryOf(compiled).decodeFirstRow([]).pipe(Effect.orDie),
 	query: (
 		pipe: string,
 		params: Record<string, unknown>,

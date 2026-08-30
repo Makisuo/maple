@@ -21,6 +21,9 @@ import {
 } from "@/components/filters/filter-sidebar"
 import {
 	FILTER_SECTION_LABEL as FILTER_SECTION_LABEL_TEXT,
+	hasActiveFilters,
+	toggleTraffic,
+	trafficIncludes,
 	type AnalyticsFilterKey,
 	type AnalyticsFilters,
 } from "./filters"
@@ -116,17 +119,45 @@ function AnalyticsFilterSidebarView({
 		},
 	})
 
-	const canClear = Object.values(filters).some(Boolean)
+	// Not `some(Boolean)`: `traffic` is always set now, so that would offer to
+	// clear a page that has nothing narrowed on it.
+	const canClear = hasActiveFilters(filters)
 
 	return (
 		<FilterSidebarFrame waiting={waiting}>
 			<FilterSidebarHeader canClear={canClear} onClear={onClearFilters} />
 			<FilterSidebarBody>
-				{/* Grouped into the same four themes the breakdown cards use — content,
-				    acquisition, audience, technology — and ordered within each group by how
-				    often you actually slice by it. Interleaving them (Country between
-				    Referrer and Device, UTM stranded at the bottom) is what made the rail
-				    read as unsorted. Separators mark the group boundaries. */}
+				{/* Ahead of the four groups, because it is not one of their dimensions:
+				    every section below slices a population, and this chooses which
+				    population that is. Same two-exclusive-checkboxes shape as Visitor and
+				    for the same reason — no per-option count exists, since the counts in
+				    this rail come from facet branches that are themselves narrowed by
+				    whichever of these is picked. Humans alone is checked on load — see
+				    DEFAULT_TRAFFIC. */}
+				<div className="py-1">
+					<h4 className={cn(FILTER_SECTION_LABEL, "py-1 text-muted-foreground")}>
+						{FILTER_SECTION_LABEL_TEXT.traffic}
+					</h4>
+					{/* Additive, not exclusive: both ticked is "all", which is what two
+					    checkboxes look like they should do. `toggleTraffic` owns the
+					    mapping, including that unticking the last one widens rather than
+					    selecting an empty page. */}
+					<SingleCheckboxFilter
+						title="Humans"
+						checked={trafficIncludes(filters.traffic, "humans")}
+						onChange={(on) =>
+							onFilterChange("traffic", toggleTraffic(filters.traffic, "humans", on))
+						}
+					/>
+					<SingleCheckboxFilter
+						title="Bots"
+						checked={trafficIncludes(filters.traffic, "bots")}
+						onChange={(on) =>
+							onFilterChange("traffic", toggleTraffic(filters.traffic, "bots", on))
+						}
+					/>
+				</div>
+				<Separator className="my-1" />
 				<SearchableFilterSection
 					title={FILTER_SECTION_LABEL_TEXT.host}
 					options={toOptions(breakdowns.hosts)}

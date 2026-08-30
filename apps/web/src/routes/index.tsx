@@ -33,6 +33,7 @@ import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 
 import { formatWarehouseDateTime } from "@maple/query-engine"
 import { snapRangeForCache } from "@/lib/time-utils"
+import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 const dashboardSearchSchema = Schema.Struct({
 	environment: Schema.optional(Schema.String),
 	...TimeRangeSearchFields,
@@ -163,6 +164,7 @@ function DashboardContent({
 }) {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
+	const pinnedNamespace = useGlobalNamespace()
 
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		search.startTime,
@@ -256,6 +258,9 @@ function DashboardContent({
 					filters: {
 						serviceName: undefined,
 						environments: environmentFilter,
+						// Injected per-site — the custom-chart family is shared with
+						// dashboard widgets, which stay unscoped for now.
+						namespaces: pinnedNamespace !== null ? [pinnedNamespace] : undefined,
 					},
 				},
 			})

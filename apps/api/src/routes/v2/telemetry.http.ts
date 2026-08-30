@@ -40,6 +40,7 @@ import {
 	QueryEngineExecuteRequest,
 	formatWarehouseDateTime,
 	formatWarehouseDateTimeMs,
+	WarehouseDateTime,
 } from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
 import {
@@ -59,42 +60,6 @@ const decodeTraceId = Schema.decodeSync(TraceId)
 const decodeSpanId = Schema.decodeSync(SpanId)
 const decodeServiceName = Schema.decodeSync(ServiceName)
 const decodeMetricName = Schema.decodeSync(MetricName)
-
-const metricCatalogRowSchema = Schema.Struct({
-	metricName: Schema.String,
-	metricType: Schema.String,
-	serviceName: Schema.String,
-	metricDescription: Schema.String,
-	metricUnit: Schema.String,
-	dataPointCount: CH.CHNumber,
-	firstSeen: Schema.String,
-	lastSeen: Schema.String,
-	// `metric_catalog.IsMonotonic` is `SimpleAggregateFunction(anyLast, UInt8)` —
-	// always 0/1 on the wire, never a JSON boolean. `CHNumber` covers both the
-	// numeric and the quoted-string encoding.
-	isMonotonic: CH.CHNumber,
-})
-
-export const serviceCatalogRowSchema = Schema.Struct({
-	serviceName: Schema.String,
-	serviceNamespaces: Schema.Array(Schema.String),
-	deploymentEnvironments: Schema.Array(Schema.String),
-	spanCount: CH.CHNumber,
-	errorCount: CH.CHNumber,
-	estimatedErrorCount: CH.CHNumber,
-	estimatedSpanCount: CH.CHNumber,
-	p50LatencyMs: CH.CHNumber,
-	p95LatencyMs: CH.CHNumber,
-	p99LatencyMs: CH.CHNumber,
-})
-
-const serviceHealthBaselineRowSchema = Schema.Struct({
-	serviceName: Schema.String,
-	serviceNamespace: Schema.String,
-	environment: Schema.String,
-	baselineP95LatencyMs: CH.CHNumber,
-	baselineSpanCount: CH.CHNumber,
-})
 
 const HOUR_MS = 60 * 60 * 1000
 const PARTITION_HINT_RADIUS_MS = 60 * 60 * 1000
@@ -254,25 +219,38 @@ const parseLogKey = (value: string) => {
 const encodeKeysetCursor = (prefix: string, parts: ReadonlyArray<string>) =>
 	`${prefix}_${Encoding.encodeBase64Url(JSON.stringify(parts))}`
 
+/**
+ * Decode a keyset cursor into its parts.
+ *
+ * Element 0 is always the timestamp the keyset walks back from, and it is
+ * checked against `WarehouseDateTime` here rather than trusted. It reaches the
+ * query builder as a `DateTime` comparison, which encodes it through the
+ * column's codec while the query is still being *built* — before `CH.compile`,
+ * so outside the Effect that would have turned the failure into a value. A
+ * forged cursor was therefore a 500 rather than the 400 this function already
+ * knows how to return.
+ */
 const decodeKeysetCursor = (value: string | undefined, prefix: string, length: number) => {
+	const invalid = Effect.fail(V2CursorInvalid.make(undefined, { param: "cursor" }))
 	if (value === undefined) return Effect.succeed<ReadonlyArray<string> | undefined>(undefined)
-	if (!value.startsWith(`${prefix}_`)) {
-		return Effect.fail(V2CursorInvalid.make(undefined, { param: "cursor" }))
-	}
+	if (!value.startsWith(`${prefix}_`)) return invalid
 	const decoded = Encoding.decodeBase64UrlString(value.slice(prefix.length + 1))
-	if (Result.isFailure(decoded)) {
-		return Effect.fail(V2CursorInvalid.make(undefined, { param: "cursor" }))
+	if (Result.isFailure(decoded)) return invalid
+	const parsed = Result.try({
+		try: () => JSON.parse(decoded.success) as unknown,
+		catch: () => undefined,
+	})
+	if (Result.isFailure(parsed)) return invalid
+	const parts = parsed.success
+	if (
+		!Array.isArray(parts) ||
+		parts.length !== length ||
+		!parts.every((part) => typeof part === "string")
+	) {
+		return invalid
 	}
-	try {
-		const parts = JSON.parse(decoded.success) as unknown
-		return Array.isArray(parts) &&
-			parts.length === length &&
-			parts.every((part) => typeof part === "string")
-			? Effect.succeed(parts as ReadonlyArray<string>)
-			: Effect.fail(V2CursorInvalid.make(undefined, { param: "cursor" }))
-	} catch {
-		return Effect.fail(V2CursorInvalid.make(undefined, { param: "cursor" }))
-	}
+	if (Result.isFailure(Schema.decodeUnknownResult(WarehouseDateTime)(parts[0]))) return invalid
+	return Effect.succeed(parts as ReadonlyArray<string>)
 }
 
 const toLog = (row: {
@@ -900,41 +878,42 @@ export const HttpV2MetricsLive = HttpApiBuilder.group(MapleApiV2, "metrics", (ha
 					const window = yield* parseWindow(query.start_time, query.end_time, {
 						precision: "second",
 					})
-					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) => {
-						const compiled = CH.compile(
-							CH.listMetricsQuery({
-								serviceName: query.service_name,
-								metricType: query.metric_type,
-								search: query.search,
-								limit,
-								offset,
-							}),
-							{ orgId: tenant.orgId, ...window },
-							{ rowSchema: metricCatalogRowSchema },
-						)
-						return warehouse
-							.compiledQuery(tenant, compiled, {
-								profile: "discovery",
-								context: "v2ListMetrics",
-							})
-							.pipe(
-								Effect.map(
-									(rows): ReadonlyArray<V2Metric> =>
-										rows.map((row) => ({
-											object: "metric",
-											name: decodeMetricName(row.metricName),
-											type: row.metricType,
-											service_name: row.serviceName,
-											description: row.metricDescription,
-											unit: row.metricUnit,
-											is_monotonic: Number(row.isMonotonic) !== 0,
-											data_point_count: Number(row.dataPointCount),
-											first_seen: chToIso(row.firstSeen),
-											last_seen: chToIso(row.lastSeen),
-										})),
-								),
+					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
+						Effect.gen(function* () {
+							const compiled = CH.compile(
+								CH.listMetricsQuery({
+									serviceName: query.service_name,
+									metricType: query.metric_type,
+									search: query.search,
+									limit,
+									offset,
+								}),
+								{ orgId: tenant.orgId, ...window },
 							)
-					})
+							return yield* warehouse
+								.compiledQuery(tenant, compiled, {
+									profile: "discovery",
+									context: "v2ListMetrics",
+								})
+								.pipe(
+									Effect.map(
+										(rows): ReadonlyArray<V2Metric> =>
+											rows.map((row) => ({
+												object: "metric",
+												name: decodeMetricName(row.metricName),
+												type: row.metricType,
+												service_name: row.serviceName,
+												description: row.metricDescription,
+												unit: row.metricUnit,
+												is_monotonic: Number(row.isMonotonic) !== 0,
+												data_point_count: Number(row.dataPointCount),
+												first_seen: chToIso(row.firstSeen),
+												last_seen: chToIso(row.lastSeen),
+											})),
+									),
+								)
+						}),
+					)
 					return { object: "list" as const, ...page }
 				}),
 			)
@@ -1147,7 +1126,6 @@ export const HttpV2ServicesLive = HttpApiBuilder.group(MapleApiV2, "services", (
 						namespaces: filters.serviceNamespace ? [filters.serviceNamespace] : undefined,
 					}),
 					{ orgId: tenant.orgId, ...window },
-					{ rowSchema: serviceHealthBaselineRowSchema },
 				)
 				const rows = yield* queryEngine.cachedDirect(
 					tenant,
@@ -1177,19 +1155,20 @@ export const HttpV2ServicesLive = HttpApiBuilder.group(MapleApiV2, "services", (
 			window: { startTime: string; endTime: string; rangeSeconds: number },
 			baselines: ServiceBaselines,
 			opts: Parameters<typeof CH.serviceCatalogQuery>[0],
-		) => {
-			const compiled = CH.compile(
-				CH.serviceCatalogQuery(opts),
-				{ orgId: tenant.orgId, ...window },
-				{ rowSchema: serviceCatalogRowSchema },
-			)
-			return warehouse
-				.compiledQuery(tenant, compiled, {
-					profile: "aggregation",
-					context: "v2ServiceCatalog",
-				})
-				.pipe(Effect.map((rows) => rows.map((row) => toService(row, window.rangeSeconds, baselines))))
-		}
+		) =>
+			Effect.gen(function* () {
+				const compiled = CH.compile(CH.serviceCatalogQuery(opts), { orgId: tenant.orgId, ...window })
+				return yield* warehouse
+					.compiledQuery(tenant, compiled, {
+						profile: "aggregation",
+						context: "v2ServiceCatalog",
+					})
+					.pipe(
+						Effect.map((rows) =>
+							rows.map((row) => toService(row, window.rangeSeconds, baselines)),
+						),
+					)
+			})
 		return handlers
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
@@ -1242,7 +1221,7 @@ const toMapEdge = (row: {
 	callCount: number
 	errorCount: number
 	avgDurationMs: number
-	p95DurationMs: number
+	maxDurationMs: number
 	estimatedSpanCount: number
 }): V2ServiceMapEdge => {
 	const calls = Number(row.callCount)
@@ -1257,15 +1236,11 @@ const toMapEdge = (row: {
 		error_count: errors,
 		error_rate: calls > 0 ? errors / calls : 0,
 		avg_duration_ms: Number(row.avgDurationMs),
-		max_duration_ms: Number(row.p95DurationMs),
+		max_duration_ms: Number(row.maxDurationMs),
 		has_sampling: estimated > calls + 0.001,
 		sampling_weight: calls > 0 ? estimated / calls : 1,
 	}
 }
-
-const serviceEnvironmentsRowSchema = Schema.Struct({
-	environment: Schema.String,
-})
 
 /**
  * The values every other endpoint's `deployment_environment` filter accepts.
@@ -1287,11 +1262,7 @@ export const HttpV2EnvironmentsLive = HttpApiBuilder.group(MapleApiV2, "environm
 					precision: "second",
 					rangeLabel: "Environment queries",
 				})
-				const compiled = CH.compile(
-					CH.serviceEnvironmentsQuery(),
-					{ orgId: tenant.orgId, ...window },
-					{ rowSchema: serviceEnvironmentsRowSchema },
-				)
+				const compiled = CH.compile(CH.serviceEnvironmentsQuery(), { orgId: tenant.orgId, ...window })
 				const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 					profile: "discovery",
 					context: "v2Environments",

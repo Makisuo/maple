@@ -69,6 +69,7 @@ import {
 	SlackIntegrationServiceStubLayer,
 	TelemetryServiceStubsLayer,
 } from "./v2-test-support"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 /**
  * End-to-end HTTP tests for the Phase-1 remainder v2 groups (investigations,
@@ -301,6 +302,9 @@ const errorIssueFixture = new ErrorIssueDocument({
 	snoozeUntil: null,
 	archivedAt: null,
 	hasOpenIncident: true,
+	commentCount: 0,
+	openPullRequestCount: 0,
+	mergedPullRequestCount: 0,
 })
 
 const errorIssueDetailFixture = new ErrorIssueDetailResponse({
@@ -330,10 +334,10 @@ const die = () => Effect.die(new Error("not exercised in this test harness"))
 /** Empty warehouse — enough to exercise the session_replays envelope + 404 paths. */
 const warehouseStub = makeWarehouseServiceStub({
 	rawSqlQuery: () => Effect.succeed([]),
-	compiledQuery: (_tenant, compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
+	compiledQuery: (_tenant, compiled) => compiledQueryOf(compiled).decodeRows([]).pipe(Effect.orDie),
 	// Replay payload reads go through the bounded variant (they carry an explicit
 	// response-byte ceiling), so the stub has to answer it too.
-	compiledQueryBounded: (_tenant, compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
+	compiledQueryBounded: (_tenant, compiled) => compiledQueryOf(compiled).decodeRows([]).pipe(Effect.orDie),
 	compiledQueryFirst: () => Effect.succeed(Option.none()),
 	// Handlers warm the org route before fanning out; the real one resolves
 	// route + capabilities, which this stub has nothing to resolve.
@@ -1184,17 +1188,23 @@ describe("v2 session_replays over HTTP", () => {
 			netStatus: seq % 2 === 0 ? 0 : 200,
 			netDurationMs: seq % 2 === 0 ? 0 : 12,
 			errorStack: "",
+			// The transcript query also selects the custom-event props. Rows decode
+			// against the compiled query's derived schema, so the fixture carries
+			// every column the SELECT names.
+			attributes: "{}",
 		}))
 		const transcriptWarehouse: WarehouseQueryServiceApi = {
 			...warehouseStub,
 			compiledQuery: (_tenant, compiled, options) => {
 				if (options?.context !== "v2SessionTranscript") {
-					return compiled.decodeRows([]).pipe(Effect.orDie)
+					return compiledQueryOf(compiled).decodeRows([]).pipe(Effect.orDie)
 				}
-				const match = /LIMIT\s+(\d+)\s+OFFSET\s+(\d+)/i.exec(compiled.sql)
+				const match = /LIMIT\s+(\d+)\s+OFFSET\s+(\d+)/i.exec(compiledQueryOf(compiled).sql)
 				const limit = Number(match?.[1] ?? 100)
 				const offset = Number(match?.[2] ?? 0)
-				return compiled.decodeRows(transcriptRows.slice(offset, offset + limit)).pipe(Effect.orDie)
+				return compiledQueryOf(compiled)
+					.decodeRows(transcriptRows.slice(offset, offset + limit))
+					.pipe(Effect.orDie)
 			},
 		}
 		const harness = makeHarness(transcriptWarehouse)
@@ -1268,9 +1278,13 @@ describe("v2 session_replays over HTTP", () => {
 			return {
 				...warehouseStub,
 				compiledQuery: (_tenant, compiled) =>
-					compiled.decodeRows(serve(compiled.sql)).pipe(Effect.orDie),
+					compiledQueryOf(compiled)
+						.decodeRows(serve(compiledQueryOf(compiled).sql))
+						.pipe(Effect.orDie),
 				compiledQueryBounded: (_tenant, compiled) =>
-					compiled.decodeRows(serve(compiled.sql)).pipe(Effect.orDie),
+					compiledQueryOf(compiled)
+						.decodeRows(serve(compiledQueryOf(compiled).sql))
+						.pipe(Effect.orDie),
 			}
 		}
 
@@ -1338,9 +1352,10 @@ describe("v2 session_replays over HTTP", () => {
 			const legacyRows = chunkRows.map((row) => ({ ...row, isCheckpoint: 0 }))
 			const harness = makeHarness({
 				...warehouseStub,
-				compiledQuery: (_tenant, compiled) => compiled.decodeRows(legacyRows).pipe(Effect.orDie),
+				compiledQuery: (_tenant, compiled) =>
+					compiledQueryOf(compiled).decodeRows(legacyRows).pipe(Effect.orDie),
 				compiledQueryBounded: (_tenant, compiled) =>
-					compiled.decodeRows(legacyRows).pipe(Effect.orDie),
+					compiledQueryOf(compiled).decodeRows(legacyRows).pipe(Effect.orDie),
 			})
 			const key = await harness.bootstrapKey()
 			const sessionId = encodePublicId("srep", "sess_legacy")
@@ -1365,9 +1380,10 @@ describe("v2 session_replays over HTTP", () => {
 			}))
 			const harness = makeHarness({
 				...warehouseStub,
-				compiledQuery: (_tenant, compiled) => compiled.decodeRows(quotedRows).pipe(Effect.orDie),
+				compiledQuery: (_tenant, compiled) =>
+					compiledQueryOf(compiled).decodeRows(quotedRows).pipe(Effect.orDie),
 				compiledQueryBounded: (_tenant, compiled) =>
-					compiled.decodeRows(quotedRows).pipe(Effect.orDie),
+					compiledQueryOf(compiled).decodeRows(quotedRows).pipe(Effect.orDie),
 			})
 			const key = await harness.bootstrapKey()
 			const sessionId = encodePublicId("srep", "sess_quoted")
@@ -1402,9 +1418,13 @@ describe("v2 session_replays over HTTP", () => {
 			const harness = makeHarness({
 				...warehouseStub,
 				compiledQueryBounded: (_tenant, compiled) => {
-					const limit = Number(/LIMIT\s+(\d+)/i.exec(compiled.sql)?.[1] ?? manyRows.length)
-					const offset = Number(/OFFSET\s+(\d+)/i.exec(compiled.sql)?.[1] ?? 0)
-					return compiled.decodeRows(manyRows.slice(offset, offset + limit)).pipe(Effect.orDie)
+					const limit = Number(
+						/LIMIT\s+(\d+)/i.exec(compiledQueryOf(compiled).sql)?.[1] ?? manyRows.length,
+					)
+					const offset = Number(/OFFSET\s+(\d+)/i.exec(compiledQueryOf(compiled).sql)?.[1] ?? 0)
+					return compiledQueryOf(compiled)
+						.decodeRows(manyRows.slice(offset, offset + limit))
+						.pipe(Effect.orDie)
 				},
 			})
 			const key = await harness.bootstrapKey()
@@ -1438,7 +1458,7 @@ describe("v2 session_replays over HTTP", () => {
 			const harness = makeHarness({
 				...warehouseStub,
 				compiledQueryBounded: (_tenant, compiled) =>
-					compiled.decodeRows(hugeBlobRows).pipe(Effect.orDie),
+					compiledQueryOf(compiled).decodeRows(hugeBlobRows).pipe(Effect.orDie),
 			})
 			const key = await harness.bootstrapKey()
 			const sessionId = encodePublicId("srep", "sess_blobs_toobig")
@@ -1457,7 +1477,8 @@ describe("v2 session_replays over HTTP", () => {
 			const blobRows = chunkRows.slice(0, 4).map((row) => ({ ...row, events: "", byteSize: 100_000 }))
 			const harness = makeHarness({
 				...warehouseStub,
-				compiledQueryBounded: (_tenant, compiled) => compiled.decodeRows(blobRows).pipe(Effect.orDie),
+				compiledQueryBounded: (_tenant, compiled) =>
+					compiledQueryOf(compiled).decodeRows(blobRows).pipe(Effect.orDie),
 			})
 			const key = await harness.bootstrapKey()
 			const sessionId = encodePublicId("srep", "sess_blobs_ok")

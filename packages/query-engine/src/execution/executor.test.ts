@@ -3,13 +3,14 @@ import { Duration, Effect, Exit, Fiber, Ref, Schema, Tracer } from "effect"
 import { TestClock } from "effect/testing"
 import { OrgId, UserId } from "@maple/domain"
 import { RawSqlValidationError } from "@maple/domain/http"
-import { compile, listRuleChecksQuery, unsafeCompiledQuery } from "../ch"
+import { compileUnsafe, listRuleChecksQuery, rawCompiledQuery } from "../ch"
 import { logBodySearchMode, type WarehouseCapabilities } from "../capabilities"
 import { makeWarehouseExecutor } from "./executor"
 import { WarehouseResponseLimitError } from "./response-limits"
 import type {
 	ExecutionTenant,
 	ResolvedWarehouseConfig,
+	SqlQueryOptions,
 	WarehouseExecutorDeps,
 	WarehouseSqlClient,
 } from "./ports"
@@ -55,32 +56,32 @@ const chdbConfig: ResolvedWarehouseConfig = {
 	kind: "chdb",
 }
 
-// listRuleChecksQuery declares .routing("ingest") at its definition —
+// listRuleChecksQuery declares .route("ingest") at its definition —
 // alert_checks only exists in the managed ingest pipeline.
-const compiled = compile(listRuleChecksQuery({ limit: 1 }), {
+const compiled = compileUnsafe(listRuleChecksQuery({ limit: 1 }), {
 	orgId: "org_test",
 	ruleId: "rule_test",
 })
-const _ingestRoutingIsPartOfTheCompiledType: "ingest" = compiled.routing
-void _ingestRoutingIsPartOfTheCompiledType
+const _ingestRouteIsPartOfTheCompiledType: "ingest" = compiled.route
+void _ingestRouteIsPartOfTheCompiledType
 
 // The old `sqlQuery(tenant, sql)` entry point took a raw string; scope now
 // travels on the compiled query, so these execution/span/retry tests wrap their
 // SQL in a compiled value that declares it.
 const scoped = (sql: string) =>
-	unsafeCompiledQuery<Record<string, unknown>>({
+	rawCompiledQuery<Record<string, unknown>>({
 		sql,
-		tenantScope: "org",
+		tenantScope: "single-tenant",
 		reason: "test-fixture",
-		note: "Synthetic SQL asserting executor behaviour, not a product query.",
+		justification: "Synthetic SQL asserting executor behaviour, not a product query.",
 	})
 
 // A plain query with no routing declaration follows the default read route.
-const untaggedCompiled = unsafeCompiledQuery<{ readonly c: number }>({
+const untaggedCompiled = rawCompiledQuery<{ readonly c: number }>({
 	reason: "test-fixture",
-	note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+	justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 	sql: "SELECT count() AS c FROM traces WHERE OrgId = 'org_test'\nFORMAT JSON",
-	tenantScope: "org",
+	tenantScope: "single-tenant",
 })
 
 // Records the backend each constructed client was wired to, so a test can assert
@@ -117,7 +118,7 @@ describe("makeWarehouseExecutor ingest routing", () => {
 		}),
 	)
 
-	it.effect("routes a .routing('ingest')-tagged compiled query to the ingest (Tinybird) route", () =>
+	it.effect("routes a .route('ingest')-tagged compiled query to the ingest (Tinybird) route", () =>
 		Effect.gen(function* () {
 			const created: Array<ResolvedWarehouseConfig["kind"]> = []
 			const executor = makeWarehouseExecutor(makeDeps(created))
@@ -218,12 +219,15 @@ describe("makeWarehouseExecutor span instrumentation", () => {
 				.compiledQuery(
 					tenant,
 					() =>
-						unsafeCompiledQuery<{ readonly c: number }>({
-							reason: "test-fixture",
-							note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-							sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
-							tenantScope: "org",
-						}),
+						Effect.succeed(
+							rawCompiledQuery<{ readonly c: number }>({
+								reason: "test-fixture",
+								justification:
+									"Synthetic SQL asserting executor/compile behaviour, not a product query.",
+								sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
+								tenantScope: "single-tenant",
+							}),
+						),
 					{ context: "capabilitySpan" },
 				)
 				.pipe(Effect.withTracer(tracer))
@@ -277,8 +281,8 @@ const makeRecordingDeps = (
 	sqls: Array<string>,
 ): WarehouseExecutorDeps => ({
 	createClient: () => ({
-		sql: async (sql: string) => {
-			sqls.push(sql)
+		sql: async (statement) => {
+			sqls.push(statement.text)
 			return { data: [] }
 		},
 		insert: async () => {},
@@ -332,11 +336,11 @@ describe("makeWarehouseExecutor compiled-query defaults", () => {
 						clientCacheKey: "read:org_test",
 					}),
 			}
-			const withSchema = unsafeCompiledQuery<{ readonly c: number }>({
+			const withSchema = rawCompiledQuery<{ readonly c: number }>({
 				reason: "test-fixture",
-				note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+				justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 				sql: "SELECT count() AS c FROM traces WHERE OrgId = 'org_test'\nFORMAT JSON",
-				tenantScope: "org",
+				tenantScope: "single-tenant",
 				rowSchema: Schema.Struct({ c: Schema.Number }),
 			})
 			const executor = makeWarehouseExecutor(badRowDeps)
@@ -347,6 +351,106 @@ describe("makeWarehouseExecutor compiled-query defaults", () => {
 			if (error._tag !== "@maple/http/errors/WarehouseResultDecodeError") return
 			// The real query identity, not the old constant "compiledQuery".
 			assert.strictEqual(error.pipeName, "serviceOverview")
+		}),
+	)
+})
+
+describe("makeWarehouseExecutor wire format", () => {
+	// The dialect decides where the wire format is declared, and the executor
+	// applies it — so a driver never has to re-derive from SQL text which terminal
+	// clauses the statement already carries.
+	const runOn = (config: ResolvedWarehouseConfig) =>
+		Effect.gen(function* () {
+			const sqls: Array<string> = []
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config, clientCacheKey: "read:managed" }, sqls),
+			)
+			yield* executor.compiledQuery(tenant, compiled, { context: "test", profile: "list" })
+			assert.lengthOf(sqls, 1)
+			return sqls[0]!
+		})
+
+	it.effect("declares FORMAT in the statement for the Tinybird SDK backend", () =>
+		Effect.gen(function* () {
+			const sql = yield* runOn(tinybirdConfig)
+			assert.match(sql, /\nFORMAT JSON$/)
+			// SETTINGS must precede FORMAT — Tinybird rejects the inverse order.
+			assert.isTrue(sql.indexOf("SETTINGS") < sql.indexOf("FORMAT JSON"))
+		}),
+	)
+
+	for (const [label, config] of [
+		["the Tinybird CH-gateway", tinybirdGatewayConfig],
+		["BYO ClickHouse", clickhouseConfig],
+		["chDB", chdbConfig],
+	] as const) {
+		it.effect(`leaves FORMAT off the statement for ${label}`, () =>
+			Effect.gen(function* () {
+				const sql = yield* runOn(config)
+				assert.notMatch(sql, /\bFORMAT\s+\w+\s*$/)
+			}),
+		)
+	}
+})
+
+describe("makeWarehouseExecutor query fingerprint", () => {
+	// The fingerprint is the QueryKey of the db-query-shape rollup. Hashing the
+	// rendered statement forked one query into a shape per backend and per
+	// profile-shape, so it covers the body alone.
+	const fingerprintOn = (config: ResolvedWarehouseConfig, options: SqlQueryOptions) =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config, clientCacheKey: "read:managed" }, []),
+			)
+			yield* executor.compiledQuery(tenant, compiled, options).pipe(Effect.withTracer(tracer))
+			const span = spans.find((candidate) => candidate.name === "WarehouseQueryService.executeSql")
+			assert.isDefined(span)
+			return span.attributes.get("db.query.fingerprint") as string
+		})
+
+	it.effect("is identical across backends for the same query", () =>
+		Effect.gen(function* () {
+			const options = { context: "test", profile: "list" } as const
+			const tinybird = yield* fingerprintOn(tinybirdConfig, options)
+			const gateway = yield* fingerprintOn(tinybirdGatewayConfig, options)
+			const byo = yield* fingerprintOn(clickhouseConfig, options)
+			assert.match(tinybird, /^[0-9a-f]{8}$/)
+			assert.strictEqual(gateway, tinybird)
+			assert.strictEqual(byo, tinybird)
+		}),
+	)
+
+	it.effect("is identical across cost profiles for the same query", () =>
+		Effect.gen(function* () {
+			const list = yield* fingerprintOn(clickhouseConfig, { context: "test", profile: "list" })
+			const unbounded = yield* fingerprintOn(clickhouseConfig, {
+				context: "test",
+				profile: "unbounded",
+			})
+			assert.strictEqual(unbounded, list)
+		}),
+	)
+
+	it.effect("still separates different queries", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+			const executor = makeWarehouseExecutor(makeDeps([]))
+			// Different tables, not different literals: the fingerprint normalizes
+			// numbers and strings so the same shape groups across params.
+			for (const sql of [
+				"SELECT count() FROM traces WHERE OrgId = 'org_test'",
+				"SELECT count() FROM logs WHERE OrgId = 'org_test'",
+			]) {
+				yield* executor
+					.compiledQuery(tenant, scoped(sql), { context: "test", profile: "list" })
+					.pipe(Effect.withTracer(tracer))
+			}
+			const fingerprints = spans
+				.filter((candidate) => candidate.name === "WarehouseQueryService.executeSql")
+				.map((span) => span.attributes.get("db.query.fingerprint"))
+			assert.lengthOf(fingerprints, 2)
+			assert.notStrictEqual(fingerprints[0], fingerprints[1])
 		}),
 	)
 })
@@ -417,7 +521,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			let metadataQueries = 0
 			const executor = makeWarehouseExecutor({
 				createClient: () => ({
-					sql: async (sql) => {
+					sql: async (statement) => {
+						const sql = statement.text
 						sqls.push(sql)
 						if (sql.includes("SELECT version()")) {
 							metadataQueries += 1
@@ -452,12 +557,15 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			})
 
 			const factory = (capabilities: WarehouseCapabilities) =>
-				unsafeCompiledQuery<{ readonly c: number }>({
-					reason: "test-fixture",
-					note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-					sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'text' FORMAT JSON`,
-					tenantScope: "org",
-				})
+				Effect.succeed(
+					rawCompiledQuery<{ readonly c: number }>({
+						reason: "test-fixture",
+						justification:
+							"Synthetic SQL asserting executor/compile behaviour, not a product query.",
+						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'text' FORMAT JSON`,
+						tenantScope: "single-tenant",
+					}),
+				)
 
 			yield* executor.compiledQuery(tenant, factory, { context: "capability-test" })
 			yield* executor.compiledQuery(tenant, factory, { context: "capability-test" })
@@ -483,7 +591,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			})
 			const executor = makeWarehouseExecutor({
 				createClient: () => ({
-					sql: async (sql) => {
+					sql: async (statement) => {
+						const sql = statement.text
 						if (sql.includes("SELECT version()")) {
 							versionQueries += 1
 							signalVersionQueryStarted?.()
@@ -508,12 +617,15 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 				executor.compiledQueryWithCapabilities(
 					tenant,
 					() =>
-						unsafeCompiledQuery<{ readonly c: number }>({
-							reason: "test-fixture",
-							note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-							sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
-							tenantScope: "org",
-						}),
+						Effect.succeed(
+							rawCompiledQuery<{ readonly c: number }>({
+								reason: "test-fixture",
+								justification:
+									"Synthetic SQL asserting executor/compile behaviour, not a product query.",
+								sql: "SELECT count() AS c FROM logs WHERE OrgId = 'org_test' FORMAT JSON",
+								tenantScope: "single-tenant",
+							}),
+						),
 					{ context: "capability-request-local" },
 				)
 
@@ -554,7 +666,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			const executed: string[] = []
 			const executor = makeWarehouseExecutor({
 				createClient: () => ({
-					sql: async (sql) => {
+					sql: async (statement) => {
+						const sql = statement.text
 						if (sql.includes("system.") || sql.includes("SELECT version()")) {
 							throw new Error("ACCESS_DENIED")
 						}
@@ -574,12 +687,15 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			yield* executor.compiledQuery(
 				tenant,
 				(capabilities) =>
-					unsafeCompiledQuery<{ readonly c: number }>({
-						reason: "test-fixture",
-						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
-						tenantScope: "org",
-					}),
+					Effect.succeed(
+						rawCompiledQuery<{ readonly c: number }>({
+							reason: "test-fixture",
+							justification:
+								"Synthetic SQL asserting executor/compile behaviour, not a product query.",
+							sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+							tenantScope: "single-tenant",
+						}),
+					),
 				{ context: "capability-fallback-test" },
 			)
 
@@ -594,7 +710,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			const sqls: string[] = []
 			const executor = makeWarehouseExecutor({
 				createClient: () => ({
-					sql: async (sql) => {
+					sql: async (statement) => {
+						const sql = statement.text
 						sqls.push(sql)
 						// A probe here would be a bug: Tinybird answers `403` for
 						// `system.columns` / `system.data_skipping_indices`, so any
@@ -614,12 +731,15 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			yield* executor.compiledQuery(
 				tenant,
 				(capabilities) =>
-					unsafeCompiledQuery<{ readonly c: number }>({
-						reason: "test-fixture",
-						note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-						sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'tokenbf' FORMAT JSON`,
-						tenantScope: "org",
-					}),
+					Effect.succeed(
+						rawCompiledQuery<{ readonly c: number }>({
+							reason: "test-fixture",
+							justification:
+								"Synthetic SQL asserting executor/compile behaviour, not a product query.",
+							sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'tokenbf' FORMAT JSON`,
+							tenantScope: "single-tenant",
+						}),
+					),
 				{ context: "tinybird-gateway-capabilities" },
 			)
 
@@ -639,7 +759,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			const executed: string[] = []
 			const executor = makeWarehouseExecutor({
 				createClient: () => ({
-					sql: (sql) => {
+					sql: (statement) => {
+						const sql = statement.text
 						if (sql.includes("SELECT version()") || sql.includes("system.")) {
 							return new Promise<{ data: never[] }>(() => {})
 						}
@@ -662,12 +783,15 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 					.compiledQuery(
 						tenant,
 						(capabilities) =>
-							unsafeCompiledQuery<{ readonly c: number }>({
-								reason: "test-fixture",
-								note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-								sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
-								tenantScope: "org",
-							}),
+							Effect.succeed(
+								rawCompiledQuery<{ readonly c: number }>({
+									reason: "test-fixture",
+									justification:
+										"Synthetic SQL asserting executor/compile behaviour, not a product query.",
+									sql: `SELECT count() AS c FROM logs WHERE OrgId = 'org_test' AND '${logBodySearchMode(capabilities)}' = 'scan' FORMAT JSON`,
+									tenantScope: "single-tenant",
+								}),
+							),
 						{ context: "hung-capability-probe" },
 					)
 					.pipe(
@@ -690,7 +814,8 @@ describe("makeWarehouseExecutor capability-aware compilation", () => {
 			const sqls: string[] = []
 			const executor = makeWarehouseExecutor({
 				createClient: () => ({
-					sql: async (sql) => {
+					sql: async (statement) => {
+						const sql = statement.text
 						sqls.push(sql)
 						if (sql.includes("SELECT version()")) return { data: [{ version: "26.2.1" }] }
 						if (sql.includes("system.data_skipping_indices")) {
@@ -864,7 +989,7 @@ describe("makeWarehouseExecutor raw response limits", () => {
 			const executor = makeWarehouseExecutor({
 				...makeDeps([]),
 				createClient: () => ({
-					sql: async (_sql: string, options?: unknown) => {
+					sql: async (_statement, options?: unknown) => {
 						seen = options
 						return { data: [] }
 					},

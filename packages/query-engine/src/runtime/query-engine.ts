@@ -110,13 +110,15 @@ export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
 	>
 	readonly compiledQuery: <Output>(
 		tenant: T,
-		compiled: CH.CompiledQuery<Output>,
+		compiled: CH.CompiledQueryInput<Output>,
 		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<Output>, WarehouseReadError>
 	/** Capability-aware execution; adapters may deliberately compile the baseline plan. */
 	readonly compiledQueryWithCapabilities: <Output>(
 		tenant: T,
-		compile: (capabilities: WarehouseCapabilities) => CH.CompiledQuery<Output>,
+		compile: (
+			capabilities: WarehouseCapabilities,
+		) => Effect.Effect<CH.CompiledQuery<Output>, CH.QueryBuilderError>,
 		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<Output>, WarehouseReadError>
 }
@@ -900,6 +902,9 @@ const executeCHQuery = Effect.fnUntraced(function* <
 		)
 	}
 
+	// Handed over unrun: the params come from a lowered `QuerySpec`, already
+	// validated against the request schema, so a compile failure is a bug in the
+	// lowering — which is exactly what the executor treats it as.
 	const compiled = CH.compile(query, params)
 	return yield* annotateWarehouseError(warehouse.compiledQuery(tenant, compiled, options), context)
 })
@@ -1098,6 +1103,7 @@ function extractTracesOpts(filters: Record<string, unknown> | undefined) {
 		excludedSpanNames: filters?.excludedSpanNames as readonly string[] | undefined,
 		excludedEnvironments: filters?.excludedEnvironments as readonly string[] | undefined,
 		excludedNamespaces: filters?.excludedNamespaces as readonly string[] | undefined,
+		excludedCommitShas: filters?.excludedCommitShas as readonly string[] | undefined,
 	}
 }
 
@@ -1912,6 +1918,10 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						fingerprintHashes: filters?.fingerprintHashes as string[] | undefined,
 						errorLabels: filters?.errorLabels as string[] | undefined,
 						serviceVersions: filters?.serviceVersions as string[] | undefined,
+						excludedServices: filters?.excludedServices as string[] | undefined,
+						excludedDeploymentEnvs: filters?.excludedDeploymentEnvs as string[] | undefined,
+						excludedErrorLabels: filters?.excludedErrorLabels as string[] | undefined,
+						excludedServiceVersions: filters?.excludedServiceVersions as string[] | undefined,
 					}),
 					baseParams,
 					"errorsFacets",

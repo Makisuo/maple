@@ -11,12 +11,13 @@ import {
 	TinybirdOrgTokenConfigError,
 	UserId,
 	WarehouseConfigError,
-	WarehouseQueryError,
+	WarehouseInvalidSqlError,
 	WarehouseResultDecodeError,
 	WarehouseScopeError,
 	WarehouseUpstreamError,
 } from "@maple/domain/http"
-import { unsafeCompiledQuery } from "@maple/query-engine/ch"
+import { rawCompiledQuery } from "@maple/query-engine/ch"
+import { parseStatement, type ClickHouseStatement } from "@maple-dev/clickhouse-builder/sql"
 import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { makeWarehouseExecutor, type ResolvedWarehouseConfig } from "@maple/query-engine/execution"
 import { __testables, WarehouseQueryService } from "./WarehouseQueryService"
@@ -96,11 +97,11 @@ const makeTenant = (): TenantContext => ({
 // tests exercise retry/routing/caching, not scope, so the SQL travels wrapped in
 // a compiled query that declares it.
 const scopedSql = (sql: string) =>
-	unsafeCompiledQuery<Record<string, unknown>>({
+	rawCompiledQuery<Record<string, unknown>>({
 		sql,
-		tenantScope: "org",
+		tenantScope: "single-tenant",
 		reason: "test-fixture",
-		note: "Synthetic SQL asserting executor behaviour, not a product query.",
+		justification: "Synthetic SQL asserting executor behaviour, not a product query.",
 	})
 
 const transient503 = () => new Error("HTTP status 503 service temporarily unavailable")
@@ -450,10 +451,10 @@ describe("WarehouseQueryService.compiledQuery", () => {
 
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
-		const compiled = unsafeCompiledQuery<{ readonly serviceName: string; readonly count: number }>({
+		const compiled = rawCompiledQuery<{ readonly serviceName: string; readonly count: number }>({
 			reason: "test-fixture",
-			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-			tenantScope: "org",
+			justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+			tenantScope: "single-tenant",
 			sql: "SELECT ServiceName AS serviceName, count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ serviceName: Schema.String, count: RowNumber }),
 		})
@@ -475,10 +476,10 @@ describe("WarehouseQueryService.compiledQuery", () => {
 
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
-		const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+		const compiled = rawCompiledQuery<{ readonly count: number }>({
 			reason: "test-fixture",
-			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-			tenantScope: "org",
+			justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+			tenantScope: "single-tenant",
 			sql: "SELECT count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ count: RowNumber }),
 		})
@@ -505,11 +506,11 @@ describe("WarehouseQueryService.compiledQuery", () => {
 		// No top-level OrgId predicate. Previously expressed as SQL lacking the
 		// substring "OrgId"; scope is now a property of the compiled query, so a
 		// query that merely mentions the column can no longer sneak through.
-		const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+		const compiled = rawCompiledQuery<{ readonly count: number }>({
 			reason: "test-fixture",
-			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+			justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
 			sql: "SELECT count() AS count, 'x' AS OrgId FROM traces",
-			tenantScope: "cross-org",
+			tenantScope: "cross-tenant",
 			rowSchema: Schema.Struct({ count: RowNumber }),
 		})
 
@@ -524,7 +525,7 @@ describe("WarehouseQueryService.compiledQuery", () => {
 			assert.strictEqual(
 				(failure as { message?: string } | undefined)?.message,
 				"compiled query is not tenant-scoped: no top-level OrgId predicate (compiledQuery). " +
-					"Deliberate cross-tenant reads must declare .crossOrg() and run through crossOrgQuery.",
+					"Deliberate cross-tenant reads must declare .crossTenant() and run through crossOrgQuery.",
 			)
 		}).pipe(Effect.provide(layer))
 	})
@@ -546,10 +547,10 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
-		const compiled = unsafeCompiledQuery<{ readonly serviceName: string; readonly count: number }>({
+		const compiled = rawCompiledQuery<{ readonly serviceName: string; readonly count: number }>({
 			reason: "test-fixture",
-			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-			tenantScope: "org",
+			justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+			tenantScope: "single-tenant",
 			sql: "SELECT ServiceName AS serviceName, count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ serviceName: Schema.String, count: RowNumber }),
 		})
@@ -574,10 +575,10 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
-		const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+		const compiled = rawCompiledQuery<{ readonly count: number }>({
 			reason: "test-fixture",
-			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-			tenantScope: "org",
+			justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+			tenantScope: "single-tenant",
 			sql: "SELECT count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ count: RowNumber }),
 		})
@@ -599,10 +600,10 @@ describe("WarehouseQueryService.compiledQueryFirst", () => {
 
 		const layer = buildLayer(createTestDb(trackedDbs))
 		const tenant = makeTenant()
-		const compiled = unsafeCompiledQuery<{ readonly count: number }>({
+		const compiled = rawCompiledQuery<{ readonly count: number }>({
 			reason: "test-fixture",
-			note: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
-			tenantScope: "org",
+			justification: "Synthetic SQL asserting executor/compile behaviour, not a product query.",
+			tenantScope: "single-tenant",
 			sql: "SELECT count() AS count FROM traces WHERE OrgId = 'org_test'",
 			rowSchema: Schema.Struct({ count: RowNumber }),
 		})
@@ -660,7 +661,10 @@ describe("WarehouseQueryService.ingest writes through the SQL client", () => {
 		}).pipe(Effect.provide(layer))
 	})
 
-	it.effect("maps a failed insert to WarehouseQueryError", () => {
+	// Inserts classify with the read path's default "caller" authorship (the
+	// rows, not Maple's SQL, are what usually earned the rejection), so a
+	// syntax-shaped complaint takes the caller-authored invalid-SQL tag.
+	it.effect("maps a failed insert through the classifier", () => {
 		__testables.setClientFactory(() => ({
 			sql: async () => ({ data: [] }),
 			insert: async () => {
@@ -678,7 +682,7 @@ describe("WarehouseQueryService.ingest writes through the SQL client", () => {
 
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
-			assert.instanceOf(failure, WarehouseQueryError)
+			assert.instanceOf(failure, WarehouseInvalidSqlError)
 		}).pipe(Effect.provide(layer))
 	})
 })
@@ -776,18 +780,19 @@ describe("createTinybirdSdkSqlClient.insert wire framing (the production insert 
 	})
 })
 
-describe("createTinybirdSdkSqlClient.sql FORMAT normalization", () => {
-	// DSL-compiled queries already end with `FORMAT JSON` (optionally followed by
-	// profile SETTINGS). Appending a second FORMAT clause is a ClickHouse syntax
-	// error ("Syntax error at (FORMAT) ... Expected: SETTINGS, end of query") that
-	// broke every alerting query against managed Tinybird — pin the normalization.
+describe("createTinybirdSdkSqlClient.sql wire format", () => {
+	// The FORMAT decision moved to the executor, which settles the statement's
+	// terminal clauses from the backend's dialect before any driver sees it. This
+	// driver's whole job is to render what it was handed — the double-FORMAT
+	// syntax error that broke every alerting query against managed Tinybird can no
+	// longer originate here, because nothing here inspects SQL text.
 	const tbConfig = {
 		kind: "tinybird" as const,
 		host: "https://api.tinybird.co",
 		token: "tok_123",
 	}
 
-	const captureSql = async (sql: string): Promise<string> => {
+	const captureSql = async (statement: ClickHouseStatement): Promise<string> => {
 		const sent: string[] = []
 		const requestFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = new URL(String(input))
@@ -803,45 +808,30 @@ describe("createTinybirdSdkSqlClient.sql FORMAT normalization", () => {
 		}) as typeof fetch
 
 		const client = __testables.createTinybirdSdkSqlClient(tbConfig, requestFetch)
-		await client.sql(sql, undefined)
+		await client.sql(statement, undefined)
 
 		assert.strictEqual(sent.length, 1)
 		return sent[0]!
 	}
 
-	const countFormats = (sql: string) => (sql.match(/FORMAT JSON/g) ?? []).length
-
-	it("does not double-append when the query already ends with FORMAT JSON", async () => {
-		const sent = await captureSql("SELECT 1\nFORMAT JSON")
-		assert.strictEqual(countFormats(sent), 1)
-		assert.match(sent, /FORMAT JSON$/)
-	})
-
-	it("does not double-append when profile SETTINGS precede FORMAT JSON", async () => {
-		// Canonical order emitted by appendSettings — Tinybird rejects the inverse.
-		const sent = await captureSql(
-			"SELECT 1 SETTINGS max_execution_time=15, max_memory_usage=1500000000\nFORMAT JSON",
-		)
-		assert.strictEqual(countFormats(sent), 1)
-		assert.match(sent, /SETTINGS max_execution_time=15, max_memory_usage=1500000000\nFORMAT JSON$/)
-	})
-
-	it("does not double-append when FORMAT JSON is followed by profile SETTINGS", async () => {
-		const sent = await captureSql(
-			"SELECT 1\nFORMAT JSON SETTINGS max_execution_time=15, max_memory_usage=1500000000",
-		)
-		assert.strictEqual(countFormats(sent), 1)
-		assert.match(sent, /FORMAT JSON SETTINGS max_execution_time=15, max_memory_usage=1500000000$/)
-	})
-
-	it("appends FORMAT JSON to raw SQL without a FORMAT clause", async () => {
-		const sent = await captureSql("SELECT 1")
+	it("sends the statement as the executor rendered it", async () => {
+		const sent = await captureSql(parseStatement("SELECT 1\nFORMAT JSON"))
 		assert.strictEqual(sent, "SELECT 1\nFORMAT JSON")
 	})
 
-	it("strips a trailing semicolon before appending", async () => {
-		const sent = await captureSql("SELECT 1;")
-		assert.strictEqual(sent, "SELECT 1\nFORMAT JSON")
+	it("keeps SETTINGS ahead of FORMAT", async () => {
+		const sent = await captureSql(parseStatement("SELECT 1 SETTINGS max_execution_time=15\nFORMAT JSON"))
+		assert.strictEqual(sent, "SELECT 1\nSETTINGS max_execution_time=15\nFORMAT JSON")
+	})
+
+	it("does not add a format the executor left off", async () => {
+		const sent = await captureSql(parseStatement("SELECT 1"))
+		assert.strictEqual(sent, "SELECT 1")
+	})
+
+	it("leaves a nested FORMAT alone", async () => {
+		const sent = await captureSql(parseStatement("SELECT * FROM (SELECT 1 FORMAT JSON) AS x"))
+		assert.strictEqual(sent, "SELECT * FROM (SELECT 1 FORMAT JSON) AS x")
 	})
 })
 

@@ -35,13 +35,6 @@ export interface DailySignalVolumeOutput {
 	readonly metricBytes: number
 }
 
-export const dailySignalVolumeRowSchema: CompiledQueryRowSchema<DailySignalVolumeOutput> = Schema.Struct({
-	day: Schema.String,
-	logBytes: CHNumber,
-	traceBytes: CHNumber,
-	metricBytes: CHNumber,
-})
-
 /**
  * Per-UTC-day log/trace/metric bytes for one org.
  *
@@ -79,11 +72,6 @@ export interface DailySessionCountOutput {
 	readonly sessions: number
 }
 
-export const dailySessionCountRowSchema: CompiledQueryRowSchema<DailySessionCountOutput> = Schema.Struct({
-	day: Schema.String,
-	sessions: CHNumber,
-})
-
 /**
  * Per-UTC-day browser session count for one org.
  *
@@ -100,8 +88,8 @@ export function dailySessionCountQuery() {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.StartTime.gte(CH.toDateTime(param.dateTime("startTime"))),
-			$.StartTime.lte(CH.toDateTime(param.dateTime("endTime"))),
+			$.StartTime.gte(CH.toDateTime(param.dateTimeString("startTime"))),
+			$.StartTime.lte(CH.toDateTime(param.dateTimeString("endTime"))),
 		])
 		.groupBy("day")
 		.orderBy(["day", "asc"])
@@ -137,8 +125,8 @@ export function dailyProductEventCountQuery() {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(CH.toDateTime(param.dateTime("startTime"))),
-			$.Timestamp.lte(CH.toDateTime(param.dateTime("endTime"))),
+			$.Timestamp.gte(CH.toDateTime(param.dateTimeString("startTime"))),
+			$.Timestamp.lte(CH.toDateTime(param.dateTimeString("endTime"))),
 			$.Kind.neq("navigation"),
 		])
 		.groupBy("day")

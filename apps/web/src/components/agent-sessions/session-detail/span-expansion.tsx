@@ -16,13 +16,16 @@ import {
 	ChevronDownIcon,
 	ChevronRightIcon,
 	CircleWarningIcon,
-	CircleXmarkIcon,
 	CopyIcon,
 	ExternalLinkIcon,
-	XmarkIcon,
 } from "@/components/icons"
 import { MessageResponse } from "@/components/ai-elements/message-response"
-import { AttributesSection, CopyableValue, ResourceAttributesSection } from "@/components/attributes"
+import {
+	AttributesSection,
+	CopyableValue,
+	ResourceAttributesSection,
+	tryParseJson,
+} from "@/components/attributes"
 import { SpanLogs } from "@/components/traces/span-detail-panel"
 import type { SpanDetailResult } from "@/api/warehouse/traces"
 import { useTimezonePreference } from "@/hooks/use-timezone-preference"
@@ -38,35 +41,34 @@ import {
 	type SpanMessagePart,
 	type SpanToolCall,
 } from "@/lib/agent-sessions/span-detail"
-import { classifyAiSpan, spanFailed, spanModel, spanTtftMs } from "@/lib/agent-sessions/session-turns"
+import { classifyAiSpan, spanFailed, spanTtftMs } from "@/lib/agent-sessions/session-turns"
 import { callMetaLine, formatCost } from "@/lib/agent-sessions/session-summary"
 import { ClampedText, firstLine } from "./clamped-text"
-import { useJsonPayload, ViewSegment, ViewSwitch } from "./payload-view"
+import { useJsonPayload, useMessageBody, ViewSegment, ViewSwitch } from "./payload-view"
 import { Pill } from "./pill"
-import { CATEGORY_ICON, CATEGORY_TEXT } from "./span-visuals"
 
 /**
- * The payload of one span, expanded in place — under its waterfall row, or in
- * the Flow view's docked drawer. One component for both because the spec's
- * whole point is that a span reads the same wherever it was opened; only the
- * header differs, and the caller supplies that through `header`.
+ * The payload of one span. The chrome around it is the caller's — today that is
+ * `SpanPopover`, the overlay every view opens a span into — and it reaches this
+ * body through `header`.
  */
 
 export type SpanDetailTab = "details" | "messages" | "tools" | "logs"
 
+/** The overlay is a reading surface, not a peek, so a payload gets twice the
+ *  transcript's twelve lines before it asks to be expanded. */
+const PANEL_CLAMP = "line-clamp-[24]"
+
 export function SpanExpansion({
 	span,
 	header,
-	tabsInHeader = false,
 	tab,
 	onTabChange,
 	toolResults,
 }: {
 	span: AiSessionSpan
-	/** Rendered above the tabs; receives the tab strip when `tabsInHeader`. */
-	header?: (tabs: ReactNode) => ReactNode
-	/** Drawer layout: the tab strip rides inside the header row. */
-	tabsInHeader?: boolean
+	/** Rendered above the tab strip. */
+	header?: ReactNode
 	/** The reader's tab choice, held by SessionViews so it survives switching
 	 *  spans and views; `undefined` means none made yet — pick by content. */
 	tab: SpanDetailTab | undefined
@@ -117,129 +119,27 @@ export function SpanExpansion({
 	)
 
 	return (
-		<div className="flex min-w-0 flex-col text-left">
-			{header !== undefined && header(tabsInHeader ? tabs : null)}
-			{!tabsInHeader && (
-				<div className="flex flex-wrap items-center gap-2 border-border border-b pb-1.5">
-					{tabs}
-					<div className="ml-auto flex items-center gap-2">
-						<CopySpanJsonButton span={span} />
-						<OpenInTracesLink span={span} />
-					</div>
+		// The header and the tab strip are the panel's fixed chrome; only the
+		// payload under them scrolls, so switching tabs never costs the reader the
+		// span's name or the way out.
+		<div className="flex min-h-0 min-w-0 grow flex-col text-left">
+			{header}
+			<div className="flex shrink-0 flex-wrap items-center gap-2 border-border border-b px-5 pb-2">
+				{tabs}
+				<div className="ml-auto flex items-center gap-2">
+					<CopySpanJsonButton span={span} />
+					<OpenInTracesLink span={span} />
 				</div>
-			)}
+			</div>
 
-			<MetaStrip span={span} />
+			<div className="min-h-0 grow overflow-y-auto overscroll-contain px-5 pb-6">
+				<MetaStrip span={span} />
 
-			{active === "details" && <DetailsSection span={span} toolCalls={toolCalls} />}
-			{active === "messages" && <MessagesSection messages={messages} span={span} />}
-			{active === "tools" && <ToolCallsSection toolCalls={toolCalls} />}
-			{active === "logs" && <LogsSection span={span} />}
-		</div>
-	)
-}
-
-/** The inline form the Traces view mounts under the selected row. */
-export function SpanInlineDetail({
-	span,
-	tab,
-	onTabChange,
-	toolResults,
-}: {
-	span: AiSessionSpan
-	tab: SpanDetailTab | undefined
-	onTabChange: (tab: SpanDetailTab) => void
-	toolResults?: SessionToolResults
-}) {
-	return (
-		<div
-			data-slot="span-inline-detail"
-			className="border-primary border-l-2 border-border border-b bg-card/40 py-2 pr-3 pl-6"
-		>
-			<SpanExpansion
-				key={span.spanId}
-				span={span}
-				tab={tab}
-				onTabChange={onTabChange}
-				toolResults={toolResults}
-			/>
-		</div>
-	)
-}
-
-/** The docked drawer the Flow view opens along the bottom of the canvas. */
-export function SpanDrawer({
-	span,
-	turnOrdinal,
-	tab,
-	onTabChange,
-	toolResults,
-	onClose,
-	onOpenTraceView,
-}: {
-	span: AiSessionSpan
-	/** "Turn 3" / "Segment 2" — where the span lives, for the drawer's title row. */
-	turnOrdinal: string | undefined
-	tab: SpanDetailTab | undefined
-	onTabChange: (tab: SpanDetailTab) => void
-	toolResults?: SessionToolResults
-	onClose: () => void
-	/** Switch to the Traces view with this span still selected. */
-	onOpenTraceView: () => void
-}) {
-	const category = classifyAiSpan(span)
-	const errored = spanFailed(span)
-	// The canvas the drawer docks under draws its nodes with these glyphs, so the
-	// drawer names its span in the same vocabulary.
-	const Glyph = errored ? CircleXmarkIcon : CATEGORY_ICON[category]
-	const subtitle = [turnOrdinal, spanModel(span), formatDuration(span.durationMs)]
-		.filter((part): part is string => part !== undefined)
-		.join(" · ")
-
-	return (
-		<div
-			data-slot="span-drawer"
-			className="max-h-[45vh] overflow-y-auto border-border border-t bg-background px-4 pb-4"
-		>
-			<SpanExpansion
-				key={span.spanId}
-				span={span}
-				tab={tab}
-				onTabChange={onTabChange}
-				toolResults={toolResults}
-				tabsInHeader
-				header={(tabs) => (
-					<div className="sticky top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 bg-background py-2">
-						<Glyph
-							aria-hidden
-							size={13}
-							className={cn("shrink-0", errored ? "text-destructive" : CATEGORY_TEXT[category])}
-						/>
-						<span className="font-medium font-mono text-sm">{span.spanName}</span>
-						{subtitle !== "" && <span className="text-muted-foreground text-xs">{subtitle}</span>}
-						{tabs}
-						<div className="ml-auto flex items-center gap-2">
-							<CopySpanJsonButton span={span} />
-							<Button
-								variant="outline"
-								size="sm"
-								className="h-6.5 text-xs"
-								onClick={onOpenTraceView}
-							>
-								Open in Traces view
-							</Button>
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								aria-label="Close span detail"
-								onClick={onClose}
-							>
-								<XmarkIcon size={14} />
-							</Button>
-						</div>
-					</div>
-				)}
-			/>
+				{active === "details" && <DetailsSection span={span} toolCalls={toolCalls} />}
+				{active === "messages" && <MessagesSection messages={messages} span={span} />}
+				{active === "tools" && <ToolCallsSection toolCalls={toolCalls} />}
+				{active === "logs" && <LogsSection span={span} />}
+			</div>
 		</div>
 	)
 }
@@ -418,6 +318,7 @@ function SystemMessageRow({ message }: { message: SpanMessage }) {
 	const [open, setOpen] = useState(false)
 	const [raw, setRaw] = useState(false)
 	const text = collapsedText(message.parts)
+	const body = useMessageBody(text)
 
 	return (
 		<div className="rounded-md border border-border/60 bg-muted/30">
@@ -443,11 +344,18 @@ function SystemMessageRow({ message }: { message: SpanMessage }) {
 				<div className="flex items-start gap-1.5 px-2.5 pb-2.5 pl-8">
 					<div className="min-w-0 grow">
 						<ClampedText
-							text={text}
-							body={raw ? undefined : <MessageResponse className="text-sm">{text}</MessageResponse>}
+							text={raw ? text : body.formatted}
+							html={raw ? undefined : body.highlighted}
+							mono={!raw && body.rendered === "json"}
+							clampClass={PANEL_CLAMP}
+							body={
+								raw || body.rendered === "json" ? undefined : (
+									<MessageResponse className="text-sm">{text}</MessageResponse>
+								)
+							}
 						/>
 					</div>
-					<ViewSwitch rendered="md" raw={raw} onRawChange={setRaw} />
+					<ViewSwitch rendered={body.rendered} raw={raw} onRawChange={setRaw} />
 					{/* Copies the instructions as captured, not their rendering. */}
 					<CopyButton value={text} label="system message" className="-my-1 shrink-0" />
 				</div>
@@ -461,6 +369,15 @@ function MessageBlock({ message, span }: { message: SpanMessage; span: AiSession
 	// reader flips together, while the payload cards keep their own json switch.
 	const [raw, setRaw] = useState(false)
 	const hasText = message.parts.some((part) => part.kind === "text")
+	// The switch names what the rendering IS, and each text part chooses its own
+	// (JSON where it parses as a document) — "json" only when they all agree.
+	const rendered = useMemo(
+		() =>
+			message.parts.some((part) => part.kind === "text" && tryParseJson(part.text) === null)
+				? "md"
+				: "json",
+		[message.parts],
+	)
 
 	return (
 		<div className="flex min-w-0 flex-col gap-1.5">
@@ -481,7 +398,7 @@ function MessageBlock({ message, span }: { message: SpanMessage; span: AiSession
 					</span>
 				)}
 				<span aria-hidden className="h-px min-w-4 flex-1 bg-border/60" />
-				{hasText && <ViewSwitch rendered="md" raw={raw} onRawChange={setRaw} />}
+				{hasText && <ViewSwitch rendered={rendered} raw={raw} onRawChange={setRaw} />}
 			</div>
 			<div className="flex min-w-0 flex-col gap-2">
 				{message.parts.map((part, index) => (
@@ -493,19 +410,31 @@ function MessageBlock({ message, span }: { message: SpanMessage; span: AiSession
 }
 
 function MessagePart({ part, raw }: { part: SpanMessagePart; raw: boolean }) {
-	if (part.kind === "text") {
-		return (
-			<ClampedText
-				text={part.text}
-				body={raw ? undefined : <MessageResponse className="text-sm">{part.text}</MessageResponse>}
-			/>
-		)
-	}
+	if (part.kind === "text") return <TextPart text={part.text} raw={raw} />
 	if (part.kind === "reasoning") return <ReasoningPart part={part} />
 	if (part.kind === "tool_call") {
 		return <PayloadCard label="tool_call" name={part.name} meta={part.id} body={part.argumentsText} />
 	}
 	return <PayloadCard label="tool_result" meta={part.id} body={part.resultText} />
+}
+
+/** A text part in the message's chosen view — markdown prose, or the payload
+ *  cards' pretty-printed JSON where the captured text is a JSON document. */
+function TextPart({ text, raw }: { text: string; raw: boolean }) {
+	const body = useMessageBody(text)
+	return (
+		<ClampedText
+			text={raw ? text : body.formatted}
+			html={raw ? undefined : body.highlighted}
+			mono={!raw && body.rendered === "json"}
+			clampClass={PANEL_CLAMP}
+			body={
+				raw || body.rendered === "json" ? undefined : (
+					<MessageResponse className="text-sm">{text}</MessageResponse>
+				)
+			}
+		/>
+	)
 }
 
 /** Reasoning is the model thinking, not the model answering, so it is set apart
@@ -523,7 +452,7 @@ function ReasoningPart({ part }: { part: Extract<SpanMessagePart, { kind: "reaso
 						: "No reasoning text was captured."}
 				</p>
 			) : (
-				<ClampedText text={part.text} />
+				<ClampedText text={part.text} clampClass={PANEL_CLAMP} />
 			)}
 		</div>
 	)
@@ -654,7 +583,12 @@ function PayloadBody({ text, copyLabel }: { text: string; copyLabel: string }) {
 	return (
 		<div className="flex items-start gap-1.5 border-border/60 border-t bg-background/50 px-2.5 py-2">
 			<div className="min-w-0 grow">
-				<ClampedText text={raw ? text : formatted} html={raw ? undefined : highlighted} mono />
+				<ClampedText
+					text={raw ? text : formatted}
+					html={raw ? undefined : highlighted}
+					clampClass={PANEL_CLAMP}
+					mono
+				/>
 			</div>
 			{highlighted !== undefined && (
 				<ViewSwitch rendered="json" raw={raw} onRawChange={setRaw} className="self-start" />
@@ -795,7 +729,8 @@ function FailureBanner({ span }: { span: AiSessionSpan }) {
 					)}
 			</div>
 			<p className="text-muted-foreground text-xs leading-relaxed">
-				The span reports the failure through the attributes above; it carries no status message.
+				The pills here are the attributes the failure was read from; the span carries no status
+				message.
 			</p>
 		</div>
 	)

@@ -6,11 +6,19 @@ import { latencyToneClass } from "@maple/ui/lib/latency-tone"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@maple/ui/components/ui/tooltip"
 import {
 	AwsLambdaIcon,
+	BunIcon,
 	CloudflareIcon,
+	CloudflareMonoIcon,
 	CubeIcon,
+	DenoIcon,
 	GlobeIcon,
 	type IconComponent,
 	KubernetesIcon,
+	NodejsMonoIcon,
+	OpenjdkMonoIcon,
+	PythonIcon,
+	RubyIcon,
+	RustIcon,
 	ServerIcon,
 } from "@/components/icons"
 import type { ServicePlatform } from "@/api/warehouse/service-map"
@@ -36,24 +44,64 @@ function getPlatformIcon(platform: ServicePlatform | undefined): {
 	}
 }
 
-function formatRuntimeLabel(rt: string | undefined): { short: string; full: string } | null {
-	if (!rt) return null
-	switch (rt) {
+/**
+ * `process.runtime.name` ⇒ the mark we draw for it. Values are normalized first
+ * because the canonical OTel strings differ per SDK ("cpython", ".NET Core",
+ * "OpenJDK Runtime Environment"), and self-instrumenters emit shorter aliases.
+ *
+ * A runtime with no mark keeps the short text chip: unrecognized values aren't
+ * worth guessing a logo for, and Go/.NET/PHP ship wordmarks — at the ~12px the
+ * node renders them, the existing text chip IS the wordmark, only legible.
+ */
+function resolveRuntimeGlyph(rt: string): { Icon: IconComponent | null; short: string; full: string } {
+	const key = rt.trim().toLowerCase()
+	if (key.startsWith("openjdk") || key === "jvm" || key === "java")
+		return { Icon: OpenjdkMonoIcon, short: "jvm", full: "JVM" }
+	if (key.startsWith(".net") || key === "dotnet" || key === "coreclr")
+		return { Icon: null, short: "dotnet", full: ".NET" }
+	switch (key) {
 		case "nodejs":
-			return { short: "node", full: "Node.js" }
-		case "edge-light":
-			return { short: "edge", full: "Edge runtime" }
+		case "node":
+			return { Icon: NodejsMonoIcon, short: "node", full: "Node.js" }
 		case "bun":
-			return { short: "bun", full: "Bun" }
+			return { Icon: BunIcon, short: "bun", full: "Bun" }
 		case "deno":
-			return { short: "deno", full: "Deno" }
+			return { Icon: DenoIcon, short: "deno", full: "Deno" }
 		case "workerd":
-			return { short: "workerd", full: "Cloudflare workerd" }
+			return { Icon: CloudflareMonoIcon, short: "workerd", full: "Cloudflare workerd" }
+		case "rust":
+			return { Icon: RustIcon, short: "rust", full: "Rust" }
+		case "go":
+		case "golang":
+			return { Icon: null, short: "go", full: "Go" }
+		case "python":
+		case "cpython":
+			return { Icon: PythonIcon, short: "python", full: "Python" }
+		case "ruby":
+		case "cruby":
+			return { Icon: RubyIcon, short: "ruby", full: "Ruby" }
+		case "php":
+			return { Icon: null, short: "php", full: "PHP" }
+		case "edge-light":
+			return { Icon: null, short: "edge", full: "Edge runtime" }
 		case "fastly":
-			return { short: "fastly", full: "Fastly Compute" }
+			return { Icon: null, short: "fastly", full: "Fastly Compute" }
 		default:
-			return { short: rt, full: rt }
+			return { Icon: null, short: rt, full: rt }
 	}
+}
+
+/**
+ * The runtime the platform icon already implies is dropped rather than drawn
+ * twice — a Cloudflare node running workerd gets one Cloudflare mark, not two.
+ */
+export function formatRuntime(
+	rt: string | undefined,
+	platform: ServicePlatform | undefined,
+): { Icon: IconComponent | null; short: string; full: string } | null {
+	if (!rt) return null
+	if (platform === "cloudflare" && rt.toLowerCase() === "workerd") return null
+	return resolveRuntimeGlyph(rt)
 }
 
 function formatRate(value: number): string {
@@ -131,8 +179,10 @@ const Handles = () => (
 function DatabaseNode({ data }: { data: ServiceNodeData }) {
 	const {
 		throughput,
+		hasSampling,
 		errorRate,
 		avgLatencyMs,
+		maxLatencyMs,
 		p95LatencyMs,
 		dbSystem,
 		dbNamespace,
@@ -191,7 +241,10 @@ function DatabaseNode({ data }: { data: ServiceNodeData }) {
 
 					{/* Metrics row */}
 					<div className="flex gap-4">
-						<MetricCell label="calls/s" value={formatRate(throughput)} />
+						<MetricCell
+							label="calls/s"
+							value={`${hasSampling ? "~" : ""}${formatRate(throughput)}`}
+						/>
 						<MetricCell
 							label="err%"
 							value={`${(errorRate * 100).toFixed(1)}%`}
@@ -202,10 +255,13 @@ function DatabaseNode({ data }: { data: ServiceNodeData }) {
 							value={formatLatency(avgLatencyMs)}
 							valueClassName={latencyToneClass(avgLatencyMs, "avg")}
 						/>
+						{/* A p95 when the rollup has a digest to merge; the slowest call
+						    otherwise, and then the label says so. Never one under the
+						    other's name — that gap read 3s against a 7ms p95. */}
 						<MetricCell
-							label="p95"
-							value={formatLatency(p95LatencyMs ?? 0)}
-							valueClassName={latencyToneClass(p95LatencyMs ?? 0, "p95")}
+							label={p95LatencyMs === undefined ? "max" : "p95"}
+							value={formatLatency(p95LatencyMs ?? maxLatencyMs ?? 0)}
+							valueClassName={latencyToneClass(p95LatencyMs ?? maxLatencyMs ?? 0, "p95")}
 						/>
 					</div>
 
@@ -262,7 +318,8 @@ function ServiceNode({ data }: { data: ServiceNodeData }) {
 		runtime,
 		colorMode,
 	} = data
-	const runtimeInfo = formatRuntimeLabel(runtime)
+	const runtimeInfo = formatRuntime(runtime, platform)
+	const RuntimeIcon = runtimeInfo?.Icon
 	const accentColor = getServiceMapNodeColor(
 		{ label, kind: "service", errorRate, platform },
 		colorMode ?? "service",
@@ -296,18 +353,33 @@ function ServiceNode({ data }: { data: ServiceNodeData }) {
 								/>
 							</TooltipTrigger>
 							<TooltipContent side="bottom">
+								{/* The runtime glyph carries its own tooltip; only fold the runtime in
+								    here when it renders as a bare text chip instead. */}
 								<p>
 									{iconLabel}
-									{runtimeInfo ? ` · ${runtimeInfo.full}` : ""}
+									{runtimeInfo && !RuntimeIcon ? ` · ${runtimeInfo.full}` : ""}
 								</p>
 							</TooltipContent>
 						</Tooltip>
 						<span className="truncate text-xs font-medium text-foreground">{label}</span>
-						{runtimeInfo && (
-							<span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/60">
-								{runtimeInfo.short}
-							</span>
-						)}
+						{runtimeInfo &&
+							(RuntimeIcon ? (
+								<Tooltip>
+									<TooltipTrigger>
+										<RuntimeIcon
+											size={12}
+											className="shrink-0 text-muted-foreground/70"
+										/>
+									</TooltipTrigger>
+									<TooltipContent side="bottom">
+										<p>{runtimeInfo.full}</p>
+									</TooltipContent>
+								</Tooltip>
+							) : (
+								<span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/60">
+									{runtimeInfo.short}
+								</span>
+							))}
 					</div>
 
 					{/* Metrics row */}

@@ -2,8 +2,12 @@ import { Data } from "effect"
 
 // ClickHouse string escaping
 
+// `;` is emitted as its hex escape: some ClickHouse-compatible HTTP gateways
+// split statements on the raw byte even inside string literals, truncating the
+// query mid-literal. The server unescapes `\x3B` back to `;`, so results are
+// byte-identical.
 export function escapeClickHouseString(value: string): string {
-	return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+	return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/;/g, "\\x3B")
 }
 
 // SQL Fragment AST
@@ -23,6 +27,17 @@ export type SqlFragment = Data.TaggedEnum<{
 	As: { readonly expr: SqlFragment; readonly alias: string }
 	/** A conditional fragment — included only when the condition is true */
 	When: { readonly condition: boolean; readonly fragment: SqlFragment }
+	/**
+	 * SQL assembled only when the fragment is compiled, not when it is built.
+	 *
+	 * The point is *where the failure lands*. A fragment that splices an inner
+	 * query's SQL has to compile that query, and compiling it eagerly puts the
+	 * failure in whatever function built the fragment — outside the `Effect` the
+	 * outer `compile` runs in, so a bad value reaches production as a synchronous
+	 * throw rather than a typed failure. Deferring the work to compile time puts
+	 * it back inside.
+	 */
+	Lazy: { readonly render: () => string }
 }>
 
 const Frag = Data.taggedEnum<SqlFragment>()
@@ -38,6 +53,7 @@ export const join = (separator: string, ...fragments: ReadonlyArray<SqlFragment>
 export const as_ = (expr: SqlFragment, alias: string): SqlFragment => Frag.As({ expr, alias })
 export const when = (condition: boolean, fragment: SqlFragment): SqlFragment =>
 	Frag.When({ condition, fragment })
+export const lazy = (render: () => string): SqlFragment => Frag.Lazy({ render })
 
 // Compiler
 
@@ -49,4 +65,5 @@ export const compile: (fragment: SqlFragment) => string = Frag.$match({
 	Join: ({ separator, fragments }) => fragments.map(compile).filter(Boolean).join(separator),
 	As: ({ expr, alias }) => `${compile(expr)} AS ${alias}`,
 	When: ({ condition, fragment }) => (condition ? compile(fragment) : ""),
+	Lazy: ({ render }) => render(),
 })

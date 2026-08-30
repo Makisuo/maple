@@ -108,7 +108,7 @@ const make: Effect.Effect<
 	/**
 	 * Split occurrences since the merge into "from a build that postdates the fix"
 	 * and "from a build that was already running".
- *
+	 *
 	 * Only the first is evidence against the fix. The second is what the whole
 	 * baseline mechanism exists to discount — without it, any product with users
 	 * on old builds could never have a fix verified.
@@ -119,16 +119,12 @@ const make: Effect.Effect<
 		nowMs: number,
 	) {
 		const mergedAtMs = dateToMs(row.mergedAt) ?? nowMs
-		const compiled = CH.compile(
-			CH.errorIssueVersionsSinceQuery(),
-			{
-				orgId: row.orgId,
-				fingerprintHash,
-				startTime: formatWarehouseDateTime(mergedAtMs),
-				endTime: formatWarehouseDateTime(nowMs),
-			},
-			{ rowSchema: CH.ErrorIssueVersionsSinceOutputSchema },
-		)
+		const compiled = CH.compile(CH.errorIssueVersionsSinceQuery(), {
+			orgId: row.orgId,
+			fingerprintHash,
+			startTime: formatWarehouseDateTime(mergedAtMs),
+			endTime: formatWarehouseDateTime(nowMs),
+		})
 		const rows = yield* warehouse.compiledQuery(systemTenant(row.orgId), compiled, {
 			context: "errorIssueVersionsSince",
 		})

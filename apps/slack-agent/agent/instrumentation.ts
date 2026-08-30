@@ -54,7 +54,7 @@ export interface ResourceAttributeInput {
 export function buildResourceAttributes(input: ResourceAttributeInput = {}): Record<string, string> {
 	const attributes: Record<string, string> = {
 		[ATTR_SERVICE_NAME]: SLACK_AGENT_SERVICE_NAME,
-		"service.namespace": "backend",
+		"service.namespace": "core",
 		"service.instance.id": randomUUID(),
 		"service.version": input.serviceVersion?.trim() || "development",
 		"maple.sdk.type": "eve",
@@ -117,7 +117,9 @@ function setupTelemetry(): void {
 		// never leaves the container. NodeSDK builds the LoggerProvider from these
 		// processors with the same resource and registers it globally.
 		logRecordProcessors: [
-			new BatchLogRecordProcessor(new OTLPLogExporter({ url: `${endpoint}/v1/logs`, headers })),
+			new BatchLogRecordProcessor({
+				exporter: new OTLPLogExporter({ url: `${endpoint}/v1/logs`, headers }),
+			}),
 		],
 	})
 	sdk.start()

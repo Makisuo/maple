@@ -40,7 +40,7 @@ import {
 import type { SessionToolResults } from "@/lib/agent-sessions/span-detail"
 import { formatClockInTimezone } from "@/lib/timezone-format"
 import { ClampedText, firstLine } from "./clamped-text"
-import { useJsonPayload, ViewSwitch } from "./payload-view"
+import { useJsonPayload, useMessageBody, ViewSwitch } from "./payload-view"
 import { Pill } from "./pill"
 
 /**
@@ -79,8 +79,8 @@ const ROW_ESTIMATE = {
 	tool: 180,
 	"lane-open": 44,
 	"lane-close": 34,
-	parallel: 46,
-	"parallel-turns": 46,
+	parallel: 34,
+	"parallel-turns": 34,
 	structure: 30,
 	note: 86,
 	divider: 60,
@@ -105,9 +105,9 @@ export function SessionTranscript({
 	/** The session's captured tool results by call id (`sessionToolResults`). */
 	toolResults: SessionToolResults
 	query: string
-	/** The toolbar's "Thinking" chip. */
+	/** The toolbar's "Show thinking" chip. */
 	showThinking: boolean
-	/** The toolbar's "Tool payloads" chip: arguments and results open by default. */
+	/** The toolbar's "Expand tool payloads" chip: arguments and results open by default. */
 	showPayloads: boolean
 	/** The response dropped the END of the session. */
 	truncated: boolean
@@ -155,12 +155,6 @@ export function SessionTranscript({
 		// calls flushSync mid-lifecycle and React logs an error for every batch.
 		useAnimationFrameWithResizeObserver: true,
 	})
-
-	const indexByKey = useMemo(() => new Map(rows.map((row, index) => [row.key, index])), [rows])
-	const jumpTo = (key: string) => {
-		const index = indexByKey.get(key)
-		if (index !== undefined) virtualizer.scrollToIndex(index, { align: "start" })
-	}
 
 	// A pasted `?span=` link lands on the block it names. Once, on mount — after
 	// that the URL follows the reader rather than leading them. Not before the
@@ -215,7 +209,6 @@ export function SessionTranscript({
 									selected={"span" in row && row.span.spanId === selectedSpanId}
 									onSelectSpan={onSelectSpan}
 									onOpenTraceView={onOpenTraceView}
-									onJump={jumpTo}
 								/>
 							</div>
 						)
@@ -237,14 +230,13 @@ interface BlockProps {
 	selected: boolean
 	onSelectSpan: (spanId: string | undefined) => void
 	onOpenTraceView: () => void
-	onJump: (key: string) => void
 }
 
 /**
  * Is this disclosure open?
  *
  * The set holds the rows the reader has flipped AWAY from their default, so the
- * "Tool payloads" chip still moves every card they have not touched, and a card
+ * "Expand tool payloads" chip still moves every card they have not touched, and a card
  * they opened by hand stays open when the chip goes off.
  */
 function disclosed(openRows: ReadonlySet<string>, key: string, byDefault: boolean): boolean {
@@ -387,19 +379,6 @@ function TurnChapter({
 				</span>
 				{turn.agentName !== undefined && <AgentPill name={turn.agentName} />}
 				{turn.failed && <Pill tone="error">Failed</Pill>}
-				{/* The cluster's banner and the indentation carry the explanation; the
-				    pill is the glanceable trace of it that survives collapse. Bounded,
-				    unlike the old per-turn jump chips, whose row of unshrinkable
-				    buttons was one of the things pushing the page sideways. */}
-				{row.parallelWith.length > 0 && (
-					<span
-						className="flex shrink-0 items-center gap-1 rounded-sm bg-primary/12 px-1.5 py-px font-mono text-[10px] text-primary uppercase tracking-[0.08em]"
-						title={`ran in parallel with ${row.parallelWith.map((ref) => turnOrdinal(ref.turn)).join(", ")}`}
-					>
-						<BranchForkIcon size={10} className="shrink-0" />
-						parallel
-					</span>
-				)}
 				{/* Shrinkable, unlike its neighbours: the summary joins every tool
 				    name in the turn, so it truncates rather than widening the page. */}
 				{collapsed && <span className={META}>{summariseTurn(row)}</span>}
@@ -472,6 +451,7 @@ function UserBlock({
 	const rawKey = `${row.key}:raw`
 	const raw = disclosed(openRows, rawKey, false)
 	const textKey = `${row.key}:text`
+	const body = useMessageBody(row.text)
 
 	return (
 		<Row time={clockOf(row.startMs, timeZone)} depth={row.depth} rail="bg-foreground" className="pt-5">
@@ -496,7 +476,7 @@ function UserBlock({
 						</button>
 					)}
 					<ViewSwitch
-						rendered="md"
+						rendered={body.rendered}
 						raw={raw}
 						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
 					/>
@@ -504,9 +484,11 @@ function UserBlock({
 				{/* Clamped like every other long body: a pasted 400-line prompt is one
 				    block of a conversation, not the page. "Show full" opens it. */}
 				<ClampedText
-					text={row.text}
+					text={raw ? row.text : body.formatted}
+					html={raw ? undefined : body.highlighted}
+					mono={!raw && body.rendered === "json"}
 					body={
-						raw ? undefined : (
+						raw || body.rendered === "json" ? undefined : (
 							<MessageResponse className="text-foreground text-sm leading-relaxed">
 								{row.text}
 							</MessageResponse>
@@ -559,6 +541,7 @@ function SystemBlock({
 	const textKey = `${row.key}:text`
 	const rawKey = `${row.key}:raw`
 	const raw = disclosed(openRows, rawKey, false)
+	const body = useMessageBody(row.text)
 
 	return (
 		<Row depth={row.depth} rail="bg-muted-foreground/40" className="pt-3.5">
@@ -594,14 +577,20 @@ function SystemBlock({
 				<div className="flex items-start gap-1.5 pb-2 pl-6">
 					<div className="min-w-0 grow">
 						<ClampedText
-							text={row.text}
-							body={raw ? undefined : <MessageResponse className="text-sm">{row.text}</MessageResponse>}
+							text={raw ? row.text : body.formatted}
+							html={raw ? undefined : body.highlighted}
+							mono={!raw && body.rendered === "json"}
+							body={
+								raw || body.rendered === "json" ? undefined : (
+									<MessageResponse className="text-sm">{row.text}</MessageResponse>
+								)
+							}
 							expanded={disclosed(openRows, textKey, false)}
 							onToggleExpanded={() => onToggleRow(textKey)}
 						/>
 					</div>
 					<ViewSwitch
-						rendered="md"
+						rendered={body.rendered}
 						raw={raw}
 						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
 					/>
@@ -628,6 +617,7 @@ function AssistantBlock({
 	// whole JSON error envelope, so it gets the same JSON treatment as a tool
 	// payload. Empty where the call succeeded, and the hook is cheap on "".
 	const error = useJsonPayload(row.failed ? row.span.statusMessage : "")
+	const body = useMessageBody(row.text ?? "")
 	const rawKey = `${row.key}:raw`
 	const raw = disclosed(openRows, rawKey, false)
 	const errorRawKey = `${row.key}:error-raw`
@@ -662,7 +652,7 @@ function AssistantBlock({
 				)}
 				{row.text !== undefined && (
 					<ViewSwitch
-						rendered="md"
+						rendered={body.rendered}
 						raw={raw}
 						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
 					/>
@@ -674,6 +664,11 @@ function AssistantBlock({
 					<p className="whitespace-pre-wrap break-words pt-2.5 text-foreground text-sm leading-relaxed">
 						{row.text}
 					</p>
+				) : body.highlighted !== undefined ? (
+					<div
+						className="min-w-0 whitespace-pre-wrap break-words pt-2.5 font-mono text-muted-foreground text-xs leading-relaxed"
+						dangerouslySetInnerHTML={{ __html: body.highlighted }}
+					/>
 				) : (
 					<MessageResponse className="pt-2.5 text-foreground text-sm leading-relaxed">
 						{row.text}
@@ -734,6 +729,7 @@ function PromptBlock({
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "prompt" }> }) {
 	const rawKey = `${row.key}:raw`
 	const raw = disclosed(openRows, rawKey, false)
+	const body = useMessageBody(row.text)
 
 	return (
 		<Row time={clockOf(row.startMs, timeZone)} depth={row.depth} rail="bg-chart-2" className="pt-3">
@@ -745,7 +741,7 @@ function PromptBlock({
 					<span className="grow" />
 					<span className={cn(META, "shrink-0")}>{row.span.serviceName}</span>
 					<ViewSwitch
-						rendered="md"
+						rendered={body.rendered}
 						raw={raw}
 						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
 					/>
@@ -754,6 +750,11 @@ function PromptBlock({
 					<p className="whitespace-pre-wrap break-words text-foreground text-sm leading-relaxed">
 						{row.text}
 					</p>
+				) : body.highlighted !== undefined ? (
+					<div
+						className="min-w-0 whitespace-pre-wrap break-words font-mono text-muted-foreground text-xs leading-relaxed"
+						dangerouslySetInnerHTML={{ __html: body.highlighted }}
+					/>
 				) : (
 					<MessageResponse className="text-foreground text-sm leading-relaxed">
 						{row.text}
@@ -1064,7 +1065,6 @@ function LaneOpen({
 	showPayloads,
 	openRows,
 	onToggleRow,
-	onJump,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "lane-open" }> }) {
 	return (
 		<Row
@@ -1074,9 +1074,7 @@ function LaneOpen({
 			timePadding="pt-2"
 			className="pt-2.5"
 		>
-			{/* Wraps: the parallel chips are one per sibling lane, and a fan-out wide
-			    enough to overflow the line belongs on a second one, not off-page. */}
-			<div className="flex flex-wrap items-center gap-2.5 py-1.5">
+			<div className="flex items-center gap-2.5 py-1.5">
 				<FaceRobotIcon size={14} className="shrink-0 text-chart-1" />
 				<span className={cn(LABEL, "text-chart-1")}>
 					{row.laneKind === "subagent" ? "Subagent" : "Agent"}
@@ -1095,21 +1093,7 @@ function LaneOpen({
 						: `· trace ${row.span.traceId.slice(0, 8)}`}{" "}
 					· {row.spanCount} spans · {formatDuration(row.span.durationMs)}
 				</span>
-				{row.parallelWith.length === 0 ? (
-					<span aria-hidden className="h-px grow bg-border" />
-				) : (
-					<>
-						<span className="grow" />
-						{row.parallelWith.map((ref) => (
-							<ParallelJump
-								key={ref.key}
-								targetKey={ref.key}
-								label={ref.agentName}
-								onJump={onJump}
-							/>
-						))}
-					</>
-				)}
+				<span aria-hidden className="h-px grow bg-border" />
 			</div>
 			{/* The handoff's own payload: the `execute_tool task` span this block
 			    swallowed is where the task prompt lives, and losing it would leave
@@ -1128,30 +1112,6 @@ function LaneOpen({
 				</div>
 			)}
 		</Row>
-	)
-}
-
-/** The same chip on a lane header and on a turn header: one visual language for
- *  concurrency, whichever level announced it. */
-function ParallelJump({
-	targetKey,
-	label,
-	onJump,
-}: {
-	targetKey: string
-	/** What the reader is being sent to — an agent's name, or a turn's ordinal. */
-	label: string
-	onJump: (key: string) => void
-}) {
-	return (
-		<button
-			type="button"
-			onClick={() => onJump(targetKey)}
-			title={label}
-			className="max-w-72 shrink-0 cursor-pointer truncate rounded-sm bg-primary/12 px-2 py-0.5 text-[11px] text-primary hover:bg-primary/20"
-		>
-			ran in parallel with {label}
-		</button>
 	)
 }
 
@@ -1195,53 +1155,26 @@ function LaneClose({
 }
 
 /**
- * The fork banner both parallel markers share: a bordered, tinted block whose
- * every line WRAPS. The old markers were one flex line of unshrinkable text and
- * chips, which is exactly the shape that pushes a page into sideways clipping —
- * a marker about concurrency must never cost the reader the right edge.
+ * The fork marker both parallel kinds share: one rule across the column, in the
+ * same shape as the page's other structural lines. WHAT forked is already on
+ * the rows right below it — all the marker has to say is that they did not run
+ * in sequence, and when they were open together.
  */
-function ParallelBanner({
-	title,
-	description,
-	refs,
-	onJump,
-}: {
-	title: string
-	description: string
-	/** The forked threads, as jump chips. */
-	refs: readonly { key: string; label: string }[]
-	onJump: (key: string) => void
-}) {
+function ParallelRule({ label, range }: { label: string; range: string }) {
 	return (
-		<div className="flex min-w-0 flex-col gap-1.5 rounded-md border border-primary/25 bg-primary/6 px-3 py-2.5">
-			<div className="flex items-center gap-2.5">
-				<BranchForkIcon size={14} className="shrink-0 text-primary" />
-				<span className={cn(LABEL, "text-primary")}>{title}</span>
-			</div>
-			<p className="min-w-0 break-words pl-6 text-muted-foreground text-xs leading-relaxed">
-				{description}
-			</p>
-			<div className="flex flex-wrap items-center gap-1.5 pl-6">
-				{refs.map((ref) => (
-					<button
-						key={ref.key}
-						type="button"
-						onClick={() => onJump(ref.key)}
-						title={ref.label}
-						className="max-w-72 cursor-pointer truncate rounded-sm bg-primary/12 px-2 py-0.5 font-mono text-[11px] text-primary hover:bg-primary/20"
-					>
-						{ref.label}
-					</button>
-				))}
-			</div>
+		<div className="flex items-center gap-2.5 py-1.5">
+			<BranchForkIcon size={13} className="shrink-0 text-primary" />
+			<span className={cn(LABEL, "text-primary")}>{label}</span>
+			<span className={cn(META, "shrink-0")}>{range}</span>
+			<span aria-hidden className="h-px grow bg-primary/25" />
 		</div>
 	)
 }
 
 /** Only a window every member shared is reported as an overlap. A chain of
- *  pairwise overlaps has none, and the sentence then reports the run's extent
+ *  pairwise overlaps has none, and the marker then reports the run's extent
  *  instead of inventing one. */
-function overlapSentence(
+function overlapWindow(
 	row: {
 		startMs: number
 		endMs: number
@@ -1251,8 +1184,8 @@ function overlapSentence(
 	timeZone: string,
 ): string {
 	return row.overlapStartMs !== undefined && row.overlapEndMs !== undefined
-		? `they overlap ${clockOf(row.overlapStartMs, timeZone)} → ${clockOf(row.overlapEndMs, timeZone)}`
-		: `their runs interleave between ${clockOf(row.startMs, timeZone)} and ${clockOf(row.endMs, timeZone)}`
+		? `overlap ${clockOf(row.overlapStartMs, timeZone)} → ${clockOf(row.overlapEndMs, timeZone)}`
+		: `interleaved ${clockOf(row.startMs, timeZone)} → ${clockOf(row.endMs, timeZone)}`
 }
 
 /**
@@ -1262,21 +1195,18 @@ function overlapSentence(
 function ParallelMarker({
 	row,
 	timeZone,
-	onJump,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "parallel" }> }) {
 	return (
 		<Row
 			time={clockOf(row.startMs, timeZone)}
 			depth={row.depth}
-			timePadding="pt-3"
-			className="pt-5"
+			timePadding="pt-2.5"
+			className="pt-4"
 			flush
 		>
-			<ParallelBanner
-				title={`Parallel — ${row.forkedBy === undefined ? "this turn" : row.forkedBy} forked ${row.lanes.length} lanes`}
-				description={`${overlapSentence(row, timeZone)}. Each lane is shown whole and in order below:`}
-				refs={row.lanes.map((lane) => ({ key: lane.key, label: lane.agentName }))}
-				onJump={onJump}
+			<ParallelRule
+				label={`${row.lanes.length} lanes in parallel`}
+				range={overlapWindow(row, timeZone)}
 			/>
 		</Row>
 	)
@@ -1295,24 +1225,18 @@ function ParallelMarker({
 function ParallelTurnsMarker({
 	row,
 	timeZone,
-	onJump,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "parallel-turns" }> }) {
 	return (
 		<Row
 			time={clockOf(row.startMs, timeZone)}
 			depth={row.depth}
-			timePadding="pt-3"
-			className="pt-5"
+			timePadding="pt-2.5"
+			className="pt-4"
 			flush
 		>
-			<ParallelBanner
-				title={`Parallel — ${row.turns.length} turns ran at the same time`}
-				description={`${overlapSentence(row, timeZone)}. Each turn is shown whole and in order, indented below:`}
-				refs={row.turns.map((ref) => ({
-					key: ref.key,
-					label: `${turnOrdinal(ref.turn).toUpperCase()}${ref.turn.agentName === undefined ? "" : ` ${ref.turn.agentName}`}`,
-				}))}
-				onJump={onJump}
+			<ParallelRule
+				label={`${row.turns.length} turns in parallel`}
+				range={overlapWindow(row, timeZone)}
 			/>
 		</Row>
 	)

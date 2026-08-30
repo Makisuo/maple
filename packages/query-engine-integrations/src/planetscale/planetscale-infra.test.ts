@@ -1,15 +1,11 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
-import { compileCH } from "@maple-dev/clickhouse-builder"
-import {
-	planetscaleBranchInfraTimeseriesSQL,
-	planetscaleInfraTimeseriesRowSchema,
-	planetscaleInfraTimeseriesSQL,
-} from "./planetscale-infra"
+import { compileUnsafe } from "@maple-dev/clickhouse-builder"
+import { planetscaleBranchInfraTimeseriesSQL, planetscaleInfraTimeseriesSQL } from "./planetscale-infra"
 
 describe("planetscaleInfraTimeseriesSQL", () => {
 	it("buckets per-timestamp totals for one database", () => {
-		const { sql } = compileCH(planetscaleInfraTimeseriesSQL(), {
+		const { sql } = compileUnsafe(planetscaleInfraTimeseriesSQL(), {
 			orgId: "org_1",
 			startTime: "2026-07-02 00:00:00.000",
 			endTime: "2026-07-03 00:00:00.000",
@@ -31,17 +27,13 @@ describe("planetscaleInfraTimeseriesSQL", () => {
 	})
 
 	it("decodes ClickHouse numeric strings through the row schema", () => {
-		const compiled = compileCH(
-			planetscaleInfraTimeseriesSQL(),
-			{
-				orgId: "org_1",
-				startTime: "2026-07-02 00:00:00.000",
-				endTime: "2026-07-03 00:00:00.000",
-				bucketSeconds: 300,
-				database: "main-db",
-			},
-			{ rowSchema: planetscaleInfraTimeseriesRowSchema },
-		)
+		const compiled = compileUnsafe(planetscaleInfraTimeseriesSQL(), {
+			orgId: "org_1",
+			startTime: "2026-07-02 00:00:00.000",
+			endTime: "2026-07-03 00:00:00.000",
+			bucketSeconds: 300,
+			database: "main-db",
+		})
 		expect(
 			Effect.runSync(
 				compiled.decodeRows([
@@ -71,7 +63,7 @@ describe("planetscaleInfraTimeseriesSQL", () => {
 	})
 
 	it("aggregates volume gauges without counting unsampled buckets as full", () => {
-		const { sql } = compileCH(planetscaleInfraTimeseriesSQL(), {
+		const { sql } = compileUnsafe(planetscaleInfraTimeseriesSQL(), {
 			orgId: "org_1",
 			startTime: "2026-07-02 00:00:00.000",
 			endTime: "2026-07-03 00:00:00.000",
@@ -90,7 +82,7 @@ describe("planetscaleInfraTimeseriesSQL", () => {
 
 describe("planetscaleBranchInfraTimeseriesSQL", () => {
 	it("scopes the same rollup to a single branch", () => {
-		const { sql } = compileCH(planetscaleBranchInfraTimeseriesSQL(), {
+		const { sql } = compileUnsafe(planetscaleBranchInfraTimeseriesSQL(), {
 			orgId: "org_1",
 			startTime: "2026-07-02 00:00:00.000",
 			endTime: "2026-07-03 00:00:00.000",

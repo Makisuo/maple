@@ -4,7 +4,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "portless",
-		"sync:i18n": "astro sync",
+		"sync:i18n": "paraglide-js compile --project ./project.inlang --outdir ./src/paraglide --strategy url baseLocale && astro sync",
 		"sync:cli": "mkdir -p public/cli && cp ../../scripts/install.sh public/cli/install && cp ../../scripts/uninstall.sh public/cli/uninstall",
 		"dev:app": "bun run sync:cli && astro dev --port ${PORT:-3391} --host ${HOST:-127.0.0.1}",
 		"test": "vitest run",
@@ -13,23 +13,25 @@
 		"astro": "astro"
 	},
 	"dependencies": {
-		"@astrojs/mdx": "^5.0.3",
-		"@astrojs/react": "^4.4.2",
+		"@astrojs/markdown-remark": "^7.2.4",
+		"@astrojs/markdown-satteri": "^0.3.8",
+		"@astrojs/mdx": "^7.0.8",
+		"@astrojs/react": "^6.0.4",
 		"@astrojs/rss": "^4.0.19",
 		"@astrojs/sitemap": "^3.7.0",
 		"@clerk/clerk-react": "^5.61.3",
 		"@fontsource-variable/geist": "^5.2.9",
 		"@fontsource-variable/geist-mono": "^5.2.8",
-		"@inlang/paraglide-astro": "^0.4.1",
 		"@maple-dev/browser": "workspace:*",
 		"@maple/domain": "workspace:*",
 		"@maple/infra": "workspace:*",
 		"@maple/ui": "workspace:*",
+		"@shikijs/transformers": "^4.4.1",
 		"@tailwindcss/vite": "catalog:tailwind",
 		"@tanstack/charts": "0.14.0",
 		"@types/react": "catalog:react",
 		"@types/react-dom": "catalog:react",
-		"astro": "^5.17.1",
+		"astro": "^7.2.8",
 		"autumn-js": "^1.2.51",
 		"d3-scale": "^4.0.2",
 		"effect": "catalog:effect",
@@ -41,6 +43,7 @@
 		"tw-animate-css": "catalog:tailwind"
 	},
 	"devDependencies": {
+		"@inlang/paraglide-js": "^2.24.1",
 		"@types/d3-scale": "^4.0.9",
 		"typescript": "^6.0.3",
 		"vitest": "catalog:"

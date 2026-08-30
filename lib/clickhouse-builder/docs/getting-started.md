@@ -3,15 +3,16 @@
 ## Install
 
 ```bash
-bun add @maple-dev/clickhouse-builder effect@beta
-# or: npm i @maple-dev/clickhouse-builder effect@beta
+bun add @maple-dev/clickhouse-builder effect@rc
+# or: npm i @maple-dev/clickhouse-builder effect@rc
 ```
 
 `effect` is a peer dependency — bring your own.
 
-> **Note the `@beta` tag.** This package requires **Effect 4** (`>=4.0.0-beta.33`), which is
-> not yet published under npm's `latest` tag. A bare `npm i effect` installs 3.x, and the
-> package then throws `Schema.TaggedError is not a function` on import.
+> **Note the `@rc` tag.** This package requires **Effect 4** (`>=4.0.0-rc.111`), which is not on
+> npm's `latest` tag — and not on `beta` either, which still points at a 4.0.0-beta. A bare
+> `npm i effect` installs 3.x, and the package then throws `Schema.TaggedError is not a function`
+> on import.
 
 The package is ESM-only and ships its own type declarations.
 
@@ -24,13 +25,18 @@ flow from here into the select callback, the output row shape, and join accessor
 import * as CH from "@maple-dev/clickhouse-builder"
 import * as T from "@maple-dev/clickhouse-builder/types"
 
-const Events = CH.table("events", {
-	OrgId: T.string,
-	Name: T.string,
-	Timestamp: T.dateTime,
-	DurationMs: T.uint64,
-	Attributes: T.map(T.string, T.string),
-})
+const Events = CH.table(
+	"events",
+	{
+		OrgId: T.string,
+		Name: T.string,
+		Timestamp: T.dateTime,
+		DurationMs: T.uint64,
+		Attributes: T.map(T.string, T.string),
+	},
+	// `OrgId` carries row-level tenancy, so filtering on it marks a query scoped.
+	{ tenantColumn: "OrgId" },
+)
 ```
 
 This declares the shape you intend to query; it does not create or validate anything against a
@@ -56,15 +62,24 @@ of the object returned from `select` become both the SQL aliases and the keys of
 type — here `{ name: string; p95: number; count: number }`.
 
 > `orderBy` takes `[column, direction]` **tuples**. `.orderBy("count", "desc")` is a type
-> error, and throws at compile time if you reach it from untyped code.
+> error, and fails compilation if you reach it from untyped code.
 
 ## Compile it
 
+Compilation returns an `Effect` — a missing param or a value the column cannot hold is a typed
+`QueryBuilderError` rather than a throw. The snippets below `yield*` it; reach for
+`CH.compileUnsafe` where a throw is what you want.
+
 ```ts
-const compiled = CH.compile(query, {
-	orgId: "org_123",
-	startTime: "2026-01-01 00:00:00",
+const program = Effect.gen(function* () {
+	const compiled = yield* CH.compile(query, {
+		orgId: "org_123",
+		startTime: "2026-01-01 00:00:00",
+	})
+	return compiled
 })
+
+const compiled = await Effect.runPromise(program)
 
 compiled.sql
 // SELECT Name AS name, quantile(0.95)(DurationMs) AS p95, count() AS count
@@ -87,19 +102,22 @@ use, then hand the rows back for decoding:
 ```ts
 import { Effect, Schema } from "effect"
 
-const compiled = CH.compile(query, params, {
-	rowSchema: Schema.Struct({
-		name: Schema.String,
-		count: Schema.Number,
-	}),
-})
+const compiled = CH.compileUnsafe(query, params, {
+		rowSchema: Schema.Struct({
+			name: Schema.String,
+			count: Schema.Number,
+		}),
+	})
 
-const rows = await Effect.runPromise(compiled.decodeRows(await runOnClickHouse(compiled.sql)))
+const result = await client.query({ query: compiled.sql, format: "JSONEachRow" })
+const rows = await Effect.runPromise(compiled.decodeRows(await result.json()))
 ```
 
+`client` is your own — see [Running a query](./running-queries.md) for the full example.
+
 Passing a `rowSchema` gets you real validation of what came back off the wire. Without one,
-`decodeRows` degrades to a pass-through cast and validates nothing — `compiled.rowSchemaDeclared`
-tells you which you got. There is deliberately no `castRows`; see
+`decodeRows` degrades to a pass-through cast and validates nothing — `compiled.rowSchemaSource`
+tells you which you got (`"declared"`, `"derived"`, or `"none"`). There is deliberately no `castRows`; see
 [Decoding results](./decoding-results.md).
 
 _(Backed by `docs/getting-started.md > Decoding the results`.)_

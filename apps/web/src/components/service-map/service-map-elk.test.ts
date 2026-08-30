@@ -33,7 +33,7 @@ const edge = (source: string, target: string): Edge<ServiceEdgeData> => ({
 		errorCount: 0,
 		errorRate: 0,
 		avgDurationMs: 1,
-		p95DurationMs: 1,
+		maxDurationMs: 1,
 		hasSampling: false,
 	},
 })

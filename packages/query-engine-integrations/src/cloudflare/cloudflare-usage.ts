@@ -5,10 +5,8 @@
 // The request-count metrics are 5-min delta sums written by the analytics
 // poller, so sum(Value) per bucket is the true request count.
 
-import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-import { from, param, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
-import { CHNumber } from "@maple/query-engine/ch/schema"
+import { from, param } from "@maple-dev/clickhouse-builder"
 import { MetricsSum } from "@maple/query-engine/ch/tables"
 import { ISO_Z_FORMAT, isoBucket } from "@maple/query-engine/ch/format"
 
@@ -32,21 +30,6 @@ export interface CloudflareUsageOutput {
 }
 
 /**
- * Row schema for {@link cloudflareUsageQuery}. `requests` (`sum`) and
- * `datapoints` (`count`, a `UInt64`) use {@link CHNumber} so a BYO-ClickHouse
- * org's string-encoded aggregates decode identically to Tinybird's numbers —
- * pass it as the `rowSchema` to `CH.compile` so `decodeRows` coerces centrally
- * instead of a `ParseError` surfacing downstream.
- */
-export const cloudflareUsageRowSchema: CompiledQueryRowSchema<CloudflareUsageOutput> = Schema.Struct({
-	serviceName: Schema.String,
-	bucket: Schema.String,
-	requests: CHNumber,
-	datapoints: CHNumber,
-	lastTimeUnix: Schema.String,
-})
-
-/**
  * Firewall actions that actually mitigated a request (challenges count as
  * mitigation; `skip`/`log` are observability-only and excluded). Single source
  * of truth for the drill-in "blocked" stat.
@@ -60,12 +43,6 @@ export interface CloudflareUsageStatsOutput {
 	readonly firewallBlockedEvents: number
 }
 
-export const cloudflareUsageStatsRowSchema: CompiledQueryRowSchema<CloudflareUsageStatsOutput> =
-	Schema.Struct({
-		previousRequests: CHNumber,
-		firewallBlockedEvents: CHNumber,
-	})
-
 /**
  * Single-row companion to {@link cloudflareUsageQuery}: the previous-window
  * request total (for the "vs previous 24h" delta) and the current-window
@@ -77,21 +54,21 @@ export function cloudflareUsageStatsQuery() {
 			previousRequests: CH.sumIf(
 				$.Value,
 				$.MetricName.in_(...CLOUDFLARE_USAGE_METRIC_NAMES).and(
-					$.TimeUnix.lt(param.dateTime("currentStartTime")),
+					$.TimeUnix.lt(param.dateTimeString("currentStartTime")),
 				),
 			),
 			firewallBlockedEvents: CH.sumIf(
 				$.Value,
 				$.MetricName.eq("cloudflare.firewall.events")
 					.and($.Attributes.get("firewall.action").in_(...BLOCKED_FIREWALL_ACTIONS))
-					.and($.TimeUnix.gte(param.dateTime("currentStartTime"))),
+					.and($.TimeUnix.gte(param.dateTimeString("currentStartTime"))),
 			),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_(...CLOUDFLARE_USAGE_METRIC_NAMES, "cloudflare.firewall.events"),
-			$.TimeUnix.gte(param.dateTime("prevStartTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("prevStartTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.format("JSON")
 }
@@ -108,8 +85,8 @@ export function cloudflareUsageQuery() {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_(...CLOUDFLARE_USAGE_METRIC_NAMES),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("serviceName", "bucket")
 		.orderBy(["serviceName", "asc"], ["bucket", "asc"])

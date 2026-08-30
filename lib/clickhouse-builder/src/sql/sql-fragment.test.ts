@@ -37,7 +37,11 @@ describe("compile", () => {
 
 		it("prevents SQL injection", () => {
 			const malicious = "'; DROP TABLE traces; --"
-			expect(compile(str(malicious))).toBe("'\\'; DROP TABLE traces; --'")
+			expect(compile(str(malicious))).toBe("'\\'\\x3B DROP TABLE traces\\x3B --'")
+		})
+
+		it("hex-escapes semicolons so gateway statement splitters never see the raw byte", () => {
+			expect(compile(str("bot;"))).toBe("'bot\\x3B'")
 		})
 	})
 

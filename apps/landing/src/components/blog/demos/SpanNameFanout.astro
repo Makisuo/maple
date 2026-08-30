@@ -1,0 +1,251 @@
+---
+/**
+ * SpanNameFanout — static diagram: one span name feeding every aggregation
+ * layer (operations list, percentiles, alerts). HTML/CSS rather than SVG so
+ * the connectors are structural (pseudo-elements pinned to the cards) and can
+ * never overlap text at any width. Lives in a component rather than inline
+ * MDX because the example names contain literal braces ("GET /users/{id}").
+ * Scoped classes throughout — see TraceComparison.astro.
+ */
+
+const targets = [
+	{
+		title: "GROUP BY SpanName",
+		desc: "operations list, throughput per operation",
+	},
+	{
+		title: "quantile(0.95) ... BY SpanName",
+		desc: "latency percentiles per operation",
+	},
+	{
+		title: "WHERE SpanName = '...'",
+		desc: "alert rules, dashboard panels",
+	},
+];
+
+const cases = [
+	{
+		id: "good",
+		name: "GET /users/{id}",
+		lines: ["one row per route", "percentiles mean something"],
+	},
+	{
+		id: "bad",
+		name: "GET /users/8f2a-4c11/orders",
+		lines: ["one row per request, nothing aggregates", "every p95 is the p95 of one call"],
+	},
+] as const;
+---
+
+<figure class="snf">
+	<div class="snf__frame">
+		<div class="snf__head">
+			<span class="snf__title">span_name · everything downstream groups by it</span>
+		</div>
+
+		<div
+			class="snf__diagram"
+			role="img"
+			aria-label="The span name is the grouping key feeding the operations list, per-operation latency percentiles, and alert rules. A parameterized name keeps all three meaningful; a name carrying a request value makes all three degenerate."
+		>
+			<div class="snf__source">
+				<span class="snf__sourcename">SpanName</span>
+				<span class="snf__sourcedesc">the grouping key</span>
+			</div>
+			<div class="snf__targets">
+				{
+					targets.map((t) => (
+						<div class="snf__target">
+							<span class="snf__targetname">{t.title}</span>
+							<span class="snf__targetdesc">{t.desc}</span>
+						</div>
+					))
+				}
+			</div>
+		</div>
+
+		<div class="snf__compare">
+			{
+				cases.map((c) => (
+					<div class:list={["snf__case", `snf__case--${c.id}`]}>
+						<span class="snf__casename">{c.name}</span>
+						{c.lines.map((line) => (
+							<span class="snf__caseline">{line}</span>
+						))}
+					</div>
+				))
+			}
+		</div>
+	</div>
+	<figcaption class="snf__cap">Not a label. The key everything downstream is built on.</figcaption>
+</figure>
+
+<style>
+	.snf {
+		margin: 40px 0;
+	}
+
+	.snf__frame {
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		overflow: hidden;
+		background: color-mix(in oklab, var(--bg-elevated) 30%, transparent);
+	}
+
+	.snf__head {
+		display: flex;
+		align-items: center;
+		padding: 9px 14px;
+		background: var(--bg-elevated);
+		border-bottom: 1px solid var(--border);
+	}
+	.snf__title {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+	}
+
+	/* ── Fan-out diagram ────────────────────────────────────── */
+	.snf__diagram {
+		--snf-line: color-mix(in oklab, var(--muted-foreground) 35%, var(--border));
+		--snf-reach: 28px;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1.9fr);
+		column-gap: calc(var(--snf-reach) * 2);
+		align-items: center;
+		padding: 18px 16px;
+	}
+
+	.snf__source {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		padding: 10px 14px;
+		border: 1px solid color-mix(in oklab, var(--primary) 45%, var(--border));
+		border-radius: 8px;
+		background: color-mix(in oklab, var(--primary) 8%, transparent);
+	}
+	/* Stub from the source card to the spine, drawn at the card's own midline. */
+	.snf__source::after {
+		content: "";
+		position: absolute;
+		left: 100%;
+		top: 50%;
+		width: var(--snf-reach);
+		border-top: 1px solid var(--snf-line);
+	}
+	.snf__sourcename {
+		font-family: var(--font-mono);
+		font-size: 12.5px;
+		color: var(--foreground);
+	}
+	.snf__sourcedesc {
+		font-size: 11px;
+		color: var(--muted-foreground);
+	}
+
+	.snf__targets {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+	.snf__target {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		padding: 10px 14px;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: color-mix(in oklab, var(--bg-deep) 45%, transparent);
+	}
+	/* Elbow into each target card... */
+	.snf__target::before {
+		content: "";
+		position: absolute;
+		left: calc(-1 * var(--snf-reach));
+		top: 50%;
+		width: var(--snf-reach);
+		border-top: 1px solid var(--snf-line);
+	}
+	/* ...and the shared spine, one segment per card so it tracks card heights.
+	   Segments overshoot half the gap on each side to join up seamlessly. */
+	.snf__target::after {
+		content: "";
+		position: absolute;
+		left: calc(-1 * var(--snf-reach));
+		top: -7px;
+		bottom: -7px;
+		border-left: 1px solid var(--snf-line);
+	}
+	.snf__target:first-child::after {
+		top: 50%;
+	}
+	.snf__target:last-child::after {
+		bottom: 50%;
+	}
+	.snf__targetname {
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--foreground);
+	}
+	.snf__targetdesc {
+		font-size: 11px;
+		color: var(--muted-foreground);
+	}
+
+	@media (max-width: 620px) {
+		.snf__diagram {
+			grid-template-columns: minmax(0, 1fr);
+			row-gap: 12px;
+		}
+		.snf__source::after,
+		.snf__target::before,
+		.snf__target::after {
+			display: none;
+		}
+	}
+
+	/* ── Good vs bad name ───────────────────────────────────── */
+	.snf__compare {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+		gap: 12px;
+		padding: 14px 16px;
+		border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+	}
+	.snf__case {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		padding: 8px 12px;
+		border-left: 2px solid var(--border);
+	}
+	.snf__case--good {
+		border-left-color: color-mix(in oklab, var(--chart-3) 60%, var(--border));
+	}
+	.snf__case--bad {
+		border-left-color: color-mix(in oklab, var(--destructive) 55%, var(--border));
+	}
+	.snf__casename {
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--foreground);
+		overflow-wrap: anywhere;
+	}
+	.snf__caseline {
+		font-size: 11.5px;
+		line-height: 1.5;
+		color: var(--muted-foreground);
+	}
+
+	.snf__cap {
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--muted-foreground);
+		margin-top: 10px;
+	}
+</style>

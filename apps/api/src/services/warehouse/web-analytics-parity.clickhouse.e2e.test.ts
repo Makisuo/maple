@@ -312,38 +312,44 @@ const QUERIES: ReadonlyArray<{
 }> = [
 	{
 		name: "webAnalyticsSummary",
-		compile: (filters) => CH.compile(CH.webAnalyticsSummaryQuery(filters), window).sql,
+		compile: (filters) => CH.compileUnsafe(CH.webAnalyticsSummaryQuery(filters), window).sql,
 	},
 	{
 		// The recency test is relative to the `endTime` param, not `now()`, so the
 		// fixed fixture window pins it as firmly as every other query here.
 		name: "webAnalyticsLive",
-		compile: (filters) => CH.compile(CH.webAnalyticsLiveQuery(filters), window).sql,
+		compile: (filters) => CH.compileUnsafe(CH.webAnalyticsLiveQuery(filters), window).sql,
 	},
 	{
 		name: "webAnalyticsTimeseries",
 		compile: (filters) =>
-			CH.compile(CH.webAnalyticsTimeseriesQuery({ ...filters, bucketSeconds: 3600 }), window).sql,
+			CH.compileUnsafe(CH.webAnalyticsTimeseriesQuery({ ...filters, bucketSeconds: 3600 }), window).sql,
 	},
 	{
 		name: "webAnalyticsPageviews",
 		compile: (filters) =>
-			CH.compile(CH.webAnalyticsPageviewsTimeseriesQuery({ ...filters, bucketSeconds: 3600 }), window)
-				.sql,
+			CH.compileUnsafe(
+				CH.webAnalyticsPageviewsTimeseriesQuery({ ...filters, bucketSeconds: 3600 }),
+				window,
+			).sql,
 	},
 	{
 		name: "webAnalyticsPages",
-		compile: (filters) => CH.compile(CH.webAnalyticsPagesQuery({ ...filters, limit: 100 }), window).sql,
+		compile: (filters) =>
+			CH.compileUnsafe(CH.webAnalyticsPagesQuery({ ...filters, limit: 100 }), window).sql,
 	},
 	{
 		name: "webAnalyticsEvents",
-		compile: (filters) => CH.compile(CH.webAnalyticsEventsQuery({ ...filters, limit: 100 }), window).sql,
+		compile: (filters) =>
+			CH.compileUnsafe(CH.webAnalyticsEventsQuery({ ...filters, limit: 100 }), window).sql,
 	},
 	{
 		name: "webAnalyticsBreakdowns",
 		compile: (filters) =>
-			CH.compileUnion(CH.webAnalyticsBreakdownsQuery({ ...filters, limitPerDimension: 50 }), window)
-				.sql,
+			CH.compileUnionUnsafe(
+				CH.webAnalyticsBreakdownsQuery({ ...filters, limitPerDimension: 50 }),
+				window,
+			).sql,
 	},
 ]
 
@@ -546,14 +552,14 @@ const PRODUCT_STEPS: ReadonlyArray<CH.FunnelStep> = [
 ]
 
 const funnelCounts = async (opts: CH.ProductEventsFunnelOpts): Promise<ReadonlyArray<number>> => {
-	const rows = await runJson(CH.compile(CH.productEventsFunnelQuery(opts), funnelWindow).sql)
+	const rows = await runJson(CH.compileUnsafe(CH.productEventsFunnelQuery(opts), funnelWindow).sql)
 	return rows.map((row) => Number(row.count))
 }
 
 const breakdownRows = async (
 	opts: CH.ProductEventsFunnelBreakdownOpts,
 ): Promise<ReadonlyArray<[unknown, number, number]>> => {
-	const rows = await runJson(CH.compile(CH.productEventsFunnelBreakdownQuery(opts), funnelWindow).sql)
+	const rows = await runJson(CH.compileUnsafe(CH.productEventsFunnelBreakdownQuery(opts), funnelWindow).sql)
 	return rows.map((row) => [row.group, Number(row.step), Number(row.count)])
 }
 
@@ -663,7 +669,9 @@ describe.skipIf(!clickhouseE2eEnabled)("product events funnels", () => {
 	})
 
 	it("lists event names with counts, sessions and persons", async () => {
-		const rows = await runJson(CH.compile(CH.productEventNamesQuery({ limit: 10 }), funnelWindow).sql)
+		const rows = await runJson(
+			CH.compileUnsafe(CH.productEventNamesQuery({ limit: 10 }), funnelWindow).sql,
+		)
 		assert.deepStrictEqual(
 			rows.map((row) => [
 				row.eventName,

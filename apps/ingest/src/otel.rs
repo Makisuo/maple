@@ -43,6 +43,9 @@ pub fn build_resource(cfg: ResourceConfig) -> Resource {
             .unwrap_or_else(|_| "https://github.com/MapleTechLabs/maple".to_owned()),
     ));
     if let Some(revision) = detect_head_revision() {
+        // Dual-emit as `deployment.commit_sha` — the key the service-overview
+        // MVs extract into `CommitSha`, matching the TS SDK's resource.ts.
+        attrs.push(KeyValue::new("deployment.commit_sha", revision.clone()));
         attrs.push(KeyValue::new("vcs.ref.head.revision", revision));
     }
     attrs.extend(detect_platform());
@@ -708,7 +711,7 @@ mod tests {
     fn build_resource_sets_runtime_and_sdk_type() {
         let resource = build_resource(ResourceConfig {
             service_name: "ingest",
-            service_namespace: "ingest",
+            service_namespace: "core",
             service_version: "0.0.0",
             service_instance_id: "test-instance".to_owned(),
             deployment_env: "test".to_owned(),
@@ -728,7 +731,7 @@ mod tests {
         );
         assert_eq!(
             find_attr(&resource, "service.namespace").as_deref(),
-            Some("ingest")
+            Some("core")
         );
         // Dual-emit deployment env
         assert_eq!(

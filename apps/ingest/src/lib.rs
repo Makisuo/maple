@@ -1,4 +1,5 @@
 pub mod ai_session;
+pub mod aws;
 pub mod clickhouse_insert_mappings;
 pub mod metrics;
 pub mod otel;
@@ -7,3 +8,4 @@ pub mod r2;
 pub mod session_analytics;
 pub mod telemetry;
 pub mod usage_metrics;
+pub mod wal_store;

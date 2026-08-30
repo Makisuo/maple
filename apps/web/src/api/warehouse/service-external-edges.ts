@@ -12,6 +12,9 @@ export interface ServiceExternalEdge {
 	errorCount: number
 	errorRate: number
 	avgDurationMs: number
+	/** Slowest call in the window, not a percentile. */
+	maxDurationMs: number
+	/** Sample-weighted p95 in ms; 0 when the window has no rollup digest to merge. */
 	p95DurationMs: number
 	hasSampling: boolean
 	samplingWeight: number
@@ -44,6 +47,7 @@ export function transformExternalEdge(
 		errorCount,
 		errorRate: callCount > 0 ? errorCount / callCount : 0,
 		avgDurationMs: Number(row.avgDurationMs ?? 0),
+		maxDurationMs: Number(row.maxDurationMs ?? 0),
 		p95DurationMs: Number(row.p95DurationMs ?? 0),
 		hasSampling: sampling.hasSampling,
 		samplingWeight: sampling.weight,

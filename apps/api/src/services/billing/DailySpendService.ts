@@ -72,23 +72,17 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 				// column's type and unifying branches has produced 502s before. Both are
 				// pre-aggregated reads, so the second round-trip is cheap.
 				const signalRows = yield* warehouse
-					.compiledQuery(
-						tenant,
-						CH.compile(Integrations.dailySignalVolumeQuery(), params, {
-							rowSchema: Integrations.dailySignalVolumeRowSchema,
-						}),
-						{ profile: "list", context: "billingDailySignalVolume" },
-					)
+					.compiledQuery(tenant, CH.compile(Integrations.dailySignalVolumeQuery(), params), {
+						profile: "list",
+						context: "billingDailySignalVolume",
+					})
 					.pipe(Effect.mapError(toQueryError))
 
 				const sessionRows = yield* warehouse
-					.compiledQuery(
-						tenant,
-						CH.compile(Integrations.dailySessionCountQuery(), params, {
-							rowSchema: Integrations.dailySessionCountRowSchema,
-						}),
-						{ profile: "list", context: "billingDailySessionCount" },
-					)
+					.compiledQuery(tenant, CH.compile(Integrations.dailySessionCountQuery(), params), {
+						profile: "list",
+						context: "billingDailySessionCount",
+					})
 					.pipe(Effect.mapError(toQueryError))
 
 				const byDay = new Map<string, { logsGB: number; tracesGB: number; metricsGB: number }>()
@@ -103,13 +97,10 @@ export class DailySpendService extends Context.Service<DailySpendService, DailyS
 				// A cluster without `product_events` has ingested no product events, so
 				// the honest series is all zeros — not a 502 for the whole chart.
 				const eventRows = yield* warehouse
-					.compiledQuery(
-						tenant,
-						CH.compile(Integrations.dailyProductEventCountQuery(), params, {
-							rowSchema: Integrations.dailyProductEventCountRowSchema,
-						}),
-						{ profile: "list", context: "billingDailyProductEventCount" },
-					)
+					.compiledQuery(tenant, CH.compile(Integrations.dailyProductEventCountQuery(), params), {
+						profile: "list",
+						context: "billingDailyProductEventCount",
+					})
 					.pipe(
 						Effect.catchIf(isMissingProductEvents, () => Effect.succeed(noEventRows)),
 						Effect.mapError(toQueryError),

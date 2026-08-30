@@ -12,6 +12,7 @@ import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param, from, inSubquery, unionAll, compileFnCall } from "@maple-dev/clickhouse-builder"
 import type { ColumnAccessor, CHQuery, CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { SessionReplays, SessionEvents, ProductEvents } from "../tables"
+import { isBotCond } from "../user-agent"
 import type { FacetOutput } from "./query-helpers"
 import { WEB_ANALYTICS_LIVE_WINDOW_SECONDS, WEB_ANALYTICS_UNSET } from "@maple/domain/query-engine"
 
@@ -73,6 +74,17 @@ export interface WebAnalyticsFilters {
 	readonly utmCampaign?: string
 	/** `new` keeps first-ever sessions for a visitor, `returning` the rest. */
 	readonly visitorType?: "new" | "returning"
+	/**
+	 * Which agents count. `humans` and `bots` partition the window on
+	 * {@link isBotCond}; `all` (and an absent value) applies no predicate.
+	 *
+	 * Not defaulted to `humans` here even though that is the number a site owner
+	 * means by "visitors" — it would silently restate every historical figure on
+	 * the page, and on the orgs where bots are most of the traffic the change is
+	 * an order of magnitude. The page ships the split visible and the choice
+	 * explicit; see the bot-share tile.
+	 */
+	readonly traffic?: "all" | "humans" | "bots"
 	/**
 	 * Sessions in which a `track(eventName)` call fired — a semi-join on
 	 * `SessionId` against the custom rows of the page-view source, independent of
@@ -150,8 +162,8 @@ function eventConditionsRaw(
 ): Array<CH.Condition | undefined> {
 	return [
 		$.OrgId.eq(param.string("orgId")),
-		$.Timestamp.gte(param.dateTime("startTime")),
-		$.Timestamp.lte(param.dateTime("endTime")),
+		$.Timestamp.gte(param.dateTimeString("startTime")),
+		$.Timestamp.lte(param.dateTimeString("endTime")),
 		$.Type.eq(kind),
 		only === "pagePath" ? undefined : CH.when(filters.host, (v: string) => CH.domain_($.Url).eq(v)),
 		only === "host" ? undefined : CH.when(filters.pagePath, (v: string) => CH.path_($.Url).eq(v)),
@@ -185,8 +197,8 @@ function eventConditionsRollup(
 ): Array<CH.Condition | undefined> {
 	return [
 		$.OrgId.eq(param.string("orgId")),
-		$.Timestamp.gte(param.dateTime("startTime")),
-		$.Timestamp.lte(param.dateTime("endTime")),
+		$.Timestamp.gte(param.dateTimeString("startTime")),
+		$.Timestamp.lte(param.dateTimeString("endTime")),
 		$.Kind.eq(kind),
 		only === "pagePath" ? undefined : CH.when(filters.host, (v: string) => $.Host.eq(v)),
 		only === "host" ? undefined : CH.when(filters.pagePath, (v: string) => $.PagePath.eq(v)),
@@ -279,6 +291,21 @@ const acquisitionEq = (column: CH.Expr<string>, value: string) =>
 	column.eq(value === WEB_ANALYTICS_UNSET ? "" : value)
 
 /**
+ * The `traffic` predicate, or nothing at all for `all`.
+ *
+ * No `exclude` arm, unlike every other dimension in {@link replaysWhere}: the
+ * facet branches narrow *within* the chosen population rather than offering to
+ * leave it, because "which countries do my human visitors come from" is the
+ * question, and a country list that silently reincluded crawlers when you
+ * opened it would answer a different one.
+ */
+function trafficCondition($: ReplaysAccessor, filters: WebAnalyticsFilters): CH.Condition | undefined {
+	if (filters.traffic === undefined || filters.traffic === "all") return undefined
+	const isBot = isBotCond($.UserAgent)
+	return filters.traffic === "bots" ? isBot : CH.not(isBot)
+}
+
+/**
  * WHERE conditions for `session_replays`.
  *
  * `exclude` drops one dimension's own equality filter so its facet branch
@@ -310,8 +337,8 @@ export function replaysWhere(
 
 	return [
 		$.OrgId.eq(param.string("orgId")),
-		$.StartTime.gte(param.dateTime("startTime")),
-		$.StartTime.lte(param.dateTime("endTime")),
+		$.StartTime.gte(param.dateTimeString("startTime")),
+		$.StartTime.lte(param.dateTimeString("endTime")),
 		navigationFilter,
 		exclude === "referrerHost"
 			? undefined
@@ -335,6 +362,7 @@ export function replaysWhere(
 		CH.when(filters.visitorType, (v: "new" | "returning") =>
 			v === "new" ? $.VisitorIsNew.eq(1) : $.VisitorIsNew.eq(0),
 		),
+		trafficCondition($, filters),
 		eventSemiJoin($.SessionId, filters, exclude),
 	]
 }
@@ -351,7 +379,11 @@ export function needsSessionSemiJoin(filters: WebAnalyticsFilters): boolean {
 		filters.utmSource ||
 		filters.utmMedium ||
 		filters.utmCampaign ||
-		filters.visitorType,
+		filters.visitorType ||
+		// `traffic` is a `session_replays` predicate like the rest: without it here,
+		// filtering to humans would narrow sessions and visitors while page views —
+		// read from the event source — kept counting crawler navigations.
+		(filters.traffic !== undefined && filters.traffic !== "all"),
 	)
 }
 
@@ -432,6 +464,16 @@ export interface WebAnalyticsSummaryOutput {
 	readonly identifiedSessions: number
 	/** Mean wall-clock session duration in ms over sessions that ended. */
 	readonly avgDurationMs: number
+	/**
+	 * Sessions whose `UserAgent` identifies a crawler, headless browser or other
+	 * non-human agent — see {@link isBotCond}.
+	 *
+	 * Counted inside whatever the filters already select, like every other field
+	 * here, so under `traffic: 'humans'` it is 0 and under `'bots'` it equals
+	 * `sessions`. The share it is read as is only meaningful against the default
+	 * `all`, and the tile that draws it says so rather than reporting 0%.
+	 */
+	readonly botSessions: number
 }
 
 /**
@@ -465,6 +507,7 @@ export function webAnalyticsSummaryQuery(
 			newSessions: CH.uniqIf($.SessionId, $.VisitorIsNew.eq(1)),
 			bouncedSessions: CH.uniqIf($.SessionId, $.PageViews.lte(1).and($.VisitorId.neq(""))),
 			identifiedSessions: CH.uniqIf($.SessionId, $.VisitorId.neq("")),
+			botSessions: CH.uniqIf($.SessionId, isBotCond($.UserAgent)),
 			// avgIf over the ended rows only: the v1 row's DurationMs is NULL, and
 			// including it would average NULLs into the result.
 			avgDurationMs: CH.round_(
@@ -517,7 +560,7 @@ export function webAnalyticsLiveQuery(
 		.where(($) => [
 			...replaysWhere($, opts),
 			CH.coalesce($.LastActivityAt, $.StartTime).gte(
-				CH.intervalSub(CH.toDateTime(param.dateTime("endTime")), windowSeconds),
+				CH.intervalSub(CH.toDateTime(param.dateTimeString("endTime")), windowSeconds),
 			),
 		])
 		.format("JSON")

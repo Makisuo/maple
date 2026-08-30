@@ -771,7 +771,7 @@ export function useDashboardsRead(): DashboardsRead {
 		data: rows,
 		isLoading: liveLoading,
 		isError,
-	} = useLiveQuery((q) => q.from({ d: collection }).orderBy(({ d }) => d.updated_at, "desc"), [collection])
+	} = useLiveQuery({ query: (q) => q.from({ d: collection }).orderBy(({ d }) => d.updated_at, "desc") })
 
 	const synced = useMemo(
 		() => (rows ?? []).map(rowToDashboard).filter((d): d is Dashboard => d !== null),

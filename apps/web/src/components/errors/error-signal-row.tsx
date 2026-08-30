@@ -9,6 +9,8 @@ import { normalizeTimestampInput } from "@/lib/timezone-format"
 import type { ErrorSignal } from "@/lib/models/error-signal"
 import { densifySpark, surgeRatio } from "@/lib/models/error-signal"
 
+import { BranchForkIcon, ChatBubbleIcon } from "@/components/icons"
+
 import { ActorAvatar } from "./actor-chip"
 import { IssueContextMenu } from "./issue-context-menu"
 import { SeverityBadge } from "./severity-badge"
@@ -38,6 +40,53 @@ function formatLastSeen(iso: string): string {
 const SURGE_THRESHOLD = 2.5
 
 /**
+ * Comment and PR marks for a row. Deliberately muted — the lane answers "is
+ * anyone on this?" without competing with severity and the incident chip, and
+ * a row nobody has touched stays empty rather than showing a line of zeros.
+ */
+function SignalActivity({
+	commentCount,
+	openPullRequestCount,
+	mergedPullRequestCount,
+}: {
+	commentCount: number
+	openPullRequestCount: number
+	mergedPullRequestCount: number
+}) {
+	const prCount = openPullRequestCount + mergedPullRequestCount
+	if (commentCount === 0 && prCount === 0) return null
+	return (
+		<>
+			{commentCount > 0 ? (
+				<span
+					className="flex items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
+					title={`${commentCount} comment${commentCount === 1 ? "" : "s"} on the timeline`}
+				>
+					<ChatBubbleIcon size={11} />
+					{commentCount}
+				</span>
+			) : null}
+			{prCount > 0 ? (
+				<span
+					className={cn(
+						"flex items-center gap-1 text-[11px] tabular-nums",
+						mergedPullRequestCount > 0 ? "text-foreground/70" : "text-muted-foreground",
+					)}
+					title={
+						mergedPullRequestCount > 0
+							? `${prCount} pull request${prCount === 1 ? "" : "s"} · ${mergedPullRequestCount} merged`
+							: `${prCount} open pull request${prCount === 1 ? "" : "s"}`
+					}
+				>
+					<BranchForkIcon size={11} />
+					{prCount}
+				</span>
+			) : null}
+		</>
+	)
+}
+
+/**
  * Lane geometry, shared by the header and the rows so the two cannot drift.
  * Width and container-query breakpoint only — each use adds its own display,
  * because the row's service lane needs `flex` for the dot while the header's
@@ -49,7 +98,10 @@ const LANE = {
 	spark: "hidden w-[56px] shrink-0 @lg/page:block",
 	count: "hidden w-[52px] shrink-0 @xl/page:block",
 	service: "hidden w-[92px] shrink-0 @md/page:block",
-	state: "hidden w-[92px] shrink-0 @2xl/page:block",
+	// Sized to the longest label: "Open incident"/"Investigating" run ~98px in
+	// 11px Geist Mono plus the dot — 92px forced them onto two lines.
+	state: "hidden w-[104px] shrink-0 @2xl/page:block",
+	activity: "hidden w-[64px] shrink-0 @xl/page:block",
 	actor: "w-5 shrink-0",
 	lastSeen: "w-[64px] shrink-0",
 } as const
@@ -83,6 +135,7 @@ export function ErrorSignalHeader() {
 			<span className={cn(LANE.count, "text-right")}>Events</span>
 			<span className={LANE.service}>Service</span>
 			<span className={LANE.state}>Status</span>
+			<span className={LANE.activity}>Activity</span>
 			<span className={LANE.actor} />
 			<span className={cn(LANE.lastSeen, "text-right")}>Last seen</span>
 		</div>
@@ -217,7 +270,15 @@ export function ErrorSignalRow({
 				</span>
 
 				<span className={LANE.state}>
-					<SignalStateChip state={signal.state} />
+					<SignalStateChip state={signal.state} withConfidence={false} />
+				</span>
+
+				<span className={cn(LANE.activity, "items-center gap-2 @xl/page:flex")}>
+					<SignalActivity
+						commentCount={signal.commentCount}
+						openPullRequestCount={signal.openPullRequestCount}
+						mergedPullRequestCount={signal.mergedPullRequestCount}
+					/>
 				</span>
 
 				<span className={LANE.actor}>

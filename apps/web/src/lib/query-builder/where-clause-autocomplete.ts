@@ -209,6 +209,11 @@ const TRACE_SEARCH_KEY_DEFINITIONS: KeyDefinition[] = [
 		description: "Filter by deployment environment",
 	},
 	{
+		label: "service.namespace",
+		insertText: "service.namespace",
+		description: "Filter by service namespace",
+	},
+	{
 		label: "http.method",
 		insertText: "http.method",
 		description: "Filter by HTTP method",

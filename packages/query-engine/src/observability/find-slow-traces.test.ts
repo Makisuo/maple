@@ -4,6 +4,7 @@ import { WarehouseUpstreamError } from "@maple/domain/http"
 import { findSlowTraces } from "./find-slow-traces"
 import { WarehouseExecutor } from "./WarehouseExecutor"
 import type { WarehouseExecutorApi } from "./WarehouseExecutor"
+import { compiledQueryOf } from "../execution/compiled-input"
 
 interface CapturedCalls {
 	pipeCalls: Array<{ pipe: string; params: Record<string, unknown> }>
@@ -15,8 +16,8 @@ const makeMockExecutor = (
 	statsRows: ReadonlyArray<Record<string, unknown>> = [],
 ): WarehouseExecutorApi => ({
 	orgId: "org_test",
-	compiledQuery: (compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
-	compiledQueryFirst: (compiled) => compiled.decodeFirstRow([]).pipe(Effect.orDie),
+	compiledQuery: (compiled) => compiledQueryOf(compiled).decodeRows([]).pipe(Effect.orDie),
+	compiledQueryFirst: (compiled) => compiledQueryOf(compiled).decodeFirstRow([]).pipe(Effect.orDie),
 	query: (pipe: string, params: Record<string, unknown>) => {
 		captured.pipeCalls.push({ pipe, params })
 		const data = pipe === "slow_traces" ? slowRows : pipe === "traces_duration_stats" ? statsRows : []
@@ -127,8 +128,9 @@ describe("findSlowTraces", () => {
 		Effect.gen(function* () {
 			const failingExecutor: WarehouseExecutorApi = {
 				orgId: "org_test",
-				compiledQuery: (compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
-				compiledQueryFirst: (compiled) => compiled.decodeFirstRow([]).pipe(Effect.orDie),
+				compiledQuery: (compiled) => compiledQueryOf(compiled).decodeRows([]).pipe(Effect.orDie),
+				compiledQueryFirst: (compiled) =>
+					compiledQueryOf(compiled).decodeFirstRow([]).pipe(Effect.orDie),
 				query: () =>
 					Effect.fail(
 						new WarehouseUpstreamError({

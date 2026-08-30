@@ -69,13 +69,12 @@ export function useAlertRulesList(): AlertRulesListHook {
 		[orgKey, generation],
 	)
 
-	const { data: ruleRows, isLoading: rulesLoading } = useLiveQuery(
+	const { data: ruleRows, isLoading: rulesLoading } = useLiveQuery({
 		// Match the server's `listRules` ordering (desc updatedAt) so recently
 		// edited rules stay at the top.
-		(q) => q.from({ r: rulesCollection }).orderBy(({ r }) => r.updated_at, "desc"),
-		[rulesCollection],
-	)
-	const { data: stateRows } = useLiveQuery((q) => q.from({ s: statesCollection }), [statesCollection])
+		query: (q) => q.from({ r: rulesCollection }).orderBy(({ r }) => r.updated_at, "desc"),
+	})
+	const { data: stateRows } = useLiveQuery({ query: (q) => q.from({ s: statesCollection }) })
 
 	const pending = rulesLoading && (ruleRows?.length ?? 0) === 0
 	const syncFailed = useCollectionLoadFailed(rulesCollection.id, pending)
@@ -100,10 +99,9 @@ export function useAlertIncidentsList(): AlertIncidentsListHook {
 		[orgKey, generation],
 	)
 
-	const { data: rows, isLoading } = useLiveQuery(
-		(q) => q.from({ i: collection }).orderBy(({ i }) => i.last_triggered_at, "desc"),
-		[collection],
-	)
+	const { data: rows, isLoading } = useLiveQuery({
+		query: (q) => q.from({ i: collection }).orderBy(({ i }) => i.last_triggered_at, "desc"),
+	})
 
 	const pending = isLoading && (rows?.length ?? 0) === 0
 	const syncFailed = useCollectionLoadFailed(collection.id, pending)
@@ -127,11 +125,10 @@ export function useAlertDestinationsList(): AlertDestinationsListHook {
 		[orgKey, generation],
 	)
 
-	const { data: rows, isLoading } = useLiveQuery(
+	const { data: rows, isLoading } = useLiveQuery({
 		// Match the server's `listDestinations` ordering (desc updatedAt).
-		(q) => q.from({ d: collection }).orderBy(({ d }) => d.updated_at, "desc"),
-		[collection],
-	)
+		query: (q) => q.from({ d: collection }).orderBy(({ d }) => d.updated_at, "desc"),
+	})
 
 	const pending = isLoading && (rows?.length ?? 0) === 0
 	const syncFailed = useCollectionLoadFailed(collection.id, pending)

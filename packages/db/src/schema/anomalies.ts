@@ -119,7 +119,17 @@ export const anomalyIncidents = pgTable(
 		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
 	},
 	(table) => [
-		index("anomaly_incidents_org_status_idx").on(table.orgId, table.status),
+		// (org, status) plus the list ordering: listIncidents filters on the
+		// first two and orders by (last_triggered_at DESC, id DESC), so a
+		// backward index walk answers the page directly — SELECT
+		// anomaly_incidents was ~970ms p95 sorting the org's rows by hand.
+		// Replaces anomaly_incidents_org_status_idx, whose prefix this carries.
+		index("anomaly_incidents_org_status_triggered_idx").on(
+			table.orgId,
+			table.status,
+			table.lastTriggeredAt,
+			table.id,
+		),
 		index("anomaly_incidents_org_triggered_idx").on(table.orgId, table.lastTriggeredAt),
 		index("anomaly_incidents_org_detector_idx").on(table.orgId, table.detectorKey),
 		index("anomaly_incidents_org_issue_idx").on(table.orgId, table.errorIssueId),

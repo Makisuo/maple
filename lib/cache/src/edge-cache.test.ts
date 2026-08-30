@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer, Option, Schema } from "effect"
 import { EdgeCacheIOError, EdgeCacheService, makeEdgeCacheService, type EdgeCacheBackend } from "./edge-cache"
+import { makeOutboundSlotsCell, trackOutboundSlot, type OutboundSlotsCell } from "./outbound-slots"
 
 // A stand-in for whatever a caller caches. These tests used to reach for
 // `CachedPayload`, which tied a generic cache to a query type; the
@@ -47,8 +48,8 @@ const makeJsonRoundtripBackend = (): EdgeCacheBackend & {
 	}
 }
 
-const makeLayer = (backend: EdgeCacheBackend, readTimeoutMs?: number) =>
-	Layer.succeed(EdgeCacheService, makeEdgeCacheService(backend, readTimeoutMs))
+const makeLayer = (backend: EdgeCacheBackend, readTimeoutMs?: number, slots?: OutboundSlotsCell) =>
+	Layer.succeed(EdgeCacheService, makeEdgeCacheService(backend, readTimeoutMs, slots))
 
 describe("EdgeCacheService.getOrCompute (no schema)", () => {
 	it.live("fails open to computation when a backend read exceeds its deadline", () => {
@@ -558,6 +559,111 @@ describe("EdgeCacheService read deadline", () => {
 			yield* cache.getOrCompute(opts, compute)
 			assert.strictEqual(call, 5, "breaker opened despite the interleaved successes")
 		}).pipe(Effect.provide(makeLayer(backend, 10)), Effect.timeout(2000))
+	})
+
+	it.live("skips the read when outbound slots are held and the bucket opts in", () => {
+		const slots = makeOutboundSlotsCell()
+		let getCalls = 0
+		const backend: EdgeCacheBackend = {
+			name: "memory",
+			get: async () => {
+				getCalls += 1
+				return { cached: true }
+			},
+			put: async () => {},
+			delete: async () => {},
+		}
+
+		return Effect.gen(function* () {
+			const cache = yield* EdgeCacheService
+			slots.acquire()
+
+			// Opted-in bucket under pressure: no read, straight to compute.
+			const skipped = yield* cache.getOrCompute(
+				{ bucket: "cfg", key: "k", ttlSeconds: 30, skipReadWhenSlotsHeld: true },
+				Effect.succeed("computed"),
+			)
+			assert.deepStrictEqual(skipped, { value: "computed", hit: false })
+			assert.strictEqual(getCalls, 0)
+
+			// The same pressure leaves a bucket that did NOT opt in untouched.
+			const read = yield* cache.getOrCompute(
+				{ bucket: "qe", key: "k", ttlSeconds: 30 },
+				Effect.succeed("computed"),
+			)
+			assert.strictEqual(getCalls, 1)
+			assert.strictEqual(read.hit, true)
+
+			// Pressure gone: the opted-in bucket reads again.
+			slots.release()
+			yield* cache.getOrCompute(
+				{ bucket: "cfg", key: "k", ttlSeconds: 30, skipReadWhenSlotsHeld: true },
+				Effect.succeed("computed"),
+			)
+			assert.strictEqual(getCalls, 2)
+		}).pipe(Effect.provide(makeLayer(backend, 50, slots)), Effect.timeout(2000))
+	})
+
+	it.live("counts an abandoned read as a held slot until the backend settles", () => {
+		const slots = makeOutboundSlotsCell()
+		let getCalls = 0
+		let settleFirstRead: (() => void) | undefined
+		const backend: EdgeCacheBackend = {
+			name: "memory",
+			get: async () => {
+				getCalls += 1
+				if (getCalls === 1) {
+					// Hangs past the deadline; the test settles it explicitly later —
+					// the shape of an uncancellable cache.match that resolves long
+					// after the read abandoned it.
+					return await new Promise<undefined>((resolve) => {
+						settleFirstRead = () => resolve(undefined)
+					})
+				}
+				return undefined
+			},
+			put: async () => {},
+			delete: async () => {},
+		}
+		const opts = { bucket: "cfg", key: "k", ttlSeconds: 30, skipReadWhenSlotsHeld: true } as const
+
+		return Effect.gen(function* () {
+			const cache = yield* EdgeCacheService
+
+			// No pressure yet, so the opted-in bucket reads — and the read hangs.
+			const first = yield* cache.getOrCompute(opts, Effect.succeed("computed"))
+			assert.strictEqual(first.hit, false)
+			assert.strictEqual(getCalls, 1)
+			assert.strictEqual(slots.held(), 1, "abandoned read still holds its slot")
+
+			// The zombie alone is pressure: the next read is skipped, not issued.
+			yield* cache.getOrCompute(opts, Effect.succeed("computed"))
+			assert.strictEqual(getCalls, 1)
+
+			// Once the underlying read finally settles, the slot frees and reads resume.
+			settleFirstRead?.()
+			// Macrotask hop: the release is chained a few microtasks behind the settle.
+			yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)))
+			assert.strictEqual(slots.held(), 0)
+			yield* cache.getOrCompute(opts, Effect.succeed("computed"))
+			assert.strictEqual(getCalls, 2)
+		}).pipe(Effect.provide(makeLayer(backend, 10, slots)), Effect.timeout(2000))
+	})
+
+	it.effect("trackOutboundSlot holds the slot for exactly the effect's lifetime", () => {
+		const slots = makeOutboundSlotsCell()
+		return Effect.gen(function* () {
+			const during = yield* trackOutboundSlot(
+				Effect.sync(() => slots.held()),
+				slots,
+			)
+			assert.strictEqual(during, 1)
+			assert.strictEqual(slots.held(), 0)
+
+			// Released on failure too.
+			yield* trackOutboundSlot(Effect.fail("boom" as const), slots).pipe(Effect.flip)
+			assert.strictEqual(slots.held(), 0)
+		})
 	})
 
 	it.live("keeps serving hits from a bucket that never times out", () => {

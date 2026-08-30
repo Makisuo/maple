@@ -224,6 +224,14 @@ const SharedFiltersSchema = Schema.Struct({
 	serviceName: Schema.optional(ServiceName),
 	spanName: Schema.optional(SpanName),
 	severity: Schema.optional(Schema.String),
+	// Logs-source multi-select and its exclusions. The scalars above stay for the widget builder,
+	// which binds one value per field.
+	serviceNames: Schema.optional(Schema.mutable(Schema.Array(ServiceName))),
+	severities: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+	excludedServiceNames: Schema.optional(Schema.mutable(Schema.Array(ServiceName))),
+	excludedSeverities: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+	excludedEnvironments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
+	excludedNamespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
 	metricName: Schema.optional(MetricName),
 	metricType: Schema.optional(Schema.Literals(QUERY_BUILDER_METRIC_TYPES)),
 	rootSpansOnly: Schema.optional(Schema.Boolean),
@@ -352,6 +360,12 @@ function buildTimeseriesQuerySpec(data: CustomChartTimeSeriesDecoded): QuerySpec
 			filters: {
 				serviceName: data.filters?.serviceName,
 				severity: data.filters?.severity,
+				serviceNames: data.filters?.serviceNames,
+				severities: data.filters?.severities,
+				excludedServiceNames: data.filters?.excludedServiceNames,
+				excludedSeverities: data.filters?.excludedSeverities,
+				excludedEnvironments: data.filters?.excludedEnvironments,
+				excludedNamespaces: data.filters?.excludedNamespaces,
 				environments: data.filters?.environments,
 				namespaces: data.filters?.namespaces,
 			},
@@ -598,6 +612,9 @@ function makeAllMetricsTimeseriesRequest(opts: {
 	environments?: ReadonlyArray<DeploymentEnvironment>
 	namespaces?: ReadonlyArray<ServiceNamespace>
 	commitShas?: ReadonlyArray<CommitSha>
+	excludedEnvironments?: ReadonlyArray<DeploymentEnvironment>
+	excludedNamespaces?: ReadonlyArray<ServiceNamespace>
+	excludedCommitShas?: ReadonlyArray<CommitSha>
 	groupBy?: string[]
 }) {
 	return new QueryEngineExecuteRequest({
@@ -615,6 +632,9 @@ function makeAllMetricsTimeseriesRequest(opts: {
 				environments: opts.environments,
 				namespaces: opts.namespaces,
 				commitShas: opts.commitShas,
+				excludedEnvironments: opts.excludedEnvironments,
+				excludedNamespaces: opts.excludedNamespaces,
+				excludedCommitShas: opts.excludedCommitShas,
 			},
 			bucketSeconds: opts.bucketSeconds,
 		},
@@ -886,6 +906,7 @@ const GetOverviewTimeSeriesInputSchema = Schema.Struct({
 	startTime: Schema.optional(dateTimeString),
 	endTime: Schema.optional(dateTimeString),
 	environments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
+	namespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
 })
 
 type GetOverviewTimeSeriesInput = (typeof GetOverviewTimeSeriesInputSchema)["Encoded"]
@@ -908,6 +929,7 @@ const getOverviewTimeSeriesEffect = Effect.fn("QueryEngine.getOverviewTimeSeries
 		bucketSeconds,
 		rootSpansOnly: true,
 		environments: input.environments,
+		namespaces: input.namespaces,
 	}
 
 	// Throughput renders from the sampling-aware `estimatedSpanCount`; exact
@@ -957,6 +979,9 @@ const GetCustomChartServiceSparklinesInputSchema = Schema.Struct({
 	environments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
 	namespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
 	commitShas: Schema.optional(Schema.mutable(Schema.Array(CommitSha))),
+	excludedEnvironments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
+	excludedNamespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
+	excludedCommitShas: Schema.optional(Schema.mutable(Schema.Array(CommitSha))),
 })
 
 type GetCustomChartServiceSparklinesInput = (typeof GetCustomChartServiceSparklinesInputSchema)["Encoded"]
@@ -992,6 +1017,9 @@ const getCustomChartServiceSparklinesEffect = Effect.fn("QueryEngine.getCustomCh
 			environments: input.environments,
 			namespaces: input.namespaces,
 			commitShas: input.commitShas,
+			excludedEnvironments: input.excludedEnvironments,
+			excludedNamespaces: input.excludedNamespaces,
+			excludedCommitShas: input.excludedCommitShas,
 			groupBy: ["service"] as string[],
 		}
 
@@ -1091,6 +1119,9 @@ const ThroughputRefinementShared = {
 	startTime: Schema.optional(dateTimeString),
 	endTime: Schema.optional(dateTimeString),
 	environments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
+	// The SpanMetrics calls MV can't be namespace-filtered, so a namespace scope
+	// skips the exact refinement the same way an environment scope does.
+	namespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
 	// The caller's sampling verdict, derived from the already-loaded primary
 	// chart. When false (or absent) the exact query is skipped — the estimate is
 	// already correct. Including it in the input makes it part of the atom key, so
@@ -1124,7 +1155,8 @@ const getServiceDetailThroughputRefinementEffect = Effect.fn(
 	)
 
 	const envScoped = (input.environments?.length ?? 0) > 0
-	if (!input.samplingActive || envScoped) {
+	const nsScoped = (input.namespaces?.length ?? 0) > 0
+	if (!input.samplingActive || envScoped || nsScoped) {
 		return { data: [] as ThroughputRefinementPoint[] }
 	}
 
@@ -1157,7 +1189,8 @@ const getOverviewThroughputRefinementEffect = Effect.fn("QueryEngine.getOverview
 		)
 
 		const envScoped = (input.environments?.length ?? 0) > 0
-		if (!input.samplingActive || envScoped) {
+		const nsScoped = (input.namespaces?.length ?? 0) > 0
+		if (!input.samplingActive || envScoped || nsScoped) {
 			return { data: [] as ThroughputRefinementPoint[] }
 		}
 

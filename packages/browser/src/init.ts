@@ -12,6 +12,7 @@ import {
 	onConsentChange,
 	publishSessionSink,
 	rotateSession,
+	isLikelyBot,
 	sdkHint,
 	setActiveTraceIdProvider,
 	setVisitorTracking,
@@ -70,7 +71,12 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 	if (!hasConsent()) clearPendingEvents()
 	setActiveTraceIdProvider(() => trace.getActiveSpan()?.spanContext().traceId)
 
-	const recordReplay = config.replayEnabled && Math.random() < config.replaySampleRate
+	// Crawlers are excluded before the sample roll, not by it: they still get a
+	// metadata-only session (Web Analytics counts them, and the server-side
+	// classifier is what labels them a bot there), but no rrweb chunk and no
+	// uploads. See `isLikelyBot`.
+	const recordReplay =
+		config.replayEnabled && !isLikelyBot(navigator.userAgent) && Math.random() < config.replaySampleRate
 	let runtime: BrowserRuntime | undefined
 	let stopped = false
 	let rotateOnNextStart = false

@@ -13,6 +13,8 @@ export const cloudflareHyperdriveConfigs = pgTable(
 	{
 		id: text("id").notNull().primaryKey(),
 		orgId: text("org_id").$type<OrgId>().notNull(),
+		/** Cloudflare account the config was discovered on; null on pre-multi-account rows. */
+		accountId: text("account_id"),
 		/** Cloudflare's 32-hex Hyperdrive config id (what `db.namespace` collapses from). */
 		configId: text("config_id").notNull(),
 		name: text("name").notNull(),

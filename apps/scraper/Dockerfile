@@ -5,7 +5,12 @@ FROM oven/bun:1.4.0 AS runner
 WORKDIR /app
 
 COPY . .
-RUN bun install --frozen-lockfile && bun run --cwd packages/effect-sdk build
+# @maple-dev/clickhouse-builder resolves through its dist/ exports, and
+# @maple/domain imports its ./sql subpath — build it or the container
+# crashloops at startup on a clean checkout.
+RUN bun install --frozen-lockfile \
+	&& bun run --cwd lib/clickhouse-builder build \
+	&& bun run --cwd packages/effect-sdk build
 
 EXPOSE 3475
 

@@ -12,6 +12,7 @@ import { MetricsSum, MetricsGauge, MetricsHistogram, MetricsExpHistogram } from 
 import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { buildAttrFilterCondition, httpDisplaySpanName } from "../../traces-shared"
 import type { AttributeIndexMode } from "../../capabilities"
+import * as T from "@maple-dev/clickhouse-builder/types"
 
 // APDEX expressions
 
@@ -105,6 +106,7 @@ export interface TracesBaseWhereOpts {
 	excludedSpanNames?: readonly string[]
 	excludedEnvironments?: readonly string[]
 	excludedNamespaces?: readonly string[]
+	excludedCommitShas?: readonly string[]
 	attributeIndexMode?: AttributeIndexMode
 }
 
@@ -139,7 +141,7 @@ export function inclusionValues(
  * `Hour` column or the join silently misses.
  */
 export function hourFloor(name: string): CH.Expr<string> {
-	return CH.toStartOfHour(CH.toDateTime(param.dateTime(name)))
+	return CH.toStartOfHour(CH.toDateTime(param.dateTimeString(name)))
 }
 
 /**
@@ -153,6 +155,30 @@ export interface FacetOutput {
 	readonly count: number
 	readonly facetType: string
 }
+
+// A conditional aggregate over a metric family the entity never emitted returns
+// `nan`, which ClickHouse serializes as JSON `null` — and one null against a
+// numeric row schema fails the decode for the whole page, not just that row.
+// Shared by the infra (host/pod/node/workload) and container queries.
+export const avgIfOrZero = (value: CH.Expr<number>, condition: CH.Condition): CH.Expr<number> =>
+	CH.ifNotFinite(CH.avgIf(value, condition), 0)
+
+export const maxIfOrZero = (value: CH.Expr<number>, condition: CH.Condition): CH.Expr<number> =>
+	CH.ifNotFinite(CH.maxIf(value, condition), 0)
+
+/**
+ * Facet dimensions are plain `ResourceAttributes` keys, with one exception: the
+ * deployment environment has two semconv spellings, so it resolves to the
+ * coalescing expression instead of a single map lookup. Shared by every infra
+ * facet builder so a future renamed-key coalesce lands in one place.
+ */
+export const facetAttrExpr = (
+	resourceAttributes: { get(key: string): CH.Expr<string> },
+	attrKey: string,
+): CH.Expr<string> =>
+	attrKey === "deployment.environment.name"
+		? deploymentEnvExpr(resourceAttributes)
+		: resourceAttributes.get(attrKey)
 
 export function inclusionCondition(col: CH.Expr<string>, values: readonly string[]): CH.Condition {
 	return values.length === 1 ? col.eq(values[0]!) : CH.inList(col, values)
@@ -219,8 +245,8 @@ export function tracesBaseWhereConditions(
 	const spanNames = inclusionValues(opts.spanName, opts.spanNames)
 	const conditions: Array<CH.Condition | undefined> = [
 		$.OrgId.eq(param.string("orgId")),
-		$.Timestamp.gte(param.dateTime("startTime")),
-		$.Timestamp.lte(param.dateTime("endTime")),
+		$.Timestamp.gte(param.dateTimeString("startTime")),
+		$.Timestamp.lte(param.dateTimeString("endTime")),
 		CH.when(services, (v: readonly string[]) =>
 			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),
@@ -310,6 +336,11 @@ export function tracesBaseWhereConditions(
 	if (opts.excludedNamespaces?.length) {
 		conditions.push(CH.notInList($.ResourceAttributes.get("service.namespace"), opts.excludedNamespaces))
 	}
+	if (opts.excludedCommitShas?.length) {
+		conditions.push(
+			CH.notInList($.ResourceAttributes.get("deployment.commit_sha"), opts.excludedCommitShas),
+		)
+	}
 
 	return conditions
 }
@@ -364,8 +395,8 @@ export function serviceOverviewWhereConditions(
 	const services = inclusionValues(opts.serviceName, opts.serviceNames)
 	const conditions: Array<CH.Condition | undefined> = [
 		$.OrgId.eq(param.string("orgId")),
-		$.Timestamp.gte(param.dateTime("startTime")),
-		$.Timestamp.lte(param.dateTime("endTime")),
+		$.Timestamp.gte(param.dateTimeString("startTime")),
+		$.Timestamp.lte(param.dateTimeString("endTime")),
 		CH.when(services, (v: readonly string[]) =>
 			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),
@@ -405,6 +436,9 @@ export function serviceOverviewWhereConditions(
 	if (opts.excludedNamespaces?.length) {
 		conditions.push(CH.notInList($.ServiceNamespace, opts.excludedNamespaces))
 	}
+	if (opts.excludedCommitShas?.length) {
+		conditions.push(CH.notInList($.CommitSha, opts.excludedCommitShas))
+	}
 
 	return conditions
 }
@@ -436,6 +470,7 @@ export function canUseTracesAggregatesMv(
 	if (opts.attributeFilters?.length) return false
 	if (opts.resourceAttributeFilters?.length) return false
 	if (opts.commitShas?.length) return false // MV doesn't carry CommitSha
+	if (opts.excludedCommitShas?.length) return false // ...so it cannot exclude on one either
 	if (opts.namespaces?.length || opts.excludedNamespaces?.length) return false // MV doesn't carry ServiceNamespace
 	if (opts.minDurationMs != null || opts.maxDurationMs != null) return false
 	if (groupBy) {
@@ -464,8 +499,12 @@ export function tracesAggregatesWhereConditions(
 	const spanNames = inclusionValues(opts.spanName, opts.spanNames)
 	const conditions: Array<CH.Condition | undefined> = [
 		$.OrgId.eq(param.string("orgId")),
-		hourBounds ? $.Hour.gte(CH.rawExpr<string>(hourBounds.gte)) : $.Hour.gte(param.dateTime("startTime")),
-		hourBounds ? $.Hour.lt(CH.rawExpr<string>(hourBounds.lt)) : $.Hour.lte(param.dateTime("endTime")),
+		hourBounds
+			? $.Hour.gte(CH.rawExpr(hourBounds.gte, T.dateTimeString))
+			: $.Hour.gte(param.dateTimeString("startTime")),
+		hourBounds
+			? $.Hour.lt(CH.rawExpr(hourBounds.lt, T.dateTimeString))
+			: $.Hour.lte(param.dateTimeString("endTime")),
 		CH.when(services, (v: readonly string[]) =>
 			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),

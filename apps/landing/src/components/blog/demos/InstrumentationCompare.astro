@@ -1,0 +1,371 @@
+---
+/**
+ * InstrumentationCompare — the same route handler twice (auto-instrumentation
+ * only vs deliberately instrumented), each shown with the span your backend
+ * actually receives. CSS-only radio + `:has()` tabs; without `:has()` both
+ * panels render stacked. Code is highlighted via astro:components' <Code> so
+ * the snippets stay inside this component instead of fighting MDX fences.
+ * Scoped classes throughout — see TraceComparison.astro.
+ */
+import { Code } from "astro:components";
+
+const LAZY_CODE = `// "we have tracing": the SDK is installed, nothing more
+app.post("/api/checkout", async (req, res) => {
+  try {
+    const order = await checkout(req.body)
+    res.json(order)
+  } catch (err) {
+    res.status(500).json({ error: "checkout failed" })
+  }
+})`;
+
+const DELIBERATE_CODE = `app.post("/api/checkout", async (req, res) => {
+  const span = trace.getActiveSpan()
+  span?.setAttributes({
+    "app.user.id": req.user.id,
+    "app.user.tier": req.user.tier,
+    "app.cart.item_count": req.body.items.length,
+    "app.cart.total_cents": req.body.totalCents,
+  })
+  try {
+    const order = await checkout(req.body)
+    span?.setAttributes({ "app.order.id": order.id })
+    res.json(order)
+  } catch (err) {
+    span?.setAttributes({
+      "app.error.code": err.code,         // "card_declined"
+      "app.payment.provider": "stripe",
+      "app.payment.attempt": err.attempt, // 3
+    })
+    span?.recordException(err)
+    span?.setStatus({ code: SpanStatusCode.ERROR })
+    res.status(500).json({ error: "checkout failed" })
+  }
+})`;
+
+interface Attr {
+	key: string;
+	value: string;
+	added?: boolean; // deliberately added, vs free from auto-instrumentation
+}
+
+const baseAttrs: Attr[] = [
+	{ key: "http.request.method", value: "POST" },
+	{ key: "http.route", value: "/api/checkout" },
+	{ key: "http.response.status_code", value: "500" },
+];
+
+const panels = [
+	{
+		id: "bad",
+		label: "auto-instrumentation only",
+		code: LAZY_CODE,
+		attrs: baseAttrs,
+		event: null,
+		note: "You know it was a 500 and that it took 1.24s. That's everything you know. Time to go grep the logs.",
+	},
+	{
+		id: "good",
+		label: "deliberate instrumentation",
+		code: DELIBERATE_CODE,
+		attrs: [
+			...baseAttrs,
+			{ key: "app.user.id", value: "user_8f2a-4c11", added: true },
+			{ key: "app.user.tier", value: "pro", added: true },
+			{ key: "app.cart.item_count", value: "3", added: true },
+			{ key: "app.cart.total_cents", value: "15999", added: true },
+			{ key: "app.error.code", value: "card_declined", added: true },
+			{ key: "app.payment.provider", value: "stripe", added: true },
+			{ key: "app.payment.attempt", value: "3", added: true },
+		],
+		event: "exception · CardDeclinedError: card was declined by the issuer",
+		note: "A pro user's card was declined on the third attempt. The span told you. Nobody grepped anything.",
+	},
+] as const;
+---
+
+<figure class="icmp">
+	<div class="icmp__frame">
+		<div class="icmp__head">
+			<span class="icmp__title">POST /api/checkout · the same handler, twice</span>
+		</div>
+
+		<div class="icmp__rail" role="radiogroup" aria-label="Instrumentation style">
+		{
+			panels.map((p, i) => (
+				<label class="icmp__opt">
+					<input class="icmp__radio" type="radio" name="icmp-mode" id={`icmp-${p.id}`} checked={i === 0} />
+					<span class="icmp__optlabel">{p.label}</span>
+				</label>
+			))
+		}
+	</div>
+
+	{
+		panels.map((p) => (
+			<div class:list={["icmp__panel", `icmp__panel--${p.id}`]}>
+				<p class="icmp__panelcap">{p.label}</p>
+				<div class="icmp__cols">
+					<div class:list={["icmp__codeframe", `icmp__codeframe--${p.id}`]}>
+						<Code code={p.code} lang="ts" theme="vitesse-dark" wrap />
+					</div>
+					<aside class="icmp__span">
+						<div class="icmp__spanhead">
+							<span class="icmp__spantitle">the span you get</span>
+							<span class="icmp__status">Error</span>
+						</div>
+						<div class="icmp__spanname">POST /api/checkout · 1.24s</div>
+						<dl class="icmp__attrs">
+							{p.attrs.map((a) => (
+								<div class:list={["icmp__attr", a.added && "icmp__attr--added"]}>
+									<dt class="icmp__key">{a.key}</dt>
+									<dd class="icmp__val">{a.value}</dd>
+								</div>
+							))}
+						</dl>
+						{p.event && <div class="icmp__event">{p.event}</div>}
+					</aside>
+				</div>
+				<p class="icmp__note">{p.note}</p>
+			</div>
+		))
+	}
+	</div>
+
+	<figcaption class="icmp__cap">
+		Same library, same protocol. The difference is ten lines of code.
+	</figcaption>
+</figure>
+
+<style>
+	.icmp {
+		margin: 40px 0;
+	}
+
+	.icmp__frame {
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		overflow: hidden;
+		background: color-mix(in oklab, var(--bg-elevated) 30%, transparent);
+	}
+
+	.icmp__head {
+		display: flex;
+		align-items: center;
+		padding: 9px 14px;
+		background: var(--bg-elevated);
+		border-bottom: 1px solid var(--border);
+	}
+	.icmp__title {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+	}
+
+	/* ── Toggle rail (hidden when :has() is unavailable) ─────── */
+	.icmp__rail {
+		display: none;
+		flex-wrap: wrap;
+		gap: 8px;
+		padding: 12px 14px 0;
+	}
+	.icmp__radio {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		opacity: 0;
+		pointer-events: none;
+	}
+	.icmp__optlabel {
+		display: inline-flex;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--muted-foreground);
+		background: color-mix(in oklab, var(--bg-elevated) 45%, transparent);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 6px 11px;
+		cursor: pointer;
+		transition:
+			color 140ms ease,
+			border-color 140ms ease,
+			background-color 140ms ease;
+	}
+	.icmp__opt:hover .icmp__optlabel {
+		color: var(--foreground);
+		border-color: color-mix(in oklab, var(--muted-foreground) 50%, var(--border));
+	}
+	.icmp__radio:checked + .icmp__optlabel {
+		color: var(--foreground);
+		border-color: var(--primary);
+		background: color-mix(in oklab, var(--primary) 12%, transparent);
+	}
+	.icmp__radio:focus-visible + .icmp__optlabel {
+		outline: 2px solid var(--primary);
+		outline-offset: 2px;
+	}
+
+	/* ── Panels ─────────────────────────────────────────────── */
+	.icmp__panel {
+		padding: 12px 14px 0;
+	}
+	.icmp__panelcap {
+		display: block;
+		margin: 0 0 6px;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+	}
+	.icmp__panel + .icmp__panel {
+		margin-top: 8px;
+	}
+
+	@supports selector(:has(*)) {
+		.icmp__rail {
+			display: flex;
+		}
+		.icmp__panelcap {
+			display: none;
+		}
+		.icmp:has(#icmp-bad:checked) .icmp__panel--good,
+		.icmp:has(#icmp-good:checked) .icmp__panel--bad {
+			display: none;
+		}
+		.icmp__panel + .icmp__panel {
+			margin-top: 0;
+		}
+	}
+
+	.icmp__cols {
+		display: grid;
+		gap: 12px;
+	}
+	@media (min-width: 880px) {
+		.icmp__cols {
+			grid-template-columns: minmax(0, 1fr) 300px;
+			align-items: start;
+		}
+	}
+
+	/* ── Code frame ─────────────────────────────────────────── */
+	.icmp__codeframe {
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		overflow: hidden;
+	}
+	.icmp__codeframe--bad {
+		border-left: 2px solid color-mix(in oklab, var(--destructive) 55%, var(--border));
+	}
+	.icmp__codeframe--good {
+		border-left: 2px solid color-mix(in oklab, var(--chart-3) 60%, var(--border));
+	}
+	/* Reset the docs-prose pre styling on the shiki output. */
+	.icmp__codeframe :global(pre) {
+		margin: 0;
+		border: 0;
+		border-radius: 0;
+		padding: 14px 16px;
+		font-size: 12.5px;
+		line-height: 1.6;
+		overflow-x: auto;
+	}
+
+	/* ── Resulting span card ────────────────────────────────── */
+	.icmp__span {
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		background: color-mix(in oklab, var(--bg-elevated) 30%, transparent);
+		overflow: hidden;
+	}
+	.icmp__spanhead {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 8px 12px;
+		background: var(--bg-elevated);
+		border-bottom: 1px solid var(--border);
+	}
+	.icmp__spantitle {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+	}
+	.icmp__status {
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: var(--destructive);
+		border: 1px solid color-mix(in oklab, var(--destructive) 45%, transparent);
+		border-radius: 4px;
+		padding: 2px 6px;
+	}
+	.icmp__spanname {
+		padding: 10px 12px 0;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--foreground);
+	}
+	.icmp__attrs {
+		margin: 8px 0 0;
+		padding: 0 12px 12px;
+	}
+	.icmp__attr {
+		display: grid;
+		grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+		gap: 10px;
+		padding: 3px 0;
+	}
+	.icmp__key {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--muted-foreground);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.icmp__val {
+		margin: 0;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--foreground);
+		overflow-wrap: anywhere;
+	}
+	.icmp__attr--added .icmp__key,
+	.icmp__attr--added .icmp__val {
+		color: color-mix(in oklab, var(--chart-3) 70%, var(--foreground));
+	}
+	.icmp__event {
+		margin: 0 12px 12px;
+		padding: 7px 9px;
+		font-family: var(--font-mono);
+		font-size: 10.5px;
+		line-height: 1.5;
+		color: var(--muted-foreground);
+		background: color-mix(in oklab, var(--destructive) 8%, transparent);
+		border: 1px solid color-mix(in oklab, var(--destructive) 25%, var(--border));
+		border-radius: 6px;
+	}
+
+	.icmp__note {
+		margin: 12px 0 0;
+		padding: 8px 2px 14px;
+		font-size: 13px;
+		line-height: 1.6;
+		color: var(--muted-foreground);
+		border-top: 1px dashed color-mix(in oklab, var(--border) 80%, transparent);
+	}
+
+	.icmp__cap {
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--muted-foreground);
+		margin-top: 10px;
+	}
+</style>

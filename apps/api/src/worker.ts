@@ -65,7 +65,7 @@ const HandlerContext = Context.empty() as never
 // live in the same runtime as the routes that emit spans.
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
-	serviceNamespace: "backend",
+	serviceNamespace: "core",
 	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	dropSpanNames: ["McpServer/Notifications."],
 	// Expected 4xx outcomes (validation, not-found, unauthorized, …) record as

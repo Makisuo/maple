@@ -91,7 +91,10 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 			yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId, sessionId })
 			const compiled = CH.compile(
 				CH.getSessionReplayQuery({ startTime: windowStart, endTime: windowEnd }),
-				{ orgId: tenant.orgId, sessionId },
+				{
+					orgId: tenant.orgId,
+					sessionId,
+				},
 			)
 			const replay = yield* warehouse.compiledQueryFirst(tenant, compiled, {
 				profile: "discovery",
@@ -109,90 +112,103 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 					const tenant = yield* CurrentTenant.Context
 					const startTime = yield* toTinybird(payload.start_time, "start_time")
 					const endTime = yield* toTinybird(payload.end_time, "end_time")
-					const page = yield* paginateOffsetQuery(payload, ({ limit, offset }) => {
-						const compiled = CH.compile(
-							CH.sessionReplaysListQuery({
-								...(payload.service_name !== undefined
-									? {
-											serviceName: payload.service_name,
-										}
-									: undefined),
-								...(payload.browser !== undefined ? { browser: payload.browser } : undefined),
-								...(payload.country !== undefined ? { country: payload.country } : undefined),
-								...(payload.device_type !== undefined
-									? { deviceType: payload.device_type }
-									: undefined),
-								...(payload.user_id !== undefined ? { userId: payload.user_id } : undefined),
-								...(payload.user_search !== undefined
-									? { userSearch: payload.user_search }
-									: undefined),
-								...(payload.group_name !== undefined
-									? { groupName: payload.group_name }
-									: undefined),
-								...(payload.visitor_id !== undefined
-									? { visitorId: payload.visitor_id }
-									: undefined),
-								...(payload.has_errors !== undefined
-									? { hasErrors: payload.has_errors }
-									: undefined),
-								...(payload.search !== undefined ? { search: payload.search } : undefined),
-								...(payload.duration_min_ms !== undefined
-									? {
-											durationMinMs: payload.duration_min_ms,
-										}
-									: undefined),
-								...(payload.duration_max_ms !== undefined
-									? {
-											durationMaxMs: payload.duration_max_ms,
-										}
-									: undefined),
-								...(payload.active_time_min_ms !== undefined
-									? {
-											activeTimeMinMs: payload.active_time_min_ms,
-										}
-									: undefined),
-								...(payload.active_time_max_ms !== undefined
-									? {
-											activeTimeMaxMs: payload.active_time_max_ms,
-										}
-									: undefined),
-								limit,
-								offset,
-							}),
-							{ orgId: tenant.orgId, startTime, endTime },
-						)
-						return warehouse
-							.compiledQuery(tenant, compiled, { profile: "list", context: "v2SearchReplays" })
-							.pipe(
-								Effect.map(
-									(rows): ReadonlyArray<V2SessionReplayListItem> =>
-										rows.map((row) => ({
-											id: decodeSessionId(row.sessionId),
-											object: "session_replay" as const,
-											start_time: chToIso(row.startTime),
-											end_time: chToIsoOrNull(row.endTime),
-											duration_ms: row.durationMs,
-											status: row.status,
-											user_id: nullableUserId(row.userId),
-											user_name: row.userName,
-											user_email: row.userEmail,
-											group_id: row.groupId,
-											group_name: row.groupName,
-											url_initial: row.urlInitial,
-											browser_name: row.browserName,
-											os_name: row.osName,
-											device_type: row.deviceType,
-											country: row.country,
-											service_name: row.serviceName,
-											page_views: row.pageViews,
-											click_count: row.clickCount,
-											error_count: row.errorCount,
-											// `length()` is UInt64 — ClickHouse JSON-quotes it as a string.
-											trace_count: Number(row.traceCount),
-										})),
-								),
+					const page = yield* paginateOffsetQuery(payload, ({ limit, offset }) =>
+						Effect.gen(function* () {
+							const compiled = CH.compile(
+								CH.sessionReplaysListQuery({
+									...(payload.service_name !== undefined
+										? {
+												serviceName: payload.service_name,
+											}
+										: undefined),
+									...(payload.browser !== undefined
+										? { browser: payload.browser }
+										: undefined),
+									...(payload.country !== undefined
+										? { country: payload.country }
+										: undefined),
+									...(payload.device_type !== undefined
+										? { deviceType: payload.device_type }
+										: undefined),
+									...(payload.user_id !== undefined
+										? { userId: payload.user_id }
+										: undefined),
+									...(payload.user_search !== undefined
+										? { userSearch: payload.user_search }
+										: undefined),
+									...(payload.group_name !== undefined
+										? { groupName: payload.group_name }
+										: undefined),
+									...(payload.visitor_id !== undefined
+										? { visitorId: payload.visitor_id }
+										: undefined),
+									...(payload.has_errors !== undefined
+										? { hasErrors: payload.has_errors }
+										: undefined),
+									...(payload.search !== undefined
+										? { search: payload.search }
+										: undefined),
+									...(payload.duration_min_ms !== undefined
+										? {
+												durationMinMs: payload.duration_min_ms,
+											}
+										: undefined),
+									...(payload.duration_max_ms !== undefined
+										? {
+												durationMaxMs: payload.duration_max_ms,
+											}
+										: undefined),
+									...(payload.active_time_min_ms !== undefined
+										? {
+												activeTimeMinMs: payload.active_time_min_ms,
+											}
+										: undefined),
+									...(payload.active_time_max_ms !== undefined
+										? {
+												activeTimeMaxMs: payload.active_time_max_ms,
+											}
+										: undefined),
+									limit,
+									offset,
+								}),
+								{ orgId: tenant.orgId, startTime, endTime },
 							)
-					})
+							return yield* warehouse
+								.compiledQuery(tenant, compiled, {
+									profile: "list",
+									context: "v2SearchReplays",
+								})
+								.pipe(
+									Effect.map(
+										(rows): ReadonlyArray<V2SessionReplayListItem> =>
+											rows.map((row) => ({
+												id: decodeSessionId(row.sessionId),
+												object: "session_replay" as const,
+												start_time: chToIso(row.startTime),
+												end_time: chToIsoOrNull(row.endTime),
+												duration_ms: row.durationMs,
+												status: row.status,
+												user_id: nullableUserId(row.userId),
+												user_name: row.userName,
+												user_email: row.userEmail,
+												group_id: row.groupId,
+												group_name: row.groupName,
+												url_initial: row.urlInitial,
+												browser_name: row.browserName,
+												os_name: row.osName,
+												device_type: row.deviceType,
+												country: row.country,
+												service_name: row.serviceName,
+												page_views: row.pageViews,
+												click_count: row.clickCount,
+												error_count: row.errorCount,
+												// `length()` is UInt64 — ClickHouse JSON-quotes it as a string.
+												trace_count: Number(row.traceCount),
+											})),
+									),
+								)
+						}),
+					)
 					return {
 						object: "list" as const,
 						...page,
@@ -206,11 +222,17 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 					const windowEnd = yield* optTinybird(query.window_end, "window_end")
 					const detailCompiled = CH.compile(
 						CH.getSessionReplayQuery({ startTime: windowStart, endTime: windowEnd }),
-						{ orgId: tenant.orgId, sessionId: params.id },
+						{
+							orgId: tenant.orgId,
+							sessionId: params.id,
+						},
 					)
 					const activityCompiled = CH.compile(
 						CH.sessionActivityQuery({ startTime: windowStart, endTime: windowEnd }),
-						{ orgId: tenant.orgId, sessionId: params.id },
+						{
+							orgId: tenant.orgId,
+							sessionId: params.id,
+						},
 					)
 					// Warm the route before fanning out — see the v1 handler for why.
 					yield* warehouse.warmRoute(tenant)
@@ -348,67 +370,70 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 						...query,
 						limit: Math.min(query.limit ?? LIST_LIMIT_DEFAULT, MAX_REPLAY_CHUNKS_PER_REQUEST),
 					}
-					const page = yield* paginateOffsetQuery(pageQuery, ({ limit, offset }) => {
-						const compiled = CH.compile(
-							CH.sessionReplayEventsQuery({
-								startTime: windowStart,
-								endTime: windowEnd,
-								fromChunkSeq,
-								toChunkSeq: toChunkSeq === Number.POSITIVE_INFINITY ? undefined : toChunkSeq,
-								limit: Math.min(limit, MAX_REPLAY_CHUNKS_PER_REQUEST + 1),
-								offset,
-							}),
-							{ orgId: tenant.orgId, sessionId: params.id },
-						)
-						// Two ceilings, because there are two places the payload can come
-						// from. `responseLimits` bounds what the warehouse hands back —
-						// the only guard for pre-cutover rows, which still carry `events`
-						// inline. Blob-backed rows make that response nearly empty, so it
-						// would pass anything; `assertRangeFitsBudget` below bounds the
-						// hydration instead, using sizes the index already knows.
-						return warehouse
-							.compiledQueryBounded(tenant, compiled, {
-								profile: "list",
-								context: "v2GetReplayEvents",
-								responseLimits: {
-									maxRows: MAX_REPLAY_CHUNKS_PER_REQUEST + 1,
-									maxBytes: MAX_REPLAY_EVENTS_RESPONSE_BYTES,
-								},
-							})
-							.pipe(
-								Effect.catchTag(
-									"@maple/query-engine/execution/WarehouseResponseLimitError",
-									() =>
-										Effect.fail(
-											V2SessionReplayRangeTooLarge.make(undefined, {
-												param: "to_chunk_seq",
-											}),
-										),
-								),
-								Effect.tap((rows) =>
-									rows.length === 0 && offset === 0
-										? requireSession(tenant, params.id, windowStart, windowEnd)
-										: Effect.void,
-								),
-								Effect.tap(assertRangeFitsBudget),
-								// Blob-backed rows (empty `events`) get their payload from
-								// R2; pre-cutover rows already carry it inline.
-								Effect.flatMap((rows) => blobs.hydrate(tenant.orgId, params.id, rows)),
-								Effect.map(
-									(rows): ReadonlyArray<V2SessionReplayChunk> =>
-										rows.map((row) => ({
-											object: "session_replay.event_chunk" as const,
-											chunk_seq: Number(row.chunkSeq),
-											timestamp: chToIso(row.timestamp),
-											duration_ms: Number(row.durationMs),
-											event_count: Number(row.eventCount),
-											byte_size: Number(row.byteSize),
-											is_checkpoint: Number(row.isCheckpoint) !== 0,
-											events: row.events,
-										})),
-								),
+					const page = yield* paginateOffsetQuery(pageQuery, ({ limit, offset }) =>
+						Effect.gen(function* () {
+							const compiled = CH.compile(
+								CH.sessionReplayEventsQuery({
+									startTime: windowStart,
+									endTime: windowEnd,
+									fromChunkSeq,
+									toChunkSeq:
+										toChunkSeq === Number.POSITIVE_INFINITY ? undefined : toChunkSeq,
+									limit: Math.min(limit, MAX_REPLAY_CHUNKS_PER_REQUEST + 1),
+									offset,
+								}),
+								{ orgId: tenant.orgId, sessionId: params.id },
 							)
-					})
+							// Two ceilings, because there are two places the payload can come
+							// from. `responseLimits` bounds what the warehouse hands back —
+							// the only guard for pre-cutover rows, which still carry `events`
+							// inline. Blob-backed rows make that response nearly empty, so it
+							// would pass anything; `assertRangeFitsBudget` below bounds the
+							// hydration instead, using sizes the index already knows.
+							return yield* warehouse
+								.compiledQueryBounded(tenant, compiled, {
+									profile: "list",
+									context: "v2GetReplayEvents",
+									responseLimits: {
+										maxRows: MAX_REPLAY_CHUNKS_PER_REQUEST + 1,
+										maxBytes: MAX_REPLAY_EVENTS_RESPONSE_BYTES,
+									},
+								})
+								.pipe(
+									Effect.catchTag(
+										"@maple/query-engine/execution/WarehouseResponseLimitError",
+										() =>
+											Effect.fail(
+												V2SessionReplayRangeTooLarge.make(undefined, {
+													param: "to_chunk_seq",
+												}),
+											),
+									),
+									Effect.tap((rows) =>
+										rows.length === 0 && offset === 0
+											? requireSession(tenant, params.id, windowStart, windowEnd)
+											: Effect.void,
+									),
+									Effect.tap(assertRangeFitsBudget),
+									// Blob-backed rows (empty `events`) get their payload from
+									// R2; pre-cutover rows already carry it inline.
+									Effect.flatMap((rows) => blobs.hydrate(tenant.orgId, params.id, rows)),
+									Effect.map(
+										(rows): ReadonlyArray<V2SessionReplayChunk> =>
+											rows.map((row) => ({
+												object: "session_replay.event_chunk" as const,
+												chunk_seq: Number(row.chunkSeq),
+												timestamp: chToIso(row.timestamp),
+												duration_ms: Number(row.durationMs),
+												event_count: Number(row.eventCount),
+												byte_size: Number(row.byteSize),
+												is_checkpoint: Number(row.isCheckpoint) !== 0,
+												events: row.events,
+											})),
+									),
+								)
+						}),
+					)
 					return { object: "list" as const, ...page }
 				}),
 			)
@@ -417,60 +442,62 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 					const tenant = yield* CurrentTenant.Context
 					const windowStart = yield* optTinybird(query.window_start, "window_start")
 					const windowEnd = yield* optTinybird(query.window_end, "window_end")
-					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) => {
-						const compiled = CH.compile(
-							CH.sessionTranscriptQuery({
-								startTime: windowStart,
-								endTime: windowEnd,
-								limit,
-								offset,
-							}),
-							{ orgId: tenant.orgId, sessionId: params.id },
-						)
-						return warehouse
-							.compiledQuery(tenant, compiled, {
-								profile: "list",
-								context: "v2SessionTranscript",
-							})
-							.pipe(
-								Effect.tap((rows) =>
-									rows.length === 0 && offset === 0
-										? requireSession(tenant, params.id, windowStart, windowEnd)
-										: Effect.void,
-								),
-								Effect.map(
-									(rows): ReadonlyArray<V2SessionTranscriptEvent> =>
-										rows.map((row) => ({
-											object: "session_replay.transcript_event" as const,
-											timestamp: chToIso(row.timestamp),
-											seq: row.seq,
-											type: row.type,
-											url: row.url,
-											trace_id: row.traceId ? decodeTraceId(row.traceId) : null,
-											level: row.level === "" ? null : row.level,
-											message: row.message === "" ? null : row.message,
-											target_selector:
-												row.targetSelector === "" ? null : row.targetSelector,
-											target_text: row.targetText === "" ? null : row.targetText,
-											net_method:
-												row.type === "network" && row.netMethod !== ""
-													? row.netMethod
-													: null,
-											net_url:
-												row.type === "network" && row.netUrl !== ""
-													? row.netUrl
-													: null,
-											net_status: row.type === "network" ? row.netStatus : null,
-											net_duration_ms:
-												row.type === "network" ? row.netDurationMs : null,
-											error_stack:
-												row.type === "error" && row.errorStack !== ""
-													? row.errorStack
-													: null,
-										})),
-								),
+					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
+						Effect.gen(function* () {
+							const compiled = CH.compile(
+								CH.sessionTranscriptQuery({
+									startTime: windowStart,
+									endTime: windowEnd,
+									limit,
+									offset,
+								}),
+								{ orgId: tenant.orgId, sessionId: params.id },
 							)
-					})
+							return yield* warehouse
+								.compiledQuery(tenant, compiled, {
+									profile: "list",
+									context: "v2SessionTranscript",
+								})
+								.pipe(
+									Effect.tap((rows) =>
+										rows.length === 0 && offset === 0
+											? requireSession(tenant, params.id, windowStart, windowEnd)
+											: Effect.void,
+									),
+									Effect.map(
+										(rows): ReadonlyArray<V2SessionTranscriptEvent> =>
+											rows.map((row) => ({
+												object: "session_replay.transcript_event" as const,
+												timestamp: chToIso(row.timestamp),
+												seq: row.seq,
+												type: row.type,
+												url: row.url,
+												trace_id: row.traceId ? decodeTraceId(row.traceId) : null,
+												level: row.level === "" ? null : row.level,
+												message: row.message === "" ? null : row.message,
+												target_selector:
+													row.targetSelector === "" ? null : row.targetSelector,
+												target_text: row.targetText === "" ? null : row.targetText,
+												net_method:
+													row.type === "network" && row.netMethod !== ""
+														? row.netMethod
+														: null,
+												net_url:
+													row.type === "network" && row.netUrl !== ""
+														? row.netUrl
+														: null,
+												net_status: row.type === "network" ? row.netStatus : null,
+												net_duration_ms:
+													row.type === "network" ? row.netDurationMs : null,
+												error_stack:
+													row.type === "error" && row.errorStack !== ""
+														? row.errorStack
+														: null,
+											})),
+									),
+								)
+						}),
+					)
 					return { object: "list" as const, ...page }
 				}),
 			)
@@ -479,28 +506,30 @@ const HttpV2SessionReplaysGroup = HttpApiBuilder.group(MapleApiV2, "sessionRepla
 					const tenant = yield* CurrentTenant.Context
 					const startTime = yield* toTinybird(payload.start_time, "start_time")
 					const endTime = yield* toTinybird(payload.end_time, "end_time")
-					const page = yield* paginateOffsetQuery(payload, ({ limit, offset }) => {
-						const compiled = CH.compile(
-							CH.sessionsForTraceQuery({ traceId: payload.trace_id, limit, offset }),
-							{ orgId: tenant.orgId, startTime, endTime },
-						)
-						return warehouse
-							.compiledQuery(tenant, compiled, {
-								profile: "list",
-								context: "v2ReplaysForTrace",
-							})
-							.pipe(
-								Effect.map(
-									(rows): ReadonlyArray<V2SessionReplayRef> =>
-										rows.map((row) => ({
-											object: "session_replay.ref" as const,
-											id: decodeSessionId(row.sessionId),
-											start_time: chToIso(row.startTime),
-											duration_ms: row.durationMs,
-										})),
-								),
+					const page = yield* paginateOffsetQuery(payload, ({ limit, offset }) =>
+						Effect.gen(function* () {
+							const compiled = CH.compile(
+								CH.sessionsForTraceQuery({ traceId: payload.trace_id, limit, offset }),
+								{ orgId: tenant.orgId, startTime, endTime },
 							)
-					})
+							return yield* warehouse
+								.compiledQuery(tenant, compiled, {
+									profile: "list",
+									context: "v2ReplaysForTrace",
+								})
+								.pipe(
+									Effect.map(
+										(rows): ReadonlyArray<V2SessionReplayRef> =>
+											rows.map((row) => ({
+												object: "session_replay.ref" as const,
+												id: decodeSessionId(row.sessionId),
+												start_time: chToIso(row.startTime),
+												duration_ms: row.durationMs,
+											})),
+									),
+								)
+						}),
+					)
 					return {
 						object: "list" as const,
 						...page,

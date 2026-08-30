@@ -57,8 +57,8 @@ export function finalizeTimeseries<Output extends Record<string, unknown>>(
 	// Top-N group names, ranked by the max of `rankColumn` across all buckets.
 	const ranked = from(baseTable)
 		.select(() => ({
-			groupName: CH.dynamicColumn<string>("groupName"),
-			rank: CH.max_(CH.dynamicColumn<number>(rankColumn)),
+			groupName: CH.dynamicColumn<string>("groupName", outputColumns.groupName),
+			rank: CH.max_(CH.dynamicColumn<number>(rankColumn, outputColumns[rankColumn])),
 		}))
 		.groupBy("groupName")
 		.orderBy(["rank", "desc"])
@@ -66,9 +66,14 @@ export function finalizeTimeseries<Output extends Record<string, unknown>>(
 	// Project down to just `groupName`: an IN subquery must return one column.
 	const topGroups = fromQuery(ranked, "ranked").select(($) => ({ groupName: $.groupName }))
 
+	// Typed from `outputColumns`, which is the whole reason the caller passes
+	// them: the cap re-selects the inner query's columns by name, and an untyped
+	// passthrough would drop every one of their schemas — taking the series-capped
+	// shape of a timeseries from "decodes" to "decodes nothing" while the
+	// uncapped shape of the same query still decoded.
 	const passthrough: Record<string, CH.Expr<unknown>> = {}
-	for (const key of Object.keys(outputColumns)) {
-		passthrough[key] = CH.dynamicColumn(key)
+	for (const [key, columnType] of Object.entries(outputColumns)) {
+		passthrough[key] = CH.dynamicColumn(key, columnType)
 	}
 
 	const capped = from(baseTable)

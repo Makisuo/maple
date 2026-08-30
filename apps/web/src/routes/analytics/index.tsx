@@ -18,6 +18,7 @@ import {
 	AnalyticsBreakdownPanel,
 	type BreakdownDimension,
 } from "@/components/analytics/analytics-breakdown-panel"
+import { AnalyticsBotNotice } from "@/components/analytics/analytics-bot-notice"
 import { AnalyticsFilterSidebar } from "@/components/analytics/analytics-filter-sidebar"
 import { AnalyticsLiveBadge } from "@/components/analytics/analytics-live-badge"
 import {
@@ -305,6 +306,16 @@ function AnalyticsContent({
 	const [picked, setPicked] = useState<AnalyticsMetricKey | null>(null)
 
 	const summaryResult = useRefreshableAtomValue(webAnalyticsSummaryResultAtom({ data: windowInput }))
+
+	// The bot split for this window, measured over every agent regardless of the
+	// Traffic filter — which is the only way it can be reported while that filter
+	// defaults to Humans, and the right semantics anyway: "how much of this window
+	// is crawlers" is a property of the window, not of the view. Same query and so
+	// the same atom as the summary above whenever Traffic is already `all`, which
+	// makes this free in that case rather than a second fetch.
+	const trafficMixResult = useRefreshableAtomValue(
+		webAnalyticsSummaryResultAtom({ data: { ...windowInput, traffic: "all" } }),
+	)
 	const timeseriesResult = useRefreshableAtomValue(
 		webAnalyticsTimeseriesResultAtom({ data: { ...windowInput, bucketSeconds } }),
 	)
@@ -368,6 +379,14 @@ function AnalyticsContent({
 
 					return (
 						<>
+							{/* Above the strip, because it qualifies every number in it.
+							    Decorative like the comparison window: a slow or failed mix
+							    query costs the line, not the page. */}
+							{Result.builder(trafficMixResult)
+								.onSuccess((mix) => (
+									<AnalyticsBotNotice mix={mix} traffic={filters.traffic} />
+								))
+								.orElse(() => null)}
 							<AnalyticsMetricStrip
 								source={source}
 								previous={previousSource}

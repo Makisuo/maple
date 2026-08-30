@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REGISTRY="${HELM_REGISTRY:-ghcr.io}"
-OWNER="${HELM_REGISTRY_OWNER:-makisuo}"
+OWNER="${HELM_REGISTRY_OWNER:-mapletechlabs}"
 OWNER_LC="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
 PACKAGE_DIR="${PACKAGE_DIR:-$ROOT/dist/charts}"
 

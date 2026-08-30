@@ -17,12 +17,18 @@ import {
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
+import { ActiveFilterChips } from "@maple/ui/components/filters/active-filter-chips"
+import { errorFilterChips } from "@/lib/errors/error-filter-chips"
 
 const errorsSearchSchema = Schema.Struct({
 	services: OptionalStringArrayParam,
 	deploymentEnvs: OptionalStringArrayParam,
 	errorTypes: OptionalStringArrayParam,
 	serviceVersions: OptionalStringArrayParam,
+	excludedServices: OptionalStringArrayParam,
+	excludedDeploymentEnvs: OptionalStringArrayParam,
+	excludedErrorTypes: OptionalStringArrayParam,
+	excludedServiceVersions: OptionalStringArrayParam,
 	showSpam: Schema.optional(Schema.Union([Schema.Boolean, BooleanFromStringParam])),
 	rootOnly: Schema.optional(Schema.Union([Schema.Boolean, BooleanFromStringParam])),
 	view: Schema.optional(Schema.Literals(HUB_VIEWS)),
@@ -65,6 +71,33 @@ function ErrorsContent() {
 		})
 	}
 
+	const activeFilterChips = errorFilterChips(search).map((chip) => ({
+		id: chip.param,
+		label: chip.label,
+		values: chip.values,
+		negated: chip.negated,
+		onRemove: () => navigate({ search: (prev) => ({ ...prev, [chip.param]: undefined }) }),
+	}))
+
+	const clearExclusions = () => {
+		const excluded = errorFilterChips(search).filter((chip) => chip.negated)
+		navigate({
+			search: (prev) => ({
+				...prev,
+				...Object.fromEntries(excluded.map((chip) => [chip.param, undefined])),
+			}),
+		})
+	}
+
+	const clearFacetFilters = () => {
+		navigate({
+			search: (prev) => ({
+				...prev,
+				...Object.fromEntries(errorFilterChips(prev).map((chip) => [chip.param, undefined])),
+			}),
+		})
+	}
+
 	const view: HubView = search.view ?? "open"
 	const sort: HubSort = search.sort ?? "volume"
 	const severity: SeverityFilter = search.severity ?? "all"
@@ -91,6 +124,7 @@ function ErrorsContent() {
 						</DashboardLayout.Header>
 					</DashboardLayout.Sticky>
 					<DashboardLayout.Scroll>
+						<ActiveFilterChips chips={activeFilterChips} onClearAll={clearFacetFilters} />
 						<ErrorsHub
 							view={view}
 							sort={sort}
@@ -100,6 +134,11 @@ function ErrorsContent() {
 							deploymentEnvs={search.deploymentEnvs}
 							errorTypes={search.errorTypes}
 							serviceVersions={search.serviceVersions}
+							excludedServices={search.excludedServices}
+							excludedDeploymentEnvs={search.excludedDeploymentEnvs}
+							excludedErrorTypes={search.excludedErrorTypes}
+							excludedServiceVersions={search.excludedServiceVersions}
+							onClearExclusions={clearExclusions}
 							rootOnly={search.rootOnly}
 							showSpam={search.showSpam}
 						/>

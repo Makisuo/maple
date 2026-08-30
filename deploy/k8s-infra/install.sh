@@ -3,7 +3,7 @@ set -euo pipefail
 
 NAMESPACE="${MAPLE_NAMESPACE:-maple}"
 RELEASE="${MAPLE_RELEASE:-maple-k8s-infra}"
-CHART_REF="${MAPLE_CHART_REF:-oci://ghcr.io/makisuo/charts/maple-k8s-infra}"
+CHART_REF="${MAPLE_CHART_REF:-oci://ghcr.io/mapletechlabs/charts/maple-k8s-infra}"
 CHART_VERSION="${MAPLE_CHART_VERSION:-}"
 INGEST_ENDPOINT="${MAPLE_INGEST_ENDPOINT:-}"
 INGEST_KEY="${MAPLE_INGEST_KEY:-}"
@@ -30,7 +30,7 @@ Optional:
   MAPLE_RELEASE=maple-k8s-infra
   MAPLE_CLUSTER_NAME=production
   MAPLE_DEPLOYMENT_ENVIRONMENT=prod
-  MAPLE_CHART_REF=oci://ghcr.io/makisuo/charts/maple-k8s-infra
+  MAPLE_CHART_REF=oci://ghcr.io/mapletechlabs/charts/maple-k8s-infra
   MAPLE_CHART_VERSION=0.5.0
   MAPLE_INSTALL_YES=1      Skip interactive context confirmation.
 

@@ -36,7 +36,16 @@ export class ListReplaysRequest extends Schema.Class<ListReplaysRequest>("ListRe
 	visitorId: Schema.optional(Schema.String),
 	hasErrors: Schema.optional(Schema.Boolean),
 	search: Schema.optional(Schema.String),
-	cursor: Schema.optional(Schema.String),
+	/**
+	 * Keyset cursor: the `StartTime` of the last row of the previous page.
+	 *
+	 * Typed as a warehouse datetime rather than a bare string because it reaches
+	 * the query builder as a `StartTime <` comparison, which encodes it through
+	 * that column's codec. A forged cursor was a compile failure, and every
+	 * caller of this query dies on one — so it was a 500 where the shape of the
+	 * value is exactly what this boundary is for.
+	 */
+	cursor: Schema.optional(TinybirdDateTime),
 	// Session-time range filters (ms). `durationMin/Max` filter the stored
 	// wall-clock duration; `activeTimeMin/Max` filter active (non-idle) time
 	// computed from session_events gaps (server-side: setting either active bound

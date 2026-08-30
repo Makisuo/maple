@@ -40,6 +40,7 @@ import { baselineWarehouseCapabilities, type WarehouseCapabilities } from "./cap
 import * as CH from "./ch"
 import { builderFixtures } from "./ch/builder-fixtures"
 import { compilePipeQuery } from "./ch/pipe-dispatch"
+import { compiledQueryOf } from "./execution/compiled-input"
 import { fingerprintSql } from "./execution/fingerprint"
 import { makeQueryEngineExecute, type QueryEngineWarehouse, type QueryTenant } from "./runtime"
 
@@ -94,6 +95,9 @@ export interface PipeFixture {
 	readonly params: Record<string, unknown>
 	/** Run under every capability variant, not just the baseline. */
 	readonly allCapabilities?: boolean
+	/** Overrides for the synthetic zero-value row where the row schema demands
+	 *  more than the ClickHouse type — see `BuilderFixture.sampleValues`. */
+	readonly sampleValues?: Readonly<Record<string, unknown>>
 }
 
 const TRACE_ID = "0af7651916cd43dd8448eb211c80319c"
@@ -258,7 +262,14 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	{ pipe: "error_detail_traces", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 	{ pipe: "error_issues", label: "default", params: {} },
 	{ pipe: "error_issue_timeseries", label: "default", params: { fingerprint_hash: FINGERPRINT } },
-	{ pipe: "error_issue_sample_traces", label: "default", params: { fingerprint_hash: FINGERPRINT } },
+	{
+		pipe: "error_issue_sample_traces",
+		label: "default",
+		params: { fingerprint_hash: FINGERPRINT },
+		// TraceId/SpanId decode through their branded schemas (minLength 1), which
+		// the synthetic row's "" would fail.
+		sampleValues: { traceId: TRACE_ID, spanId: "b7ad6b7169203331" },
+	},
 	{ pipe: "error_issue_environments", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 
 	{ pipe: "list_metrics", label: "default", params: {} },
@@ -337,13 +348,16 @@ export function collectPipeCatalog(): ReadonlyArray<CatalogEntry> {
 				...fixture.params,
 			} as Record<string, unknown> & { org_id: string }
 
-			const compiled = compilePipeQuery(fixture.pipe, params as never, variant.capabilities)
-			if (compiled === undefined) {
+			const lowered = compilePipeQuery(fixture.pipe, params as never, variant.capabilities)
+			if (lowered === undefined) {
 				throw new Error(
 					`SQL catalog: compilePipeQuery returned undefined for "${fixture.pipe}" (${fixture.label}). ` +
 						`The pipe is in warehouseQueries but has no dispatch arm.`,
 				)
 			}
+			// The catalog wants a throw: a fixture that will not compile must fail
+			// its test rather than drop silently out of the sweep.
+			const compiled = Effect.runSync(lowered)
 			entries.push({
 				id: `pipe:${fixture.pipe}:${fixture.label}:${variant.label}`,
 				source: "pipe",
@@ -354,6 +368,7 @@ export function collectPipeCatalog(): ReadonlyArray<CatalogEntry> {
 				sql: compiled.sql,
 				fingerprint: fingerprintSql(compiled.sql),
 				compiled,
+				...(fixture.sampleValues ? { sampleValues: fixture.sampleValues } : undefined),
 			})
 		}
 	}
@@ -822,12 +837,13 @@ function makeCapturingWarehouse(capabilities: WarehouseCapabilities): {
 			captured.push({ sql })
 			return empty
 		},
-		compiledQuery: (_tenant, compiled) => {
+		compiledQuery: (_tenant, input) => {
+			const compiled = compiledQueryOf(input)
 			captured.push({ sql: compiled.sql, compiled: compiled as CompiledQuery<unknown> })
 			return empty
 		},
 		compiledQueryWithCapabilities: (_tenant, compile) => {
-			const compiled = compile(capabilities)
+			const compiled = Effect.runSync(compile(capabilities))
 			captured.push({ sql: compiled.sql, compiled: compiled as CompiledQuery<unknown> })
 			return empty
 		},
@@ -938,7 +954,97 @@ export function dedupeByFingerprint(entries: ReadonlyArray<CatalogEntry>): Reado
 
 // Anti-rot assertions
 
+/**
+ * Catalog entries whose rows nothing validates.
+ *
+ * `rowSchemaSource: "none"` means at least one selected expression had no type
+ * to read — a `rawExpr` without a column type, a `dynamicColumn`, an
+ * un-annotated custom function — so `decodeRows` degrades to an identity cast
+ * and a warehouse that changes a column's wire format is invisible until the
+ * value reaches a `Schema.Class` constructor several layers away.
+ *
+ * The allowlist below is asserted *exactly*, in both directions: a query that
+ * stops deriving fails, and so does one still listed here after it starts.
+ *
+ * It is empty, and that is the invariant worth keeping: every SQL shape the
+ * product can emit validates the rows it gets back. Adding an entry is how you
+ * say a query cannot — and it needs a sentence here saying why.
+ */
+export const UNDECODED_QUERIES: ReadonlySet<string> = new Set([])
+
+/** `source:name` for every catalog entry that decodes nothing. */
+export function undecodedQueries(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<string> {
+	const undecoded = new Set<string>()
+	for (const entry of entries) {
+		if (entry.compiled?.rowSchemaSource === "none") undecoded.add(`${entry.source}:${entry.name}`)
+	}
+	return [...undecoded].sort()
+}
+
+/**
+ * The same list with the columns responsible, for the assertion's failure
+ * message. Derivation is all-or-nothing, so "this query decodes nothing" is
+ * useless on its own — these are the aliases to give a type.
+ */
+export function undecodedColumns(
+	entries: ReadonlyArray<CatalogEntry>,
+): ReadonlyMap<string, ReadonlyArray<string>> {
+	const columns = new Map<string, ReadonlyArray<string>>()
+	for (const entry of entries) {
+		if (entry.compiled?.rowSchemaSource !== "none") continue
+		const key = `${entry.source}:${entry.name}`
+		if (!columns.has(key)) columns.set(key, entry.compiled.untypedColumns)
+	}
+	return columns
+}
+
 /** Pipe names in `warehouseQueries` that no fixture covers. */
+/**
+ * Tables that hold pre-aggregated buckets, and the raw per-row tables a query
+ * splices against them. A query naming BOTH is reconstructing a window from two
+ * tiers, and its boundary is the thing `./ch/queries/rollup-splice` exists to
+ * own.
+ */
+const ROLLUP_TABLE_RE = /\b(\w+_(?:hourly|minutely|daily)|\w+_aggregates_\w+)\b/
+const RAW_TABLE_RE =
+	/\bFROM\s+(?:traces|logs|service_map_spans|service_map_children|service_overview_spans)\b/
+
+/**
+ * The `firstFullBucket` fragment `makeGrain` emits. Structural rather than a
+ * string match on the whole expression: what matters is that the boundary is
+ * *computed* — floor, compare to the unrounded start, advance one bucket only
+ * when it is not already aligned — not that it is spelled a particular way.
+ */
+const SPLICE_BOUNDARY_RE = /=\s*toStartOf\w+\([\s\S]*?\+ INTERVAL 1 (?:HOUR|MINUTE)\)/
+
+/**
+ * Two-tier queries whose window boundary does not come from `rollup-splice`.
+ *
+ * A rollup tier and a raw tier have to tile the window exactly once — no gap, no
+ * overlap. Written by hand that is two inequalities that must stay each other's
+ * complement, and the failure is silent: counts inflate or drop, nothing errors.
+ * The service-map family carried both outcomes at once — `serviceDependencies`
+ * hand-rolled it correctly, `serviceDbEdges` hand-rolled the same boundary with
+ * the start floored to the hour, and for every non-aligned window the DB numbers
+ * read high against the service edges drawn beside them.
+ *
+ * There is deliberately no allowlist. A single-tier query never trips this (it
+ * names one class of table); a genuinely approximate one — `serviceHealthSnapshot`
+ * floors to the hour on purpose — reads only its rollup and so never trips it
+ * either. If a new query needs to be exempt, that is a signal the rule found
+ * something, not that the rule needs a hole.
+ */
+export function unsplicedTwoTierQueries(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<string> {
+	return entries
+		.filter(
+			(entry) =>
+				ROLLUP_TABLE_RE.test(entry.sql) &&
+				RAW_TABLE_RE.test(entry.sql) &&
+				!SPLICE_BOUNDARY_RE.test(entry.sql),
+		)
+		.map((entry) => entry.id)
+}
+
 export function uncoveredPipes(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<WarehouseQueryName> {
 	const covered = new Set(entries.map((entry) => entry.name))
 	return warehouseQueries.filter((name) => !covered.has(name))

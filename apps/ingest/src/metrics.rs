@@ -126,10 +126,41 @@ static WAL_SHARD_FULL_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
         .build()
 });
 
-static WAL_COMPACTED_BYTES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+static WAL_SEGMENTS_SEALED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     METER
-        .u64_counter("ingest_wal_compacted_bytes_total")
-        .with_description("Exported WAL bytes reclaimed by rewriting a lane file from its cursor")
+        .u64_counter("ingest_wal_segments_sealed_total")
+        .with_description("WAL segments closed at the size threshold and replaced by a new one")
+        .build()
+});
+
+static WAL_SHIPPED_BYTES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_wal_shipped_bytes_total")
+        .with_description("WAL segment bytes uploaded to the durability object store")
+        .build()
+});
+
+static WAL_SHIP_OUTCOMES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_wal_ship_outcomes_total")
+        .with_description(
+            "WAL segments that were not uploaded, by outcome: exported before the upload ran, \
+             dropped because the shipper queue was full, or failed",
+        )
+        .build()
+});
+
+static WAL_FRAMES_RECOVERED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_wal_frames_recovered_total")
+        .with_description("Frames re-committed from another task's orphaned WAL segments")
+        .build()
+});
+
+static WAL_RECLAIMED_BYTES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_wal_reclaimed_bytes_total")
+        .with_description("WAL bytes freed by deleting fully exported segments")
         .build()
 });
 
@@ -210,6 +241,13 @@ static METRICS_SUMMARY_DROPPED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| 
         .build()
 });
 
+static AUTUMN_ENTITLEMENT_DECISIONS_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("autumn_entitlement_decisions_total")
+        .with_description("Autumn entitlement decisions, by cache outcome")
+        .build()
+});
+
 static AUTUMN_FLUSHES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     METER
         .u64_counter("autumn_track_flushes_total")
@@ -245,7 +283,7 @@ static WAL_SHARD_BYTES: LazyLock<Gauge<u64>> = LazyLock::new(|| {
     METER
         .u64_gauge("ingest_wal_shard_bytes")
         .with_unit("By")
-        .with_description("Current WAL shard file size")
+        .with_description("Bytes held by a WAL lane's segments on disk")
         .build()
 });
 
@@ -532,7 +570,7 @@ pub fn wal_commit_bytes(shard: usize, destination: &str, bytes: u64) {
     );
 }
 
-/// Current WAL lane file size.
+/// Bytes a WAL lane currently holds on disk, exported prefix included.
 pub fn wal_shard_bytes(shard: usize, destination: &str, bytes: u64) {
     WAL_SHARD_BYTES.record(
         bytes,
@@ -543,9 +581,65 @@ pub fn wal_shard_bytes(shard: usize, destination: &str, bytes: u64) {
     );
 }
 
-/// Exported bytes reclaimed by compacting a WAL lane file.
-pub fn wal_lane_compacted(shard: usize, destination: &str, reclaimed_bytes: u64) {
-    WAL_COMPACTED_BYTES_TOTAL.add(
+/// A lane sealed its active segment and opened the next one.
+pub fn wal_segment_sealed(shard: usize, destination: &str) {
+    WAL_SEGMENTS_SEALED_TOTAL.add(
+        1,
+        &[
+            KeyValue::new("shard", shard.to_string()),
+            KeyValue::new("destination", destination.to_owned()),
+        ],
+    );
+}
+
+/// A sealed WAL segment reached the durability object store.
+pub fn wal_segment_shipped(shard: usize, destination: &str, bytes: u64) {
+    WAL_SHIPPED_BYTES_TOTAL.add(
+        bytes,
+        &[
+            KeyValue::new("shard", shard.to_string()),
+            KeyValue::new("destination", destination.to_owned()),
+        ],
+    );
+}
+
+fn wal_ship_outcome(shard: usize, destination: &str, outcome: &'static str, detail: String) {
+    WAL_SHIP_OUTCOMES_TOTAL.add(
+        1,
+        &[
+            KeyValue::new("shard", shard.to_string()),
+            KeyValue::new("destination", destination.to_owned()),
+            KeyValue::new("outcome", outcome),
+            KeyValue::new("error.type", detail),
+        ],
+    );
+}
+
+/// The segment exported before its upload ran, so there was nothing to protect.
+/// The expected outcome for most segments in a healthy pipeline.
+pub fn wal_ship_skipped(shard: usize, destination: &str) {
+    wal_ship_outcome(shard, destination, "exported_first", String::new());
+}
+
+/// The shipper queue was full, so this segment stays local-only. Sustained
+/// non-zero means the object store cannot keep up with segment rotation.
+pub fn wal_ship_dropped(shard: usize, destination: &str) {
+    wal_ship_outcome(shard, destination, "queue_full", String::new());
+}
+
+/// An upload or delete against the object store failed.
+pub fn wal_ship_failed(shard: usize, destination: &str, error_kind: &str) {
+    wal_ship_outcome(shard, destination, "failed", error_kind.to_owned());
+}
+
+/// Frames re-committed from a dead task's orphaned segments.
+pub fn wal_frames_recovered(frames: u64) {
+    WAL_FRAMES_RECOVERED_TOTAL.add(frames, &[]);
+}
+
+/// Bytes freed by deleting segments the export cursor has moved past.
+pub fn wal_segments_reclaimed(shard: usize, destination: &str, reclaimed_bytes: u64) {
+    WAL_RECLAIMED_BYTES_TOTAL.add(
         reclaimed_bytes,
         &[
             KeyValue::new("shard", shard.to_string()),
@@ -736,6 +830,12 @@ pub fn metrics_summary_dropped() {
 pub fn autumn_flush(status: &'static str, duration_secs: f64) {
     AUTUMN_FLUSH_DURATION_SECONDS.record(duration_secs, &[]);
     AUTUMN_FLUSHES_TOTAL.add(1, &[KeyValue::new("status", status)]);
+}
+
+/// An entitlement decision was served (`source` is `hit` or `miss`). The miss
+/// rate is what says whether the decision cache is doing its job.
+pub fn autumn_entitlement_decision(source: &'static str) {
+    AUTUMN_ENTITLEMENT_DECISIONS_TOTAL.add(1, &[KeyValue::new("source", source)]);
 }
 
 /// Unflushed Autumn usage currently held in memory, in GB.

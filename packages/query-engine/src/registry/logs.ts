@@ -16,6 +16,8 @@ export const logsQueryOptions = (filters: LogsFilters | undefined) => {
 	return {
 		serviceName: filters?.serviceName,
 		severity: filters?.severity,
+		serviceNames: filters?.serviceNames,
+		severities: filters?.severities,
 		minSeverity: filters?.minSeverity,
 		traceId: filters?.traceId,
 		spanId: filters?.spanId,
@@ -25,6 +27,10 @@ export const logsQueryOptions = (filters: LogsFilters | undefined) => {
 		matchModes,
 		attributeFilters: filters?.attributeFilters,
 		resourceAttributeFilters: filters?.resourceAttributeFilters,
+		excludedServiceNames: filters?.excludedServiceNames,
+		excludedSeverities: filters?.excludedSeverities,
+		excludedEnvironments: filters?.excludedEnvironments,
+		excludedNamespaces: filters?.excludedNamespaces,
 	}
 }
 

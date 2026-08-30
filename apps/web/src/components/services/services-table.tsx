@@ -4,6 +4,7 @@ import { Result, useAtomValue } from "@/lib/effect-atom"
 import { Link, useNavigate } from "@tanstack/react-router"
 
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { useAlertIncidentsList } from "@/hooks/use-alerts-list"
 import {
@@ -136,9 +137,16 @@ function groupByNamespace(services: ServiceOverview[]): [string, [string, Servic
  * Unset `groupBy` in the URL means auto: group by namespace as soon as the
  * displayed rows carry any `service.namespace` (the semconv grouping
  * dimension), else fall back to the environment grouping every org has.
+ * While the org-global namespace pin is active every row shares one
+ * namespace, so auto falls back to environment grouping.
  */
-function resolveGroupBy(explicit: ServicesGroupBy | undefined, services: ServiceOverview[]): ServicesGroupBy {
+function resolveGroupBy(
+	explicit: ServicesGroupBy | undefined,
+	services: ServiceOverview[],
+	namespacePinned: boolean,
+): ServicesGroupBy {
 	if (explicit !== undefined) return explicit
+	if (namespacePinned) return "environment"
 	return services.some((service) => service.serviceNamespace !== "") ? "namespace" : "environment"
 }
 
@@ -605,6 +613,7 @@ function LoadingState() {
 
 export function ServicesTable({ filters }: ServicesTableProps) {
 	const navigate = useNavigate()
+	const pinnedNamespace = useGlobalNamespace()
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		filters?.startTime,
 		filters?.endTime,
@@ -619,6 +628,9 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 				environments: filters?.environments,
 				namespaces: filters?.namespaces,
 				commitShas: filters?.commitShas,
+				excludedEnvironments: filters?.excludedEnvironments,
+				excludedNamespaces: filters?.excludedNamespaces,
+				excludedCommitShas: filters?.excludedCommitShas,
 			},
 		}),
 	)
@@ -631,6 +643,9 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 				environments: filters?.environments,
 				namespaces: filters?.namespaces,
 				commitShas: filters?.commitShas,
+				excludedEnvironments: filters?.excludedEnvironments,
+				excludedNamespaces: filters?.excludedNamespaces,
+				excludedCommitShas: filters?.excludedCommitShas,
 			},
 		}),
 	)
@@ -647,6 +662,9 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 		environments: filters?.environments,
 		namespaces: filters?.namespaces,
 		commitShas: filters?.commitShas,
+		excludedEnvironments: filters?.excludedEnvironments,
+		excludedNamespaces: filters?.excludedNamespaces,
+		excludedCommitShas: filters?.excludedCommitShas,
 	})
 
 	// Progressive enrichment — does not block first paint. The baseline payload
@@ -678,7 +696,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 				: overviewResponse.data
 
 			const hasNamespaces = services.some((service) => service.serviceNamespace !== "")
-			const groupBy = resolveGroupBy(filters?.groupBy, services)
+			const groupBy = resolveGroupBy(filters?.groupBy, services, pinnedNamespace !== null)
 			// One shape for both modes: namespace mode nests environment groups
 			// under each namespace; environment mode is a single anonymous outer
 			// group whose header is skipped.

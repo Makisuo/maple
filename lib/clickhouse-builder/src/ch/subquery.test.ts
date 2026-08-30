@@ -1,19 +1,21 @@
 import { describe, expect, it } from "@effect/vitest"
-import { compileCH } from "./compile"
+import { Effect } from "effect"
+import { compileCHUnsafe } from "./compile"
 import * as CH from "./index"
 import { param } from "./param"
 
-const Events = CH.table("events", {
-	OrgId: CH.string,
-	TraceId: CH.string,
-	ServiceName: CH.string,
-	Count: CH.uint64,
-})
+const Events = CH.table(
+	"events",
+	{
+		OrgId: CH.string,
+		TraceId: CH.string,
+		ServiceName: CH.string,
+		Count: CH.uint64,
+	},
+	{ tenantColumn: "OrgId" },
+)
 
-const Excluded = CH.table("excluded", {
-	OrgId: CH.string,
-	TraceId: CH.string,
-})
+const Excluded = CH.table("excluded", { OrgId: CH.string, TraceId: CH.string }, { tenantColumn: "OrgId" })
 
 const excludedTraces = CH.from(Excluded)
 	.select(($) => ({ TraceId: $.TraceId }))
@@ -22,7 +24,7 @@ const excludedTraces = CH.from(Excluded)
 
 describe("subquery conditions", () => {
 	it("splices a CHQuery as the IN subquery", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ count: CH.count() }))
 				.where(($) => [$.OrgId.eq(param.string("orgId")), CH.inSubquery($.TraceId, excludedTraces)]),
@@ -34,7 +36,7 @@ describe("subquery conditions", () => {
 	})
 
 	it("resolves the inner query's params from the outer param set", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ count: CH.count() }))
 				.where(($) => [$.OrgId.eq(param.string("orgId")), CH.inSubquery($.TraceId, excludedTraces)]),
@@ -48,7 +50,7 @@ describe("subquery conditions", () => {
 	})
 
 	it("emits NOT IN for notInSubquery", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ count: CH.count() }))
 				.where(($) => [
@@ -62,7 +64,7 @@ describe("subquery conditions", () => {
 	})
 
 	it("still accepts pre-compiled SQL", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ count: CH.count() }))
 				.where(($) => [
@@ -78,14 +80,14 @@ describe("subquery conditions", () => {
 	it("does NOT let a scoped subquery scope the outer query", () => {
 		// `x IN (SELECT y FROM t WHERE OrgId = 'a')` does not confine the outer
 		// read to org 'a' — another org can hold the same `y`.
-		const compiled = compileCH(
+		const compiled = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ count: CH.count() }))
 				.where(($) => [CH.inSubquery($.TraceId, excludedTraces)]),
 			{ orgId: "org_1" },
 		)
 
-		expect(compiled.tenantScope).toBe("cross-org")
+		expect(compiled.tenantScope).toBe("cross-tenant")
 	})
 })
 
@@ -96,7 +98,7 @@ describe("withCTE with a query", () => {
 			.where(($) => [$.OrgId.eq(param.string("orgId"))])
 			.groupBy("TraceId")
 
-		const compiled = compileCH(
+		const compiled = compileCHUnsafe(
 			CH.from(CH.table("hot", { TraceId: CH.string, total: CH.uint64 }))
 				.select(($) => ({ TraceId: $.TraceId }))
 				.withCTE("hot", scopedCte),
@@ -105,28 +107,28 @@ describe("withCTE with a query", () => {
 
 		expect(compiled.sql.startsWith("WITH hot AS (")).toBe(true)
 		// No OrgId predicate on the outer query — the scope comes from the CTE.
-		expect(compiled.tenantScope).toBe("org")
+		expect(compiled.tenantScope).toBe("single-tenant")
 	})
 
-	it("reads as cross-org when the CTE query is itself unscoped", () => {
+	it("reads as cross-tenant when the CTE query is itself unscoped", () => {
 		const unscopedCte = CH.from(Events)
 			.select(($) => ({ TraceId: $.TraceId }))
 			.groupBy("TraceId")
 
-		const compiled = compileCH(
+		const compiled = compileCHUnsafe(
 			CH.from(CH.table("hot", { TraceId: CH.string }))
 				.select(($) => ({ TraceId: $.TraceId }))
 				.withCTE("hot", unscopedCte),
 			{},
 		)
 
-		expect(compiled.tenantScope).toBe("cross-org")
+		expect(compiled.tenantScope).toBe("cross-tenant")
 	})
 })
 
 describe("having", () => {
 	it("emits HAVING after GROUP BY and before ORDER BY", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ serviceName: $.ServiceName, total: CH.sum($.Count) }))
 				.where(($) => [$.OrgId.eq(param.string("orgId"))])
@@ -143,7 +145,7 @@ describe("having", () => {
 
 	it("drops undefined entries like where does", () => {
 		const build = (filterEmpty: boolean) =>
-			compileCH(
+			compileCHUnsafe(
 				CH.from(Events)
 					.select(($) => ({ serviceName: $.ServiceName, total: CH.sum($.Count) }))
 					.where(($) => [$.OrgId.eq(param.string("orgId"))])
@@ -161,7 +163,7 @@ describe("having", () => {
 	it("does NOT scope a query via the tenant column", () => {
 		// By HAVING time the rows are aggregated — the scan that produced them
 		// already crossed tenants.
-		const compiled = compileCH(
+		const compiled = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ orgId: $.OrgId, total: CH.sum($.Count) }))
 				.groupBy("orgId")
@@ -170,13 +172,13 @@ describe("having", () => {
 		)
 
 		expect(compiled.sql).toContain("HAVING OrgId = 'org_1'")
-		expect(compiled.tenantScope).toBe("cross-org")
+		expect(compiled.tenantScope).toBe("cross-tenant")
 	})
 })
 
 describe("Expr.mod", () => {
 	it("emits an infix modulo", () => {
-		const { sql } = compileCH(
+		const { sql } = compileCHUnsafe(
 			CH.from(Events)
 				.select(($) => ({ count: CH.count() }))
 				.where(($) => [$.OrgId.eq(param.string("orgId")), CH.cityHash64($.TraceId).mod(16).eq(0)]),
@@ -184,5 +186,170 @@ describe("Expr.mod", () => {
 		)
 
 		expect(sql).toContain("cityHash64(TraceId) % 16 = 0")
+	})
+})
+
+describe("deferred params", () => {
+	// A spliced subquery compiles with no params so the outer pass resolves them.
+	// Nested compilations (CTEs, FROM-subqueries, joins) are part of the same
+	// string, so they have to inherit the deferral rather than demand values.
+	it("defers a nested FROM-subquery's params to the outer compile", () => {
+		const inner = CH.from(Events)
+			.select(($) => ({ TraceId: $.TraceId }))
+			.where(($) => [$.OrgId.eq(param.string("orgId"))])
+
+		const spliced = CH.fromQuery(inner, "sub").select(($) => ({ traceId: $.TraceId }))
+
+		const outer = CH.from(Events)
+			.select(($) => ({ traceId: $.TraceId }))
+			.where(($) => [$.OrgId.eq(param.string("orgId")), CH.inSubquery($.TraceId, spliced)])
+
+		expect(compileCHUnsafe(outer, { orgId: "org_1" }).sql).not.toContain("__PARAM_")
+	})
+})
+
+describe("spliced sub-SELECTs", () => {
+	const cheapScan = CH.from(Events)
+		.select(($) => ({ ts: $.TraceId }))
+		.where(($) => [$.OrgId.eq(param.string("orgId"))])
+		.limit(100)
+
+	it("splices the inner SQL through the wrapper", () => {
+		const cutoff = CH.subqueryExpr(cheapScan, CH.string, (sql) => `(SELECT min(ts) FROM (${sql}))`)
+		const { sql } = compileCHUnsafe(
+			CH.from(Events)
+				.select(($) => ({ count: CH.count() }))
+				.where(($) => [$.OrgId.eq(param.string("orgId")), $.TraceId.gte(cutoff)]),
+			{ orgId: "org_1" },
+		)
+
+		expect(sql).toContain("TraceId >= (SELECT min(ts) FROM (")
+		// The inner query's placeholder was resolved by the OUTER substitution
+		// pass, with the outer params — the whole reason the splice defers.
+		expect(sql).not.toContain("__PARAM_")
+		expect(sql.match(/OrgId = 'org_1'/g)).toHaveLength(2)
+	})
+
+	// The point of the whole construct: an unencodable value inside the inner
+	// query used to throw from whatever function *built* the expression, outside
+	// any Effect. Now it throws from the outer compile, which `compile` catches.
+	it.effect("defers the inner compile so its failure lands in the outer one", () =>
+		Effect.gen(function* () {
+			const badInner = CH.from(Events)
+				.select(($) => ({ ts: $.TraceId }))
+				.where(($) => [$.Count.eq("lots" as never)])
+
+			// Building the expression compiles nothing.
+			const cutoff = CH.subqueryExpr(badInner, CH.string)
+
+			const outer = CH.from(Events)
+				.select(($) => ({ count: CH.count() }))
+				.where(($) => [$.OrgId.eq(param.string("orgId")), $.TraceId.gte(cutoff)])
+
+			const error = yield* Effect.flip(CH.compile(outer, { orgId: "org_1" }))
+			expect(error._tag).toBe("@maple-dev/clickhouse-builder/QueryBuilderError")
+			expect(error.code).toBe("InvalidLiteral")
+		}),
+	)
+
+	it("splices as a condition and as an untyped expression", () => {
+		const { sql } = compileCHUnsafe(
+			CH.from(Events)
+				.select(($) => ({
+					key: CH.untypedSubqueryExpr(cheapScan, (s) => `(SELECT any(ts) FROM (${s}))`),
+				}))
+				.where(($) => [
+					$.OrgId.eq(param.string("orgId")),
+					CH.subqueryCond(cheapScan, (s) => `TraceId IN (SELECT ts FROM (${s}))`),
+				]),
+			{ orgId: "org_1" },
+		)
+
+		expect(sql).toContain("TraceId IN (SELECT ts FROM (")
+		expect(sql).toContain("(SELECT any(ts) FROM (")
+	})
+})
+
+describe("CTE chains", () => {
+	// `WITH a AS (…), b AS (SELECT … FROM a)`: `b` names a table this compilation
+	// cannot see, so without the sibling's scope in hand it reads as
+	// cross-tenant — and so does the outer query that reads `b`.
+	it("a CTE that reads an earlier sibling inherits its scope", () => {
+		const scoped = CH.from(Events)
+			.select(($) => ({ TraceId: $.TraceId, Count: $.Count }))
+			.where(($) => [$.OrgId.eq(param.string("orgId"))])
+
+		const scopedCte = CH.table("scoped", { TraceId: CH.string, Count: CH.uint64 })
+		const derivedCte = CH.table("derived", { TraceId: CH.string, Count: CH.uint64 })
+
+		const compiled = compileCHUnsafe(
+			CH.from(derivedCte)
+				.withCTE(
+					"scoped",
+					CH.from(scopedCte)
+						.select(($) => ({ TraceId: $.TraceId, Count: $.Count }))
+						.where(() => []),
+				)
+				.select(($) => ({ total: CH.sum($.Count) })),
+			{ orgId: "org_1" },
+		)
+		// The control: the CTE's body reads a table that declares no tenant column,
+		// so there is no tenancy anywhere in the query.
+		expect(compiled.tenantScope).toBe("untenanted")
+
+		const chained = compileCHUnsafe(
+			CH.from(derivedCte)
+				.withCTE("scoped", scoped)
+				.withCTE(
+					"derived",
+					CH.from(scopedCte)
+						.select(($) => ({ TraceId: $.TraceId, Count: $.Count }))
+						.where(() => []),
+				)
+				.select(($) => ({ total: CH.sum($.Count) })),
+			{ orgId: "org_1" },
+		)
+		expect(chained.tenantScope).toBe("single-tenant")
+	})
+})
+
+describe("CTE shadowing", () => {
+	// SQL scopes CTEs innermost-first: an inner `WITH x AS (…)` shadows an
+	// enclosing one. Verified against a server —
+	// `WITH x AS (SELECT 1 AS v), y AS (WITH x AS (SELECT 2 AS v) SELECT v FROM x)
+	//  SELECT v FROM y` returns 2, not 1.
+	//
+	// Reading the scope off the enclosing CTE instead certified a query that
+	// scans every tenant as `"single-tenant"`, the one direction that matters.
+	it("an inner CTE shadows an enclosing one of the same name", () => {
+		const scoped = CH.from(Events)
+			.select(($) => ({ TraceId: $.TraceId, Count: $.Count }))
+			.where(($) => [$.OrgId.eq(param.string("orgId"))])
+
+		const shared = CH.table("shared", { TraceId: CH.string, Count: CH.uint64 })
+		const outerSource = CH.table("outer_source", { TraceId: CH.string, Count: CH.uint64 })
+
+		// The inner `shared` reads a bare table and scopes nothing. The outer
+		// `shared` is tenant-scoped, and must NOT be what `outer_source` inherits.
+		const compiled = compileCHUnsafe(
+			CH.from(outerSource)
+				.withCTE("shared", scoped)
+				.withCTE(
+					"outer_source",
+					CH.from(shared)
+						.withCTE(
+							"shared",
+							CH.from(Excluded)
+								.select(($) => ({ TraceId: $.TraceId, Count: CH.lit(1) }))
+								.where(() => []),
+						)
+						.select(($) => ({ TraceId: $.TraceId, Count: $.Count }))
+						.where(() => []),
+				)
+				.select(($) => ({ total: CH.sum($.Count) })),
+			{ orgId: "org_1" },
+		)
+
+		expect(compiled.tenantScope).toBe("cross-tenant")
 	})
 })

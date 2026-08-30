@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildRawSqlDataSource, validateRawSqlMacro, visualizationToDisplayType } from "./raw-sql-widget"
+import { buildRawSqlDataSource, validateRawSql, visualizationToDisplayType } from "./raw-sql-widget"
 
 describe("visualizationToDisplayType", () => {
 	it("maps direct visualization kinds 1:1", () => {
@@ -81,15 +81,43 @@ describe("buildRawSqlDataSource", () => {
 	})
 })
 
-describe("validateRawSqlMacro", () => {
+describe("validateRawSql", () => {
 	it("returns null when $__orgFilter is present", () => {
-		expect(validateRawSqlMacro("SELECT 1 WHERE $__orgFilter")).toBeNull()
-		expect(validateRawSqlMacro("SELECT 1 WHERE foo = 1 AND $__orgFilter")).toBeNull()
+		expect(validateRawSql("SELECT 1 WHERE $__orgFilter")).toBeNull()
+		expect(validateRawSql("SELECT 1 WHERE foo = 1 AND $__orgFilter")).toBeNull()
 	})
 
 	it("returns an error message when $__orgFilter is missing", () => {
-		const err = validateRawSqlMacro("SELECT 1")
+		const err = validateRawSql("SELECT 1")
 		expect(err).not.toBeNull()
 		expect(err).toContain("$__orgFilter")
+	})
+
+	// Everything below was accepted at write time before this delegated to the
+	// shared validator, and failed only when the dashboard was opened.
+	it("rejects a deny-listed statement", () => {
+		expect(validateRawSql("DROP TABLE logs WHERE $__orgFilter")).toContain("not allowed")
+	})
+
+	it("rejects an author-supplied SETTINGS clause", () => {
+		expect(validateRawSql("SELECT 1 WHERE $__orgFilter SETTINGS max_execution_time=3000")).toContain(
+			"SETTINGS is managed by Maple",
+		)
+	})
+
+	it("rejects multiple statements", () => {
+		expect(validateRawSql("SELECT 1 WHERE $__orgFilter; SELECT 2")).toContain("Multiple SQL statements")
+	})
+
+	it("rejects a non-SELECT query", () => {
+		expect(validateRawSql("EXPLAIN SELECT 1 WHERE $__orgFilter")).toContain("must be a SELECT query")
+	})
+
+	it("rejects an unknown macro", () => {
+		expect(validateRawSql("SELECT $__nope FROM logs WHERE $__orgFilter")).toContain("Unknown macro")
+	})
+
+	it("accepts a query that ends with FORMAT — the driver owns the wire format", () => {
+		expect(validateRawSql("SELECT 1 WHERE $__orgFilter FORMAT JSONEachRow")).toBeNull()
 	})
 })

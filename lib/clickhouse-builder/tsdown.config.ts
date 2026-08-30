@@ -4,7 +4,7 @@ export default defineConfig({
 	entry: {
 		index: "./src/index.ts",
 		expr: "./src/expr.ts",
-		types: "./src/ch/types.ts",
+		types: "./src/types.ts",
 		sql: "./src/sql/index.ts",
 	},
 	format: "esm",

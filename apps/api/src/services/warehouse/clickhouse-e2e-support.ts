@@ -171,6 +171,24 @@ export const syntheticRow = (
 	return row
 }
 
+/** Output columns the analyzer resolved as `Nullable(...)`. */
+export const nullableColumns = (columns: ReadonlyArray<DescribedColumn>): ReadonlyArray<DescribedColumn> =>
+	columns.filter((column) => column.type.startsWith("Nullable("))
+
+/**
+ * The same row with one column set to `null`.
+ *
+ * `sampleValue` strips the `Nullable(...)` wrapper before picking a value, so
+ * the ordinary synthetic row never contains a null and a row schema that cannot
+ * decode one passes the sweep unchallenged. A query whose SELECT the builder
+ * typed non-nullably while ClickHouse resolved it as `Nullable` is a 500 on the
+ * first row that actually comes back null.
+ */
+export const rowWithNull = (row: Record<string, unknown>, columnName: string): Record<string, unknown> => ({
+	...row,
+	[columnName]: null,
+})
+
 const sampleValue = (type: string, quote64Bit: boolean): unknown => {
 	const inner = type.replace(/^(?:Nullable|LowCardinality)\((.*)\)$/, "$1")
 	if (inner.startsWith("Array(")) return []

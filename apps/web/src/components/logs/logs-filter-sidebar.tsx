@@ -23,6 +23,8 @@ import {
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
 import { SEVERITY_COLORS } from "@maple/ui/lib/severity"
+import { PinnedNamespaceNotice } from "@/components/filters/pinned-namespace-notice"
+import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 
 const routeApi = getRouteApi("/logs/")
 
@@ -33,6 +35,7 @@ function LoadingState() {
 export function LogsFilterSidebar() {
 	const navigate = routeApi.useNavigate()
 	const search = routeApi.useSearch()
+	const pinnedNamespace = useGlobalNamespace()
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		search.startTime,
 		search.endTime,
@@ -91,6 +94,10 @@ export function LogsFilterSidebar() {
 		(search.severities?.length ?? 0) > 0 ||
 		(search.deploymentEnvs?.length ?? 0) > 0 ||
 		(search.namespaces?.length ?? 0) > 0 ||
+		(search.excludedServices?.length ?? 0) > 0 ||
+		(search.excludedSeverities?.length ?? 0) > 0 ||
+		(search.excludedDeploymentEnvs?.length ?? 0) > 0 ||
+		(search.excludedNamespaces?.length ?? 0) > 0 ||
 		!!search.search
 
 	return Result.builder(facetsResult)
@@ -144,6 +151,8 @@ export function LogsFilterSidebar() {
 							options={facets.severities ?? []}
 							selected={search.severities ?? []}
 							onChange={(val) => updateFilter("severities", val)}
+							excluded={search.excludedSeverities ?? []}
+							onExcludedChange={(val) => updateFilter("excludedSeverities", val)}
 							colorMap={SEVERITY_COLORS}
 						/>
 
@@ -152,20 +161,30 @@ export function LogsFilterSidebar() {
 							options={facets.deploymentEnvs ?? []}
 							selected={search.deploymentEnvs ?? []}
 							onChange={(val) => updateFilter("deploymentEnvs", val)}
+							excluded={search.excludedDeploymentEnvs ?? []}
+							onExcludedChange={(val) => updateFilter("excludedDeploymentEnvs", val)}
 						/>
 
-						<SearchableFilterSection
-							title="Namespace"
-							options={facets.namespaces ?? []}
-							selected={search.namespaces ?? []}
-							onChange={(val) => updateFilter("namespaces", val)}
-						/>
+						{pinnedNamespace !== null ? (
+							<PinnedNamespaceNotice namespace={pinnedNamespace} />
+						) : (
+							<SearchableFilterSection
+								title="Namespace"
+								options={facets.namespaces ?? []}
+								selected={search.namespaces ?? []}
+								onChange={(val) => updateFilter("namespaces", val)}
+								excluded={search.excludedNamespaces ?? []}
+								onExcludedChange={(val) => updateFilter("excludedNamespaces", val)}
+							/>
+						)}
 
 						<SearchableFilterSection
 							title="Service"
 							options={facets.services ?? []}
 							selected={search.services ?? []}
 							onChange={(val) => updateFilter("services", val)}
+							excluded={search.excludedServices ?? []}
+							onExcludedChange={(val) => updateFilter("excludedServices", val)}
 							colorMap={serviceColorMap(facets.services ?? [])}
 						/>
 

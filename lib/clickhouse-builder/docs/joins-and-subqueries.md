@@ -69,7 +69,7 @@ const outer = CH.fromQuery(inner, "sub")
 > accessor. Reaching for `$.sub.name` throws at runtime.
 
 The outer query inherits the inner query's tenant scope: a scoped subquery cannot leak other
-tenants' rows, so the outer stays `"org"` even with no WHERE of its own. See
+tenants' rows, so the outer stays `"single-tenant"` even with no WHERE of its own. See
 [Tenant scoping](./tenant-scoping.md).
 
 _(Backed by `docs/joins-and-subqueries.md > Subquery in FROM uses flat accessors` and
@@ -95,7 +95,7 @@ const query = CH.from(Services, "s")
 	.select(($) => ({ team: $.Team }))
 	.where(($) => [$.OrgId.eq(param.string("orgId")), CH.notInSubquery($.Team, excluded)])
 
-const compiled = CH.compile(query, { orgId: "org_123" })
+const compiled = CH.compileUnsafe(query, { orgId: "org_123" })
 // … WHERE OrgId = 'org_123' AND Team NOT IN (SELECT Name AS n FROM events WHERE OrgId = 'org_123')
 ```
 
@@ -123,6 +123,66 @@ All three also accept a pre-compiled SQL string, for the rare case where that is
 
 > **`NOT IN` and NULLs.** If the subquery yields any NULL, `NOT IN` is never true. Project a
 > non-nullable column, or filter the NULLs out inside the subquery.
+
+## Splicing a subquery where there is no syntax for one
+
+`exists` / `inSubquery` / `notInSubquery` put a subquery where SQL expects a subquery. Sometimes
+you need its *SQL text* somewhere the builder has no syntax for — inside an aggregate, a tuple
+comparison, a hand-written predicate:
+
+```sql
+Timestamp >= (SELECT min(ts) FROM (<a cheap scan>))
+```
+
+That is what `subqueryExpr` is for. It takes the inner query, the column type its result decodes
+as, and a `wrap` function that receives the inner SQL and returns the expression text:
+
+```ts
+import { subqueryCond, subqueryExpr } from "@maple-dev/clickhouse-builder"
+
+// Stage 1: a cheap scan reading only the sort column.
+const cheapScan = CH.from(Events)
+	.select(($) => ({ ts: $.Timestamp }))
+	.where(($) => [$.OrgId.eq(param.string("orgId"))])
+	.orderBy(["ts", "desc"])
+	.limit(100)
+
+const cutoff = subqueryExpr(cheapScan, T.dateTime, (sql) => `(SELECT min(ts) FROM (${sql}))`)
+
+// Stage 2: the heavy columns, read only for rows at or after the cutoff.
+const query = CH.from(Events)
+	.select(($) => ({ name: $.Name, attrs: $.Attributes }))
+	.where(($) => [$.OrgId.eq(param.string("orgId")), $.Timestamp.gte(cutoff)])
+```
+
+`subqueryCond` is the same thing as a predicate, and `untypedSubqueryExpr` the same thing for a
+value that never becomes a row (which costs the query its row schema — see
+[Decoding results](./decoding-results.md)):
+
+```ts
+CH.from(Events)
+	.select(($) => ({ name: $.Name }))
+	.where(($) => [
+		$.OrgId.eq(param.string("orgId")),
+		subqueryCond(cheapScan, (sql) => `Timestamp IN (SELECT ts FROM (${sql}))`),
+	])
+```
+
+**The inner query is compiled by the outer `compile`, not when you build the expression.** That
+is the whole point of these three, and the reason not to reach for `compileUnsafe(inner).sql` and
+a template string of your own:
+
+- Params inside the spliced SQL resolve from the **outer** param set, in the same single
+  substitution pass as everything else — exactly like the subquery conditions above.
+- A value the inner query cannot encode fails the **outer** compile, so it lands in the error
+  channel where a route can `catchTag` it. Compiling the inner query yourself runs the compiler
+  while the outer query is still being *built* — outside any `Effect` — so the same bad value is
+  a synchronous throw from your query-definition function instead.
+
+You are assembling SQL text inside `wrap`: interpolate only values you control, and route
+anything user-supplied through `str()` from the `/sql` subpath so it gets escaped.
+
+_(Backed by `docs/joins-and-subqueries.md > subqueryExpr splices an inner query, compiled by the outer compile`.)_
 
 ## Membership helpers
 

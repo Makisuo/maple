@@ -32,6 +32,14 @@ const ListLogsInputSchema = Schema.Struct({
 	),
 	service: Schema.optional(ServiceName),
 	severity: Schema.optional(Schema.String),
+	services: Schema.optional(Schema.Array(ServiceName)),
+	severities: Schema.optional(Schema.Array(Schema.String)),
+	deploymentEnvs: Schema.optional(Schema.Array(DeploymentEnvironment)),
+	namespaces: Schema.optional(Schema.Array(ServiceNamespace)),
+	excludedServices: Schema.optional(Schema.Array(ServiceName)),
+	excludedSeverities: Schema.optional(Schema.Array(Schema.String)),
+	excludedDeploymentEnvs: Schema.optional(Schema.Array(DeploymentEnvironment)),
+	excludedNamespaces: Schema.optional(Schema.Array(ServiceNamespace)),
 	minSeverity: Schema.optional(
 		Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(255)),
 	),
@@ -85,6 +93,14 @@ const listLogsEffect = Effect.fn("QueryEngine.listLogs")(function* ({ data }: { 
 					limit,
 					service: input.service,
 					severity: input.severity,
+					services: input.services,
+					severities: input.severities,
+					deploymentEnvs: input.deploymentEnvs,
+					namespaces: input.namespaces,
+					excludedServices: input.excludedServices,
+					excludedSeverities: input.excludedSeverities,
+					excludedDeploymentEnvs: input.excludedDeploymentEnvs,
+					excludedNamespaces: input.excludedNamespaces,
 					minSeverity: input.minSeverity,
 					traceId: input.traceId,
 					spanId: input.spanId,
@@ -184,12 +200,26 @@ const getLogsCountEffect = Effect.fn("QueryEngine.getLogsCount")(function* ({
 				filters: {
 					serviceName: input.service,
 					severity: input.severity,
+					serviceNames: input.services,
+					severities: input.severities,
 					traceId: input.traceId,
 					search: input.search,
-					environments: input.deploymentEnv ? [input.deploymentEnv] : undefined,
+					environments: input.deploymentEnvs?.length
+						? input.deploymentEnvs
+						: input.deploymentEnv
+							? [input.deploymentEnv]
+							: undefined,
 					deploymentEnvMatchMode: input.deploymentEnvMatchMode,
-					namespaces: input.namespace ? [input.namespace] : undefined,
+					namespaces: input.namespaces?.length
+						? input.namespaces
+						: input.namespace
+							? [input.namespace]
+							: undefined,
 					namespaceMatchMode: input.namespaceMatchMode,
+					excludedServiceNames: input.excludedServices,
+					excludedSeverities: input.excludedSeverities,
+					excludedEnvironments: input.excludedDeploymentEnvs,
+					excludedNamespaces: input.excludedNamespaces,
 				},
 			},
 		}),
@@ -211,6 +241,9 @@ const GetLogsFacetsInputSchema = Schema.Struct({
 	deploymentEnv: Schema.optional(DeploymentEnvironment),
 	deploymentEnvMatchMode: Schema.optional(Schema.Literal("contains")),
 	namespace: Schema.optional(ServiceNamespace),
+	// Multi-value spelling, wins over the scalar (matches `listLogs`). Carries
+	// the org-global namespace pin.
+	namespaces: Schema.optional(Schema.Array(ServiceNamespace)),
 	namespaceMatchMode: Schema.optional(Schema.Literal("contains")),
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
@@ -243,7 +276,11 @@ const getLogsFacetsEffect = Effect.fn("QueryEngine.getLogsFacets")(function* ({
 					severity: input.severity,
 					environments: input.deploymentEnv ? [input.deploymentEnv] : undefined,
 					deploymentEnvMatchMode: input.deploymentEnvMatchMode,
-					namespaces: input.namespace ? [input.namespace] : undefined,
+					namespaces: input.namespaces?.length
+						? input.namespaces
+						: input.namespace
+							? [input.namespace]
+							: undefined,
 					namespaceMatchMode: input.namespaceMatchMode,
 				},
 			},

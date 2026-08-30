@@ -15,7 +15,7 @@ const hourParams = {
 describe("service-map rollup compiled row schemas", () => {
 	it.effect("decodes existing-hour rows with numeric strings", () =>
 		Effect.gen(function* () {
-			const compiled = serviceMapEdgesExistingHoursSQL({
+			const compiled = yield* serviceMapEdgesExistingHoursSQL({
 				orgId: "org_1",
 				startTime: "2024-01-01 00:00:00",
 				endTime: "2024-01-02 00:00:00",
@@ -29,7 +29,7 @@ describe("service-map rollup compiled row schemas", () => {
 
 	it.effect("decodes edge rollup rows into the service_map_edges_hourly ingest shape", () =>
 		Effect.gen(function* () {
-			const compiled = serviceMapEdgesRollupSQL(hourParams)
+			const compiled = yield* serviceMapEdgesRollupSQL(hourParams)
 
 			const rows = yield* compiled.decodeRows([
 				{
@@ -71,7 +71,7 @@ describe("service-map rollup compiled row schemas", () => {
 		"decodes address resolution rows into the service_address_resolutions_hourly ingest shape",
 		() =>
 			Effect.gen(function* () {
-				const compiled = serviceMapResolutionsRollupSQL(hourParams)
+				const compiled = yield* serviceMapResolutionsRollupSQL(hourParams)
 
 				const rows = yield* compiled.decodeRows([
 					{

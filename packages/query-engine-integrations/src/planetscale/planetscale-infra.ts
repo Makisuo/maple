@@ -11,10 +11,8 @@
 // the database-wide `max()` is dominated by whichever ephemeral branch spiked.
 // Scoping to a branch is what makes the chart mean anything.
 
-import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-import { from, fromQuery, param, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
-import { CHNumber } from "@maple/query-engine/ch/schema"
+import { from, fromQuery, param } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge } from "@maple/query-engine/ch/tables"
 import {
 	CONNECTION_METRIC_NAMES,
@@ -45,17 +43,6 @@ export interface PlanetScaleInfraTimeseriesOutput {
 	/** Free-space samples behind this bucket; 0 means the series was absent, not full. */
 	readonly storageSamples: number
 }
-
-export const planetscaleInfraTimeseriesRowSchema: CompiledQueryRowSchema<PlanetScaleInfraTimeseriesOutput> =
-	Schema.Struct({
-		bucket: Schema.String,
-		connectionsAvg: CHNumber,
-		cpuMaxPercent: CHNumber,
-		memMaxPercent: CHNumber,
-		replicaLagMaxSeconds: CHNumber,
-		storageUsedPercent: CHNumber,
-		storageSamples: CHNumber,
-	})
 
 /**
  * Per-raw-timestamp collapse shared by both variants: connections are summed
@@ -112,8 +99,8 @@ export function planetscaleInfraTimeseriesSQL() {
 				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
 				$.Attributes.get("planetscale_database"),
 			).eq(param.string("database")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("t")
 
@@ -134,8 +121,8 @@ export function planetscaleBranchInfraTimeseriesSQL() {
 				CH.nullIf($.Attributes.get("planetscale_branch_name"), ""),
 				$.Attributes.get("planetscale_branch"),
 			).eq(param.string("branch")),
-			$.TimeUnix.gte(param.dateTime("startTime")),
-			$.TimeUnix.lte(param.dateTime("endTime")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
 		])
 		.groupBy("t")
 

@@ -10,7 +10,7 @@ import {
 	oauthConnections,
 	orgClickHouseSettings,
 } from "@maple/db"
-import { ConfigProvider, Effect, Layer, Schema } from "effect"
+import { Array as Arr, ConfigProvider, Effect, Layer, Schema } from "effect"
 import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -29,6 +29,7 @@ import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettin
 import { OrgIngestKeysService } from "@/services/org/OrgIngestKeysService"
 import type { MetricGaugeRow, MetricSumRow } from "./cloudflare-analytics/mapping"
 import type { OtlpMetricsPayload } from "./cloudflare-analytics/otlp"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 const trackedDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(trackedDbs))
@@ -192,6 +193,11 @@ interface HyperdriveConfigFixture {
 
 interface FetchOptions {
 	readonly zones?: ReadonlyArray<typeof zoneFixture>
+	/**
+	 * When set, the `/zones` listing serves only the zones of the account whose id appears
+	 * in the request URL (the listing is account-filtered upstream) — multi-account tests.
+	 */
+	readonly zonesByAccount?: Record<string, ReadonlyArray<typeof zoneFixture>>
 	readonly zonesStatus?: number
 	readonly graphqlErrors?: ReadonlyArray<{ message: string; path?: ReadonlyArray<string | number> }>
 	/** When set, every outbound GraphQL document is captured here (batching assertions). */
@@ -302,7 +308,13 @@ const mockCloudflareFetch =
 				)
 			}
 			const page = Number(new URL(url).searchParams.get("page") ?? "1")
-			const zones = page === 1 ? (options.zones ?? [zoneFixture]) : []
+			const forAccount =
+				options.zonesByAccount == null
+					? null
+					: (Object.entries(options.zonesByAccount).find(([accountId]) =>
+							url.includes(accountId),
+						)?.[1] ?? [])
+			const zones = page === 1 ? (forAccount ?? options.zones ?? [zoneFixture]) : []
 			return jsonResponse({
 				success: true,
 				errors: [],
@@ -355,13 +367,13 @@ const makeWarehouseStub = (
 			options?: CompiledQueryStub["calls"][number]["options"],
 		) =>
 			// Mirror the real executor: run the compiled query's `decodeRows` so a
-			// query's `rowSchema` (e.g. cloudflareUsageRowSchema's CHNumber coercion)
+			// query's row schema (the `CHNumber` coercion it derives from the SELECT)
 			// is actually exercised instead of passing raw stub rows straight through.
 			Effect.sync(() => {
-				queryStub?.calls.push({ sql: compiled.sql, orgId: tenant.orgId, options })
+				queryStub?.calls.push({ sql: compiledQueryOf(compiled).sql, orgId: tenant.orgId, options })
 			}).pipe(
 				Effect.flatMap(() =>
-					compiled.decodeRows(
+					compiledQueryOf(compiled).decodeRows(
 						(options?.context === "cloudflareUsageStats"
 							? queryStub?.statsRows
 							: queryStub?.rows) ?? [],
@@ -398,8 +410,16 @@ const makeLayer = (
 		Layer.provideMerge(Layer.succeed(Retry.Retry, { while: () => false })),
 	)
 
-/** Insert a connected Cloudflare org with a non-expiring encrypted access token. */
-const seedConnection = (scope: string = ANALYTICS_SCOPE) =>
+/**
+ * Insert the org's Cloudflare connection with a non-expiring encrypted access token. One grant
+ * may cover several accounts — pass them all; the first is the row's principal.
+ */
+const seedConnection = (
+	scope: string = ANALYTICS_SCOPE,
+	accounts: Arr.NonEmptyReadonlyArray<{ id: string; name: string }> = [
+		{ id: ACCOUNT_ID, name: "Test Account" },
+	],
+) =>
 	Effect.gen(function* () {
 		const database = yield* Database
 		const key = yield* parseBase64Aes256GcmKey(ENCRYPTION_KEY_B64, (message) => new Error(message))
@@ -409,8 +429,12 @@ const seedConnection = (scope: string = ANALYTICS_SCOPE) =>
 				id: randomUUID(),
 				orgId: ORG,
 				provider: "cloudflare",
-				externalUserId: ACCOUNT_ID,
-				externalAccountName: "Test Account",
+				externalUserId: Arr.headNonEmpty(accounts).id,
+				externalAccountName: Arr.headNonEmpty(accounts).name,
+				grantedAccountsJson:
+					accounts.length > 1
+						? JSON.stringify(accounts.map((account) => ({ id: account.id, name: account.name })))
+						: null,
 				connectedByUserId: "user_1",
 				scope,
 				accessTokenCiphertext: accessEnc.ciphertext,
@@ -456,6 +480,7 @@ const seedStateRow = (values: Partial<typeof cloudflareAnalyticsState.$inferInse
 			db.insert(cloudflareAnalyticsState).values({
 				id: randomUUID(),
 				orgId: ORG,
+				accountId: ACCOUNT_ID,
 				zoneId: "",
 				createdAt: new Date(T0 - 60 * MIN),
 				updatedAt: new Date(T0 - 60 * MIN),
@@ -524,7 +549,7 @@ describe("CloudflareAnalyticsService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, captured)))
 	})
 
-	it.effect("pollOrg records missing analytics scopes instead of calling the API", () => {
+	it.effect("pollOrg skips a scope-incapable account without calling the API or touching state", () => {
 		const testDb = createTestDb(trackedDbs)
 		const captured: CapturedIngest[] = []
 		return Effect.gen(function* () {
@@ -534,10 +559,11 @@ describe("CloudflareAnalyticsService", () => {
 			const summary = yield* service.pollOrg(ORG)
 			assert.strictEqual(summary.skipped, "missing analytics scopes")
 			assert.strictEqual(summary.callsMade, 0)
+			// The account is skipped before any state rows exist — capability is surfaced
+			// per account by the status endpoint (analyticsCapable), not by error stamps
+			// rewritten every tick.
 			const rows = yield* loadStateRows
-			// One row per account-scoped dataset (workers + queues×2 + durable objects).
-			assert.strictEqual(rows.length, 4)
-			for (const row of rows) assert.include(row.lastError ?? "", "scopes")
+			assert.strictEqual(rows.length, 0)
 			assert.strictEqual(captured.length, 0)
 		}).pipe(Effect.provide(makeLayer(testDb, captured)))
 	})
@@ -599,6 +625,62 @@ describe("CloudflareAnalyticsService", () => {
 			// Nothing bypassed the gateway via a direct warehouse ingest.
 			assert.strictEqual(captured.length, 0)
 		}).pipe(Effect.provide(makeLayer(testDb, captured, { otlpCalls })))
+	})
+
+	it.effect("pollOrg polls every account of the grant, each with its own state rows and zones", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		const SECOND_ACCOUNT = "acct-2"
+		const secondZone = {
+			...zoneFixture,
+			id: "zone-2",
+			name: "beta.example",
+			account: { id: SECOND_ACCOUNT, name: "Second Account" },
+		}
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			// One grant covering both accounts — the order here is the status order.
+			yield* seedConnection(ANALYTICS_SCOPE, [
+				{ id: ACCOUNT_ID, name: "Test Account" },
+				{ id: SECOND_ACCOUNT, name: "Second Account" },
+			])
+			const service = yield* CloudflareAnalyticsService
+			const summary = yield* service.pollOrg(ORG)
+			assert.isNull(summary.skipped)
+			assert.isAbove(summary.rowsIngested, 0)
+
+			// Each account discovered ITS zones and owns its state rows — including its own
+			// workers anchor, so leases and discovery run per account.
+			const rows = yield* loadStateRows
+			const httpRows = rows.filter((row) => row.dataset === "http_requests")
+			assert.deepStrictEqual(httpRows.map((row) => `${row.accountId}:${row.zoneId}`).sort(), [
+				`${ACCOUNT_ID}:${ZONE_ID}`,
+				`${SECOND_ACCOUNT}:zone-2`,
+			])
+			const anchors = rows.filter((row) => row.dataset === "workers_invocations")
+			assert.deepStrictEqual(anchors.map((row) => row.accountId).sort(), [ACCOUNT_ID, SECOND_ACCOUNT])
+
+			// The integration status breaks the same state down per account, while the
+			// legacy top-level view merges both accounts' zones.
+			const status = yield* service.getIntegrationStatus(ORG)
+			assert.strictEqual(status.connected, true)
+			assert.deepStrictEqual(
+				(status.accounts ?? []).map((account) => account.accountId),
+				[ACCOUNT_ID, SECOND_ACCOUNT],
+			)
+			assert.deepStrictEqual(
+				(status.accounts ?? []).map((account) => account.zones.map((zone) => zone.id)),
+				[[ZONE_ID], ["zone-2"]],
+			)
+			assert.deepStrictEqual(status.zones.map((zone) => zone.id).sort(), [ZONE_ID, "zone-2"].sort())
+			assert.strictEqual(status.accountId, ACCOUNT_ID)
+		}).pipe(
+			Effect.provide(
+				makeLayer(testDb, captured, {
+					zonesByAccount: { [ACCOUNT_ID]: [zoneFixture], [SECOND_ACCOUNT]: [secondZone] },
+				}),
+			),
+		)
 	})
 
 	const hyperdriveMysqlFixture: HyperdriveConfigFixture = {
@@ -1454,6 +1536,7 @@ describe("CloudflareAnalyticsService", () => {
 				lastSyncedAt: T0 - 5 * MIN,
 				lastError: null,
 				watermarkAt: T0 - 15 * MIN,
+				backfillAt: null,
 			})
 			assert.strictEqual(status.workers?.lastError, "boom")
 			assert.strictEqual(status.workers?.watermarkAt, null)

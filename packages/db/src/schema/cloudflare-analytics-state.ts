@@ -11,6 +11,9 @@ export const cloudflareAnalyticsState = pgTable(
 	{
 		id: text("id").notNull().primaryKey(),
 		orgId: text("org_id").$type<OrgId>().notNull(),
+		// Cloudflare account the row belongs to (one of the org grant's accounts). "" only on
+		// orphaned pre-multi-account rows whose org had no connection when the backfill ran.
+		accountId: text("account_id").notNull().default(""),
 		dataset: text("dataset").notNull(),
 		// "" for account-scoped datasets — kept NOT NULL so the (org, dataset, zone) unique index
 		// treats the account row like any other.
@@ -51,7 +54,12 @@ export const cloudflareAnalyticsState = pgTable(
 		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
 	},
 	(table) => [
-		uniqueIndex("cf_analytics_state_org_dataset_zone_idx").on(table.orgId, table.dataset, table.zoneId),
+		uniqueIndex("cf_analytics_state_org_account_dataset_zone_idx").on(
+			table.orgId,
+			table.accountId,
+			table.dataset,
+			table.zoneId,
+		),
 		index("cf_analytics_state_org_idx").on(table.orgId),
 	],
 )

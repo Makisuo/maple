@@ -25,17 +25,9 @@
 // row schemas are built from `CHNumber` — compile with them or BYO-CH orgs get
 // arithmetic over strings.
 
-import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-import {
-	from,
-	param,
-	unionAll,
-	type CHUnionQuery,
-	type CompiledQueryRowSchema,
-} from "@maple-dev/clickhouse-builder"
+import { from, param, unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { Logs, ServiceOperationsMinutely, ServiceOverviewSpans } from "../tables"
-import { CHNumber } from "../schema"
 
 export interface ServiceLivenessOutput {
 	/** Distinct minutes in the window that carried at least one span. */
@@ -47,15 +39,6 @@ export interface ServiceLivenessOutput {
 	/** ClickHouse datetime literal; '1970-01-01 00:00:00' when the window is empty. */
 	readonly lastSeen: string
 }
-
-export const serviceLivenessRowSchema: CompiledQueryRowSchema<ServiceLivenessOutput> = Schema.Struct({
-	minutesWithData: CHNumber,
-	spanCount: CHNumber,
-	estimatedSpanCount: CHNumber,
-	errorCount: CHNumber,
-	estimatedErrorCount: CHNumber,
-	lastSeen: Schema.String,
-})
 
 export interface ServiceLivenessOpts {
 	/** Narrow to one deployment environment. Omit to span all of them. */
@@ -83,8 +66,8 @@ export function serviceLivenessQuery(opts: ServiceLivenessOpts = {}) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(param.string("serviceName")),
-			$.Minute.gte(param.dateTime("startTime")),
-			$.Minute.lte(param.dateTime("endTime")),
+			$.Minute.gte(param.dateTimeString("startTime")),
+			$.Minute.lte(param.dateTimeString("endTime")),
 			opts.scopeToEnvironment ? $.DeploymentEnv.eq(param.string("deploymentEnv")) : undefined,
 		])
 		.format("JSON")
@@ -95,17 +78,6 @@ export interface TelemetryPulseOutput {
 	readonly count: number
 	readonly lastSeen: string
 }
-
-/**
- * `count()` is UInt64 and BYO-ClickHouse quotes it, so pass this to
- * `compileUnion(..., { rowSchema: telemetryPulseRowSchema })` and read rows
- * through `decodeRows` — compiling without it gives you string arithmetic.
- */
-export const telemetryPulseRowSchema: CompiledQueryRowSchema<TelemetryPulseOutput> = Schema.Struct({
-	signal: Schema.String,
-	count: CHNumber,
-	lastSeen: Schema.String,
-})
 
 /**
  * Cheap "are we receiving telemetry right now?" probe for one org. Unions a
@@ -134,8 +106,8 @@ export function orgTelemetryPulseQuery(): CHUnionQuery<TelemetryPulseOutput> {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 		])
 
 	const logs = from(Logs)
@@ -146,10 +118,10 @@ export function orgTelemetryPulseQuery(): CHUnionQuery<TelemetryPulseOutput> {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimestampTime.gte(param.dateTime("startTime")),
-			$.TimestampTime.lte(param.dateTime("endTime")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
+			$.TimestampTime.gte(param.dateTimeString("startTime")),
+			$.TimestampTime.lte(param.dateTimeString("endTime")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
 		])
 
 	return unionAll(spans, logs).format("JSON")

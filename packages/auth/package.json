@@ -11,7 +11,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@clerk/backend": "^2.30.1",
+		"@clerk/backend": "^3.16.12",
 		"@maple/domain": "workspace:*",
 		"effect": "catalog:effect"
 	},

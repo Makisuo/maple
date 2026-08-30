@@ -16,7 +16,11 @@ import type {
 	ErrorsSummaryRequest,
 	ErrorsTimeseriesRequest,
 	ErrorsSparkRequest,
+	ContainerDetailSummaryRequest,
+	ContainerFacetsRequest,
+	ContainersSummaryRequest,
 	HostDetailSummaryRequest,
+	ListContainersRequest,
 	ListHostsRequest,
 	ListLogsRequest,
 	ListMetricsRequest,
@@ -78,6 +82,10 @@ export const errorsByType = defineQuery({
 				fingerprintHashes: payload.fingerprintHashes,
 				errorLabels: payload.errorLabels,
 				serviceVersions: payload.serviceVersions,
+				excludedServices: payload.excludedServices,
+				excludedDeploymentEnvs: payload.excludedDeploymentEnvs,
+				excludedErrorLabels: payload.excludedErrorLabels,
+				excludedServiceVersions: payload.excludedServiceVersions,
 				limit: payload.limit,
 			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
@@ -116,6 +124,10 @@ export const errorsSpark = defineQuery({
 				deploymentEnvs: payload.deploymentEnvs,
 				errorLabels: payload.errorLabels,
 				serviceVersions: payload.serviceVersions,
+				excludedServices: payload.excludedServices,
+				excludedDeploymentEnvs: payload.excludedDeploymentEnvs,
+				excludedErrorLabels: payload.excludedErrorLabels,
+				excludedServiceVersions: payload.excludedServiceVersions,
 			}),
 			{
 				orgId,
@@ -124,7 +136,6 @@ export const errorsSpark = defineQuery({
 				// Optional buckets default to one hour, as errorsTimeseries does.
 				bucketSeconds: payload.bucketSeconds ?? 3600,
 			},
-			{ rowSchema: CH.ErrorsSparkOutputSchema },
 		),
 })
 
@@ -173,6 +184,9 @@ export const serviceOverview = defineQuery({
 				environments: payload.environments,
 				namespaces: payload.namespaces,
 				commitShas: payload.commitShas,
+				excludedEnvironments: payload.excludedEnvironments,
+				excludedNamespaces: payload.excludedNamespaces,
+				excludedCommitShas: payload.excludedCommitShas,
 			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
 		),
@@ -199,11 +213,11 @@ export const serviceHealthSnapshot = defineQuery({
 	profile: "aggregation",
 	cache: timeRangeCache,
 	compile: (payload: ServiceHealthSnapshotRequest, orgId: string) =>
-		CH.compile(
-			CH.serviceHealthSnapshotQuery({ environments: payload.environments }),
-			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
-			{ rowSchema: CH.serviceHealthSnapshotRowSchema },
-		),
+		CH.compile(CH.serviceHealthSnapshotQuery({ environments: payload.environments }), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
 })
 
 export const serviceHealthBaseline = defineQuery({
@@ -293,13 +307,29 @@ export const listLogs = defineQuery({
 				bodySearchMode: logBodySearchMode(capabilities),
 				serviceName: payload.service,
 				severity: payload.severity,
+				serviceNames: payload.services,
+				severities: payload.severities,
+				excludedServiceNames: payload.excludedServices,
+				excludedSeverities: payload.excludedSeverities,
+				excludedEnvironments: payload.excludedDeploymentEnvs,
+				excludedNamespaces: payload.excludedNamespaces,
 				minSeverity: payload.minSeverity,
 				traceId: payload.traceId,
 				spanId: payload.spanId,
 				cursor: payload.cursor,
 				search: payload.search,
-				environments: payload.deploymentEnv ? [payload.deploymentEnv] : undefined,
-				namespaces: payload.namespace ? [payload.namespace] : undefined,
+				// The array spelling wins when present; the scalar stays for the dashboard
+				// read-model plans, which select exactly one.
+				environments: payload.deploymentEnvs?.length
+					? payload.deploymentEnvs
+					: payload.deploymentEnv
+						? [payload.deploymentEnv]
+						: undefined,
+				namespaces: payload.namespaces?.length
+					? payload.namespaces
+					: payload.namespace
+						? [payload.namespace]
+						: undefined,
 				matchModes: Match.value([
 					payload.deploymentEnvMatchMode,
 					payload.namespaceMatchMode,
@@ -384,7 +414,6 @@ export const podsSummary = defineQuery({
 				environments: payload.environments,
 			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
-			{ rowSchema: CH.ListPodsSummaryOutputSchema },
 		),
 })
 
@@ -645,6 +674,7 @@ const webAnalyticsFilters = (
 		readonly utmMedium?: string
 		readonly utmCampaign?: string
 		readonly visitorType?: "new" | "returning"
+		readonly traffic?: "all" | "humans" | "bots"
 		readonly eventName?: string
 	},
 	useProductEvents: boolean,
@@ -661,6 +691,7 @@ const webAnalyticsFilters = (
 	utmMedium: payload.utmMedium,
 	utmCampaign: payload.utmCampaign,
 	visitorType: payload.visitorType,
+	traffic: payload.traffic,
 	eventName: payload.eventName,
 	useProductEvents,
 })
@@ -830,6 +861,16 @@ export const podFacets = defineQuery({
 				jobs: payload.jobs,
 				environments: payload.environments,
 				computeTypes: payload.computeTypes,
+				excludedPodNames: payload.excludedPodNames,
+				excludedNamespaces: payload.excludedNamespaces,
+				excludedNodeNames: payload.excludedNodeNames,
+				excludedClusters: payload.excludedClusters,
+				excludedDeployments: payload.excludedDeployments,
+				excludedStatefulsets: payload.excludedStatefulsets,
+				excludedDaemonsets: payload.excludedDaemonsets,
+				excludedJobs: payload.excludedJobs,
+				excludedEnvironments: payload.excludedEnvironments,
+				excludedComputeTypes: payload.excludedComputeTypes,
 			}),
 			{ orgId: orgId, startTime: payload.startTime, endTime: payload.endTime },
 		),
@@ -887,6 +928,16 @@ const listPodsFilters = (payload: ListPodsRequest) => ({
 	jobs: payload.jobs,
 	environments: payload.environments,
 	computeTypes: payload.computeTypes,
+	excludedPodNames: payload.excludedPodNames,
+	excludedNamespaces: payload.excludedNamespaces,
+	excludedNodeNames: payload.excludedNodeNames,
+	excludedClusters: payload.excludedClusters,
+	excludedDeployments: payload.excludedDeployments,
+	excludedStatefulsets: payload.excludedStatefulsets,
+	excludedDaemonsets: payload.excludedDaemonsets,
+	excludedJobs: payload.excludedJobs,
+	excludedEnvironments: payload.excludedEnvironments,
+	excludedComputeTypes: payload.excludedComputeTypes,
 	workloadKind: payload.workloadKind,
 	workloadName: payload.workloadName,
 })
@@ -914,11 +965,114 @@ export const listPodsCount = defineQuery({
 	profile: "aggregation",
 	cache: timeRangeCache,
 	compile: (payload: ListPodsRequest, orgId: string) =>
+		CH.compile(CH.listPodsSummaryQuery(listPodsFilters(payload)), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
+// Containers (Docker) — keep page and denominator filters identical.
+const listContainersFilters = (payload: ListContainersRequest | ContainerFacetsRequest) => ({
+	search: payload.search,
+	containerNames: payload.containerNames,
+	hostNames: payload.hostNames,
+	images: payload.images,
+	composeProjects: payload.composeProjects,
+	composeServices: payload.composeServices,
+	environments: payload.environments,
+	excludedContainerNames: payload.excludedContainerNames,
+	excludedHostNames: payload.excludedHostNames,
+	excludedImages: payload.excludedImages,
+	excludedComposeProjects: payload.excludedComposeProjects,
+	excludedComposeServices: payload.excludedComposeServices,
+	excludedEnvironments: payload.excludedEnvironments,
+})
+
+export const listContainers = defineQuery({
+	id: "listContainers",
+	profile: "list",
+	cache: timeRangeCache,
+	compile: (payload: ListContainersRequest, orgId: string) =>
 		CH.compile(
-			CH.listPodsSummaryQuery(listPodsFilters(payload)),
+			CH.listContainersQuery({
+				...listContainersFilters(payload),
+				scope: payload.scope,
+				sortBy: payload.sortBy,
+				sortDir: payload.sortDir,
+				limit: payload.limit,
+				offset: payload.offset,
+			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
-			{ rowSchema: CH.ListPodsSummaryOutputSchema },
 		),
+})
+
+export const listContainersCount = defineQuery({
+	id: "listContainersCount",
+	profile: "aggregation",
+	cache: timeRangeCache,
+	compile: (payload: ListContainersRequest, orgId: string) =>
+		CH.compile(CH.listContainersSummaryQuery(listContainersFilters(payload)), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
+export const containersSummary = defineQuery({
+	id: "containersSummary",
+	profile: "aggregation",
+	cache: timeRangeCache,
+	compile: (payload: ContainersSummaryRequest, orgId: string) =>
+		CH.compile(
+			CH.listContainersSummaryQuery({
+				hostNames: payload.hostNames,
+				environments: payload.environments,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const containerDetailSummary = defineQuery({
+	id: "containerDetailSummary",
+	profile: "aggregation",
+	cache: timeRangeCache,
+	compile: (payload: ContainerDetailSummaryRequest, orgId: string) =>
+		CH.compile(
+			CH.containerDetailSummaryQuery({
+				containerName: payload.containerName,
+				hostName: payload.hostName,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const containerCountersSummary = defineQuery({
+	id: "containerCountersSummary",
+	profile: "aggregation",
+	cache: timeRangeCache,
+	compile: (payload: ContainerDetailSummaryRequest, orgId: string) =>
+		CH.compile(
+			CH.containerCountersSummaryQuery({
+				containerName: payload.containerName,
+				hostName: payload.hostName,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const containerFacets = defineQuery({
+	id: "containerFacets",
+	profile: "discovery",
+	// Bound Map-column decompression memory across the UNION fan-out.
+	settings: { maxThreads: 4 },
+	cache: 60,
+	compile: (payload: ContainerFacetsRequest, orgId: string) =>
+		CH.compileUnion(CH.containerFacetsQuery(listContainersFilters(payload)), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
 })
 
 // Probes resolve a time bound so hierarchy reads avoid ~30 daily partitions.
@@ -1032,11 +1186,10 @@ export const serviceOperationsTimeseries = defineQuery({
 	profile: "aggregation",
 	cache: undefined,
 	compile: (payload: ServiceOperationsTimeseriesInput, orgId: string) =>
-		CH.compile(
-			CH.serviceOperationsTimeseriesQuery(serviceOperationsTimeseriesOptions(payload)),
-			{ ...serviceOperationsParams(payload, orgId), bucketSeconds: payload.bucketSeconds },
-			{ rowSchema: CH.serviceOperationsTimeseriesRowSchema },
-		),
+		CH.compile(CH.serviceOperationsTimeseriesQuery(serviceOperationsTimeseriesOptions(payload)), {
+			...serviceOperationsParams(payload, orgId),
+			bucketSeconds: payload.bucketSeconds,
+		}),
 })
 
 export const serviceOperationsTimeseriesRaw = defineQuery({
@@ -1045,9 +1198,8 @@ export const serviceOperationsTimeseriesRaw = defineQuery({
 	settings: SERVICE_OPERATIONS_RAW_SETTINGS,
 	cache: undefined,
 	compile: (payload: ServiceOperationsTimeseriesInput, orgId: string) =>
-		CH.compile(
-			CH.serviceOperationsTimeseriesRawQuery(serviceOperationsTimeseriesOptions(payload)),
-			{ ...serviceOperationsParams(payload, orgId), bucketSeconds: payload.bucketSeconds },
-			{ rowSchema: CH.serviceOperationsTimeseriesRowSchema },
-		),
+		CH.compile(CH.serviceOperationsTimeseriesRawQuery(serviceOperationsTimeseriesOptions(payload)), {
+			...serviceOperationsParams(payload, orgId),
+			bucketSeconds: payload.bucketSeconds,
+		}),
 })

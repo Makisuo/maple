@@ -9,13 +9,12 @@
 
 export {
 	aiSessionFacetsQuery,
-	aiSessionFacetsRowSchema,
 	aiSessionListQuery,
-	aiSessionListRowSchema,
 	aiSessionSpansQuery,
 	aiSessionSpansRowSchema,
 	aiSessionWindowQuery,
-	aiSessionWindowRowSchema,
+	aiTraceSpansQuery,
+	aiTraceWindowQuery,
 	type AiSessionFacetsOutput,
 	type AiSessionListOpts,
 	type AiSessionListOutput,

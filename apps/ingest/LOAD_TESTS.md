@@ -28,6 +28,13 @@ Useful knobs:
 - `LOAD_TEST_INGEST_BIN`: path to the ingest binary when not using the default sibling binary.
 - `LOAD_TEST_INGEST_MODE`: `tinybird` (default) or `forward`.
 - `LOAD_TEST_QUEUE_DIR`: WAL directory override.
+- `LOAD_TEST_AUTUMN_LATENCY_MS`: when set, starts a fake Autumn that adds this
+  much latency to every billing call and points ingest at it with
+  `AUTUMN_SECRET_KEY` set. Unset (the default, and what CI runs) leaves billing
+  inert. The summary reports `autumn_checks` / `autumn_tracks` /
+  `autumn_finalizes` and `autumn_calls_per_request` — the last is the one to
+  watch: it should stay near zero, since entitlement decisions are cached and
+  usage is flushed on its own interval rather than per request.
 - `LOAD_TEST_REPORT_PATH`: when set, the `LoadSummary` JSON is also written here
   (in addition to stdout). CI uses this to avoid parsing JSON out of mixed stdout.
 

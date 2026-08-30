@@ -510,7 +510,8 @@ export const serviceMapDbEdgesHourlyMv = defineMaterializedView("service_map_db_
           max(Duration / 1000000) AS MaxDurationMs,
           countIf(TraceState LIKE '%th:%') AS SampledSpanCount,
           countIf(TraceState = '' OR TraceState NOT LIKE '%th:%') AS UnsampledSpanCount,
-          sum(SampleRate) AS SampleRateSum
+          sum(SampleRate) AS SampleRateSum,
+          quantilesTDigestWeightedState(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0))) AS DurationQuantiles
         FROM traces
         WHERE SpanKind IN ('Client', 'Producer')
           AND ${DB_SYSTEM_ATTR_SQL} != ''
@@ -622,7 +623,8 @@ export const serviceExternalEdgesHourlyMv = defineMaterializedView("service_exte
           countIf(StatusCode = 'Error') AS ErrorCount,
           sum(Duration / 1000000) AS DurationSumMs,
           max(Duration / 1000000) AS MaxDurationMs,
-          sum(SampleRate) AS SampleRateSum
+          sum(SampleRate) AS SampleRateSum,
+          quantilesTDigestWeightedState(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0))) AS DurationQuantiles
         FROM traces
         WHERE SpanKind IN ('Client', 'Producer')
           AND SpanAttributes['db.system.name'] = ''

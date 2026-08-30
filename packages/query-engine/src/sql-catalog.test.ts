@@ -12,12 +12,17 @@ import {
 	querySpecFixtures,
 	routeCoverage,
 	uncoveredPipes,
+	UNDECODED_QUERIES,
+	undecodedColumns,
+	undecodedQueries,
+	unsplicedTwoTierQueries,
 } from "./sql-catalog"
 import { builderFixtures } from "./ch/builder-fixtures"
 import * as activityQueries from "./ch/queries/activity"
 import * as alertCheckQueries from "./ch/queries/alert-checks"
 import * as anomalyQueries from "./ch/queries/anomaly"
 import * as attributeKeyQueries from "./ch/queries/attribute-keys"
+import * as containerQueries from "./ch/queries/containers"
 import * as errorQueries from "./ch/queries/errors"
 import * as infraQueries from "./ch/queries/infra"
 import * as livenessQueries from "./ch/queries/liveness"
@@ -58,8 +63,60 @@ describe("sql catalog", () => {
 		expect(uncoveredPipes(pipeEntries)).toEqual([])
 	})
 
+	// The tiling invariant, enforced structurally.
+	//
+	// Every query that unions a rollup tier with a raw tier must take its window
+	// boundary from `rollup-splice`, because the two tiers have to cover the
+	// window exactly once and a hand-written pair of inequalities that drift
+	// apart produces wrong counts rather than an error. `serviceDbEdges` drifted
+	// exactly this way and inflated every non-hour-aligned window by the whole
+	// leading hour; it was invisible partly because it had no fixture here at all.
+	//
+	// The list is empty, not an allowlist. See `unsplicedTwoTierQueries`.
+	it("splices every two-tier query through the shared boundary", () => {
+		expect(
+			unsplicedTwoTierQueries(entries),
+			"these queries read a rollup AND a raw table but compute their own boundary — " +
+				"use `interiorConditions` / `edgeCondition` from ch/queries/rollup-splice",
+		).toEqual([])
+	})
+
+	// Asserted exactly, not as a ceiling: a query that stops deriving a row
+	// schema fails here, and so does one still listed after it starts. The
+	// `decodeRows` identity cast is invisible at runtime, so this list is the
+	// only place the product can see which of its queries validate nothing.
+	it("decodes every query except the declared exceptions", () => {
+		const columns = undecodedColumns(entries)
+		const detail = [...columns]
+			.map(([name, cols]) => `  ${name} — untyped: ${cols.join(", ")}`)
+			.join("\n")
+		expect(undecodedQueries(entries), `undecoded queries and the columns to type:\n${detail}`).toEqual(
+			[...UNDECODED_QUERIES].sort(),
+		)
+	})
+
+	// A declared schema replaces the derived one wholesale, so one that has
+	// fallen behind its SELECT keeps decoding — silently dropping a column it
+	// forgot, or failing on the first row for a field the query no longer emits.
+	// That is how a duplicate `serviceUsageRowSchema` sat seven columns behind
+	// the canonical export. The builder holds both shapes and compares their
+	// field names; this asserts the comparison is clean.
+	it("keeps every declared row schema in step with its SELECT", () => {
+		const drifted = entries
+			.filter((entry) => entry.compiled?.rowSchemaMismatch !== undefined)
+			.map((entry) => {
+				const mismatch = entry.compiled!.rowSchemaMismatch!
+				return `  ${entry.source}:${entry.name} — undeclared: [${mismatch.undeclared.join(", ")}] unselected: [${mismatch.unselected.join(", ")}]`
+			})
+
+		expect(
+			drifted,
+			`declared row schemas that no longer match their query:\n${drifted.join("\n")}`,
+		).toEqual([])
+	})
+
 	// Builders that read across every tenant on purpose. Each must declare
-	// `.crossOrg()` and run through `WarehouseQueryService.crossOrgQuery`, which
+	// `.crossTenant()` and run through `WarehouseQueryService.crossOrgQuery`, which
 	// records a justification on the span. This list should stay tiny — it is the
 	// complete inventory of cross-tenant reads in the product.
 	const CROSS_ORG_BUILDERS: ReadonlySet<string> = new Set([
@@ -75,7 +132,7 @@ describe("sql catalog", () => {
 	it("scopes every query to an org", () => {
 		for (const entry of entries) {
 			if (entry.compiled === undefined) continue
-			const expected = CROSS_ORG_BUILDERS.has(entry.name) ? "cross-org" : "org"
+			const expected = CROSS_ORG_BUILDERS.has(entry.name) ? "cross-tenant" : "single-tenant"
 			expect(entry.compiled.tenantScope, `${entry.id} tenant scope`).toBe(expected)
 		}
 	})
@@ -181,6 +238,7 @@ const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 	"alert-checks": alertCheckQueries,
 	anomaly: anomalyQueries,
 	"attribute-keys": attributeKeyQueries,
+	containers: containerQueries,
 	errors: errorQueries,
 	infra: infraQueries,
 	liveness: livenessQueries,
@@ -284,11 +342,6 @@ const EXEMPT_BUILDERS: ReadonlySet<string> = new Set([
 	"infra/workloadDetailSummaryQuery",
 	"service-infra/serviceWorkloadsSQL",
 	"service-map-rollup/serviceMapResolutionsRollupSQL",
-	"service-map/serviceDbEdgesSQL",
-	"service-map/serviceDbEdgesForServiceQuery",
-	"service-map/serviceDbQuerySummarySQL",
-	"service-map/serviceDbQueryTimeseriesSQL",
-	"service-map/serviceDbTopQueriesSQL",
 	"service-map/servicePlatformsSQL",
 
 	// todo batch ④ — remainder (billing, service detail, operations, stray trace/log lookups)

@@ -140,6 +140,15 @@ final class ScreenLoader<Value: Sendable> {
 		await load(.initial)
 	}
 
+	/// Show a cached snapshot before the first load has produced anything, so
+	/// the screen paints immediately and the load that follows revalidates it
+	/// as a `.refresh` — content stays, a failure becomes the refresh strip.
+	/// A no-op once any load has run or is running: live data beats cache.
+	func seed(_ value: Value) {
+		guard case .loading = state, !isLoading else { return }
+		state = isEmpty(value) ? .empty : .loaded(value)
+	}
+
 	/// The error state's button and the refresh strip's button.
 	func retry() {
 		Task { await load(state.hasContent ? .refresh : .initial) }

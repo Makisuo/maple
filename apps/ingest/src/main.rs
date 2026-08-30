@@ -11,6 +11,7 @@
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 mod autumn;
+mod task_protection;
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -20,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
-use autumn::{AutumnEntitlements, AutumnReservation, AutumnReserveOutcome, AutumnTracker};
+use autumn::{AutumnEntitlements, AutumnTracker};
 use axum::body::Bytes;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Path;
@@ -40,6 +41,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use hmac::{Hmac, Mac};
 use maple_ingest::ai_session;
+use maple_ingest::aws::CredentialsProvider as AwsCredentialsProvider;
 use maple_ingest::clickhouse_insert_mappings::SCHEMA_VERSION as CLICKHOUSE_SCHEMA_VERSION;
 use maple_ingest::metrics;
 use maple_ingest::otel::{
@@ -59,6 +61,7 @@ use maple_ingest::telemetry::{
     TinybirdMirrorConfig,
 };
 use maple_ingest::usage_metrics::{billable_gb, usage_cardinality_view, UsageMetrics};
+use maple_ingest::wal_store::WalSegmentStore;
 use moka::future::Cache;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
@@ -124,6 +127,18 @@ struct ReplayBlobStoreConfig {
     timeout: Duration,
 }
 
+/// Where sealed WAL segments are shipped so a task that dies without draining
+/// does not take its backlog with it. Unset means the WAL is local-only, which
+/// is what self-hosted and local runs use.
+#[derive(Clone, Debug)]
+struct WalStoreSettings {
+    store: maple_ingest::wal_store::WalStoreConfig,
+    /// Static credentials, when the deployment supplies them instead of relying
+    /// on the task role.
+    access_key_id: Option<String>,
+    secret_access_key: Option<String>,
+}
+
 #[derive(Clone)]
 struct AppConfig {
     port: u16,
@@ -141,6 +156,8 @@ struct AppConfig {
     autumn_secret_key: Option<String>,
     autumn_api_url: String,
     autumn_flush_interval_secs: u64,
+    autumn_allow_ttl_secs: u64,
+    autumn_deny_ttl_secs: u64,
     ingest_key_cache_ttl_secs: u64,
     org_routing_cache_ttl_secs: u64,
     /// Ceiling on the total decompressed rrweb payload a single replay session
@@ -166,6 +183,11 @@ struct AppConfig {
     /// terminated by Cloudflare. Off simply writes `''`, which is what the
     /// column held before this existed — it cannot regress anything.
     trust_proxy_geo: bool,
+    /// How long a graceful shutdown may spend exporting the WAL backlog before
+    /// exiting anyway. Must fit inside the ECS `stopTimeout` (SIGTERM → SIGKILL
+    /// window) or the drain is cut off mid-flight.
+    shutdown_drain_secs: u64,
+    wal_store: Option<WalStoreSettings>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -308,6 +330,14 @@ impl AppConfig {
             })
         };
 
+        // Shared by the pipeline (which runs the heartbeat task) and the store
+        // config (which decides how stale a heartbeat has to be).
+        let heartbeat_secs = parse_u64(
+            "INGEST_WAL_S3_HEARTBEAT_SECS",
+            std::env::var("INGEST_WAL_S3_HEARTBEAT_SECS").ok(),
+            maple_ingest::wal_store::DEFAULT_HEARTBEAT_INTERVAL.as_secs(),
+        )?;
+
         let tinybird = TinybirdConfig {
             endpoint: std::env::var("TINYBIRD_HOST")
                 .unwrap_or_default()
@@ -343,6 +373,12 @@ impl AppConfig {
                 std::env::var("INGEST_WAL_SHARDS").ok(),
                 (num_cpus::get().max(1) * 2).max(2),
             )?,
+            wal_segment_max_bytes: parse_u64(
+                "INGEST_WAL_SEGMENT_MAX_BYTES",
+                std::env::var("INGEST_WAL_SEGMENT_MAX_BYTES").ok(),
+                maple_ingest::telemetry::WAL_SEGMENT_MAX_BYTES,
+            )?,
+            wal_store_heartbeat_interval: Duration::from_secs(heartbeat_secs),
             batch_max_rows: parse_usize(
                 "INGEST_BATCH_MAX_ROWS",
                 std::env::var("INGEST_BATCH_MAX_ROWS").ok(),
@@ -470,6 +506,20 @@ impl AppConfig {
             1,
         )?;
 
+        // How long an entitlement decision is reused. Allows are cached long
+        // enough to take Autumn off the hot path; denials briefly, so an org
+        // that has just paid is not held at 402 for a full allow window.
+        let autumn_allow_ttl_secs = parse_u64(
+            "AUTUMN_ENTITLEMENT_ALLOW_TTL_SECS",
+            std::env::var("AUTUMN_ENTITLEMENT_ALLOW_TTL_SECS").ok(),
+            60,
+        )?;
+        let autumn_deny_ttl_secs = parse_u64(
+            "AUTUMN_ENTITLEMENT_DENY_TTL_SECS",
+            std::env::var("AUTUMN_ENTITLEMENT_DENY_TTL_SECS").ok(),
+            5,
+        )?;
+
         let ingest_key_cache_ttl_secs = parse_u64(
             "INGEST_KEY_CACHE_TTL_SECS",
             std::env::var("INGEST_KEY_CACHE_TTL_SECS").ok(),
@@ -553,6 +603,66 @@ impl AppConfig {
             false,
         )?;
 
+        // 90s fits inside the deployed 120s stopTimeout with margin for the
+        // in-flight-request drain that runs before it.
+        // WAL durability tier. An unset bucket keeps the WAL local-only, which
+        // is the self-hosted and local-dev shape; on ECS the task role signs the
+        // requests, so credentials are optional here.
+        let wal_store = match std::env::var("INGEST_WAL_S3_BUCKET")
+            .ok()
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty())
+        {
+            None => None,
+            Some(bucket) => {
+                let region = std::env::var("INGEST_WAL_S3_REGION")
+                    .ok()
+                    .map(|v| v.trim().to_owned())
+                    .filter(|v| !v.is_empty())
+                    .or_else(|| std::env::var("AWS_REGION").ok())
+                    .ok_or_else(|| {
+                        "INGEST_WAL_S3_REGION is required when INGEST_WAL_S3_BUCKET is set"
+                            .to_owned()
+                    })?;
+                let endpoint = std::env::var("INGEST_WAL_S3_ENDPOINT")
+                    .ok()
+                    .map(|v| v.trim().to_owned())
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or_else(|| format!("https://s3.{region}.amazonaws.com"));
+                Some(WalStoreSettings {
+                    store: maple_ingest::wal_store::WalStoreConfig {
+                        endpoint,
+                        bucket,
+                        region,
+                        prefix: std::env::var("INGEST_WAL_S3_PREFIX")
+                            .ok()
+                            .map(|v| v.trim().to_owned())
+                            .filter(|v| !v.is_empty())
+                            .unwrap_or_else(|| "wal".to_owned()),
+                        timeout: Duration::from_millis(parse_u64(
+                            "INGEST_WAL_S3_TIMEOUT_MS",
+                            std::env::var("INGEST_WAL_S3_TIMEOUT_MS").ok(),
+                            10_000,
+                        )?),
+                        orphan_after: Duration::from_secs(parse_u64(
+                            "INGEST_WAL_S3_ORPHAN_AFTER_SECS",
+                            std::env::var("INGEST_WAL_S3_ORPHAN_AFTER_SECS").ok(),
+                            maple_ingest::wal_store::DEFAULT_ORPHAN_AFTER.as_secs(),
+                        )?),
+                        heartbeat_interval: Duration::from_secs(heartbeat_secs),
+                    },
+                    access_key_id: std::env::var("INGEST_WAL_S3_ACCESS_KEY_ID").ok(),
+                    secret_access_key: std::env::var("INGEST_WAL_S3_SECRET_ACCESS_KEY").ok(),
+                })
+            }
+        };
+
+        let shutdown_drain_secs = parse_u64(
+            "INGEST_SHUTDOWN_DRAIN_SECS",
+            std::env::var("INGEST_SHUTDOWN_DRAIN_SECS").ok(),
+            90,
+        )?;
+
         Ok(Self {
             port,
             otlp_grpc_port,
@@ -569,12 +679,16 @@ impl AppConfig {
             autumn_secret_key,
             autumn_api_url,
             autumn_flush_interval_secs,
+            autumn_allow_ttl_secs,
+            autumn_deny_ttl_secs,
             ingest_key_cache_ttl_secs,
             org_routing_cache_ttl_secs,
             replay_max_session_bytes,
             replay_blob_store,
             internal_org_id,
             trust_proxy_geo,
+            shutdown_drain_secs,
+            wal_store,
         })
     }
 }
@@ -647,6 +761,9 @@ struct IngestKeyResolver {
     store: Arc<dyn KeyStore>,
     lookup_hmac_key: String,
     cache: Cache<String, IngestKeyIdentity>,
+    // Authoritative "no such key" results, so an unknown-key flood is absorbed
+    // here instead of amplifying into a Postgres lookup per request.
+    negative_cache: Cache<String, ()>,
     routing: Arc<OrgRoutingResolver>,
 }
 
@@ -835,7 +952,7 @@ const BROWSER_SESSIONS_FEATURE_ID: &str = "browser_sessions";
 /// server-side one; only the transport differs).
 const PRODUCT_EVENTS_FEATURE_ID: &str = "product_events";
 
-/// What a DENIED Autumn reservation means for the batch in flight.
+/// What a DENIED Autumn entitlement means for the batch in flight.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum OnDenied {
     /// 402 the request: the metered feature IS the payload, so an exhausted
@@ -851,17 +968,16 @@ enum OnDenied {
     MeterAnyway,
 }
 
-/// Meter `value` units of `feature_id` around a WAL enqueue: reserve through
-/// Autumn's atomic check+event lock, run `enqueue`, then confirm or release the
-/// lock. When Autumn could not reserve (disabled, unavailable, or denied under
-/// `OnDenied::MeterAnyway`) the quantity is recorded fail-open through the
-/// retrying tracker after the enqueue succeeds, so provider outages never drop
-/// data or usage. `value <= 0` meters nothing.
+/// Meter `value` units of `feature_id` around a WAL enqueue: gate on the cached
+/// entitlement decision, run `enqueue`, then record the quantity through the
+/// retrying tracker. Usage is only ever recorded after the enqueue succeeds, so
+/// a rejected payload is never billed and a provider outage never drops usage.
+/// `value <= 0` gates and meters nothing.
 ///
 /// This is the one shape every count-metered handler uses (session starts on
 /// the metadata endpoint, product events on both event endpoints); keeping it in
-/// one place is what stops the reserve → enqueue → finalize ordering drifting
-/// between them.
+/// one place is what stops the gate → enqueue → track ordering drifting between
+/// them.
 async fn metered_enqueue<T, F, Fut>(
     state: &AppState,
     org_id: &str,
@@ -874,35 +990,27 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<T, ApiError>>,
 {
-    // `reserve_autumn_usage` fails only on a denial (every other outcome is an
-    // `Ok(None)` fail-open), so swallowing the error here is exactly "denied".
-    let reservation = match reserve_autumn_usage(state, org_id, feature_id, value).await {
-        Ok(reservation) => reservation,
-        Err(error) => {
+    // A request that bills nothing is not gated: a session-event batch carrying
+    // no new session starts rides on the gate its metadata request already
+    // passed. Callers that must gate regardless check `entitlement_rejection`
+    // themselves.
+    if value > 0.0 && org_id != SENTINEL_ORG_ID {
+        if let Some(error) = entitlement_rejection(state, org_id, feature_id).await {
             if on_denied == OnDenied::Reject {
                 return Err(error);
             }
             warn!(
                 org_id,
-                feature_id, value, "Autumn denied the reservation; metering fail-open"
+                feature_id, value, "Autumn denied the feature; metering fail-open"
             );
-            None
         }
-    };
-    let enqueue_result = enqueue().await;
-
-    if let (Some(entitlements), Some(reservation)) =
-        (&state.autumn_entitlements, reservation.as_ref())
-    {
-        let _ = entitlements
-            .finalize(reservation, enqueue_result.is_ok())
-            .await;
     }
-    let accepted = enqueue_result?;
 
-    // Fail-open fallback: if Autumn could not reserve, record after the WAL
-    // commit through the retrying tracker.
-    if reservation.is_none() && org_id != SENTINEL_ORG_ID && value > 0.0 {
+    let accepted = enqueue().await?;
+
+    // Usage is recorded only after the WAL commit, through the retrying tracker
+    // that batches it. Nothing bills from the request path.
+    if org_id != SENTINEL_ORG_ID && value > 0.0 {
         if let Some(tracker) = &state.autumn_tracker {
             tracker.track(org_id, feature_id, value);
         }
@@ -944,37 +1052,6 @@ async fn entitlement_rejection(
         StatusCode::PAYMENT_REQUIRED,
         "Plan limit reached or no active subscription",
     ))
-}
-
-/// Reserve exact usage through Autumn's atomic check+event lock. `None` means
-/// billing is disabled or temporarily unavailable; callers then use the
-/// retrying tracker after the WAL commit so provider outages do not drop data.
-async fn reserve_autumn_usage(
-    state: &AppState,
-    org_id: &str,
-    feature_id: &'static str,
-    value: f64,
-) -> Result<Option<AutumnReservation>, ApiError> {
-    if org_id == SENTINEL_ORG_ID || value <= 0.0 {
-        return Ok(None);
-    }
-    let Some(entitlements) = &state.autumn_entitlements else {
-        return Ok(None);
-    };
-    match entitlements.reserve(org_id, feature_id, value).await {
-        AutumnReserveOutcome::Reserved(reservation) => Ok(Some(reservation)),
-        AutumnReserveOutcome::Unavailable => Ok(None),
-        AutumnReserveOutcome::Denied => {
-            warn!(
-                org_id,
-                feature_id, value, "Ingestion blocked by Autumn billing controls"
-            );
-            Err(ApiError::new(
-                StatusCode::PAYMENT_REQUIRED,
-                "Billing limit reached for this feature",
-            ))
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -1709,7 +1786,7 @@ fn init_tracing(
 
     let resource = build_resource(ResourceConfig {
         service_name: "ingest",
-        service_namespace: "ingest",
+        service_namespace: "core",
         service_version: env!("CARGO_PKG_VERSION"),
         service_instance_id: service_instance_id.to_owned(),
         deployment_env,
@@ -1831,7 +1908,7 @@ fn init_metrics(
 
     let resource = build_resource(ResourceConfig {
         service_name: "ingest",
-        service_namespace: "ingest",
+        service_namespace: "core",
         service_version: env!("CARGO_PKG_VERSION"),
         service_instance_id: service_instance_id.to_owned(),
         deployment_env,
@@ -1893,7 +1970,7 @@ fn init_usage_metrics(
 
     let resource = build_resource(ResourceConfig {
         service_name: "ingest",
-        service_namespace: "ingest",
+        service_namespace: "core",
         service_version: env!("CARGO_PKG_VERSION"),
         service_instance_id: service_instance_id.to_owned(),
         deployment_env,
@@ -2038,12 +2115,43 @@ async fn main() {
             None
         };
 
+    // Credentials come from the ECS task role unless the deployment supplies a
+    // key pair — the same choice the replay bucket makes, except that on ECS the
+    // role is the default rather than the exception.
+    let wal_segment_store = config.wal_store.as_ref().and_then(|settings| {
+        let credentials = match (&settings.access_key_id, &settings.secret_access_key) {
+            (Some(key), Some(secret)) => Some(AwsCredentialsProvider::from_static(
+                key.clone(),
+                secret.clone(),
+            )),
+            _ => AwsCredentialsProvider::from_ecs_environment(http_client.clone()),
+        };
+        let Some(credentials) = credentials else {
+            warn!(
+                bucket = settings.store.bucket,
+                "INGEST_WAL_S3_BUCKET is set but no credentials are available; the WAL stays local-only"
+            );
+            return None;
+        };
+        info!(
+            bucket = settings.store.bucket,
+            prefix = settings.store.prefix,
+            "WAL segments will be shipped to the durability object store"
+        );
+        Some(Arc::new(WalSegmentStore::new(
+            http_client.clone(),
+            &settings.store,
+            Arc::new(credentials),
+        )))
+    });
+
     let telemetry_pipeline = if config.write_mode.uses_tinybird() || direct_clickhouse_possible {
-        match TelemetryPipeline::new_with_clickhouse_validation(
+        match TelemetryPipeline::new_with_object_store(
             config.tinybird.clone(),
             http_client.clone(),
             clickhouse_target_provider,
             config.write_mode.uses_tinybird(),
+            wal_segment_store,
         )
         .await
         {
@@ -2057,6 +2165,14 @@ async fn main() {
         None
     };
 
+    // Handle kept out of AppState for the post-shutdown WAL drain, plus the
+    // scale-in protection loop (a no-op off ECS — see `task_protection`).
+    let drain_pipeline = telemetry_pipeline.clone();
+    let drain_deadline = Duration::from_secs(config.shutdown_drain_secs);
+    if let Some(pipeline) = telemetry_pipeline.clone() {
+        task_protection::spawn(pipeline);
+    }
+
     let autumn_tracker = config.autumn_secret_key.as_ref().map(|key| {
         AutumnTracker::spawn(
             key.clone(),
@@ -2068,12 +2184,24 @@ async fn main() {
     // A configured Autumn account is the billing authority. Native balance
     // checks and customer controls must not be bypassable by a second flag.
     let autumn_entitlements = config.autumn_secret_key.as_ref().map(|key| {
-        AutumnEntitlements::new(http_client.clone(), key.clone(), &config.autumn_api_url)
+        AutumnEntitlements::new(
+            http_client.clone(),
+            key.clone(),
+            &config.autumn_api_url,
+            config.autumn_allow_ttl_secs,
+            config.autumn_deny_ttl_secs,
+        )
     });
 
     let ingest_key_cache = Cache::builder()
         .time_to_live(Duration::from_secs(config.ingest_key_cache_ttl_secs))
         .max_capacity(1_000)
+        .build();
+    // Short TTL so a freshly created key starts working within seconds even
+    // after the SDK raced ahead of provisioning.
+    let ingest_key_negative_cache = Cache::builder()
+        .time_to_live(Duration::from_secs(30))
+        .max_capacity(10_000)
         .build();
 
     let cloudflare_connector_cache = Cache::builder()
@@ -2109,6 +2237,7 @@ async fn main() {
             store: Arc::clone(&store),
             lookup_hmac_key: config.lookup_hmac_key.clone(),
             cache: ingest_key_cache,
+            negative_cache: ingest_key_negative_cache,
             routing: Arc::clone(&org_routing_resolver),
         },
         org_inflight_limiter: OrgInFlightLimiter::new(config.org_max_in_flight),
@@ -2233,6 +2362,35 @@ async fn main() {
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await;
+
+    // Intake has stopped (graceful shutdown drained in-flight requests), but
+    // the WAL sits on ephemeral storage that dies with the task — export what
+    // it still holds before exiting. The export workers stay alive until the
+    // process ends, so this only has to wait for them.
+    if let Some(pipeline) = drain_pipeline {
+        let remaining = pipeline.drain_wal(drain_deadline).await;
+        if remaining == 0 {
+            info!("WAL drained clean on shutdown");
+        } else {
+            warn!(
+                remaining_bytes = remaining,
+                deadline_secs = drain_deadline.as_secs(),
+                "Shutdown drain deadline hit with WAL backlog remaining"
+            );
+        }
+        // Even a clean drain runs this: it retires the owner heartbeat, so a
+        // successor claims anything left instead of waiting out the staleness
+        // window. With a backlog it also seals and ships the tail, which is the
+        // difference between "replays if this task's storage survives" (it does
+        // not — Fargate ephemeral storage dies with the task) and "replays".
+        let shipped = pipeline.flush_wal_to_object_store().await;
+        if shipped > 0 {
+            info!(
+                shipped_bytes = shipped,
+                "Shipped the undrained WAL tail to the object store"
+            );
+        }
+    }
 
     if let Some(providers) = telemetry_providers {
         // Flush buffered spans on graceful exit. Errors here are non-fatal —
@@ -2457,14 +2615,11 @@ async fn accept_grpc_decoded(
         .try_acquire(&resolved.org_id)
         .ok_or_else(|| tonic::Status::resource_exhausted("Per-org ingest limit exceeded"))?;
     let item_count = decoded.item_count();
-    let reservation = reserve_autumn_usage(
-        state,
-        &resolved.org_id,
-        signal.path(),
-        billable_gb(decoded_bytes as u64),
-    )
-    .await
-    .map_err(|error| tonic::Status::resource_exhausted(error.message))?;
+    if resolved.org_id != SENTINEL_ORG_ID {
+        if let Some(error) = entitlement_rejection(state, &resolved.org_id, signal.path()).await {
+            return Err(tonic::Status::resource_exhausted(error.message));
+        }
+    }
 
     let result = process_decoded_payload(
         state,
@@ -2478,11 +2633,6 @@ async fn accept_grpc_decoded(
 
     match result {
         Ok(_) => {
-            if let (Some(entitlements), Some(reservation)) =
-                (&state.autumn_entitlements, reservation.as_ref())
-            {
-                let _ = entitlements.finalize(reservation, true).await;
-            }
             if resolved.org_id != SENTINEL_ORG_ID {
                 if let Some(usage) = &state.usage_metrics {
                     usage.record(
@@ -2492,24 +2642,17 @@ async fn accept_grpc_decoded(
                         item_count as u64,
                     );
                 }
-                if reservation.is_none() {
-                    if let Some(tracker) = &state.autumn_tracker {
-                        tracker.track(
-                            &resolved.org_id,
-                            signal.path(),
-                            billable_gb(decoded_bytes as u64),
-                        );
-                    }
+                if let Some(tracker) = &state.autumn_tracker {
+                    tracker.track(
+                        &resolved.org_id,
+                        signal.path(),
+                        billable_gb(decoded_bytes as u64),
+                    );
                 }
             }
             Ok(())
         }
         Err(error) => {
-            if let (Some(entitlements), Some(reservation)) =
-                (&state.autumn_entitlements, reservation.as_ref())
-            {
-                let _ = entitlements.finalize(reservation, false).await;
-            }
             if error.status == StatusCode::TOO_MANY_REQUESTS {
                 Err(tonic::Status::resource_exhausted(error.message))
             } else {
@@ -2898,6 +3041,14 @@ async fn handle_replay_meta_inner(
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
 
+    let _org_inflight_permit = state
+        .org_inflight_limiter
+        .try_acquire(&org_id)
+        .ok_or_else(|| {
+            warn!(org_id = %org_id, "Per-org in-flight ingest limit exceeded");
+            ApiError::too_many_requests("Per-org ingest limit exceeded")
+        })?;
+
     let pipeline = native_rows_pipeline_for(
         state,
         destination,
@@ -3074,6 +3225,14 @@ async fn handle_session_events_inner(
     );
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
+
+    let _org_inflight_permit = state
+        .org_inflight_limiter
+        .try_acquire(&org_id)
+        .ok_or_else(|| {
+            warn!(org_id = %org_id, "Per-org in-flight ingest limit exceeded");
+            ApiError::too_many_requests("Per-org ingest limit exceeded")
+        })?;
 
     // Same Autumn gate as the metadata endpoint. Automatic session events
     // (clicks, navigations, errors, ...) are not separately metered —
@@ -3252,6 +3411,14 @@ async fn handle_product_events_inner(
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
 
+    let _org_inflight_permit = state
+        .org_inflight_limiter
+        .try_acquire(&org_id)
+        .ok_or_else(|| {
+            warn!(org_id = %org_id, "Per-org in-flight ingest limit exceeded");
+            ApiError::too_many_requests("Per-org ingest limit exceeded")
+        })?;
+
     // Product events are their own metered feature, but they are NOT gated on
     // it — same reasoning as the `type == "custom"` rows on `/v1/sessionEvents`.
     // Autumn answers `allowed: false` for a customer that simply has no balance
@@ -3382,6 +3549,11 @@ async fn handle_replay_blob(
         "maple.replay.storage" = tracing::field::Empty,
         "maple.replay.object_key" = tracing::field::Empty,
         "maple.replay.blob_put_ms" = tracing::field::Empty,
+        "maple.replay.blob_attempts" = tracing::field::Empty,
+        "maple.replay.blob_status" = tracing::field::Empty,
+        "maple.replay.blob_error_kind" = tracing::field::Empty,
+        "maple.replay.blob_request_id" = tracing::field::Empty,
+        "maple.replay.blob_cf_ray" = tracing::field::Empty,
         "maple.replay.body_prefix" = tracing::field::Empty,
         "http.request.header.content-type" = tracing::field::Empty,
         "maple.sdk" = tracing::field::Empty,
@@ -3434,6 +3606,14 @@ async fn handle_replay_blob_inner(
     );
     let destination = native_destination_for(&resolved_key);
     Span::current().record("maple.ingest.destination", destination.as_str());
+
+    let _org_inflight_permit = state
+        .org_inflight_limiter
+        .try_acquire(&org_id)
+        .ok_or_else(|| {
+            warn!(org_id = %org_id, "Per-org in-flight ingest limit exceeded");
+            ApiError::too_many_requests("Per-org ingest limit exceeded")
+        })?;
 
     let pipeline = native_rows_pipeline_for(
         state,
@@ -3540,14 +3720,34 @@ async fn handle_replay_blob_inner(
             // Verbatim gzip: ~10x smaller at rest than the JSON text, no
             // recompression, and the Content-Encoding lets a reader hand the
             // bytes to a browser to inflate.
-            store
+            let outcome = store
                 .put_object(&key, body.to_vec(), "application/json", Some("gzip"))
                 .await
                 .map_err(|e| {
+                    // Everything Cloudflare support asks for, on the span rather
+                    // than only in the message: the request id and ray are
+                    // unrecoverable once the response is gone, and the error kind
+                    // separates "R2 is overloaded" from "our request is wrong"
+                    // without parsing an XML body out of a log line.
+                    let span = Span::current();
+                    span.record("maple.replay.blob_error_kind", e.error_kind());
+                    span.record("maple.replay.blob_attempts", e.attempts);
+                    if let Some(status) = e.status() {
+                        span.record("maple.replay.blob_status", status);
+                    }
+                    if let Some(request_id) = e.request_id() {
+                        span.record("maple.replay.blob_request_id", request_id);
+                    }
+                    if let Some(cf_ray) = e.cf_ray() {
+                        span.record("maple.replay.blob_cf_ray", cf_ray);
+                    }
                     warn!(
                         org_id = %org_id,
                         session_id = %session_id,
                         chunk_seq,
+                        error_kind = e.error_kind(),
+                        request_id = e.request_id().unwrap_or_default(),
+                        cf_ray = e.cf_ray().unwrap_or_default(),
                         error = %e,
                         "replay chunk blob upload failed"
                     );
@@ -3558,10 +3758,16 @@ async fn handle_replay_blob_inner(
                     ApiError::service_unavailable("failed to store replay chunk")
                         .with_detail(e.to_string())
                 })?;
-            Span::current().record(
+            let span = Span::current();
+            span.record(
                 "maple.replay.blob_put_ms",
                 i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX),
             );
+            // Recorded on success too: an attempt count above 1 is a transient
+            // R2 failure this absorbed, and the only warning that the bucket is
+            // degrading before it starts losing chunks outright.
+            span.record("maple.replay.blob_attempts", outcome.attempts);
+            span.record("maple.replay.blob_status", 200u16);
             // The index row carries the chunk's metadata; the payload lives in
             // R2 under a key derived from (OrgId, SessionId, ChunkSeq). An empty
             // `events` is what marks the row as blob-backed on read — the SDK
@@ -3687,7 +3893,7 @@ async fn handle_signal(
     let duration = start.elapsed();
 
     match result {
-        Ok((response, item_count, org_id, decoded_bytes, metered_atomically)) => {
+        Ok((response, item_count, org_id, decoded_bytes)) => {
             let status_code = response.status().as_u16();
             span_handle.record("http.response.status_code", status_code);
             span_handle.record("otel.status_code", "Ok");
@@ -3700,10 +3906,8 @@ async fn handle_signal(
                 if let Some(usage) = &state.usage_metrics {
                     usage.record(&org_id, feature_id, decoded_bytes as u64, item_count as u64);
                 }
-                if !metered_atomically {
-                    if let Some(tracker) = &state.autumn_tracker {
-                        tracker.track(&org_id, feature_id, billable_gb(decoded_bytes as u64));
-                    }
+                if let Some(tracker) = &state.autumn_tracker {
+                    tracker.track(&org_id, feature_id, billable_gb(decoded_bytes as u64));
                 }
             }
             response
@@ -3799,8 +4003,8 @@ async fn handle_cloudflare_logpush(
     }
 }
 
-/// Returns Ok((response, item_count, org_id, decoded_bytes, metered_atomically))
-/// or Err((ApiError, error_kind_label)).
+/// Returns Ok((response, item_count, org_id, decoded_bytes)) or
+/// Err((ApiError, error_kind_label)).
 #[expect(
     clippy::cognitive_complexity,
     clippy::too_many_lines,
@@ -3812,7 +4016,7 @@ async fn handle_signal_inner(
     headers: &HeaderMap,
     body: Bytes,
     signal: Signal,
-) -> Result<(Response, usize, String, usize, bool), (ApiError, &'static str)> {
+) -> Result<(Response, usize, String, usize), (ApiError, &'static str)> {
     let ingest_key = extract_ingest_key(headers).ok_or_else(|| {
         warn!("Missing ingest key");
         (ApiError::unauthorized("Missing ingest key"), "auth")
@@ -3830,7 +4034,6 @@ async fn handle_signal_inner(
             0,
             SENTINEL_ORG_ID.to_owned(),
             0,
-            false,
         ));
     }
 
@@ -3988,14 +4191,12 @@ async fn handle_signal_inner(
 
     let decoded_bytes = decoded_payload.len();
 
-    let reservation = reserve_autumn_usage(
-        state,
-        &resolved_key.org_id,
-        signal.path(),
-        billable_gb(decoded_bytes as u64),
-    )
-    .await
-    .map_err(|error| (error, "billing_limit"))?;
+    if resolved_key.org_id != SENTINEL_ORG_ID {
+        if let Some(error) = entitlement_rejection(state, &resolved_key.org_id, signal.path()).await
+        {
+            return Err((error, "billing_limit"));
+        }
+    }
 
     let response_result = process_decoded_payload(
         state,
@@ -4007,31 +4208,13 @@ async fn handle_signal_inner(
     )
     .await;
 
-    let response = match response_result {
-        Ok(response) => {
-            if let (Some(entitlements), Some(reservation)) =
-                (&state.autumn_entitlements, reservation.as_ref())
-            {
-                let _ = entitlements.finalize(reservation, true).await;
-            }
-            response
-        }
-        Err(error) => {
-            if let (Some(entitlements), Some(reservation)) =
-                (&state.autumn_entitlements, reservation.as_ref())
-            {
-                let _ = entitlements.finalize(reservation, false).await;
-            }
-            return Err((error, "forward"));
-        }
-    };
+    let response = response_result.map_err(|error| (error, "forward"))?;
 
     Ok((
         response,
         item_count,
         resolved_key.org_id.clone(),
         decoded_bytes,
-        reservation.is_some(),
     ))
 }
 
@@ -4190,14 +4373,13 @@ async fn handle_cloudflare_logpush_inner(
                 clickhouse_ready: resolved.clickhouse_ready,
             };
             let decoded = DecodedPayload::Logs(request);
-            let reservation = reserve_autumn_usage(
-                state,
-                &resolved.org_id,
-                Signal::Logs.path(),
-                billable_gb(decoded_payload.len() as u64),
-            )
-            .await
-            .map_err(|error| (error, "billing_limit"))?;
+            if resolved.org_id != SENTINEL_ORG_ID {
+                if let Some(error) =
+                    entitlement_rejection(state, &resolved.org_id, Signal::Logs.path()).await
+                {
+                    return Err((error, "billing_limit"));
+                }
+            }
             let response = match process_decoded_payload(
                 state,
                 Signal::Logs,
@@ -4210,11 +4392,6 @@ async fn handle_cloudflare_logpush_inner(
             {
                 Ok(response) => response,
                 Err(error) => {
-                    if let (Some(entitlements), Some(reservation)) =
-                        (&state.autumn_entitlements, reservation.as_ref())
-                    {
-                        let _ = entitlements.finalize(reservation, false).await;
-                    }
                     state
                         .cloudflare_resolver
                         .record_failure(&resolved.connector_id, &error.message)
@@ -4222,12 +4399,6 @@ async fn handle_cloudflare_logpush_inner(
                     return Err((error, "forward"));
                 }
             };
-
-            if let (Some(entitlements), Some(reservation)) =
-                (&state.autumn_entitlements, reservation.as_ref())
-            {
-                let _ = entitlements.finalize(reservation, true).await;
-            }
 
             state
                 .cloudflare_resolver
@@ -4243,14 +4414,12 @@ async fn handle_cloudflare_logpush_inner(
                         item_count as u64,
                     );
                 }
-                if reservation.is_none() {
-                    if let Some(tracker) = &state.autumn_tracker {
-                        tracker.track(
-                            &resolved.org_id,
-                            Signal::Logs.path(),
-                            billable_gb(decoded_payload.len() as u64),
-                        );
-                    }
+                if let Some(tracker) = &state.autumn_tracker {
+                    tracker.track(
+                        &resolved.org_id,
+                        Signal::Logs.path(),
+                        billable_gb(decoded_payload.len() as u64),
+                    );
                 }
             }
 
@@ -5152,6 +5321,10 @@ impl IngestKeyResolver {
         }
         Span::current().record("maple.ingest.cache_hit", false);
 
+        if self.negative_cache.get(raw_key).await.is_some() {
+            return Ok(None);
+        }
+
         let key_type = infer_ingest_key_type(raw_key);
         let Some(key_type) = key_type else {
             return Ok(None);
@@ -5169,6 +5342,9 @@ impl IngestKeyResolver {
         // the key identity cached while the separate org-routing cache refreshes
         // ClickHouse readiness on its own TTL.
         let Some(row) = self.store.fetch_ingest_key(&key_hash, hash_column).await? else {
+            // Only a genuine "no row" is cached — store errors surface above and
+            // must stay retryable.
+            self.negative_cache.insert(raw_key.to_owned(), ()).await;
             return Ok(None);
         };
 
@@ -6990,6 +7166,10 @@ mod tests {
                 .time_to_live(Duration::from_mins(1))
                 .max_capacity(16)
                 .build(),
+            negative_cache: Cache::builder()
+                .time_to_live(Duration::from_secs(30))
+                .max_capacity(16)
+                .build(),
             routing,
         }
     }
@@ -7083,6 +7263,8 @@ mod tests {
             org_queue_max_bytes: 1024 * 1024,
             queue_channel_capacity: 10,
             wal_shards: 1,
+            wal_segment_max_bytes: maple_ingest::telemetry::WAL_SEGMENT_MAX_BYTES,
+            wal_store_heartbeat_interval: maple_ingest::wal_store::DEFAULT_HEARTBEAT_INTERVAL,
             batch_max_rows: 100,
             batch_max_bytes: 1024 * 1024,
             batch_max_wait: Duration::from_millis(1),
@@ -7198,11 +7380,15 @@ mod tests {
                 autumn_secret_key: None,
                 autumn_api_url: "https://api.useautumn.com".to_owned(),
                 autumn_flush_interval_secs: 1,
+                autumn_allow_ttl_secs: 60,
+                autumn_deny_ttl_secs: 5,
                 ingest_key_cache_ttl_secs: 60,
                 org_routing_cache_ttl_secs: 5,
                 replay_max_session_bytes: 1024 * 1024 * 1024,
                 replay_blob_store: None,
                 trust_proxy_geo: false,
+                shutdown_drain_secs: 1,
+            wal_store: None,
             },
             #[expect(
                 clippy::useless_conversion,
@@ -7216,6 +7402,10 @@ mod tests {
                 lookup_hmac_key: "test-hmac-key".to_owned(),
                 cache: Cache::builder()
                     .time_to_live(Duration::from_mins(1))
+                    .max_capacity(16)
+                    .build(),
+                negative_cache: Cache::builder()
+                    .time_to_live(Duration::from_secs(30))
                     .max_capacity(16)
                     .build(),
                 routing: Arc::clone(&routing),
@@ -7522,10 +7712,8 @@ mod tests {
         fn feature_id(&self) -> &str {
             self.body["feature_id"].as_str().unwrap_or_default()
         }
-        /// `required_balance` is only sent by `reserve`; a plain `is_allowed`
-        /// gate omits it. That is how the tests tell the two apart.
-        fn reserved_value(&self) -> Option<f64> {
-            self.body.get("required_balance").and_then(|v| v.as_f64())
+        fn tracked_value(&self) -> Option<f64> {
+            self.body.get("value").and_then(serde_json::Value::as_f64)
         }
     }
 
@@ -7557,25 +7745,53 @@ mod tests {
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
+        let api_url = format!("http://{addr}");
         state.autumn_entitlements = Some(AutumnEntitlements::new(
             state.http_client.clone(),
             "am_sk_test".to_string(),
-            &format!("http://{addr}"),
+            &api_url,
+            // A one-second allow TTL, so a test that wants a second gate can
+            // have one without a long sleep; the decision cache itself is
+            // tested in `autumn.rs`.
+            1,
+            1,
+        ));
+        state.autumn_tracker = Some(AutumnTracker::spawn(
+            "am_sk_test".to_string(),
+            &api_url,
+            1,
         ));
         (state, rx)
     }
 
-    /// Drain everything the fake Autumn has seen so far. Reserve → enqueue →
-    /// finalize all complete before the handler returns, so no waiting is
-    /// needed once the handler future has resolved.
-    fn drain_autumn_calls(
+    /// Everything the fake Autumn has seen. The entitlement gate resolves before
+    /// the handler returns, but usage is tracked out of band by the flush loop,
+    /// so this waits out one flush interval before draining.
+    async fn drain_autumn_calls(
         rx: &mut tokio::sync::mpsc::UnboundedReceiver<AutumnCall>,
     ) -> Vec<AutumnCall> {
+        tokio::time::sleep(Duration::from_millis(1_500)).await;
         let mut calls = Vec::new();
         while let Ok(call) = rx.try_recv() {
             calls.push(call);
         }
         calls
+    }
+
+    fn checks(calls: &[AutumnCall]) -> Vec<&AutumnCall> {
+        calls
+            .iter()
+            .filter(|c| c.path == "balances.check")
+            .collect()
+    }
+
+    /// Usage as Autumn was told it: `(feature_id, value)` per track call.
+    fn tracked(calls: &[AutumnCall]) -> Vec<(&str, f64)> {
+        calls
+            .iter()
+            .filter(|c| c.path == "balances.track")
+            .filter_map(|c| c.tracked_value().map(|v| (c.feature_id(), v)))
+            .collect()
     }
 
     fn bearer_headers(raw_key: &str) -> HeaderMap {
@@ -7616,41 +7832,20 @@ mod tests {
         .expect("product events should be accepted");
         assert_eq!(accepted, 3);
 
-        let calls = drain_autumn_calls(&mut rx);
-        let checks: Vec<&AutumnCall> = calls
-            .iter()
-            .filter(|c| c.path == "balances.check")
-            .collect();
+        let calls = drain_autumn_calls(&mut rx).await;
         // Every check on this endpoint is against `product_events`, never
-        // `browser_sessions`.
+        // `browser_sessions`. The check cannot reject here (`MeterAnyway`): a
+        // gate would 402 every org whose Autumn customer has no
+        // `product_events` balance yet, which is every org until the plan item
+        // is pushed and granted — Autumn answers that with a real
+        // `allowed: false`, not an error, so the fail-open does not cover it.
+        let checks = checks(&calls);
         assert!(!checks.is_empty(), "expected Autumn checks, saw {calls:?}");
         for check in &checks {
             assert_eq!(check.feature_id(), "product_events", "{check:?}");
         }
-        // ...and there is NO entitlement gate (a check with no
-        // `required_balance`), only the reservation. A gate would 402 every org
-        // whose Autumn customer has no `product_events` balance yet, which is
-        // every org until the plan item is pushed and granted — Autumn answers
-        // that with a real `allowed: false`, not an error, so the fail-open in
-        // `is_allowed` does not cover it.
-        let gates: Vec<&str> = checks
-            .iter()
-            .filter(|c| c.reserved_value().is_none())
-            .map(|c| c.feature_id())
-            .collect();
-        assert!(gates.is_empty(), "expected no entitlement gate, saw {gates:?}");
-        let reservations: Vec<f64> = checks.iter().filter_map(|c| c.reserved_value()).collect();
-        assert_eq!(
-            reservations,
-            vec![3.0],
-            "exactly one reservation for the enqueued row count"
-        );
-        let finalizes: Vec<&AutumnCall> = calls
-            .iter()
-            .filter(|c| c.path == "balances.finalize")
-            .collect();
-        assert_eq!(finalizes.len(), 1, "{calls:?}");
-        assert_eq!(finalizes[0].body["action"], "confirm");
+        // Usage is billed once, for the enqueued row count, through the tracker.
+        assert_eq!(tracked(&calls), vec![("product_events", 3.0)], "{calls:?}");
 
         let _ = std::fs::remove_dir_all(&queue_dir);
     }
@@ -7686,40 +7881,25 @@ mod tests {
             "custom + click rows are stored, unknown is dropped"
         );
 
-        let calls = drain_autumn_calls(&mut rx);
-        let checks: Vec<&AutumnCall> = calls
-            .iter()
-            .filter(|c| c.path == "balances.check")
-            .collect();
+        let calls = drain_autumn_calls(&mut rx).await;
 
-        // The entitlement gate (no `required_balance`) stays on browser_sessions:
-        // an exhausted product-events allowance must not 402 a whole transcript.
-        let gates: Vec<&str> = checks
-            .iter()
-            .filter(|c| c.reserved_value().is_none())
-            .map(|c| c.feature_id())
-            .collect();
-        assert_eq!(gates, vec!["browser_sessions"], "{calls:?}");
+        // The REJECTING gate stays on browser_sessions: an exhausted
+        // product-events allowance must not 402 a whole transcript. The
+        // product_events check beside it is `MeterAnyway` and cannot reject.
+        let gated: Vec<&str> = checks(&calls).iter().map(|c| c.feature_id()).collect();
+        assert!(
+            gated.contains(&"browser_sessions"),
+            "the transcript must be gated on browser_sessions, saw {calls:?}"
+        );
 
-        // The reservation is for the two custom rows only, as product_events.
-        let reservations: Vec<(&str, f64)> = checks
-            .iter()
-            .filter_map(|c| c.reserved_value().map(|v| (c.feature_id(), v)))
-            .collect();
-        assert_eq!(reservations, vec![("product_events", 2.0)], "{calls:?}");
-
-        let finalizes: Vec<&AutumnCall> = calls
-            .iter()
-            .filter(|c| c.path == "balances.finalize")
-            .collect();
-        assert_eq!(finalizes.len(), 1, "{calls:?}");
-        assert_eq!(finalizes[0].body["action"], "confirm");
+        // Only the two custom rows are billed, and as product_events.
+        assert_eq!(tracked(&calls), vec![("product_events", 2.0)], "{calls:?}");
 
         let _ = std::fs::remove_dir_all(&queue_dir);
     }
 
     #[tokio::test]
-    async fn session_events_without_custom_rows_reserve_nothing() {
+    async fn session_events_without_custom_rows_bill_nothing() {
         let queue_dir = unique_main_test_dir("session-events-no-custom");
         let state =
             replay_blob_test_state("maple_sk_test_se_auto", "org_se_auto", queue_dir.clone()).await;
@@ -7740,16 +7920,12 @@ mod tests {
         .expect("session events should be accepted");
         assert_eq!(accepted, 2);
 
-        let calls = drain_autumn_calls(&mut rx);
-        // Automatic events ride on the session's browser_sessions unit: only
-        // the gate fires, no reservation and no finalize.
-        assert!(
-            calls
-                .iter()
-                .all(|c| c.path == "balances.check" && c.reserved_value().is_none()),
-            "{calls:?}"
-        );
+        let calls = drain_autumn_calls(&mut rx).await;
+        // Automatic events ride on the session's browser_sessions unit: the
+        // gate fires and nothing is billed.
+        assert!(tracked(&calls).is_empty(), "{calls:?}");
         assert_eq!(calls.len(), 1, "{calls:?}");
+        assert_eq!(calls[0].path, "balances.check");
         assert_eq!(calls[0].feature_id(), "browser_sessions");
 
         let _ = std::fs::remove_dir_all(&queue_dir);
@@ -8301,7 +8477,7 @@ mod tests {
 
         // Stands in for the `ingest` server span that handle_signal creates.
         let server_span = tracing::info_span!("ingest");
-        let (response, item_count, _, _, _) = handle_signal_inner(
+        let (response, item_count, _, _) = handle_signal_inner(
             &state,
             &test_headers(raw_key),
             Bytes::from(test_log_request("span tree").encode_to_vec()),
@@ -8384,7 +8560,7 @@ mod tests {
         .await;
 
         let first_payload = test_log_request("before setup").encode_to_vec();
-        let (first_response, first_count, _, _, _) = handle_signal_inner(
+        let (first_response, first_count, _, _) = handle_signal_inner(
             &state,
             &test_headers(raw_key),
             Bytes::from(first_payload),
@@ -8430,7 +8606,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let second_payload = test_log_request("after setup").encode_to_vec();
-        let (second_response, second_count, _, _, _) = handle_signal_inner(
+        let (second_response, second_count, _, _) = handle_signal_inner(
             &state,
             &test_headers(raw_key),
             Bytes::from(second_payload),
@@ -8637,5 +8813,22 @@ mod tests {
             .await
             .expect("resolve should succeed");
         assert!(resolved.is_none());
+    }
+
+    #[tokio::test]
+    async fn resolve_ingest_key_negative_caches_unknown_keys() {
+        // A repeated unknown key must be answered from the negative cache, not
+        // by a store lookup per request — that's the unauthenticated
+        // DB-amplification path.
+        let store = Arc::new(FakeKeyStore::default());
+        let resolver = make_resolver(Arc::clone(&store));
+        for _ in 0..3 {
+            let resolved = resolver
+                .resolve_ingest_key("maple_sk_unknown")
+                .await
+                .expect("resolve should succeed");
+            assert!(resolved.is_none());
+        }
+        assert_eq!(store.ingest_key_fetches.load(Ordering::Relaxed), 1);
     }
 }

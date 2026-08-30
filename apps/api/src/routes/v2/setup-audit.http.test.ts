@@ -32,6 +32,7 @@ import {
 	SlackIntegrationServiceStubLayer,
 	TelemetryServiceStubsLayer,
 } from "./v2-test-support"
+import { compiledQueryOf } from "@maple/query-engine/execution"
 
 /**
  * End-to-end HTTP tests for `GET /v2/instrumentation/audit` over an embedded PGlite. The pure check
@@ -76,8 +77,12 @@ const warehouseStub = (
 		query: () => Effect.die(new Error("unexpected warehouse pipe query")),
 		rawSqlQuery: () => Effect.succeed([]),
 		compiledQuery: (_tenant, compiled) => {
-			const table = Object.keys(rowsByTable).find((name) => compiled.sql.includes(`FROM ${name}`))
-			return compiled.decodeRows(table === undefined ? [] : rowsByTable[table]!).pipe(Effect.orDie)
+			const table = Object.keys(rowsByTable).find((name) =>
+				compiledQueryOf(compiled).sql.includes(`FROM ${name}`),
+			)
+			return compiledQueryOf(compiled)
+				.decodeRows(table === undefined ? [] : rowsByTable[table]!)
+				.pipe(Effect.orDie)
 		},
 		compiledQueryFirst: () => Effect.die(new Error("unexpected compiled query")),
 		// `fetchWarehouseInputs` / `fetchTraceCompleteness` warm the route before

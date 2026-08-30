@@ -1,6 +1,7 @@
 import Maple
 import MapleAPI
 import SwiftUI
+import UIKit
 
 /// This app's own instrumentation, in one place.
 ///
@@ -38,6 +39,9 @@ enum Telemetry {
 		static let apiClientInit = "api.client_init"
 		/// One screen's data load, and the parent of every request it makes.
 		static let screenLoad = "screen.load"
+		/// The second pass of a load: decoration fetched after the first paint,
+		/// so `screen.load` measures time-to-content and this measures the rest.
+		static let screenDecorate = "screen.decorate"
 		/// A Clerk session token, cached or freshly minted.
 		static let authToken = "auth.token"
 		static let authMemberships = "auth.memberships"
@@ -406,6 +410,51 @@ extension Telemetry {
 // MARK: - Screen loads
 
 extension Telemetry {
+	/// The `screen.load` / `screen.decorate` spans currently in flight, so
+	/// backgrounding can end them the moment the app suspends.
+	///
+	/// A load in flight when the phone locks does not fail — its task freezes
+	/// with the process and finishes on resume — so its span used to cover the
+	/// whole suspension, and Home's `screen.load` p95 read as minutes of locked
+	/// phone. The SDK already ends `ui.screen` spans on `didEnterBackground`;
+	/// this mirrors that for the load spans it cannot see, ending them with
+	/// `load.outcome = "suspended"` and status left `Unset` — like a superseded
+	/// load, a suspended one neither succeeded nor failed. `Span` ignores
+	/// attribute writes and `end()` after it has ended, so the recording the
+	/// resumed load still does needs no guard.
+	@MainActor
+	enum ActiveLoads {
+		private static var spans: [ObjectIdentifier: Span] = [:]
+		private static var observer: (any NSObjectProtocol)?
+
+		static func began(_ span: Span?) {
+			guard let span else { return }
+			if observer == nil {
+				observer = NotificationCenter.default.addObserver(
+					forName: UIApplication.didEnterBackgroundNotification,
+					object: nil,
+					queue: .main
+				) { _ in
+					MainActor.assumeIsolated { suspendAll() }
+				}
+			}
+			spans[ObjectIdentifier(span)] = span
+		}
+
+		static func ended(_ span: Span?) {
+			guard let span else { return }
+			spans.removeValue(forKey: ObjectIdentifier(span))
+		}
+
+		private static func suspendAll() {
+			for span in spans.values where !span.hasEnded {
+				span.setAttribute(Key.loadOutcome, "suspended")
+				span.end()
+			}
+			spans.removeAll()
+		}
+	}
+
 	/// Wrap a screen's data load in the span every request it makes hangs under.
 	///
 	/// This is the whole reason the app traces at all. `HomeModel.fetch` fans
@@ -433,6 +482,8 @@ extension Telemetry {
 		let parent = PushOpen.parent(for: screen) ?? Visit.parent(for: screen)
 		let state = await withParent(parent) {
 			await Telemetry.span(Name.screenLoad, attributes: attributes) { span in
+				ActiveLoads.began(span)
+				defer { ActiveLoads.ended(span) }
 				let state = await body()
 				record(state, on: span)
 				return state
@@ -442,6 +493,30 @@ extension Telemetry {
 		// data — which is the moment the tap was actually answered.
 		PushOpen.settled(screen)
 		return state
+	}
+
+	/// Wrap a screen's post-paint decoration fetches — Home's issue counts and
+	/// sparklines — in their own span.
+	///
+	/// `screen.load` ends at the first paint now, so these requests need a
+	/// parent of their own: hanging them under a span that already ended draws
+	/// as bars outside the box above them. Parented to the visit span like a
+	/// load is, so the trace still reads as one screen's story.
+	@MainActor
+	static func screenDecorations<T: Sendable>(
+		screen: String,
+		organizationId: String?,
+		_ body: @MainActor @Sendable @escaping () async -> T
+	) async -> T {
+		var attributes: [String: AttributeValue] = [Key.screenName: .string(screen)]
+		if let organizationId { attributes[Key.organizationId] = .string(organizationId) }
+		return await withParent(Visit.parent(for: screen)) {
+			await Telemetry.span(Name.screenDecorate, attributes: attributes) { span in
+				ActiveLoads.began(span)
+				defer { ActiveLoads.ended(span) }
+				return await body()
+			}
+		}
 	}
 
 	/// Run `body` with `parent` ambient, so spans started inside it hang under

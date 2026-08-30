@@ -249,11 +249,7 @@ export class ServiceMapRollupService extends Context.Service<
 			return yield* warehouse
 				.crossOrgQuery(
 					systemTenant(knownOrgs[0]!),
-					CH.compile(
-						CH.activeOrgsByTracesQuery(),
-						{ startTime },
-						{ rowSchema: CH.ActiveOrgsOutputSchema },
-					),
+					CH.compile(CH.activeOrgsByTracesQuery(), { startTime }),
 					{
 						profile: "discovery",
 						context: "serviceMapRollupActiveOrgs",

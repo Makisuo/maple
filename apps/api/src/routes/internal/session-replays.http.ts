@@ -43,7 +43,11 @@ export const HttpSessionReplaysInternalLive = HttpApiBuilder.group(
 								hasErrors: payload.hasErrors,
 								search: payload.search,
 							}),
-							{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+							{
+								orgId: tenant.orgId,
+								startTime: payload.startTime,
+								endTime: payload.endTime,
+							},
 						)
 						const rows = yield* warehouse.compiledQuery(tenant, compiled, {
 							profile: "list",

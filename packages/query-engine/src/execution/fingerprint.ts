@@ -1,3 +1,5 @@
+import { splitTerminalClauses } from "@maple-dev/clickhouse-builder/sql"
+
 /**
  * Cap traced SQL at 16 KB. OTel's default attribute size limit is 32 KB, and
  * 16 KB covers the overwhelming majority of compiled DSL queries while leaving
@@ -71,12 +73,15 @@ export const summarizeSql = (sql: string): SqlSummary => {
 }
 
 /**
- * The official ClickHouse client rejects a trailing `FORMAT JSONEachRow`/`FORMAT
- * JSON` (it sets the format itself) and a trailing `;`. Strip both before
- * handing the SQL to the CH driver. Tinybird's `/v0/sql` keeps the SQL as-is.
+ * Drop a statement's `FORMAT` clause (any format, not just the `FORMAT JSON`
+ * the DSL emits) and trailing `;`, keeping any `SETTINGS`.
+ *
+ * The executor no longer needs this — it settles terminal clauses from the
+ * backend dialect before the driver sees the statement. This is for callers
+ * that hold compiled SQL as text and hand it straight to a ClickHouse client,
+ * which sets the wire format itself and rejects a statement carrying its own.
  */
-export const normalizeSqlForClickHouseClient = (sql: string): string =>
-	sql
-		.replace(/;\s*$/, "")
-		.replace(/\s+FORMAT\s+(?:JSONEachRow|JSON)\s*$/i, "")
-		.replace(/;\s*$/, "")
+export const normalizeSqlForClickHouseClient = (sql: string): string => {
+	const terminal = splitTerminalClauses(sql)
+	return terminal.settings === undefined ? terminal.body : `${terminal.body}\n${terminal.settings}`
+}

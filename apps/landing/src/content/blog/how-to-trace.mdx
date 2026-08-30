@@ -1,0 +1,212 @@
+---
+title: "Your traces are useless, and it's not OpenTelemetry's fault"
+description: "Auto-instrumentation gives you plumbing, not answers. A field guide to deliberate tracing: real span names, real attributes, honest errors, and the two failures we found auditing our own production backend."
+date: 2026-08-28
+author: "David Granzin"
+authorRole: "CEO and founder, Maple"
+category: "engineering"
+featured: true
+draft: true
+---
+
+import TraceComparison from "../../components/blog/demos/TraceComparison.astro"
+import InstrumentationCompare from "../../components/blog/demos/InstrumentationCompare.astro"
+import SpanNameFanout from "../../components/blog/demos/SpanNameFanout.astro"
+import OpsListSimulator from "../../components/blog/demos/OpsListSimulator.astro"
+import SpanAttrBuilder from "../../components/blog/demos/SpanAttrBuilder.astro"
+
+We build a tracing backend, which means we spend our days looking at traces, ours and everyone else's. Here is the uncomfortable pattern: almost everyone has tracing now, and almost nobody's traces can answer a real question.
+
+You did the responsible thing. You installed the OpenTelemetry SDK, wired up the exporter, watched spans appear in a dashboard, and closed the ticket. Then a customer emailed "checkout is broken," you opened the trace for their request, and it told you: `POST`, status 500, 1.24 seconds, two spans. One of them is named `query`.
+
+You now know exactly as much as you did before you opened it.
+
+This post is about closing that gap. Not "what is distributed tracing"; you know what it is. How to instrument so that the trace answers the question, instead of confirming that a request occurred. The mental model is one sentence, and everything else falls out of it:
+
+**A trace is a debugging session you ran in advance.** Every span you create and every attribute you set is an answer you pre-recorded for a question someone will ask at 2am. Auto-instrumentation can only pre-answer questions about HTTP and SQL plumbing. The questions that actually get asked are about your business: which user, which query, which flag, why. Only you can answer those.
+
+## Auto-instrumentation won't save you
+
+The auto-instrumentation pitch is real: install the SDK, get spans for every incoming request, outgoing call, and database query, for free. You should absolutely take the free spans. They are the skeleton of every trace, and the context propagation they do for you is genuinely hard to hand-roll.
+
+But look at what the free spans know. The HTTP library knows methods, routes, and status codes. The database driver knows that a query happened and how long it took; many drivers won't even record which query, and the ones that do record the SQL, not what it was *for*. Nothing in that stack knows what a cart is, what a subscription tier is, or that this particular request was the third retry of a payment that keeps declining.
+
+Auto-instrumentation is plumbing. It moves whatever you put into it, and by default you have put nothing into it. The two-span trace above isn't a tracing failure. The SDK did precisely what it was told. Nobody told it anything.
+
+The difference between "we have tracing" and "tracing pays our on-call back" is deliberate instrumentation: spans you create on purpose, named on purpose, carrying attributes you chose on purpose. That's the rest of this post.
+
+## What a trace, span, and attribute actually are
+
+Eight terms, quickly. These get used loosely, and the loose usage is where bad instrumentation hides.
+
+**Trace:** everything that happened because of one request, across every service it touched, stitched together by a shared id. One user click, one trace.
+
+**Span:** one unit of work inside a trace: a name, a start time, a duration, an outcome, and a parent. Spans nest, which is what makes the waterfall a waterfall.
+
+**Span name:** the *class* of work a span represents. It is a grouping key, not a sentence. This distinction gets its own chapter, because we shipped both ways of getting it wrong.
+
+**Attribute:** a key/value pair on a span. An attribute is a column you will filter by during an incident. `app.user.id`, `db.query.fingerprint`, `app.payment.attempt`.
+
+**Span event:** a timestamped point inside a span. The one that matters in practice is the exception event: the stack trace, attached exactly where it happened.
+
+**Status:** the span's verdict: `Ok`, `Error`, or unset. A verdict, not a reflex; more on that below.
+
+**Context propagation:** how the trace id and the current span id travel: between functions in-process, and between services in a header. When propagation breaks, one request becomes several disconnected traces, and each one starts mid-sentence.
+
+**Cardinality:** how many distinct values something can take. `http.request.method` has about nine. `app.user.id` has millions. High-cardinality values are the most useful things you can record, and the whole game is putting them in the right place: attributes are built for high-cardinality values, and names are ruined by them.
+
+## Anatomy of a trace worth reading
+
+Here is the checkout request from the intro, twice. Once as auto-instrumentation left it, and once instrumented by someone who expected to be paged about it.
+
+<TraceComparison />
+
+The good version isn't clever. It's nine deliberate decisions about what deserves a span, and they follow one test: **a unit of work gets a span if it has a duration worth seeing on its own and a way to fail on its own.** Verifying a session. Loading the cart. Quoting prices. Charging the card. Persisting the order. Each of those can be slow independently and can fail independently, so each one gets a row in the waterfall.
+
+Notice what did *not* get a span: utility functions, serializers, the four private methods inside `PricingService.quote`. A span is not a stack frame. If it can't be slow on its own and can't fail on its own, its time belongs inside its parent, and its details, if they matter at all, belong in an attribute.
+
+Nesting is the other half. The Stripe call is a child of `PaymentService.charge`, which is a child of the request. That parentage is what turns "the request took 1.24s" into "60% of the request is Stripe" without anyone doing arithmetic. Auto-instrumented spans get parentage for free; your deliberate spans get it by being created inside the active context, which every OTel SDK does by default with `startActiveSpan` or its equivalent. If you take one implementation detail from this post: create spans *around* the work, with the work as a callback or a scope, and nesting takes care of itself.
+
+How many spans should a request have? Our healthy services run five to thirty spans for a typical request. Under five, you're probably hiding work inside opaque parents. Hundreds, and you've turned the waterfall into a log file. You'll meet a spectacular version of that failure two chapters from now.
+
+## Lazy vs deliberate instrumentation
+
+The same handler, written twice. The code difference is about ten lines. The difference mid-incident is everything.
+
+<InstrumentationCompare />
+
+The deliberate version does three things the lazy version doesn't, and they're worth naming because they're the whole recipe:
+
+1. **It records business context before the work starts.** User, tier, cart size, cart value. If the request dies halfway through, the context is already on the span. Context recorded after the `await` is context you lose in exactly the failures you care about.
+2. **It records outcomes as they're learned.** The order id on success; the decline code and the attempt number on failure, as fields rather than a prose message.
+3. **It classifies the failure and then records the exception.** The attributes (`app.error.code`) are for aggregation: "how many `card_declined` this hour, is it one issuer?" The exception event is for the single case: this stack, this line.
+
+One note on naming keys: pick a namespace for your own attributes (`app.*`, or your company name) and stay out of the `http.*`/`db.*` semconv namespaces unless you mean them. Semconv keys have defined meanings that backends build features on; your business context deserves its own prefix, applied consistently, so that `app.user.id` is one column across every service and not five spellings of the same idea.
+
+## A span name is a GROUP BY key
+
+Before writing this guide we audited our own span names, on the theory that you should not publish a field guide to a swamp you're standing in. It did not go great: we found both possible ways to get naming wrong, live, in the same service.
+
+The OpenTelemetry spec defines a span name as "the most general string that identifies a (statistically) interesting class of Spans", which is true, and which has never once caused anyone to name a span well. Here is the version that changes behavior. Every useful view of your traces is an aggregation, and the thing it aggregates by is the span name:
+
+<SpanNameFanout />
+
+The operations list is `GROUP BY SpanName`. Per-operation p95 is a quantile grouped by span name. The alert on a slow endpoint is a `WHERE` on the span name. Whatever vendor you use, this is what's happening under the dashboard. So a span name must be chosen the way you'd choose a value for a column you intend to group by. There are exactly two ways to ruin a grouping key: too generic, and it merges things that have nothing to do with each other; too specific, and it never aggregates at all.
+
+We shipped both. One span name in our API was covering 222,632 spans a day with roughly 200,000 distinct SQL queries underneath it: a row in our operations list that said `executeSql · p95 395ms` and meant nothing, because the spans under it ranged from 0ms to 30 seconds. The slowest operation in the service could never appear in a "slowest operations" view, because as far as the grouping key was concerned, it wasn't an operation.
+
+In the same service, one code path used the semconv-recommended `{operation} {target}` template with a `{target}` generated per request: 555 spans minting 327 distinct names, 1.7 uses per name. The template was right, but the value being interpolated was a per-request payload.
+
+<OpsListSimulator />
+
+If your driver names every database span `query`, the first view is your operations list too. It looks tidy, in the way a room is tidy after you shove everything into one closet.
+
+The second failure is worth learning to spot in code review, because the code that produces it is *technically correct*: find every span name built by interpolation and ask what the interpolated part ranges over. A fixed set the code knows, like an HTTP method or a table name? Fine. Anything from a request, a user, a record id, or a model? Every distinct value splits the operation into a new one, and none of the fragments will ever aggregate, trend, or alert. IDs in URL paths are the classic case: the route template is the name, the id is an attribute.
+
+The rules compress into one table:
+
+| Kind | Name | Example |
+| --- | --- | --- |
+| Server (HTTP) | `{method} {route template}` | `GET /users/{id}` |
+| Client (HTTP) | `{method}`, host in `server.address` | `POST` |
+| Client (DB) | `{operation} {table}` | `SELECT users` |
+| Producer / Consumer | `{destination} {operation}` | `orders send` |
+| Internal | `{Component}.{method}` | `BillingService.createInvoice` |
+
+Three of these deserve a sentence. Client HTTP spans don't get a path: you rarely know the callee's route template, and guessing one from the path is the interpolation bug with extra steps; the host goes in `server.address`. Internal spans always get a component prefix (`BillingService.createInvoice`, never a bare `process` or `sync`), because a bare verb is the closet problem in miniature: six subsystems each have a `sync`. And pick one casing, forever: `BillingService.createInvoice` and `billing.create_invoice` are different rows in every dashboard until the end of time.
+
+The one-line rule that decides every case the table doesn't: **the name says what class of work this is; anything that varies per request is an attribute.**
+
+## Attributes are where the cardinality goes
+
+Everything the naming chapter evicted (IDs, users, tenants, query text, sizes, flags) lands here, and attributes are built to hold it. They're cheap, they're indexed for filtering, and they're not part of any grouping key, so a million distinct user ids cost you nothing structurally. You lose nothing by moving a value out of a name; you can still find the one request for user `8f2a-4c11` by filtering the attribute. What you gain is that the other 200,000 requests become percentiles that mean something.
+
+The test for whether an attribute earns its place is the question it answers:
+
+<SpanAttrBuilder />
+
+A starter checklist for a request-handling span, in rough order of how often each one ends an incident: the user or tenant id; the error code as a stable string (not a message); the feature flags that were on; the retry or attempt number; sizes and counts (items, bytes, rows); the query fingerprint or statement for database work; the external provider and their request id for calls that cross a company boundary.
+
+Two boundaries to respect. Don't record secrets or raw payloads: attributes are forever, and `app.cart.total_cents` is useful where `app.card.number` is a breach. And don't stringify objects into one mega-attribute: one JSON blob is grep-able but not filterable, which puts you right back where logs left you.
+
+## Errors: status is a verdict, not a reflex
+
+The laziest error instrumentation is `catch (e) { span.recordException(e); throw e }`, and its sibling, marking every non-200 response as an error. Both feel diligent. Both quietly ruin your error views.
+
+Span status is a *verdict about the operation*, not a reflex about exceptions. Our ingest gateway rejects unauthenticated requests all day. Those are 401s, they're the system working as designed, and their spans are `Ok`. The OTel HTTP convention agrees: for server spans, only 5xx-class failures set `Error`. When we got this wrong, expected 401s and 429s flooded the error rate, and the dashboard's answer to "is the service healthy?" became "define healthy." A 4xx is the caller's problem; a 5xx is yours. Status tracks *yours*.
+
+When something genuinely fails, record it three ways, because each serves a different reader:
+
+```ts
+} catch (err) {
+  span.setAttributes({ // [!code ++]
+    "app.error.code": toErrorCode(err),   // aggregation: GROUP BY error code // [!code ++]
+    "app.error.retriable": isRetriable(err), // [!code ++]
+  }) // [!code ++]
+  span.recordException(err)               // the single case: this stack, here // [!code ++]
+  span.setStatus({ code: SpanStatusCode.ERROR }) // the verdict // [!code ++]
+  throw err
+}
+```
+
+The classification attributes power the aggregate questions ("is the error spike one decline code?"). The exception event powers the individual investigation. The status powers every error-rate chart and alert you'll ever build. Skip any of the three and one of those readers goes home empty-handed.
+
+## Keep the trace connected
+
+Everything above assumes the trace is *whole*, that the checkout span and the Stripe span ended up in the same waterfall. Within one service, the SDK's context does this invisibly. The places it breaks are the places a request stops being one call stack:
+
+**Across services**, the context travels in the `traceparent` header. Instrumented HTTP clients inject it and instrumented servers extract it. That's free, until the day a proxy strips the header, or one service in the chain isn't instrumented, and every request becomes two traces that don't know about each other. If your traces routinely start at service B, this is why.
+
+**Across queues and background jobs**, nothing is automatic: write the trace context into the message when you enqueue, read it when you consume. Whether the consumer *continues* the trace or starts a new one linked to it is a real choice: for work that runs seconds later, continue; for a batch job that processes 500 enqueued items an hour later, give the job its own trace and attach a span link per item, or the producer's traces grow hour-long tails.
+
+**Across in-process async boundaries** (fire-and-forget promises, spawned workers, anything that outlives the request) the failure is subtler: work either escapes the trace entirely, or, worse, inherits the ambient span silently, so a 30ms handler appears to take nine minutes because a background loop kept parenting onto it. If a waterfall ever shows a span that makes no chronological sense, suspect context leaking into forked work.
+
+The audit here is one query: what fraction of your traces have a root span that isn't your edge? Every one of those is a broken stitch, and each has one of the three causes above.
+
+## Sampling, or: you can afford this
+
+The objection to everything above is cost: "if every request gets ten spans with fifteen attributes, the bill will be spectacular." The answer is that sampling exists, and that useless telemetry at 100% costs more than useful telemetry at 10%. You were already paying for the two-span traces that answered nothing.
+
+Head sampling decides at the trace's birth ("keep 10% of everything"). It's cheap, simple, and blind: it drops nine out of ten of the errors you'll wish you had. Tail sampling decides after the outcome is known, which lets you state a policy that matches how debugging actually works: keep every trace with an error, keep everything slower than your p99, keep flagged tenants and rollout cohorts, and keep a small random slice of the healthy fast majority as a baseline. You almost never scroll happy, fast, ordinary traces. You aggregate them. So keep enough of them to aggregate, and keep *all* of the ones you'd read one at a time.
+
+Whatever you choose, decide it deliberately and write it down where the whole team can see it: an undocumented sampler is how "the trace doesn't exist" becomes a surprise mid-incident. We keep the longer version, rates and all, in our [sampling guide](/docs/concepts/sampling-throughput).
+
+## Five things people get wrong about tracing
+
+**"We use OpenTelemetry, so we're covered."** OpenTelemetry is a wire format and an SDK. It standardizes how telemetry travels, not what it says. Empty spans in a standard format are still empty.
+
+**"Traces replace logs."** A deliberately-attributed span makes most per-request log lines redundant, and that's a fine outcome. But multi-line context inside one unit of work, and anything that happens outside a request, still reads better as structured, trace-correlated logs. The goal is one id joining both, not a funeral for either.
+
+**"High-cardinality attributes are expensive."** They were, on systems built for low-cardinality string search. Columnar stores (ClickHouse and its relatives, which is what serious trace backends run on) are built precisely for filtering billions of rows by a high-cardinality column. On a columnar store, an attribute is the cheap place to put cardinality; a name never stops being the expensive one.
+
+**"More spans means better traces."** Our 327-names-for-555-spans incident says otherwise, and so does every waterfall with four hundred rows of function calls. Spans are for units of work that can be slow or fail on their own. Everything else is an attribute on its parent.
+
+**"We'll rename the bad spans later; it's just a string."** Renaming a span splits its history: yesterday's `query` and today's `SELECT users` are different rows in every dashboard and every alert baseline, and nothing merges them retroactively. Rename them (we are), but do it deliberately, not as a Friday drive-by, and expect alert thresholds to spend a week re-learning.
+
+## How to audit your own span names in an hour
+
+You don't need a migration project. You need an hour, two queries, and one uncomfortable exercise.
+
+**Sort your span names both ways.** Group a day of spans by name and count them. Read the bottom of the list first: names used once or twice are values that leaked into names, and you'll usually spot the guilty interpolation from the name alone; ours were not subtle.
+
+Then read the top: for each fat name, ask how many genuinely different things live under it. If one name is a third of your spans and covers three orders of magnitude of duration, you've found your closet. There's no magic number of names, but the ratio is diagnostic: our healthy services run from 22 names across 85M spans to about 600 across 3M. Thousands of spans per name is a grouping key doing its job.
+
+**Then pick one trace for your slowest endpoint and try to answer *why* from the trace alone.** No logs, no grep, no asking the person who wrote it. Which user? Which query? Which downstream call ate the time? Was it a retry? Every question you can't answer from the trace is a missing span or a missing attribute, and now you have the list. That list is your instrumentation backlog, already prioritized.
+
+Then put the audit on a calendar and run it again in a month, because one of the two bugs we confessed above was in code reviewed by people who were, at that moment, building a span-naming feature. This class of bug does not announce itself. It just quietly makes every number you look at slightly about nothing.
+
+That's the whole trade. A few deliberate lines per handler, and debugging stops being archaeology, digging through strata of log lines hoping context survived, and becomes a query you already answered. You wrote the answer down at instrumentation time. 2am you just has to read it.
+
+## Frequently asked questions
+
+**What should an OpenTelemetry span name be?** The class of work, not the instance: `GET /users/{id}` for a server span, `SELECT users` for a database call, `BillingService.createInvoice` for internal work. Anything that varies per request (an id, a query, a payload) goes in an attribute, or every distinct value becomes a separate row in your dashboards.
+
+**How many spans should a trace have?** For a typical request in our services, five to thirty. Fewer usually means real work is hiding inside opaque parents; hundreds means stack frames are masquerading as spans. A span earns its place when it can be slow on its own and fail on its own.
+
+**Are high-cardinality attributes expensive in distributed tracing?** Not on modern trace backends. Columnar stores are built for filtering billions of rows by a high-cardinality column, so `app.user.id` with millions of values is fine as an attribute. Cardinality only gets expensive when it leaks into span names or metric labels.
+
+**Should a 401 or 404 set the span status to error?** No. For server spans, the OpenTelemetry HTTP convention sets `Error` only for 5xx-class failures. Expected rejections like 401s and 429s are the system working as designed; marking them as errors floods your error rate and buries the failures that are actually yours.
+
+---
+
+*If you want somewhere to point the deliberate spans at, [Maple](https://maple.dev) is an OpenTelemetry-native tracing backend: the [instrumentation guides](/docs/guides/instrumentation-nodejs) get you from zero to a readable waterfall in one sitting, and everything in this post about names, attributes, and status is exactly what its operations views group by.*

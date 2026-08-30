@@ -35,6 +35,7 @@
 			"error",
 			{ "check": "unsafe", "allowFileSafetyComment": true }
 		],
+		"maple/no-ordie-compiled-query": "error",
 		"maple/no-react-use-effect": "warn",
 		"maple/no-record-string-any": "error",
 		"typescript/no-explicit-any": "warn",
@@ -44,6 +45,15 @@
 		"require-yield": "off"
 	},
 	"overrides": [
+		// The executor is the seam that decides a compile failure is a defect — the
+		// one place `Effect.orDie` around a compile is the intended behaviour rather
+		// than a call site restating it.
+		{
+			"files": ["packages/query-engine/src/execution/**"],
+			"rules": {
+				"maple/no-ordie-compiled-query": "off"
+			}
+		},
 		// Standalone generic DSLs use `any` as a variance placeholder; Maple product code may not.
 		{
 			"files": ["lib/**"],
