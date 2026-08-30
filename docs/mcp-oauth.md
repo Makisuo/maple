@@ -33,7 +33,7 @@ Manual MCP keys remain supported for clients without OAuth. They continue to use
 ## Rate limiting
 
 Authenticated `POST /mcp` requests share one budget per credential — the internal key ID for
-OAuth tokens and manual MCP keys, the user for dashboard sessions — of **120 requests per 60
+OAuth tokens and manual MCP keys, the user for dashboard sessions — of **600 requests per 60
 seconds**, partitioned by deployment stage. Exceeding it returns `429` with
 `{ "error": "rate_limited" }` and `Retry-After: 60`. The limiter fails open with
 `maple.rate_limit.outcome=failed_open` telemetry, like the `/v2` limiter documented in

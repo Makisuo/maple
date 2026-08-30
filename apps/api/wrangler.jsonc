@@ -30,7 +30,7 @@
 			"name": "MCP_TOOLS_RATE_LIMITER",
 			"namespace_id": "2026082901",
 			"simple": {
-				"limit": 120,
+				"limit": 600,
 				"period": 60,
 			},
 		},
