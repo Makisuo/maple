@@ -383,11 +383,11 @@ export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOp
 					namespaceId: 2026072102,
 					simple: { limit: 60, period: 60 },
 				}),
-				// Authenticated POST /mcp, per credential. Matches the v2 API's budget:
-				// agents burst tool calls, so this is a runaway-loop backstop.
+				// Authenticated POST /mcp, per credential. A short window so a runaway
+				// agent loop is cut off in seconds, at twice the v2 API's throughput.
 				MCP_TOOLS_RATE_LIMITER: Cloudflare.RateLimit("MCP_TOOLS_RATE_LIMITER", {
 					namespaceId: 2026082901,
-					simple: { limit: 600, period: 60 },
+					simple: { limit: 120, period: 10 },
 				}),
 				API_V2_RATE_LIMIT_PARTITION: formatMapleStage(stage),
 				// Production only: preview/stg workers run the same email crons against

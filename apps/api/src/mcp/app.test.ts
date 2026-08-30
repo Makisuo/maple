@@ -434,7 +434,7 @@ describe("MCP HTTP authorization", () => {
 				retryAfter: response.headers.get("retry-after"),
 				error: body.error,
 				executed,
-			}).toEqual({ status: 429, retryAfter: "60", error: "rate_limited", executed: false })
+			}).toEqual({ status: 429, retryAfter: "10", error: "rate_limited", executed: false })
 			// Buckets are per internal key id, so a rolled key gets a fresh budget
 			// and the raw secret never reaches the counter key.
 			expect(limitedKeys).toEqual([`key:${key.id}`])
