@@ -179,8 +179,10 @@ const Handles = () => (
 function DatabaseNode({ data }: { data: ServiceNodeData }) {
 	const {
 		throughput,
+		hasSampling,
 		errorRate,
 		avgLatencyMs,
+		maxLatencyMs,
 		p95LatencyMs,
 		dbSystem,
 		dbNamespace,
@@ -239,7 +241,10 @@ function DatabaseNode({ data }: { data: ServiceNodeData }) {
 
 					{/* Metrics row */}
 					<div className="flex gap-4">
-						<MetricCell label="calls/s" value={formatRate(throughput)} />
+						<MetricCell
+							label="calls/s"
+							value={`${hasSampling ? "~" : ""}${formatRate(throughput)}`}
+						/>
 						<MetricCell
 							label="err%"
 							value={`${(errorRate * 100).toFixed(1)}%`}
@@ -250,10 +255,13 @@ function DatabaseNode({ data }: { data: ServiceNodeData }) {
 							value={formatLatency(avgLatencyMs)}
 							valueClassName={latencyToneClass(avgLatencyMs, "avg")}
 						/>
+						{/* A p95 when the rollup has a digest to merge; the slowest call
+						    otherwise, and then the label says so. Never one under the
+						    other's name — that gap read 3s against a 7ms p95. */}
 						<MetricCell
-							label="p95"
-							value={formatLatency(p95LatencyMs ?? 0)}
-							valueClassName={latencyToneClass(p95LatencyMs ?? 0, "p95")}
+							label={p95LatencyMs === undefined ? "max" : "p95"}
+							value={formatLatency(p95LatencyMs ?? maxLatencyMs ?? 0)}
+							valueClassName={latencyToneClass(p95LatencyMs ?? maxLatencyMs ?? 0, "p95")}
 						/>
 					</div>
 

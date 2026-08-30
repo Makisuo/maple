@@ -145,7 +145,8 @@ describe("serviceExternalEdgesSQL", () => {
 					callCount: "11",
 					errorCount: "1",
 					avgDurationMs: "12.5",
-					p95DurationMs: "40",
+					maxDurationMs: "40",
+					p95DurationMs: "18",
 					estimatedSpanCount: "22",
 				},
 			])
@@ -158,7 +159,8 @@ describe("serviceExternalEdgesSQL", () => {
 					callCount: 11,
 					errorCount: 1,
 					avgDurationMs: 12.5,
-					p95DurationMs: 40,
+					maxDurationMs: 40,
+					p95DurationMs: 18,
 					estimatedSpanCount: 22,
 				},
 			])
@@ -173,6 +175,7 @@ describe("serviceExternalEdgesSQL", () => {
 						callCount: 1,
 						errorCount: 0,
 						avgDurationMs: 1,
+						maxDurationMs: 1,
 						p95DurationMs: 1,
 						estimatedSpanCount: 1,
 					},
@@ -240,6 +243,13 @@ describe("serviceMapResolutionsRollupSQL", () => {
 
 // serviceDependenciesForServiceQuery — service-scoped service↔service edges
 
+// The splice fragments `./rollup-splice` emits for the 10:15 → 12:30 window the
+// boundary tests use. Spelled out rather than imported: a test that derived them
+// from the helper would pass even if the helper itself inverted an inequality.
+const START_FLOOR = "toStartOfHour(toDateTime('2024-01-01 10:15:00'))"
+const FIRST_FULL_HOUR = `if(toDateTime('2024-01-01 10:15:00') = ${START_FLOOR}, ${START_FLOOR}, ${START_FLOOR} + INTERVAL 1 HOUR)`
+const END_FLOOR = "toStartOfHour(toDateTime('2024-01-01 12:30:00'))"
+
 describe("serviceDependenciesSQL", () => {
 	it("reads partial boundary hours from raw spans without widening the start", () => {
 		const { sql } = Effect.runSync(
@@ -252,10 +262,16 @@ describe("serviceDependenciesSQL", () => {
 				},
 			),
 		)
+		// The raw branch is bounded by the REQUESTED start, never the hour floor —
+		// the whole point of the splice.
 		expect(sql).toContain("Timestamp >= toDateTime('2024-01-01 10:15:00')")
-		expect(sql).toContain("addHours(toStartOfHour(toDateTime('2024-01-01 10:15:00')), 1)")
-		expect(sql).toContain("greatest(least(")
 		expect(sql).not.toContain("Timestamp >= toStartOfHour(toDateTime('2024-01-01 10:15:00'))")
+		// ...and it is restricted to the two partial hours, the exact complement
+		// of the hourly interior below.
+		expect(sql).toContain(`(Timestamp < ${FIRST_FULL_HOUR} OR Timestamp >= ${END_FLOOR})`)
+		// Hourly interior: half-open, starting at the first WHOLE hour.
+		expect(sql).toContain(`Hour >= ${FIRST_FULL_HOUR}`)
+		expect(sql).toContain(`Hour < ${END_FLOOR}`)
 	})
 
 	it.effect("decodes service dependency rows with numeric strings from ClickHouse JSON", () =>
@@ -269,7 +285,7 @@ describe("serviceDependenciesSQL", () => {
 					callCount: "12",
 					errorCount: "2",
 					avgDurationMs: "8.5",
-					p95DurationMs: "30",
+					maxDurationMs: "30",
 					estimatedSpanCount: "18",
 				},
 			])
@@ -281,7 +297,7 @@ describe("serviceDependenciesSQL", () => {
 					callCount: 12,
 					errorCount: 2,
 					avgDurationMs: 8.5,
-					p95DurationMs: 30,
+					maxDurationMs: 30,
 					estimatedSpanCount: 18,
 				},
 			])
@@ -304,7 +320,7 @@ describe("serviceDependenciesSQL", () => {
 	it("keeps the union branches' aliases disjoint from the outer aggregates", () => {
 		const { sql } = Effect.runSync(serviceDependenciesSQL({}, baseParams))
 		// Inner branches project `bucket*`; the outer projects the public names.
-		for (const outerAlias of ["callCount", "errorCount", "p95DurationMs", "estimatedSpanCount"]) {
+		for (const outerAlias of ["callCount", "errorCount", "maxDurationMs", "estimatedSpanCount"]) {
 			expect(sql).toContain(`AS ${outerAlias}`)
 			expect(sql).not.toContain(`AS bucket${outerAlias}`)
 		}
@@ -375,8 +391,9 @@ describe("serviceDependenciesForServiceQuery", () => {
 			endTime: "2024-01-01 12:30:00",
 		})
 		expect(sql).toContain("Timestamp >= toDateTime('2024-01-01 10:15:00')")
-		expect(sql).toContain("addHours(toStartOfHour(toDateTime('2024-01-01 10:15:00')), 1)")
-		expect(sql).toContain("greatest(least(")
+		expect(sql).toContain(`(Timestamp < ${FIRST_FULL_HOUR} OR Timestamp >= ${END_FLOOR})`)
+		expect(sql).toContain(`Hour >= ${FIRST_FULL_HOUR}`)
+		expect(sql).toContain(`Hour < ${END_FLOOR}`)
 	})
 
 	it("filters SourceService on the hourly branch", () => {
@@ -461,7 +478,8 @@ describe("serviceDbEdgesForServiceQuery", () => {
 					callCount: "42",
 					errorCount: "3",
 					avgDurationMs: "14.25",
-					p95DurationMs: "88",
+					maxDurationMs: "88",
+					p95DurationMs: "31",
 					estimatedSpanCount: "63",
 				},
 			])
@@ -474,7 +492,8 @@ describe("serviceDbEdgesForServiceQuery", () => {
 					callCount: 42,
 					errorCount: 3,
 					avgDurationMs: 14.25,
-					p95DurationMs: 88,
+					maxDurationMs: 88,
+					p95DurationMs: 31,
 					estimatedSpanCount: 63,
 				},
 			])
@@ -598,12 +617,14 @@ describe("service-map database query summaries", () => {
 		expect(sql).toContain("FROM service_map_db_query_shapes_hourly")
 		expect(sql).toContain("DbSystem = 'postgresql'")
 		expect(sql).toContain("DeploymentEnv = 'production'")
-		expect(sql).toContain("Hour >= toStartOfHour(toDateTime('2024-01-01 00:00:00'))")
+		// `baseParams` is hour-aligned, so the first whole hour IS the start hour.
+		expect(sql).toContain("Hour >= if(toDateTime('2024-01-01 00:00:00') = ")
 		expect(sql).toContain("Hour < toStartOfHour(toDateTime('2024-01-02 00:00:00'))")
-		// raw branch — in-progress (current) hour only
+		// raw branch — the two partial hours, bounded by the requested window
 		expect(sql).toContain("FROM traces")
-		expect(sql).toContain("Timestamp >= toStartOfHour(toDateTime('2024-01-02 00:00:00'))")
+		expect(sql).toContain("Timestamp >= toDateTime('2024-01-01 00:00:00')")
 		expect(sql).toContain("Timestamp <= toDateTime('2024-01-02 00:00:00')")
+		expect(sql).toContain("OR Timestamp >= toStartOfHour(toDateTime('2024-01-02 00:00:00'))")
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("ServiceName = 'artifacts-api'")
 		expect(sql).toContain(

@@ -14,7 +14,7 @@ function renderEdge(overrides: Partial<ServiceEdgeData> = {}) {
 		errorCount: 0,
 		errorRate: 0,
 		avgDurationMs: 5,
-		p95DurationMs: 10,
+		maxDurationMs: 10,
 		hasSampling: false,
 		services: ["api", "auth"],
 		...overrides,

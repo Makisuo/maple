@@ -956,6 +956,62 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 			CH.compileUnsafe(CH.serviceDependenciesForServiceQuery({ serviceName: "web" }), window),
 	},
 	{
+		// Hourly MV UNION ALL the two partial hours from raw traces. Absent from
+		// this catalog until 2026-08-30, which is how its splice drifted: the
+		// hourly branch floored the start to the hour while the raw branch covered
+		// only the trailing one, so every non-hour-aligned window counted the whole
+		// leading hour. Nothing swept it and nothing gated it.
+		module: "service-map",
+		name: "serviceDbEdgesSQL",
+		label: "default",
+		compile: () => runCompile(CH.serviceDbEdgesSQL({}, window)),
+	},
+	{
+		module: "service-map",
+		name: "serviceDbEdgesSQL",
+		label: "env-scoped",
+		compile: () => runCompile(CH.serviceDbEdgesSQL({ deploymentEnv: "production" }, window)),
+	},
+	{
+		module: "service-map",
+		name: "serviceDbEdgesForServiceQuery",
+		label: "default",
+		compile: () => CH.compileUnsafe(CH.serviceDbEdgesForServiceQuery({ serviceName: "web" }), window),
+	},
+	{
+		module: "service-map",
+		name: "serviceDbQuerySummarySQL",
+		label: "default",
+		compile: () => runCompile(CH.serviceDbQuerySummarySQL({ ...window, dbSystem: "postgresql" })),
+	},
+	{
+		// Hour-aligned buckets take the sealed-rollup UNION raw-edge path; the
+		// sub-hour branch below reads raw `traces` for the whole window instead,
+		// and is a genuinely different SQL shape.
+		module: "service-map",
+		name: "serviceDbQueryTimeseriesSQL",
+		label: "hourly-buckets",
+		compile: () =>
+			runCompile(
+				CH.serviceDbQueryTimeseriesSQL({ ...window, dbSystem: "postgresql", bucketSeconds: 3600 }),
+			),
+	},
+	{
+		module: "service-map",
+		name: "serviceDbQueryTimeseriesSQL",
+		label: "sub-hour-buckets",
+		compile: () =>
+			runCompile(
+				CH.serviceDbQueryTimeseriesSQL({ ...window, dbSystem: "postgresql", bucketSeconds: 300 }),
+			),
+	},
+	{
+		module: "service-map",
+		name: "serviceDbTopQueriesSQL",
+		label: "default",
+		compile: () => runCompile(CH.serviceDbTopQueriesSQL({ ...window, dbSystem: "postgresql" })),
+	},
+	{
 		// Hourly MV UNION ALL raw traces, minus the internal-resolution anti-join.
 		module: "service-map",
 		name: "serviceExternalEdgesSQL",

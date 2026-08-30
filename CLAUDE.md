@@ -190,6 +190,7 @@ gets diagnosed, fixed and verified — read before touching `apps/api/src/servic
 `sampling-throughput.md` · `persistence.md` ·
 `ingest-wal-durability.md` (WAL segments, the S3 tier, and what survives a task dying) ·
 `docker-container-monitoring.md` (Docker agent → `/infra/containers` lifecycle + its invariants) ·
+`service-map-architecture.md` (the map's tiers, its splice invariant, and what a new overlay costs) ·
 `warehouse-rollups.md` (MV/rollup tiering contract — read before adding a materialized view) ·
 `sst-fork-workflow.md` · `local-mode.md` (single-binary CLI + embedded chDB) ·
 `tinybird-pr-branches.md` · `otel-spec/` (OTel spec map @ v1.58.0 — start at its README).

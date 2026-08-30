@@ -75,7 +75,7 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
 				"Errors",
 				"Error Rate",
 				"Avg Duration",
-				"P95 Duration",
+				"Max Duration",
 			]
 			const rows = Arr.map(edges, (e) => {
 				const errorRate = e.callCount > 0 ? e.errorCount / e.callCount : 0
@@ -85,7 +85,7 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
 					formatNumber(e.errorCount),
 					formatPercent(errorRate),
 					formatDurationFromMs(e.avgDurationMs),
-					formatDurationFromMs(e.p95DurationMs),
+					formatDurationFromMs(e.maxDurationMs),
 				]
 			})
 
@@ -124,7 +124,7 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
 							callCount: e.callCount,
 							errorCount: e.errorCount,
 							avgDurationMs: e.avgDurationMs,
-							p95DurationMs: e.p95DurationMs,
+							maxDurationMs: e.maxDurationMs,
 						})),
 						serviceCount,
 					},

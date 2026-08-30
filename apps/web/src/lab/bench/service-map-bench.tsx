@@ -101,14 +101,14 @@ function refreshBenchMetrics(graph: BenchGraph, revision: number): BenchGraph {
 			callCount: Math.max(1, Math.round(edge.callCount * callScale)),
 			estimatedCallCount: Math.max(1, Math.round(edge.estimatedCallCount * callScale)),
 			avgDurationMs: edge.avgDurationMs * latencyScale,
-			p95DurationMs: edge.p95DurationMs * latencyScale,
+			maxDurationMs: edge.maxDurationMs * latencyScale,
 		})),
 		dbEdges: graph.dbEdges.map((edge) => ({
 			...edge,
 			callCount: Math.max(1, Math.round(edge.callCount * callScale)),
 			estimatedCallCount: Math.max(1, Math.round(edge.estimatedCallCount * callScale)),
 			avgDurationMs: edge.avgDurationMs * latencyScale,
-			p95DurationMs: edge.p95DurationMs * latencyScale,
+			maxDurationMs: edge.maxDurationMs * latencyScale,
 		})),
 		overviews: graph.overviews.map((overview) => ({
 			...overview,
@@ -159,7 +159,7 @@ function generateBenchGraph(params: BenchParams): BenchGraph {
 			errorCount: Math.round(callCount * errorRate),
 			errorRate,
 			avgDurationMs: 2 + rng() * 80,
-			p95DurationMs: 20 + rng() * 400,
+			maxDurationMs: 20 + rng() * 400,
 			hasSampling: rng() < 0.3,
 			samplingWeight: 1 + Math.floor(rng() * 9),
 		})
@@ -187,7 +187,8 @@ function generateBenchGraph(params: BenchParams): BenchGraph {
 			errorCount: Math.round(callCount * errorRate),
 			errorRate,
 			avgDurationMs: 1 + rng() * 40,
-			p95DurationMs: 10 + rng() * 200,
+			maxDurationMs: 10 + rng() * 200,
+			p95DurationMs: 8 + rng() * 120,
 			hasSampling: false,
 			samplingWeight: 1,
 		})
@@ -678,8 +679,7 @@ function BenchDriver({
 			const measured = nodes.length > 0 && nodes.every((n) => n.measured?.width)
 			const domEdges = document.querySelectorAll(".react-flow__edge").length
 			// "fallback" is NOT terminal — it is what is on screen while ELK works.
-			const elkSettled =
-				document.querySelector('[data-elk-status="ready"]') !== null
+			const elkSettled = document.querySelector('[data-elk-status="ready"]') !== null
 			if (
 				(measured && domEdges > 0 && elkSettled) ||
 				performance.now() - settleStart > ELK_SETTLE_DEADLINE_MS

@@ -501,6 +501,19 @@ export const serviceMapDbEdgesHourly = defineDatasource("service_map_db_edges_ho
 		UnsampledSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
 		SampleRateSum: t.simpleAggregateFunction("sum", t.float64()),
 		DbNamespace: t.string().lowCardinality(),
+		// Sample-weighted t-digest of Duration (nanoseconds), so the map's database
+		// nodes can show a real p95 instead of the max they showed for months.
+		// Same state type and weight expression as
+		// `service_map_db_query_shapes_hourly.DurationQuantiles`, which the detail
+		// panel already merges — the node and the panel therefore finalize the
+		// identical statistic off the identical spans.
+		//
+		// Added by migration 0022. Buckets sealed before it hold an empty state,
+		// which merges to nothing; the read path reports 0 and the UI falls back to
+		// the max, labelled as a max. Not backfilled: raw `traces` keeps 30 days
+		// against this table's 365, so a backfill could only ever repair a twelfth
+		// of the window.
+		DurationQuantiles: t.aggregateFunction("quantilesTDigestWeighted(0.5, 0.95), UInt64", t.uint32()),
 	},
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
@@ -609,6 +622,9 @@ export const serviceExternalEdgesHourly = defineDatasource("service_external_edg
 		DurationSumMs: t.simpleAggregateFunction("sum", t.float64()),
 		MaxDurationMs: t.simpleAggregateFunction("max", t.float64()),
 		SampleRateSum: t.simpleAggregateFunction("sum", t.float64()),
+		// See the note on `service_map_db_edges_hourly.DurationQuantiles` — same
+		// state, same reason, same migration.
+		DurationQuantiles: t.aggregateFunction("quantilesTDigestWeighted(0.5, 0.95), UInt64", t.uint32()),
 	},
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",

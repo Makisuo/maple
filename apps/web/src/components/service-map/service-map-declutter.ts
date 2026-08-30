@@ -68,7 +68,7 @@ function mergeEdgeData(a: ServiceEdgeData, b: ServiceEdgeData): ServiceEdgeData 
 		errorRate: callCount > 0 ? errorCount / callCount : 0,
 		avgDurationMs:
 			callCount > 0 ? (a.avgDurationMs * a.callCount + b.avgDurationMs * b.callCount) / callCount : 0,
-		p95DurationMs: Math.max(a.p95DurationMs, b.p95DurationMs),
+		maxDurationMs: Math.max(a.maxDurationMs, b.maxDurationMs),
 		hasSampling: a.hasSampling || b.hasSampling,
 	}
 }
