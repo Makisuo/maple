@@ -677,10 +677,11 @@ describe("SessionWaterfall", () => {
 		expect(within(spanPopover()).getAllByText("grep_repo").length).toBeGreaterThan(0)
 	})
 
-	// A call and its result are one event: the panel shows them as one card
-	// whose selector flips between the halves, instead of two stacked cards the
-	// reader has to pair by eye.
-	it("groups a tool call and its result into one card behind a selector", () => {
+	// A call and its result are one event: the panel draws both halves of one
+	// card at once, joined by the direction gutter. The selector that used to
+	// show one at a time made a result nobody captured read exactly like a half
+	// nobody had clicked.
+	it("draws a tool call and its result as both halves of one card", () => {
 		const { turns: toolTurns, summary: toolSummary } = sessionOf([
 			agentSpan({ spanId: "tc-agent", startMs: 0, durationMs: 4 * SECOND }),
 			toolSpan({
@@ -698,14 +699,64 @@ describe("SessionWaterfall", () => {
 		])
 		render(<Waterfall turns={toolTurns} summary={toolSummary} selectedSpanId="tc-tool" spanTab="tools" />)
 
-		// Arguments first, pretty-printed; the result is a click away, not a scroll.
+		// Both halves, pretty-printed and named by direction — and nothing to click
+		// to see the other one.
 		const detail = spanPopover()
 		expect(detail.textContent).toContain('"sql"')
-		expect(detail.textContent).not.toContain('"rows"')
-
-		fireEvent.click(within(detail).getByRole("button", { name: "result" }))
 		expect(detail.textContent).toContain('"rows"')
-		expect(detail.textContent).not.toContain('"sql"')
+		expect(detail.textContent).toContain("Sent")
+		expect(detail.textContent).toContain("Returned")
+		expect(within(detail).queryByRole("button", { name: "result" })).toBeNull()
+		expect(within(detail).queryByRole("button", { name: "arguments" })).toBeNull()
+	})
+
+	// A failed tool span condemns the call it EXECUTED. Without that, the Tool
+	// calls tab dressed a failed return in the success styling and dropped its
+	// error label — the tab said the call came back fine.
+	it("marks the executed call's return as the failure on the Tool calls tab", () => {
+		const { turns: toolTurns, summary: toolSummary } = sessionOf([
+			agentSpan({ spanId: "ft-agent", startMs: 0, durationMs: 4 * SECOND }),
+			toolSpan({
+				spanId: "ft-tool",
+				parentSpanId: "ft-agent",
+				startMs: SECOND,
+				durationMs: SECOND,
+				toolName: "run_tests",
+				statusCode: "Error",
+				statusMessage: "exit 1",
+				genAi: {
+					toolCallId: "call_11",
+					toolCallArguments: { suite: "webhooks" },
+					toolCallResult: "exit 1 · 2 failing",
+				},
+			}),
+		])
+		render(<Waterfall turns={toolTurns} summary={toolSummary} selectedSpanId="ft-tool" spanTab="tools" />)
+
+		const detail = spanPopover()
+		expect(detail.textContent).toContain("Returned · error")
+		expect(detail.textContent).toContain("span status Error")
+	})
+
+	// A half nobody recorded keeps its place: dropping it would leave a card that
+	// reads as a call which returned nothing.
+	it("keeps the returned half when no result was captured", () => {
+		const { turns: toolTurns, summary: toolSummary } = sessionOf([
+			agentSpan({ spanId: "nr-agent", startMs: 0, durationMs: 4 * SECOND }),
+			toolSpan({
+				spanId: "nr-tool",
+				parentSpanId: "nr-agent",
+				startMs: SECOND,
+				durationMs: SECOND,
+				toolName: "write_file",
+				genAi: { toolCallId: "call_10", toolCallArguments: { path: "a.ts" } },
+			}),
+		])
+		render(<Waterfall turns={toolTurns} summary={toolSummary} selectedSpanId="nr-tool" spanTab="tools" />)
+
+		const detail = spanPopover()
+		expect(detail.textContent).toContain("Returned")
+		expect(detail.textContent).toContain("whether the call succeeded is unknown")
 	})
 
 	// The panel is a dialog, so the page-level keys stand down while it is open:
