@@ -547,6 +547,8 @@ describe("SlackInternalRouter (usage)", () => {
 			body: Record<string, unknown>
 		}> = []
 		globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+			// SAFETY: the tracker under test always POSTs a JSON object body; the
+			// assertions on `body` fail loudly if that ever stops holding.
 			calls.push({
 				url: String(input instanceof Request ? input.url : input),
 				authorization: new Headers(init?.headers).get("authorization") ?? undefined,
