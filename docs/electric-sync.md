@@ -6,9 +6,12 @@ real time using [ElectricSQL](https://electric.ax) shapes fronted by
 (traces, logs, metrics via `@maple/query-engine`) is **not** synced — it stays on
 the effect-atom + `WarehouseQueryService` path.
 
-Electric sync is the **only read path** for the dashboards, alerts, and
-error-issue verticals — there is no fetch fallback, so the web app needs the
-sync worker (and its upstream Electric) reachable for those lists to load.
+Electric sync is the primary read path for the dashboards and alerts verticals.
+Only `/dashboards` has a fallback: it degrades to a plain-HTTP snapshot with
+writes disabled (`SyncDegradedBanner`). The alerts lists have none — with the
+sync worker or its upstream unreachable they show `SyncUnavailable` and a retry.
+So an Electric outage is visible, and a deploy of the singleton service is a
+short one.
 
 The reusable machinery lives in the **`@maple/effect-db`** workspace package
 (source-only, consumed by `apps/web`'s Vite and, later, the mobile app):
@@ -40,12 +43,12 @@ apps/electric-sync Worker — /api/sync/shape  (src/routes/shape.http.ts, a raw 
   a standalone, DB-free worker (deploys independently of apps/api)
   auth: Clerk/self-hosted tenant resolution ONLY (makeResolveTenant, shared from
         @maple/api/electric-sync) — no API-key path, since it has no database
-  pins: table + `"org_id" = $1` (+ per-shape extra WHERE), params[1]=orgId, source_id/secret
+  pins: table + `"org_id" = $1` (+ per-shape extra WHERE), params[1]=orgId, secret
   forwards ONLY offset/handle/live/cursor from the client
   streams Electric's response back (buffers the long-poll body)
 
-Electric (Electric Cloud in prod / docker `electric` locally)
-  ← logical replication ← PlanetScale Postgres (direct 5432, publication electric_publication_default)
+Electric (apps/electric on ECS Fargate in prod / docker `electric` locally)
+  ← logical replication ← PlanetScale Postgres (direct 5432, publication electric_publication_maple)
 
 writes: endpoint captures the Postgres txid on the mutating statement
   (`pg_current_xact_id()::xid::text`, apps/api/src/lib/electric-txid.ts) and returns it;
@@ -142,29 +145,73 @@ SQL
 running `electric-sync` worker and that the docker `electric` service is up. It's
 a build-time constant, so a Vite restart is needed after changing it.
 
-## Production runbook (PlanetScale + Electric Cloud)
+## Production (PlanetScale + self-hosted Electric on ECS)
+
+Electric Cloud is gone. `apps/electric` runs the upstream `electricsql/electric`
+image on ECS Fargate — its own VPC, ALB and cluster, modelled on
+`apps/ingest/alchemy.run.ts` — at `electric.maple.dev` / `electric-staging.maple.dev`.
+Nothing was migrated to get there: Postgres is the source of truth and Electric
+is a cache over its logical replication stream.
+
+**What guards it.** The service is public, because its only caller is a Worker at
+the Cloudflare edge with no private route into a VPC. `ELECTRIC_SECRET` is the
+control — Electric requires it on every shape request, and the sync worker
+appends it as `?secret=` exactly as it did for Cloud's source secret. One secret,
+both ends of the hop. The task security group additionally admits `ELECTRIC_PORT`
+only from the ALB's group, so a task's public IP is not a way around TLS.
+
+**It is a singleton.** Two Electrics cannot share a replication slot, so the
+service runs `desiredCount: 1` with `minimumHealthyPercent: 0` — stop the old
+task, then start the new one. Every deploy therefore has a ~60s window with no
+sync: `/dashboards` degrades to its HTTP snapshot (`SyncDegradedBanner`), while
+the alerts lists have no fallback and sit in their retry state. This is why the
+image tag is pinned in `apps/electric/Dockerfile` rather than tracking `:latest`
+like local docker does.
+
+### Standing it up
 
 1. **PlanetScale cluster params:** `wal_level=logical`, `max_replication_slots>=10`,
    `max_wal_senders>=10`, `max_slot_wal_keep_size>=4096`, `sync_replication_slots=on`,
-   `hot_standby_feedback=on`.
-2. **Dedicated role:** a Postgres role with `REPLICATION` + `SELECT` on the synced
-   tables (avoid the ephemeral pscale migration roles).
-3. **Migration:** `0009_electric_publication` ships via the normal CI
-   `drizzle-kit migrate`. Because prod runs `ELECTRIC_MANUAL_TABLE_PUBLISHING=true`,
-   Electric never needs to own the tables — the migration owns the publication,
-   sidestepping PlanetScale's inability to reassign table ownership.
-4. **Electric Cloud source:** point it at the **direct** connection string
-   (port 5432 — not PSBouncer/6432, not Hyperdrive), `ELECTRIC_MANUAL_TABLE_PUBLISHING=true`.
-   Record `source_id` / `secret`.
-5. **Env:** set `ELECTRIC_URL`, `ELECTRIC_SOURCE_ID`, `ELECTRIC_SECRET` — now wired
-   into the standalone sync worker (`apps/electric-sync/alchemy.run.ts` +
-   `src/config.ts`), which also needs the auth env (`MAPLE_AUTH_MODE`,
-   `MAPLE_ROOT_PASSWORD` or `CLERK_*`). The root `alchemy.run.ts` bakes the worker's
-   public origin into the web build as `VITE_ELECTRIC_SYNC_URL`. Then `alchemy deploy`.
-   With `ELECTRIC_URL` unset the proxy returns 503 and the synced lists fail to load.
-6. Validate initial per-org snapshot sizes before deploying a new synced table.
+   `hot_standby_feedback=on`. Already set for Cloud; unchanged.
+2. **Dedicated role** with the `REPLICATION` *attribute* — never inherited through
+   role membership, and Electric's database validation rejects a role without it
+   with a message that does not say so — plus `SELECT` on the synced tables.
+   Avoid the ephemeral pscale migration roles.
+3. **Env:** `MAPLE_PG_ELECTRIC_URL` (that role, DIRECT port 5432 — logical
+   replication cannot run through PSBouncer or Hyperdrive) and `ELECTRIC_SECRET`.
+   Both reach the task through Secrets Manager, never the task definition's
+   plaintext `env`.
+4. **Migrate,** then `alchemy deploy`. `0051_electric_publication_maple` creates
+   the second publication the service reads (see below).
+5. **DNS,** one-time and manual in the Cloudflare `maple.dev` zone — the deploy
+   output carries both: the ACM validation CNAME, then a proxied CNAME for
+   `electric.maple.dev` at the ALB. The certificate lands `PENDING_VALIDATION` on
+   the first deploy; add the record and re-run to attach the listener.
+6. **Verify** before pointing anything at it:
+   `curl https://electric.maple.dev/v1/health`, then a shape through the proxy —
+   `curl -g 'https://sync.maple.dev/api/sync/shape?shape=dashboards&offset=-1' -H "authorization: Bearer <token>"`.
+7. **Cut over:** set `ELECTRIC_URL=https://electric.maple.dev` and clear
+   `ELECTRIC_SOURCE_ID`, then redeploy the sync worker. Reverting is the same env
+   change backwards, which is the entire point of the parallel publication.
 
-## PR previews (no Electric source — dormant since 2026-08)
+### Why there are two publications
+
+`ELECTRIC_REPLICATION_STREAM_ID=maple` (in `packages/infra/src/aws/stage.ts`) makes
+the self-hosted service read `electric_publication_maple` over `electric_slot_maple`,
+rather than the `…_default` pair Electric Cloud held. Without that, the new service
+could only start after the Cloud source was deleted — a cutover with no way back.
+
+While both exist, **a migration that adds or removes a synced table must touch
+both.** `migrations.test.ts` asserts they carry the same set, so forgetting fails
+the suite instead of silently starving a shape.
+
+Once the Cloud source is deleted, drop `electric_publication_default` in a
+follow-up migration and `electric_publication_maple` is simply the publication.
+Do **not** instead rename the stream back to `default`: that drops and rebuilds
+the slot, forcing a full re-snapshot of every shape for every connected client,
+to save a suffix.
+
+## PR previews (no Electric source — dormant since 2026-08, now also Cloud-less)
 
 **PR previews no longer have an Electric source.** They stopped provisioning a
 PlanetScale branch (see `resolveDatabaseMode` in
@@ -175,9 +222,10 @@ therefore withholds `ELECTRIC_URL`/`ELECTRIC_SOURCE_ID`/`ELECTRIC_SECRET` on the
 credentials and proxy its shapes at another stage's data. The sync worker deploys
 unconfigured, returns 503, and the web app falls back to its effect-atom fetches.
 
-The `down`/`sweep` paths below still run: they reap environments left over from
-PRs opened before the cutover (each still holds a plan max-databases slot). The
-`up` path described here is dormant and documents the reverse path.
+Both paths are now dead, not just `up`: Electric Cloud is gone, so there are no
+environments left to reap and `scripts/electric-pr-branch.ts` has nothing to call.
+What follows is kept as the record of what previews used to do — restoring live
+sync in a preview means pointing it at a self-hosted Electric, not at Cloud.
 
 The former lifecycle: an ephemeral Electric Cloud **environment** `pr-<n>` + a
 Postgres **source** per PR, mirroring the PlanetScale/Tinybird branch lifecycle.

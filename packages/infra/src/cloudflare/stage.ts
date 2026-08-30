@@ -15,6 +15,12 @@ export interface MapleDomains {
 	ingest?: string
 	/** Standalone ElectricSQL shape-proxy worker (`apps/electric-sync`). */
 	sync?: string
+	/**
+	 * Self-hosted ElectricSQL sync service (`apps/electric`, ECS Fargate). Only
+	 * the `sync` worker ever dials it; it is public because that worker runs at
+	 * the Cloudflare edge, and `ELECTRIC_SECRET` is what actually guards it.
+	 */
+	electric?: string
 	/** Auto-updating local-mode dashboard SPA (the `maple` binary points users here by default). */
 	local?: string
 }
@@ -26,6 +32,7 @@ const PRD_DOMAINS: MapleDomains = {
 	api: "api.maple.dev",
 	ingest: "ingest.maple.dev",
 	sync: "sync.maple.dev",
+	electric: "electric.maple.dev",
 	landing: "maple.dev",
 	local: "local.maple.dev",
 }
@@ -35,6 +42,7 @@ const STG_DOMAINS: MapleDomains = {
 	api: "api-staging.maple.dev",
 	ingest: "ingest-staging.maple.dev",
 	sync: "sync-staging.maple.dev",
+	electric: "electric-staging.maple.dev",
 	landing: "staging-landing.maple.dev",
 	local: "local-staging.maple.dev",
 }

@@ -245,3 +245,59 @@ export function stageEnablesReplayBlobs(stage: MapleStage): boolean {
 export function resolveCollectorTaskSize(stage: MapleStage): IngestTaskSize {
 	return stage.kind === "prd" ? { cpu: 512, memory: 1024 } : { cpu: 256, memory: 1024 }
 }
+
+/**
+ * VPC CIDR for the self-hosted Electric fleet, per Maple region. Kept out of
+ * the ingest ranges (10.2x) so the two VPCs could be peered later without
+ * renumbering; nothing peers them today.
+ */
+export function resolveElectricCidrBlock(region: MapleRegion): string {
+	switch (region) {
+		case "us":
+			return "10.30.0.0/16"
+		case "eu":
+			return "10.31.0.0/16"
+	}
+}
+
+/**
+ * Whether a stage runs its own ElectricSQL sync service.
+ *
+ * prd + stg. PR previews are excluded for the same reason they get no Electric
+ * config at all (`apps/electric-sync/alchemy.run.ts`): they have no PlanetScale
+ * branch, so there is no Postgres to replicate from. Dev stages use the docker
+ * `electric` service in `docker-compose.development.yml`.
+ */
+export function stageDeploysElectric(stage: MapleStage): boolean {
+	return stage.kind === "prd" || stage.kind === "stg"
+}
+
+/**
+ * Suffix Electric appends to the replication publication and slot it uses
+ * (`electric_publication_<id>` / `electric_slot_<id>`).
+ *
+ * `maple` rather than Electric's `default` ON PURPOSE. `electric_publication_default`
+ * is the migration-owned publication Electric CLOUD reads, and the two services
+ * cannot share one replication slot — the second to connect is refused. Giving
+ * the self-hosted service its own stream lets both run against the same database
+ * while the cutover is verified, so flipping `ELECTRIC_URL` is a reversible env
+ * change rather than a leap. `0031_electric_publication_maple` creates the
+ * matching publication.
+ *
+ * Do not "simplify" this back to `default` after the Cloud source is deleted:
+ * that rename drops and rebuilds the slot, forcing a full re-snapshot of every
+ * shape for every connected client.
+ */
+export const ELECTRIC_REPLICATION_STREAM_ID = "maple"
+
+/**
+ * Fargate task size for Electric per stage.
+ *
+ * The synced set is eight low-write control-plane tables, so this is sized for
+ * the BEAM's floor rather than for throughput. prd gets half a vCPU; stg a quarter.
+ * Raise it when a shape's snapshot query, not its change stream, becomes the
+ * cost — that is the first thing that will actually need CPU here.
+ */
+export function resolveElectricTaskSize(stage: MapleStage): IngestTaskSize {
+	return stage.kind === "prd" ? { cpu: 512, memory: 1024 } : { cpu: 256, memory: 512 }
+}

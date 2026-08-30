@@ -13,11 +13,17 @@ import * as Output from "alchemy/Output"
 import * as RemovalPolicy from "alchemy/RemovalPolicy"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import { parseMapleRegion, resolveAwsRegion, stageDeploysIngest } from "@maple/infra/aws"
+import {
+	parseMapleRegion,
+	resolveAwsRegion,
+	stageDeploysElectric,
+	stageDeploysIngest,
+} from "@maple/infra/aws"
 import { formatMapleStage, parseMapleStage, resolveMapleDomains } from "@maple/infra/cloudflare"
 import { requiredPlain } from "@maple/infra/env"
 import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
 import { createMapleApi, createReplayBlobStore } from "./apps/api/alchemy.run.ts"
+import { createMapleElectric } from "./apps/electric/alchemy.run.ts"
 import { createElectricSyncWorker } from "./apps/electric-sync/alchemy.run.ts"
 import { createMapleIngest } from "./apps/ingest/alchemy.run.ts"
 import { createLandingWorker } from "./apps/landing/alchemy.run.ts"
@@ -175,6 +181,16 @@ export default Alchemy.Stack(
 			replayBlobs: replayBlobStore.bucket,
 		})
 
+		// Self-hosted ElectricSQL on ECS Fargate (prd/stg — dev stages use the
+		// docker `electric` service, and PR previews have no database to replicate
+		// from). Deliberately NOT wired into the sync worker's env here: the worker
+		// reads `ELECTRIC_URL` from the secret store, so standing this service up
+		// and cutting over to it are two separate, independently revertible acts.
+		// Point `ELECTRIC_URL` at `https://${domains.electric}` once it is verified.
+		const electric = stageDeploysElectric(stage)
+			? yield* createMapleElectric({ stage, domains, region })
+			: undefined
+
 		// Standalone ElectricSQL shape-proxy worker (DB-free); its public origin is
 		// baked into the web build (VITE_ELECTRIC_SYNC_URL).
 		const electricSync = yield* createElectricSyncWorker({ stage, domains })
@@ -253,6 +269,10 @@ export default Alchemy.Stack(
 					)(ingest.serviceUrl)
 				: undefined,
 			ingestCollectorEndpoint: ingest?.collectorEndpoint,
+			// Same manual-DNS story as ingest: CNAME `domains.electric` at this ALB
+			// (proxied), and add the ACM validation record once.
+			electricServiceUrl: electric?.serviceUrl,
+			electricCertificateValidation: electric?.certificateValidation,
 			ingestCertificateValidation: ingest?.certificateValidation,
 			electricSyncWorker: electricSync.workerName,
 			webWorker: web.workerName,
