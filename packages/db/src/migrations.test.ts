@@ -140,15 +140,11 @@ describe("bundled migrations", () => {
 			expect(row.relreplident, `${row.relname} replica identity`).toBe("f")
 		}
 
-		// `electric_publication_maple` is the self-hosted service's own stream
-		// (0051) — a second slot so it could run beside Electric Cloud during the
-		// cutover instead of replacing it blind. While BOTH exist they must carry
-		// the same tables: a migration that publishes a new table to only one of
-		// them starves whichever service reads the other, and the symptom is a
-		// shape that simply never delivers a change. This is the check that turns
-		// that into a failing test. When the Cloud source is gone and
-		// `electric_publication_default` is dropped, delete this block and point
-		// the assertions above at `electric_publication_maple`.
+		// `electric_publication_maple` (0051) is the self-hosted service's own
+		// stream. While both exist they must carry the same tables — publishing to
+		// only one starves whichever service reads the other, and the symptom is a
+		// shape that never delivers a change. Once `electric_publication_default`
+		// is dropped, delete this and point the assertions above at `…_maple`.
 		const mapleMembers = await pg.query<{ tablename: string }>(
 			"select tablename from pg_publication_tables where pubname = 'electric_publication_maple'",
 		)

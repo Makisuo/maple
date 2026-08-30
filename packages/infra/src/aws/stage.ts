@@ -247,9 +247,8 @@ export function resolveCollectorTaskSize(stage: MapleStage): IngestTaskSize {
 }
 
 /**
- * VPC CIDR for the self-hosted Electric fleet, per Maple region. Kept out of
- * the ingest ranges (10.2x) so the two VPCs could be peered later without
- * renumbering; nothing peers them today.
+ * VPC CIDR for the Electric service, per Maple region. Kept clear of the ingest
+ * ranges (10.2x) so the two could be peered later without renumbering.
  */
 export function resolveElectricCidrBlock(region: MapleRegion): string {
 	switch (region) {
@@ -263,29 +262,23 @@ export function resolveElectricCidrBlock(region: MapleRegion): string {
 /**
  * Whether a stage runs its own ElectricSQL sync service.
  *
- * prd + stg. PR previews are excluded for the same reason they get no Electric
- * config at all (`apps/electric-sync/alchemy.run.ts`): they have no PlanetScale
- * branch, so there is no Postgres to replicate from. Dev stages use the docker
- * `electric` service in `docker-compose.development.yml`.
+ * PR previews are excluded for the same reason they get no Electric config at
+ * all: no PlanetScale branch, so nothing to replicate from. Dev stages use the
+ * docker `electric` service.
  */
 export function stageDeploysElectric(stage: MapleStage): boolean {
 	return stage.kind === "prd" || stage.kind === "stg"
 }
 
 /**
- * Suffix Electric appends to the replication publication and slot it uses
- * (`electric_publication_<id>` / `electric_slot_<id>`).
+ * Suffix Electric appends to the publication and slot it reads
+ * (`electric_publication_<id>` / `electric_slot_<id>`), created by
+ * `0051_electric_publication_maple`.
  *
- * `maple` rather than Electric's `default` ON PURPOSE. `electric_publication_default`
- * is the migration-owned publication Electric CLOUD reads, and the two services
- * cannot share one replication slot — the second to connect is refused. Giving
- * the self-hosted service its own stream lets both run against the same database
- * while the cutover is verified, so flipping `ELECTRIC_URL` is a reversible env
- * change rather than a leap. `0031_electric_publication_maple` creates the
- * matching publication.
- *
- * Do not "simplify" this back to `default` after the Cloud source is deleted:
- * that rename drops and rebuilds the slot, forcing a full re-snapshot of every
+ * `maple` rather than Electric's `default` because the hosted source held the
+ * `default` pair and two services cannot share one slot — a separate stream is
+ * what let the two run side by side through the cutover. Do not simplify it back
+ * afterwards: that rename rebuilds the slot, forcing a full re-snapshot of every
  * shape for every connected client.
  */
 export const ELECTRIC_REPLICATION_STREAM_ID = "maple"
@@ -293,10 +286,9 @@ export const ELECTRIC_REPLICATION_STREAM_ID = "maple"
 /**
  * Fargate task size for Electric per stage.
  *
- * The synced set is eight low-write control-plane tables, so this is sized for
- * the BEAM's floor rather than for throughput. prd gets half a vCPU; stg a quarter.
- * Raise it when a shape's snapshot query, not its change stream, becomes the
- * cost — that is the first thing that will actually need CPU here.
+ * Eight low-write control-plane tables, so this is sized for the BEAM's floor
+ * rather than for throughput. Raise it when a shape's snapshot query, not its
+ * change stream, becomes the cost.
  */
 export function resolveElectricTaskSize(stage: MapleStage): IngestTaskSize {
 	return stage.kind === "prd" ? { cpu: 512, memory: 1024 } : { cpu: 256, memory: 512 }

@@ -127,22 +127,14 @@ export const buildUpstreamSyncUrl = (args: {
 }
 
 /**
- * Both Electric deployments authenticate a shape request with a `secret` query
- * param; only Electric Cloud pairs it with a `source_id` naming which source to
- * read. Self-hosted Electric (`ELECTRIC_SECRET`, or none at all under
- * `ELECTRIC_INSECURE`) has no such thing.
+ * Both Electric deployments authenticate a shape request with a `secret`; only
+ * Electric Cloud pairs it with a `source_id` naming which source to read.
  *
- * So the rule is one-directional: a `source_id` without its `secret` is
- * incoherent, everything else is a shape we deploy. The broken case is a deploy
- * that inherited `ELECTRIC_URL` + `ELECTRIC_SOURCE_ID` from the secret store but
- * no matching `ELECTRIC_SECRET` — forwarding that is a guaranteed 401
- * `MISSING_SECRET`, which surfaces as a hard-broken shape stream in the browser.
- * We treat it as "not configured" and take the same 503 graceful-degrade path as
- * a missing `ELECTRIC_URL`.
- *
- * A bare `secret` is NOT that case: it is exactly how a self-hosted upstream is
- * addressed, and rejecting it is what made the first self-hosted deploy 503
- * everything. Pure + exported so the rule is unit-tested.
+ * So the rule is one-directional. A `source_id` with no `secret` is a deploy
+ * that inherited half its credentials, and forwarding it is a guaranteed 401 —
+ * better treated as "not configured" and taking the 503 graceful-degrade path.
+ * A bare `secret` is not that case: it is exactly how a self-hosted upstream is
+ * addressed. Pure + exported so the rule is unit-tested.
  */
 export const isElectricConfigCoherent = (creds: {
 	readonly sourceId: Option.Option<unknown>
