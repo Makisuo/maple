@@ -170,6 +170,33 @@ services:
     command: ["bun", "pg-ws-proxy.ts", "--listen", "0.0.0.0:5498", "--target", "postgres:5432"]
     restart: unless-stopped
 
+  migrate:
+    <<: *celld
+    restart: "no"
+    volumes: []
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      DATABASE_URL: ${MAPLE_PG_URL:-postgres://maple:maple@postgres:5432/maple}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://clickhouse:8123}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-maple}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-maple}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-default}
+    command:
+      - |
+        set -euo pipefail
+        export PATH="/usr/local/bin:/root/.bun/bin:$$PATH"
+        cd /app
+        bun run --cwd packages/db db:migrate
+        bun run --cwd packages/clickhouse-cli start apply \
+          --url="$$CLICKHOUSE_URL" --user="$$CLICKHOUSE_USER" \
+          --password="$$CLICKHOUSE_PASSWORD" --database="$$CLICKHOUSE_DATABASE"
+        bun run --cwd packages/db db:ensure-electric-publication
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
   api:
     <<: *celld
     environment:
@@ -193,6 +220,8 @@ services:
         condition: service_started
       pg-ws-proxy:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
         required: false
@@ -219,6 +248,8 @@ services:
     depends_on:
       vars:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
         required: false
@@ -244,6 +275,8 @@ services:
         condition: service_started
       pg-ws-proxy:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
         required: false
