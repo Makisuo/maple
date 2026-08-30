@@ -8,6 +8,7 @@ import {
 	V1UnexpectedErrors,
 } from "@maple/domain/http"
 
+import { WarehouseConfigError } from "@maple/domain/http"
 import { WarehouseResponseLimitError } from "@maple/query-engine/execution"
 import { Context, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
@@ -383,6 +384,62 @@ describe("POST /internal/ai-sessions/facets", () => {
 				{ name: "vercel_ai_sdk", count: 2 },
 			])
 			expect(response.body.services).toEqual([{ name: "agent-runner", count: 4 }])
+		} finally {
+			await harness.dispose()
+		}
+	})
+})
+
+/**
+ * The missing-table degrade: `ai_trace_index` ships in a `requiredForIngest:
+ * false` migration, so a cluster can lack it indefinitely. The list and the
+ * facets must answer an empty 200 for exactly that error — and ONLY that
+ * error, because every other `WarehouseConfigError` (bad DSN, wrong database)
+ * is a real misconfiguration that has to stay a loud 502.
+ */
+describe("missing ai_trace_index degrade", () => {
+	const missingIndex = () =>
+		Effect.fail(
+			new WarehouseConfigError({
+				message: "ClickHouse error: Unknown table expression identifier 'ai_trace_index'",
+				pipeName: "listAiSessions",
+				clickhouseType: "UNKNOWN_TABLE",
+			}),
+		)
+
+	it("answers the list with an empty 200 when the index is absent", async () => {
+		const harness = makeHarness({ compiledQuery: missingIndex })
+		try {
+			const response = await harness.post("/internal/ai-sessions/list", WINDOW)
+			expect(response.status).toBe(200)
+			expect(response.body.data).toEqual([])
+		} finally {
+			await harness.dispose()
+		}
+	})
+
+	it("answers the facets with empty dimensions when the index is absent", async () => {
+		const harness = makeHarness({ compiledQuery: missingIndex })
+		try {
+			const response = await harness.post("/internal/ai-sessions/facets", WINDOW)
+			expect(response.status).toBe(200)
+			expect(response.body.vendors).toEqual([])
+			expect(response.body.services).toEqual([])
+		} finally {
+			await harness.dispose()
+		}
+	})
+
+	it("keeps every other config error a loud 502", async () => {
+		const harness = makeHarness({
+			compiledQuery: () =>
+				Effect.fail(
+					new WarehouseConfigError({ message: "Invalid URL", pipeName: "listAiSessions" }),
+				),
+		})
+		try {
+			const response = await harness.post("/internal/ai-sessions/list", WINDOW)
+			expect(response.status).toBe(502)
 		} finally {
 			await harness.dispose()
 		}

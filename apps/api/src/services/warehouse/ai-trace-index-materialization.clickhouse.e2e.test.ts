@@ -16,6 +16,7 @@
 // same data.
 
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
+import { Effect } from "effect"
 import { compileUnsafe } from "@maple-dev/clickhouse-builder"
 import {
 	MAPLE_AI_SESSION_ID_ATTR,
@@ -45,6 +46,8 @@ const chDateTime = (epochMs: number): string =>
 	new Date(epochMs).toISOString().replace("T", " ").slice(0, 19)
 
 const quote = (value: string): string => `'${value.replaceAll("'", "\\'")}'`
+
+const FOREIGN_ORG_ID = "org_ai_trace_index_e2e_other"
 
 const SESSION_ID = `${ORG_ID}:inv-e2e-1`
 const AGENT_TRACE = "aitraceindexe2e000000000000000001"
@@ -98,16 +101,33 @@ const SEED_SPANS: ReadonlyArray<SeedSpan> = [
 	},
 ]
 
+// A vendor span under ANOTHER org: it must materialize under its own OrgId —
+// the one by-name mapping mistake with cross-tenant consequences — and the
+// org-scoped list query below must never surface it.
+const FOREIGN_SPAN: SeedSpan = {
+	traceId: "aitraceindexe2e000000000000000004",
+	spanId: "span-foreign-1",
+	ms: BASE_MS + 180_000,
+	service: "agent-service",
+	status: "Ok",
+	attrs: { [MAPLE_AI_VENDOR_ID_ATTR]: "eve" },
+}
+
 const chMap = (attrs: Readonly<Record<string, string>>): string =>
 	`map(${Object.entries(attrs)
 		.flatMap(([key, value]) => [quote(key), quote(value)])
 		.join(", ")})`
 
 const seed = async (): Promise<void> => {
-	const rows = SEED_SPANS.map(
-		(span) =>
-			`(${quote(ORG_ID)}, ${quote(chDateTime(span.ms))}, ${quote(span.traceId)}, ${quote(span.spanId)}, '', 'agent turn', 'Internal', ${quote(span.service)}, 1000000, ${quote(span.status)}, 1, ${chMap(span.attrs)})`,
-	).join(",\n")
+	const rows = [
+		...SEED_SPANS.map((span) => [ORG_ID, span] as const),
+		[FOREIGN_ORG_ID, FOREIGN_SPAN] as const,
+	]
+		.map(
+			([orgId, span]) =>
+				`(${quote(orgId)}, ${quote(chDateTime(span.ms))}, ${quote(span.traceId)}, ${quote(span.spanId)}, '', 'agent turn', 'Internal', ${quote(span.service)}, 1000000, ${quote(span.status)}, 1, ${chMap(span.attrs)})`,
+		)
+		.join("\n,")
 
 	await clickhouseExec(
 		`INSERT INTO traces
@@ -139,12 +159,14 @@ describe.skipIf(!clickhouseE2eEnabled)("ai_trace_index materialization", () => {
 
 	it("materializes exactly the vendor-stamped spans, column by column", async () => {
 		const rows = await runJson(
-			`SELECT TraceId, SessionId, VendorId, VendorVersion, ServiceName, StatusCode, ErrorType, ResponseStatus
+			`SELECT OrgId, toString(Timestamp) AS Timestamp, TraceId, SessionId, VendorId, VendorVersion, ServiceName, StatusCode, ErrorType, ResponseStatus
 			 FROM ai_trace_index ORDER BY Timestamp ASC`,
 		)
 
 		assert.deepStrictEqual(rows, [
 			{
+				OrgId: ORG_ID,
+				Timestamp: `${chDateTime(SEED_SPANS[0]!.ms)}.000000000`,
 				TraceId: AGENT_TRACE,
 				SessionId: SESSION_ID,
 				VendorId: "eve",
@@ -155,6 +177,8 @@ describe.skipIf(!clickhouseE2eEnabled)("ai_trace_index materialization", () => {
 				ResponseStatus: "",
 			},
 			{
+				OrgId: ORG_ID,
+				Timestamp: `${chDateTime(SEED_SPANS[1]!.ms)}.000000000`,
 				TraceId: SESSIONLESS_TRACE,
 				SessionId: "",
 				VendorId: "vercel_ai_sdk",
@@ -163,6 +187,18 @@ describe.skipIf(!clickhouseE2eEnabled)("ai_trace_index materialization", () => {
 				StatusCode: "Error",
 				ErrorType: "RateLimitError",
 				ResponseStatus: "failed",
+			},
+			{
+				OrgId: FOREIGN_ORG_ID,
+				Timestamp: `${chDateTime(FOREIGN_SPAN.ms)}.000000000`,
+				TraceId: FOREIGN_SPAN.traceId,
+				SessionId: "",
+				VendorId: "eve",
+				VendorVersion: "",
+				ServiceName: "agent-service",
+				StatusCode: "Ok",
+				ErrorType: "",
+				ResponseStatus: "",
 			},
 		])
 	})
@@ -173,11 +209,14 @@ describe.skipIf(!clickhouseE2eEnabled)("ai_trace_index materialization", () => {
 			startTime: chDateTime(BASE_MS - HOUR_MS),
 			endTime: chDateTime(BASE_MS + HOUR_MS),
 		})
-		const rows = await runJson(compiled.sql)
+		// Decoded through the query's own row schema, exactly as `compiledQuery`
+		// does in production — the raw JSON alone would not catch a wire shape
+		// the schema refuses.
+		const rows = Effect.runSync(compiled.decodeRows(await runJson(compiled.sql)))
 
 		// Newest session first: the sessionless agent trace files under its own
 		// `trace:` key, the session-bearing one under the vendor's id, and the
-		// plain trace must not appear at all.
+		// plain trace and the foreign org's trace must not appear at all.
 		assert.deepStrictEqual(
 			rows.map((row) => [row.sessionId, row.vendorId, row.traceCount]),
 			[
