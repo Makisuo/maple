@@ -121,7 +121,11 @@ export interface ApplyTriageSeverityInput {
 	readonly runId: string
 	/** Durable investigation id; omitted by the short-lived legacy workflow. */
 	readonly investigationId?: InvestigationId
-	readonly severity: IssueSeverity
+	/**
+	 * Undefined when the report carried no assessment. The issue is left at the
+	 * severity it already had — see the early return below.
+	 */
+	readonly severity: IssueSeverity | undefined
 	readonly confidence: AiTriageResult["confidence"]
 	readonly timestamp: number
 	/** Full triage result; snapshotted into the escalation payload. */
@@ -151,6 +155,13 @@ export const applyTriageSeverity = async (
 	if (!issue) return { applied: false, actorId: null }
 
 	const actorId = await ensureTriageAgentActor(db, input.orgId, input.timestamp)
+
+	// No assessment, no re-rank: a report that did not judge the severity must not
+	// overwrite one that was. The actor is still returned so the caller can record
+	// that triage ran on the issue's timeline.
+	const severity = input.severity
+	if (severity === undefined) return { applied: false, actorId }
+
 	const from = issue.severity ?? null
 
 	if (issue.severitySource === "manual") {
@@ -161,7 +172,7 @@ export const applyTriageSeverity = async (
 	// and this update still wins.
 	const updated = await db
 		.update(errorIssues)
-		.set({ severity: input.severity, severitySource: "ai", updatedAt: new Date(input.timestamp) })
+		.set({ severity, severitySource: "ai", updatedAt: new Date(input.timestamp) })
 		.where(
 			and(
 				eq(errorIssues.orgId, input.orgId),
@@ -176,7 +187,7 @@ export const applyTriageSeverity = async (
 		return { applied: false, actorId }
 	}
 
-	if (from !== input.severity) {
+	if (from !== severity) {
 		await db
 			.insert(errorIssueEvents)
 			.values({
@@ -189,7 +200,7 @@ export const applyTriageSeverity = async (
 				toState: null,
 				payloadJson: {
 					from,
-					to: input.severity,
+					to: severity,
 					source: "ai",
 					runId: input.runId,
 					confidence: input.confidence,
@@ -199,7 +210,7 @@ export const applyTriageSeverity = async (
 			.onConflictDoNothing()
 	}
 
-	const reason = escalationReasonFor(from, input.severity)
+	const reason = escalationReasonFor(from, severity)
 	if (reason !== null) {
 		await db
 			.insert(issueEscalations)
@@ -207,7 +218,7 @@ export const applyTriageSeverity = async (
 				id: decodeEscalationId(deterministicUuid(`ai-triage-escalation:${input.runId}`)),
 				orgId: input.orgId,
 				issueId: input.issueId,
-				severity: input.severity,
+				severity,
 				source: "ai",
 				reason,
 				runId: input.runId,
@@ -219,7 +230,7 @@ export const applyTriageSeverity = async (
 				deliveryResultsJson: [],
 				status: "queued",
 				attempts: 0,
-				dedupeKey: escalationDedupeKey(input.orgId, input.issueId, input.severity),
+				dedupeKey: escalationDedupeKey(input.orgId, input.issueId, severity),
 				error: null,
 				createdAt: new Date(input.timestamp),
 				processedAt: null,

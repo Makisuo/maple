@@ -160,7 +160,13 @@ const V2AiTriageEvidence = Schema.Struct({
 const V2AiTriageResult = Schema.Struct({
 	summary: Schema.String,
 	suspectedCause: Schema.String,
-	severityAssessment: IssueSeverity,
+	/**
+	 * `optionalKey`, mirroring the internal report: a partial has no cause to
+	 * assess, and reports stored before the field became optional still decode.
+	 * A client reading a run's severity wants the investigation's own `severity`,
+	 * which is null on a partial by design.
+	 */
+	severityAssessment: Schema.optionalKey(IssueSeverity),
 	affectedScope: Schema.String,
 	evidence: Schema.Array(V2AiTriageEvidence),
 	suggestedActions: Schema.Array(Schema.String),

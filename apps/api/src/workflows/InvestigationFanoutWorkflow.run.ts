@@ -562,12 +562,9 @@ export const partialFromLanes = (
 	return new AiTriageResult({
 		summary: verdict.note,
 		suspectedCause: "No cause was established.",
-		// `IssueSeverity` has no "unclassified" member, and inventing one to carry
-		// "we did not assess this" would widen an enum the issues system reads. It
-		// does not matter here: `applyInconclusiveWrites` writes `severity: null`
-		// onto the row, so the hub shows the incident's own severity and this field
-		// is never the one displayed. "low" is the reading that claims least.
-		severityAssessment: "low",
+		// Omitted, not "low": nothing was established, so there is no cause whose
+		// severity this could be. `applyInconclusiveWrites` writes `severity: null`
+		// onto the row either way, and the hub shows the incident's own severity.
 		affectedScope: snapshot?.scope ?? "",
 		evidence: [],
 		suggestedActions: [],
