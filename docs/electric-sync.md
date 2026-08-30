@@ -183,10 +183,12 @@ like local docker does.
    plaintext `env`.
 4. **Migrate,** then `alchemy deploy`. `0051_electric_publication_maple` creates
    the second publication the service reads (see below).
-5. **DNS,** one-time and manual in the Cloudflare `maple.dev` zone — the deploy
-   output carries both: the ACM validation CNAME, then a proxied CNAME for
-   `electric.maple.dev` at the ALB. The certificate lands `PENDING_VALIDATION` on
-   the first deploy; add the record and re-run to attach the listener.
+5. **DNS.** The certificate lands `PENDING_VALIDATION` on the first deploy and the
+   443 listener fails; the deploy workflows recover on their own by creating the
+   validation CNAME and redeploying (`scripts/acm-cert-validate.sh`, which now
+   names the electric domains alongside ingest). The one manual record is a
+   **proxied CNAME for `electric.maple.dev` at the ALB** — the deploy output
+   carries the hostname.
 6. **Verify** before pointing anything at it:
    `curl https://electric.maple.dev/v1/health`, then a shape through the proxy —
    `curl -g 'https://sync.maple.dev/api/sync/shape?shape=dashboards&offset=-1' -H "authorization: Bearer <token>"`.

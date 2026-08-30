@@ -120,8 +120,10 @@ export const createMapleElectric = ({ stage, domains, region }: CreateMapleElect
 
 		// An ALB can only use a certificate from its own region, and ACM otherwise
 		// defaults to us-east-1. Without `hostedZoneId` the provider does not block
-		// on issuance: the first deploy of a new stage lands it PENDING_VALIDATION,
-		// so add the DNS record and re-run to attach the listener.
+		// on issuance, so a new stage's first deploy fails at the 443 listener with
+		// this PENDING_VALIDATION; the deploy workflows recover by running
+		// `scripts/acm-cert-validate.sh` and redeploying. A new certificate-bearing
+		// service MUST be added to that call.
 		const certificate = domains.electric
 			? yield* AWS.ACM.Certificate("electric-cert", {
 					domainName: domains.electric,
