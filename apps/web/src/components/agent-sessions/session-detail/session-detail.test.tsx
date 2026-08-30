@@ -710,6 +710,34 @@ describe("SessionWaterfall", () => {
 		expect(within(detail).queryByRole("button", { name: "arguments" })).toBeNull()
 	})
 
+	// A failed tool span condemns the call it EXECUTED. Without that, the Tool
+	// calls tab dressed a failed return in the success styling and dropped its
+	// error label — the tab said the call came back fine.
+	it("marks the executed call's return as the failure on the Tool calls tab", () => {
+		const { turns: toolTurns, summary: toolSummary } = sessionOf([
+			agentSpan({ spanId: "ft-agent", startMs: 0, durationMs: 4 * SECOND }),
+			toolSpan({
+				spanId: "ft-tool",
+				parentSpanId: "ft-agent",
+				startMs: SECOND,
+				durationMs: SECOND,
+				toolName: "run_tests",
+				statusCode: "Error",
+				statusMessage: "exit 1",
+				genAi: {
+					toolCallId: "call_11",
+					toolCallArguments: { suite: "webhooks" },
+					toolCallResult: "exit 1 · 2 failing",
+				},
+			}),
+		])
+		render(<Waterfall turns={toolTurns} summary={toolSummary} selectedSpanId="ft-tool" spanTab="tools" />)
+
+		const detail = spanPopover()
+		expect(detail.textContent).toContain("Returned · error")
+		expect(detail.textContent).toContain("span status Error")
+	})
+
 	// A half nobody recorded keeps its place: dropping it would leave a card that
 	// reads as a call which returned nothing.
 	it("keeps the returned half when no result was captured", () => {

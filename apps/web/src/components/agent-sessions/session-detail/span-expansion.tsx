@@ -139,7 +139,7 @@ export function SpanExpansion({
 
 				{active === "details" && <DetailsSection span={span} toolCalls={toolCalls} />}
 				{active === "messages" && <MessagesSection messages={messages} span={span} />}
-				{active === "tools" && <ToolCallsSection toolCalls={toolCalls} />}
+				{active === "tools" && <ToolCallsSection span={span} toolCalls={toolCalls} />}
 				{active === "logs" && <LogsSection span={span} />}
 			</div>
 		</div>
@@ -464,7 +464,13 @@ function ReasoningPart({ part }: { part: Extract<SpanMessagePart, { kind: "reaso
 /* Tool calls                                                                 */
 /* -------------------------------------------------------------------------- */
 
-function ToolCallsSection({ toolCalls }: { toolCalls: readonly SpanToolCall[] }) {
+function ToolCallsSection({
+	span,
+	toolCalls,
+}: {
+	span: AiSessionSpan
+	toolCalls: readonly SpanToolCall[]
+}) {
 	// The expansion does not virtualize, so one disclosure set for every card on
 	// the tab lives here — the same shape the transcript hands its rows.
 	const [openRows, setOpenRows] = useState<ReadonlySet<string>>(() => new Set())
@@ -475,12 +481,18 @@ function ToolCallsSection({ toolCalls }: { toolCalls: readonly SpanToolCall[] })
 	if (toolCalls.length === 0) {
 		return <EmptyNote>No tool calls were captured on this span.</EmptyNote>
 	}
+	// A failed span condemns the call it EXECUTED and no other: its output calls
+	// are the request it made, and a model call that died on its own error never
+	// learned whether they ran. `call.own` is the difference.
+	const failed = spanFailed(span)
 	return (
 		<div className="flex flex-col gap-3 pb-1">
 			{toolCalls.map((call, index) => (
 				<ToolCallCard
 					key={index}
 					call={call}
+					failed={failed && call.own}
+					statusCode={span.statusCode}
 					keyPrefix={`tool-call-${index}`}
 					openRows={openRows}
 					onToggleRow={onToggleRow}
@@ -497,11 +509,16 @@ function ToolCallsSection({ toolCalls }: { toolCalls: readonly SpanToolCall[] })
  */
 function ToolCallCard({
 	call,
+	failed,
+	statusCode,
 	keyPrefix,
 	openRows,
 	onToggleRow,
 }: {
 	call: SpanToolCall
+	/** This span executed this call, and it failed. */
+	failed: boolean
+	statusCode: string
 	keyPrefix: string
 	openRows: ReadonlySet<string>
 	onToggleRow: (key: string) => void
@@ -538,6 +555,8 @@ function ToolCallCard({
 			<ToolIo
 				args={args}
 				result={result}
+				failed={failed}
+				resultMeta={failed ? `span status ${statusCode}` : undefined}
 				missingResultNote="not captured — whether the call succeeded is unknown."
 				keyPrefix={keyPrefix}
 				openRows={openRows}
@@ -653,11 +672,12 @@ function DetailsSection({
 	const failed = spanFailed(span)
 	// A failed tool call's captured result is usually where the actual error
 	// text lives; surfacing it here saves the reader the trip to the Tool calls
-	// tab. Tool spans only — a model span's tool calls are its OUTPUT, and their
-	// results say nothing about why the model call itself failed. The own call
-	// is first in `spanToolCalls`' order.
+	// tab. The span's OWN call only — a model span's tool calls are its OUTPUT,
+	// and their results say nothing about why the model call itself failed.
 	const failedToolResult =
-		failed && classifyAiSpan(span) === "tool" ? toolCalls[0]?.resultText : undefined
+		failed && classifyAiSpan(span) === "tool"
+			? toolCalls.find((call) => call.own)?.resultText
+			: undefined
 
 	return (
 		<div className="flex flex-col gap-3 pb-1">
