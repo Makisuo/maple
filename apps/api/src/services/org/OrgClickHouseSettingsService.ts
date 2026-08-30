@@ -1219,7 +1219,15 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		) {
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			yield* requireAdmin(roles)
-			const row = yield* requireActiveRow(orgId)
+			const existing = yield* selectActiveRow(orgId)
+			if (Option.isNone(existing)) {
+				return new OrgClickHouseSchemaDiffResponse({
+					expectedSchemaVersion: clickHouseSchemaVersion,
+					appliedSchemaVersion: null,
+					entries: [],
+				})
+			}
+			const row = existing.value
 			const config = yield* loadConfigForRow(row)
 			const actual = yield* fetchActualSchema(httpClient, config)
 			const entries = computeSchemaDiff({ tables: yield* getDesiredTables }, actual)
