@@ -130,6 +130,17 @@ describe("meterInvestigationTurn", () => {
 		assert.deepEqual(tracked, [])
 	})
 
+	it("gives up on a tracker that never answers, rather than holding the turn slot", async () => {
+		// `endTurn` waits on this finalizer, and a wedged slot is only reclaimed after 15 minutes.
+		globalThis.fetch = () => new Promise<Response>(() => {})
+
+		const started = Date.now()
+		await meter(`${ORG}:inv-${INVESTIGATION}`, "msg-1", 1000, 100)
+
+		assert.isBelow(Date.now() - started, 30_000, "metering did not give up")
+		assert.deepEqual(tracked, [])
+	})
+
 	it("charges nothing for an `inv-` tab whose id is not an investigation id", async () => {
 		// Same guard `submit_diagnosis` applies: the set of sessions that bill is exactly the set
 		// that gets the tool.

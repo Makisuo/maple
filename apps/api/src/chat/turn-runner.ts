@@ -237,6 +237,20 @@ const decodeInvestigationIdOption = Schema.decodeUnknownOption(InvestigationId)
 /** Compaction is housekeeping; it must not hold the turn slot open. */
 const COMPACTION_TIMEOUT = "20 seconds"
 
+/**
+ * So is metering, and it runs even later — after the answer, on the way out of the turn.
+ *
+ * `endTurn` sits in the `finally` of `ChatSession.runTurn`, so whatever the metering finalizer
+ * waits on holds the session's turn slot, and the stale-claim reclaim is 15 minutes out
+ * (`TURN_STALE_MS` in `ChatSession.ts`). Unbounded, a POST to Autumn that never answers is a way
+ * for a third party's outage to wedge a conversation — the exact hazard `COMPACTION_TIMEOUT`
+ * exists for, one step later in the same tail.
+ *
+ * On timeout the request is abandoned rather than aborted: it may still land, and if it does not,
+ * one turn goes unbilled. That is the trade the tracker already makes for a failed request.
+ */
+const METERING_TIMEOUT = "5 seconds"
+
 /** Stable copy for the durable/browser event; detailed causes stay server-side. */
 const CHAT_TURN_FAILED = "Maple couldn't complete this response."
 
@@ -280,7 +294,7 @@ export const meterInvestigationTurn = (
 			idempotencyKey: `${investigationId}:turn-${input.messageId}`,
 			source: "triage",
 		}).catch(() => undefined),
-	)
+	).pipe(Effect.timeout(METERING_TIMEOUT), Effect.ignore)
 }
 
 /**
