@@ -38,7 +38,9 @@
 		"maple/no-ordie-compiled-query": "error",
 		"maple/no-react-use-effect": "warn",
 		"maple/no-record-string-any": "error",
+		"maple/no-try-catch": "error",
 		"typescript/no-explicit-any": "warn",
+		"typescript/no-non-null-assertion": "error",
 		"no-alert": "error",
 		"oxc/approx-constant": "warn",
 		"no-plusplus": "off",
@@ -52,6 +54,45 @@
 			"files": ["packages/query-engine/src/execution/**"],
 			"rules": {
 				"maple/no-ordie-compiled-query": "off"
+			}
+		},
+		// A test asserts on a fixture it just built, so `!` there documents the fixture
+		// rather than hiding an unchecked value; and a test that drives a throwing
+		// boundary on purpose needs `try`/`catch` to observe it.
+		{
+			"files": [
+				"**/*.test.ts",
+				"**/*.test.tsx",
+				"**/*.spec.ts",
+				"**/*.spec.tsx",
+				"**/test/**",
+				"**/tests/**",
+				"**/__tests__/**"
+			],
+			"rules": {
+				"maple/no-try-catch": "off",
+				"typescript/no-non-null-assertion": "off"
+			}
+		},
+		// The rule points at an Effect primitive, so it only applies where Effect is on
+		// the dependency list. These three ship to customers with no runtime deps at all
+		// (`@maple/browser` and `@maple/browser-session` are under a bundle-size budget),
+		// so `try`/`catch` is the only error handling they have.
+		{
+			"files": ["packages/browser/**", "packages/browser-session/**", "packages/clickhouse-cli/**"],
+			"rules": {
+				"maple/no-try-catch": "off"
+			}
+		},
+		// Burndown list, not a policy. `packages/*` and `lib/*` source is clean and
+		// gated for both rules; the apps and the one-shot ops scripts still hold
+		// ~460 `try`/`catch` blocks and ~500 non-null assertions between them.
+		// Drop entries from this list as each is converted rather than widening it.
+		{
+			"files": ["apps/**", "scripts/**", "**/scripts/**", "examples/**", "alchemy.run.ts"],
+			"rules": {
+				"maple/no-try-catch": "off",
+				"typescript/no-non-null-assertion": "off"
 			}
 		},
 		// Standalone generic DSLs use `any` as a variance placeholder; Maple product code may not.

@@ -9,6 +9,9 @@
  * site instead is both noise and, where a request value reaches a param, a 500
  * where the route owed a 400.
  *
+ * `no-try-catch` is the syntax half of the repo's Effect-errors convention: oxlint
+ * has no `no-restricted-syntax`, so banning a statement kind takes a plugin rule.
+ *
  * `no-record-string-any` exists as its own rule (rather than leaning on
  * `typescript/no-explicit-any`, which flags the inner `any` anyway) so the worst
  * offender — an open key set whose values are also unchecked — can sit at `error`
@@ -200,11 +203,32 @@ const noOrDieCompiledQuery = {
 	},
 }
 
+const NO_TRY_CATCH_MESSAGE =
+	"Do not use `try`/`catch`. A thrown exception is invisible to the type system, so it escapes the typed error channel, and one `catch` block flattens every failure into a single branch. Use the Effect primitive: `Effect.try`/`Effect.tryPromise` for a throwing call, `Schema.fromJsonString` for JSON, `Schema.decodeUnknown{Effect,Option,Sync}` for decoding, `Effect.catch`/`catchTag`/`catchDefect` to handle a failure, and `Effect.ensuring`/`Effect.addFinalizer` for a `finally`."
+
+const noTryCatch = {
+	meta: {
+		type: "problem",
+		docs: {
+			description: "Disallow `try`/`catch`/`finally` in favour of Effect's typed error channel.",
+		},
+		messages: { noTryCatch: NO_TRY_CATCH_MESSAGE },
+	},
+	create(context) {
+		return {
+			TryStatement(node) {
+				context.report({ node, messageId: "noTryCatch" })
+			},
+		}
+	},
+}
+
 export default {
 	meta: { name: "maple" },
 	rules: {
 		"no-ordie-compiled-query": noOrDieCompiledQuery,
 		"no-react-use-effect": noReactUseEffect,
 		"no-record-string-any": noRecordStringAny,
+		"no-try-catch": noTryCatch,
 	},
 }

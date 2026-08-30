@@ -84,8 +84,8 @@ const sha256Hex = async (input: string): Promise<string> => {
 	const digest = await crypto.subtle.digest("SHA-256", bytes)
 	const view = new Uint8Array(digest)
 	let out = ""
-	for (let i = 0; i < view.length; i++) {
-		out += view[i]!.toString(16).padStart(2, "0")
+	for (const byte of view) {
+		out += byte.toString(16).padStart(2, "0")
 	}
 	return out
 }
@@ -569,9 +569,11 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 							concurrency: fillConcurrency,
 						},
 					)
+					// `freshByRange` is the result of the same `fillRanges` fan-out, so the
+					// indexes line up; an empty range is the honest value if one ever does not.
 					const rangeResults = fillRanges.map((item, index) => ({
 						item,
-						points: freshByRange[index]!,
+						points: freshByRange[index] ?? [],
 					}))
 					const freshCachableBuckets = rangeResults.flatMap(({ item, points }) =>
 						item.cachable

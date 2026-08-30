@@ -84,10 +84,8 @@ function assignLanes(bars: FlamegraphBar[]): { bars: FlamegraphBar[]; totalLanes
 	}
 
 	let laneOffset = 0
-	const depths = Array.from(byDepth.keys()).sort((a, b) => a - b)
 
-	for (const depth of depths) {
-		const group = byDepth.get(depth)!
+	for (const [depth, group] of [...byDepth.entries()].sort(([a], [b]) => a - b)) {
 		group.sort((a, b) => a.leftPercent - b.leftPercent)
 		const lanes: number[] = []
 

@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import {
 	MAX_RAW_SQL_CELL_LENGTH,
 	MAX_RAW_SQL_RESULT_BYTES,
@@ -136,13 +136,11 @@ const rawSqlResultLimitError = (rows: ReadonlyArray<Record<string, unknown>>): s
 			}
 		}
 
-		let encoded: string
-		try {
-			encoded = JSON.stringify(row) ?? "null"
-		} catch {
-			return "Raw SQL results must be JSON serializable"
-		}
-		totalBytes += new TextEncoder().encode(encoded).byteLength + 1
+		// A cyclic value or a BigInt cell throws out of `JSON.stringify` rather
+		// than returning, and the caller owes the user that as a 400.
+		const encoded = Effect.runSync(Effect.option(Effect.try(() => JSON.stringify(row) ?? "null")))
+		if (Option.isNone(encoded)) return "Raw SQL results must be JSON serializable"
+		totalBytes += new TextEncoder().encode(encoded.value).byteLength + 1
 		if (totalBytes > MAX_RAW_SQL_RESULT_BYTES) {
 			return `Raw SQL results may contain at most ${MAX_RAW_SQL_RESULT_BYTES} encoded bytes`
 		}

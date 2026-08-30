@@ -35,6 +35,7 @@ import {
 	tracesBaseWhereConditions,
 	type TracesBaseWhereOpts,
 	matchOrIn,
+	soleValue,
 } from "./query-helpers"
 
 /**
@@ -227,7 +228,8 @@ function buildMvGroupNameExpr(
 	}
 
 	if (parts.length === 0) return CH.lit("all")
-	if (parts.length === 1) return CH.coalesce(CH.nullIf(parts[0]!, ""), CH.lit("all"))
+	const onlyPart = soleValue(parts)
+	if (onlyPart !== undefined) return CH.coalesce(CH.nullIf(onlyPart, ""), CH.lit("all"))
 	const filtered = CH.arrayFilter("x -> x != ''", CH.arrayOf(...parts))
 	return CH.coalesce(CH.nullIf(CH.arrayStringConcat(filtered, " \u00b7 "), ""), CH.lit("all"))
 }
@@ -256,7 +258,8 @@ function buildAggregatesGroupNameExpr(
 	}
 
 	if (parts.length === 0) return CH.lit("all")
-	if (parts.length === 1) return CH.coalesce(CH.nullIf(parts[0]!, ""), CH.lit("all"))
+	const onlyPart = soleValue(parts)
+	if (onlyPart !== undefined) return CH.coalesce(CH.nullIf(onlyPart, ""), CH.lit("all"))
 	const filtered = CH.arrayFilter("x -> x != ''", CH.arrayOf(...parts))
 	return CH.coalesce(CH.nullIf(CH.arrayStringConcat(filtered, " \u00b7 "), ""), CH.lit("all"))
 }

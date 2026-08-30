@@ -9,6 +9,7 @@ import { Layer, Redacted } from "effect"
 import {
 	buildResolved,
 	type FlushTransport,
+	guardFlush,
 	makeSerializedFlush,
 	type Resolved,
 	type ResourceInput,
@@ -19,6 +20,7 @@ import { type LogBuffer, makeLogBuffer } from "../shared/flushable-logger.js"
 import { makeMetricBuffer } from "../shared/flushable-metrics.js"
 import { type CaptureExceptionOptions, makeSpanBuffer, type SpanBuffer } from "../shared/flushable-tracer.js"
 import { browserDocument, browserNavigator } from "./browser-globals.js"
+import { trySyncOrUndefined } from "../shared/try-sync.js"
 import { type ClientReplayConfig, startClientSession } from "./replay-loader.js"
 import { withSessionLink } from "./session-link.js"
 import type { PrivacyOptions } from "./track.js"
@@ -160,9 +162,10 @@ const buildBrowserAttributes = (config: MapleClientFlushableConfig): Record<stri
 		if (nav.language) attributes["browser.language"] = nav.language
 	}
 	if (typeof Intl !== "undefined") {
-		try {
-			attributes["browser.timezone"] = Intl.DateTimeFormat().resolvedOptions().timeZone
-		} catch {}
+		// A locale-stripped build throws from `DateTimeFormat` rather than
+		// reporting an unknown zone.
+		const timezone = trySyncOrUndefined(() => Intl.DateTimeFormat().resolvedOptions().timeZone)
+		if (timezone) attributes["browser.timezone"] = timezone
 	}
 	if (config.environment) {
 		// Dual-emit: legacy key (pre-extracted by Tinybird MVs) + the canonical
@@ -243,8 +246,8 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 
 	// Never rejects — fired from `pagehide`/`visibilitychange` handlers and the
 	// auto-flush timer as `void flush()`.
-	const flush = makeSerializedFlush(async (): Promise<void> => {
-		try {
+	const flush = makeSerializedFlush(
+		guardFlush("[MapleClientSDK]", async (): Promise<void> => {
 			if (!hasConsent()) {
 				spans.drain()
 				logs.drain()
@@ -263,10 +266,8 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 				logPrefix: "[MapleClientSDK]",
 				onNoOp: noOpNotice,
 			})
-		} catch (err) {
-			console.error("[MapleClientSDK] flush failed:", err)
-		}
-	})
+		}),
+	)
 
 	const intervalMs =
 		config.autoFlushInterval === undefined

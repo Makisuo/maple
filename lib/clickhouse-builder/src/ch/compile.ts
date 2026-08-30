@@ -250,8 +250,9 @@ export interface RowSchemaMismatch {
 const structFieldNames = (schema: unknown): ReadonlyArray<string> | undefined => {
 	const ast = (schema as { readonly ast?: { readonly _tag?: string } } | undefined)?.ast
 	if (ast?._tag !== "Objects") return undefined
-	const signatures = (ast as { readonly propertySignatures?: ReadonlyArray<{ readonly name: PropertyKey }> })
-		.propertySignatures
+	const signatures = (
+		ast as { readonly propertySignatures?: ReadonlyArray<{ readonly name: PropertyKey }> }
+	).propertySignatures
 	return signatures?.map((signature) => String(signature.name))
 }
 
@@ -865,7 +866,8 @@ const deriveUnionRowSchema = (
 
 	const fields: Record<string, Schema.Codec<any, any>> = {}
 	for (const [alias, schemas] of perColumn) {
-		fields[alias] = schemas.length === 1 ? schemas[0]! : Schema.Union(schemas)
+		const only = schemas.length === 1 ? schemas[0] : undefined
+		fields[alias] = only ?? Schema.Union(schemas)
 	}
 	return { schema: Schema.Struct(fields) }
 }

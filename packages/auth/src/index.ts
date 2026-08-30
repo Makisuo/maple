@@ -687,7 +687,8 @@ export const makeResolveTenant = (
 					? verifyOrgMembership
 					: undefined
 
-			if (!auth.orgId && !orgIdOverride) {
+			const sessionOrgId = orgIdOverride ?? auth.orgId
+			if (!sessionOrgId) {
 				// No active organization in the session. A request that names one it
 				// can prove membership of is still serviceable — this is the widget
 				// publishing path, whose whole point is not to disturb whatever the
@@ -705,10 +706,7 @@ export const makeResolveTenant = (
 			}
 
 			const clerkTenant: TenantContext = {
-				orgId: yield* decodeOrgId(
-					orgIdOverride ?? auth.orgId!,
-					"Invalid organization in Clerk session token",
-				),
+				orgId: yield* decodeOrgId(sessionOrgId, "Invalid organization in Clerk session token"),
 				userId,
 				roles:
 					typeof auth.orgRole === "string"

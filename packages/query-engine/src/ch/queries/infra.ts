@@ -433,8 +433,11 @@ const podFilterConditions = (
 			excluded?.length ? CH.notInList(expr, excluded) : undefined,
 		]
 	}),
-	CH.when(opts.workloadKind && opts.workloadName, () =>
-		$.ResourceAttributes.get(workloadAttrKey(opts.workloadKind!)).eq(opts.workloadName!),
+	CH.when(
+		opts.workloadKind !== undefined && opts.workloadName !== undefined
+			? { kind: opts.workloadKind, name: opts.workloadName }
+			: undefined,
+		(workload) => $.ResourceAttributes.get(workloadAttrKey(workload.kind)).eq(workload.name),
 	),
 ]
 

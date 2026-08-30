@@ -120,13 +120,13 @@ const isReadOnlyPost = (path: string): boolean =>
  * read access; mutation methods require write access. Returns null for non-/v2 paths.
  */
 export const requiredScopeForRequest = (method: string, path: string): RequiredScope | null => {
-	const match = /^\/v2\/([a-z][a-z0-9_]*)(?:\/|$)/.exec(path)
-	if (match === null) return null
+	const [, family] = /^\/v2\/([a-z][a-z0-9_]*)(?:\/|$)/.exec(path) ?? []
+	if (family === undefined) return null
 	const access =
 		method === "GET" || method === "HEAD" || (method === "POST" && isReadOnlyPost(path))
 			? "read"
 			: "write"
-	return { family: match[1]!, access }
+	return { family, access }
 }
 
 /**

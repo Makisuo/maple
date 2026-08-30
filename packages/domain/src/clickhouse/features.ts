@@ -59,11 +59,15 @@ const parseVersion = (version: string): readonly [number, number, number] => {
 }
 
 export const clickHouseVersionAtLeast = (actual: string, minimum: string): boolean => {
-	const left = parseVersion(actual)
-	const right = parseVersion(minimum)
-	for (let i = 0; i < 3; i++) {
-		if (left[i]! > right[i]!) return true
-		if (left[i]! < right[i]!) return false
+	const [leftMajor, leftMinor, leftPatch] = parseVersion(actual)
+	const [rightMajor, rightMinor, rightPatch] = parseVersion(minimum)
+	for (const [left, right] of [
+		[leftMajor, rightMajor],
+		[leftMinor, rightMinor],
+		[leftPatch, rightPatch],
+	] as const) {
+		if (left > right) return true
+		if (left < right) return false
 	}
 	return true
 }

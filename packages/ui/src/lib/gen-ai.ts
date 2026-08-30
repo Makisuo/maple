@@ -10,6 +10,9 @@
 // plus the legacy aliases real spans still emit. The labels live here because a
 // label is a UI decision the convention does not make.
 
+import { Option } from "effect"
+
+import { trySync } from "./try-sync"
 import { formatDuration } from "./format"
 
 const GEN_AI_PREFIX = "gen_ai."
@@ -327,12 +330,7 @@ function formatValue(key: string, rawValue: string): string {
 /** An array of primitives, else null — an array of objects stays JSON. */
 function parseFlatArray(rawValue: string): string[] | null {
 	if (rawValue.trimStart()[0] !== "[") return null
-	let parsed: unknown
-	try {
-		parsed = JSON.parse(rawValue)
-	} catch {
-		return null
-	}
+	const parsed = Option.getOrNull(trySync<unknown>(() => JSON.parse(rawValue)))
 	if (!Array.isArray(parsed)) return null
 	if (!parsed.every((item) => item === null || typeof item !== "object")) return null
 	return parsed.map((item) => String(item))

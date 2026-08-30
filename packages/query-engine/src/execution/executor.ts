@@ -919,7 +919,10 @@ WHERE name = 'enable_full_text_index'`,
 		capabilities: WarehouseCapabilities | undefined,
 	): Effect.Effect<CompiledQuery<T>> =>
 		typeof compiled === "function"
-			? Effect.orDie(compiled(capabilities!))
+			? // The capability-aware form is only reachable from the two methods that
+				// resolve capabilities first. Baseline is the conservative stand-in — it
+				// generates the widest SQL — if a caller ever reaches here without them.
+				Effect.orDie(compiled(capabilities ?? baselineWarehouseCapabilities()))
 			: resolveCompiledQuery(compiled)
 
 	const executeCompiledQuery = Effect.fn("WarehouseQueryService.executeCompiledQuery")(function* <T>(

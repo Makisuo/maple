@@ -253,17 +253,23 @@ export function optimisticAction<
 				mutateResult = onMutate(variables)
 			})
 
+			// Roll back before mapping, as its own step in the chain: the rollback is
+			// best effort, and a rollback that throws must not displace the mutation
+			// failure the caller is owed.
+			const rollbackIfPending = Effect.ignore(
+				Effect.try(() => {
+					if (transaction.state !== "completed" && transaction.state !== "failed") {
+						transaction.rollback()
+					}
+				}),
+			)
+
 			yield* Effect.tryPromise({
 				try: () => transaction.isPersisted.promise,
-				catch: (error) => {
-					if (transaction.state !== "completed" && transaction.state !== "failed") {
-						try {
-							transaction.rollback()
-						} catch {
-							// Best effort; preserve the mutation failure below.
-						}
-					}
-
+				catch: (error) => error,
+			}).pipe(
+				Effect.tapError(() => rollbackIfPending),
+				Effect.mapError((error) => {
 					if (error && typeof error === "object" && "_tag" in error) {
 						return error as TError | SyncError
 					}
@@ -272,8 +278,8 @@ export function optimisticAction<
 						message: error instanceof Error ? error.message : "Optimistic action failed",
 						cause: error,
 					})
-				},
-			})
+				}),
+			)
 
 			return {
 				data: mutationResult.data,

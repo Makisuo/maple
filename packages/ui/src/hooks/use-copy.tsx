@@ -2,13 +2,27 @@
 "use client"
 
 import * as React from "react"
+import { Effect, Option, Result, Schema } from "effect"
 import { toastManager } from "../components/ui/toast"
 
 import { writeClipboardFallback } from "../lib/clipboard"
+import { trySync } from "../lib/try-sync"
 import { useClipboard } from "./use-clipboard"
 import { useMountEffect } from "./use-mount-effect"
 
 export type CopyStatus = "idle" | "copied" | "error"
+
+/** The platform clipboard rejected — insecure origin, denied permission, unfocused document. */
+class ClipboardWriteError extends Schema.TaggedError<ClipboardWriteError>()(
+	"@maple/ui/hooks/ClipboardWriteError",
+	{ cause: Schema.Defect() },
+) {}
+
+/** `copy()` was handed an empty or absent value; nothing reached the clipboard. */
+class NothingToCopyError extends Schema.TaggedError<NothingToCopyError>()(
+	"@maple/ui/hooks/NothingToCopyError",
+	{},
+) {}
 
 export interface UseCopyOptions {
 	/** Human label for the thing being copied, e.g. "Trace ID". Drives toast copy. */
@@ -80,21 +94,30 @@ export function useCopy({
 	const copy = React.useCallback(
 		async (text: string | null | undefined): Promise<boolean> => {
 			let ok = false
-			let reason: Error | null = null
+			let reason: ClipboardWriteError | NothingToCopyError | null = null
 
 			if (!text) {
-				reason = new Error("Nothing to copy")
+				reason = new NothingToCopyError()
 			} else {
-				try {
-					await clipboard.copy(text)
+				// The platform clipboard rejects on an insecure origin, a denied
+				// permission, and an unfocused document; the hidden-textarea fallback
+				// covers all three, and can itself throw in a sandboxed frame.
+				const written = await Effect.runPromise(
+					Effect.result(
+						Effect.tryPromise({
+							try: () => clipboard.copy(text),
+							catch: (cause) => new ClipboardWriteError({ cause }),
+						}),
+					),
+				)
+				if (Result.isSuccess(written)) {
 					ok = true
-				} catch (error) {
-					reason = error instanceof Error ? error : new Error(String(error))
-					try {
-						ok = writeClipboardFallback(text)
-					} catch {
-						ok = false
-					}
+				} else {
+					reason = written.failure
+					ok = Option.getOrElse(
+						trySync(() => writeClipboardFallback(text)),
+						() => false,
+					)
 				}
 			}
 

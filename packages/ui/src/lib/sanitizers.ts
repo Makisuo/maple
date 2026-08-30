@@ -5,6 +5,10 @@
  * fall back, etc.) rather than ever rendering an unvetted string.
  */
 
+import { Option, Schema } from "effect"
+
+const decodeUrl = Schema.decodeUnknownOption(Schema.URLFromString)
+
 const CSS_COLOR_RE =
 	/^(?:#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^()]*\)|var\(--[a-z0-9_-]+(?:,[^()]*)?\)|currentColor|transparent|inherit|initial|unset|[a-z]+)$/i
 
@@ -50,12 +54,11 @@ export const validateUrlScheme = (raw: string | undefined | null): string | null
 	if (trimmed.length === 0) return null
 	if (trimmed.startsWith("//")) return null
 	if (trimmed.startsWith("/") && !trimmed.startsWith("//")) return trimmed
-	try {
-		const parsed = new URL(trimmed)
-		return ALLOWED_HREF_SCHEMES.has(parsed.protocol) ? trimmed : null
-	} catch {
-		return null
-	}
+	return Option.getOrNull(
+		Option.filter(decodeUrl(trimmed), (parsed) => ALLOWED_HREF_SCHEMES.has(parsed.protocol)).pipe(
+			Option.map(() => trimmed),
+		),
+	)
 }
 
 /**
