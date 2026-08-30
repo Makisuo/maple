@@ -61,12 +61,19 @@ export interface ServiceDependenciesOutput {
 	readonly errorCount: number
 	readonly avgDurationMs: number
 	/**
-	 * The window's slowest call, NOT a percentile — the edge rollups store
-	 * `MaxDurationMs`, and there is no quantile state at edge grain to merge.
-	 * Named for what it is: it rendered as "p95" on the service map for months,
-	 * against a drill-down panel showing a real tDigest p95 off the same node, so
-	 * a Scylla edge read 3s beside its own 7ms p99. Renaming it is the cheap half
-	 * of the fix; storing a tDigest in the edge rollups is the other half.
+	 * The window's slowest call, NOT a percentile — and unlike the database and
+	 * external edges, this one has no `p95DurationMs` beside it.
+	 *
+	 * `service_map_edges_hourly` is filled by the scheduled rollup shipping rows
+	 * through the Events API as JSON, and Tinybird rejects AggregateFunction
+	 * columns in a datasource carrying JSONPaths (see `serviceMapEdgesHourlyIngest`).
+	 * A t-digest is not JSON-serializable and the forwarding view cannot rebuild
+	 * one from a sum and a max, so a real p95 here needs the rollup to stop going
+	 * through that bridge — a larger change than migration 0022 was.
+	 *
+	 * It renders nowhere on the map: service nodes take their p95 from
+	 * `serviceOverview`, which is a real merged tDigest. This value reaches only
+	 * the MCP table and the chat renderer, both of which label it "Max Duration".
 	 */
 	readonly maxDurationMs: number
 	readonly estimatedSpanCount: number
@@ -414,14 +421,21 @@ export interface ServiceDbEdgesOutput {
 	readonly errorCount: number
 	readonly avgDurationMs: number
 	/**
-	 * The window's slowest call, NOT a percentile — the edge rollups store
-	 * `MaxDurationMs`, and there is no quantile state at edge grain to merge.
-	 * Named for what it is: it rendered as "p95" on the service map for months,
-	 * against a drill-down panel showing a real tDigest p95 off the same node, so
-	 * a Scylla edge read 3s beside its own 7ms p99. Renaming it is the cheap half
-	 * of the fix; storing a tDigest in the edge rollups is the other half.
+	 * The window's slowest call. Kept beside `p95DurationMs` rather than replaced:
+	 * it is the only latency figure available for buckets sealed before migration
+	 * 0022, and it is a genuinely useful outlier signal in its own right. Present
+	 * it AS a max wherever it is shown.
 	 */
 	readonly maxDurationMs: number
+	/**
+	 * Sample-weighted p95 in ms, merged from the edge rollup's t-digest.
+	 *
+	 * 0 when the window has no digest to merge — buckets sealed before migration
+	 * 0022 hold an empty state and are not backfilled. Callers fall back to
+	 * `maxDurationMs` and must present it AS a max; substituting one for the other
+	 * under a "p95" label is the bug this pair replaced.
+	 */
+	readonly p95DurationMs: number
 	readonly estimatedSpanCount: number
 }
 
@@ -433,6 +447,7 @@ const ServiceDbEdgesOutputSchema: CompiledQueryRowSchema<ServiceDbEdgesOutput> =
 	errorCount: CHNumber,
 	avgDurationMs: CHNumberOrZero,
 	maxDurationMs: CHNumber,
+	p95DurationMs: CHNumberOrZero,
 	estimatedSpanCount: CHNumber,
 })
 
@@ -444,6 +459,34 @@ export function serviceDbEdgesSQL(
 		rowSchema: ServiceDbEdgesOutputSchema,
 	})
 }
+
+/**
+ * The edge rollups' sample-weighted t-digest, and its raw-branch twin.
+ *
+ * Byte-identical to the state `service_map_db_query_shapes_hourly_mv` writes, so
+ * a database node and the detail panel that opens on top of it finalize the same
+ * statistic over the same spans and cannot disagree. The strings stay raw: the
+ * DSL has no notion of ClickHouse's `-State` / `-Merge` combinators, and the
+ * sealed and live branches must agree on the type exactly to UNION-merge.
+ */
+const EDGE_TDIGEST_MERGE_STATE_EXPR = "quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles)"
+const EDGE_TDIGEST_RAW_STATE_EXPR =
+	"quantilesTDigestWeightedState(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0)))"
+const EDGE_DURATION_STATE = T.aggregateState("quantilesTDigestWeighted(0.5, 0.95)", "UInt64", "UInt32")
+
+/**
+ * Finalize the merged edge digest to milliseconds, or 0 when there is nothing to
+ * merge.
+ *
+ * Zero is a real answer here rather than a null: buckets sealed before migration
+ * 0022 hold an empty state, and the UI is expected to fall back to
+ * `maxDurationMs` — shown as a max — for those windows. Reporting a fabricated
+ * quantile off an empty digest is precisely the failure this replaced.
+ */
+const edgeP95Expr = CH.rawExpr(
+	"if(sum(bucketCallCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bucketDurationQuantiles), 2) / 1000000, 0)",
+	T.float64,
+)
 
 // Shared DSL expressions for identifying the database a Client/Producer span
 // talks to, mirroring the write-side `DB_SYSTEM_ATTR_SQL` /
@@ -499,6 +542,7 @@ function serviceDbEdgesQueryBase(opts: { serviceName?: string; deploymentEnv?: s
 			bucketEstimatedSpanCount: CH.sum(
 				CH.if_($.SampleRateSum.gt(0), $.SampleRateSum, _toFloat64($.CallCount)),
 			),
+			bucketDurationQuantiles: CH.rawExpr(EDGE_TDIGEST_MERGE_STATE_EXPR, EDGE_DURATION_STATE),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
@@ -530,6 +574,7 @@ function serviceDbEdgesQueryBase(opts: { serviceName?: string; deploymentEnv?: s
 			bucketDurationSumMs: CH.sum($.Duration.div(1000000)),
 			bucketMaxDurationMs: CH.max_($.Duration.div(1000000)),
 			bucketEstimatedSpanCount: CH.sum($.SampleRate),
+			bucketDurationQuantiles: CH.rawExpr(EDGE_TDIGEST_RAW_STATE_EXPR, EDGE_DURATION_STATE),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
@@ -556,6 +601,7 @@ function serviceDbEdgesQueryBase(opts: { serviceName?: string; deploymentEnv?: s
 			errorCount: CH.sum($.bucketErrorCount),
 			avgDurationMs: CH.sum($.bucketDurationSumMs).div(CH.nullIf(CH.sum($.bucketCallCount), CH.lit(0))),
 			maxDurationMs: CH.max_($.bucketMaxDurationMs),
+			p95DurationMs: edgeP95Expr,
 			estimatedSpanCount: CH.sum($.bucketEstimatedSpanCount),
 		}))
 		.groupBy("sourceService", "dbSystem", "dbNamespace")
@@ -1042,14 +1088,14 @@ export interface ServiceExternalEdgesOutput {
 	readonly errorCount: number
 	readonly avgDurationMs: number
 	/**
-	 * The window's slowest call, NOT a percentile — the edge rollups store
-	 * `MaxDurationMs`, and there is no quantile state at edge grain to merge.
-	 * Named for what it is: it rendered as "p95" on the service map for months,
-	 * against a drill-down panel showing a real tDigest p95 off the same node, so
-	 * a Scylla edge read 3s beside its own 7ms p99. Renaming it is the cheap half
-	 * of the fix; storing a tDigest in the edge rollups is the other half.
+	 * The window's slowest call. Kept beside `p95DurationMs` rather than replaced:
+	 * it is the only latency figure available for buckets sealed before migration
+	 * 0022, and it is a genuinely useful outlier signal in its own right. Present
+	 * it AS a max wherever it is shown.
 	 */
 	readonly maxDurationMs: number
+	/** See `ServiceDbEdgesOutput.p95DurationMs` — same state, same 0-means-absent. */
+	readonly p95DurationMs: number
 	readonly estimatedSpanCount: number
 }
 
@@ -1062,6 +1108,7 @@ const ServiceExternalEdgesOutputSchema: CompiledQueryRowSchema<ServiceExternalEd
 	errorCount: CHNumber,
 	avgDurationMs: CHNumberOrZero,
 	maxDurationMs: CHNumber,
+	p95DurationMs: CHNumberOrZero,
 	estimatedSpanCount: CHNumber,
 })
 
@@ -1088,6 +1135,7 @@ export function serviceExternalEdgesSQL(
 			bucketEstimatedSpanCount: CH.sum(
 				CH.if_($.SampleRateSum.gt(0), $.SampleRateSum, _toFloat64($.CallCount)),
 			),
+			bucketDurationQuantiles: CH.rawExpr(EDGE_TDIGEST_MERGE_STATE_EXPR, EDGE_DURATION_STATE),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
@@ -1140,6 +1188,7 @@ export function serviceExternalEdgesSQL(
 				bucketDurationSumMs: CH.sum($.Duration.div(1000000)),
 				bucketMaxDurationMs: CH.max_($.Duration.div(1000000)),
 				bucketEstimatedSpanCount: CH.sum($.SampleRate),
+				bucketDurationQuantiles: CH.rawExpr(EDGE_TDIGEST_RAW_STATE_EXPR, EDGE_DURATION_STATE),
 			}
 		})
 		.where(($) => {
@@ -1204,6 +1253,7 @@ export function serviceExternalEdgesSQL(
 			errorCount: CH.sum($.bucketErrorCount),
 			avgDurationMs: CH.sum($.bucketDurationSumMs).div(CH.nullIf(CH.sum($.bucketCallCount), CH.lit(0))),
 			maxDurationMs: CH.max_($.bucketMaxDurationMs),
+			p95DurationMs: edgeP95Expr,
 			estimatedSpanCount: CH.sum($.bucketEstimatedSpanCount),
 		}))
 		.where(($) => [CH.not($.targetType.eq("http").and(inSubquery($.targetName, internalResolutions)))])

@@ -146,6 +146,7 @@ describe("serviceExternalEdgesSQL", () => {
 					errorCount: "1",
 					avgDurationMs: "12.5",
 					maxDurationMs: "40",
+					p95DurationMs: "18",
 					estimatedSpanCount: "22",
 				},
 			])
@@ -159,6 +160,7 @@ describe("serviceExternalEdgesSQL", () => {
 					errorCount: 1,
 					avgDurationMs: 12.5,
 					maxDurationMs: 40,
+					p95DurationMs: 18,
 					estimatedSpanCount: 22,
 				},
 			])
@@ -174,6 +176,7 @@ describe("serviceExternalEdgesSQL", () => {
 						errorCount: 0,
 						avgDurationMs: 1,
 						maxDurationMs: 1,
+						p95DurationMs: 1,
 						estimatedSpanCount: 1,
 					},
 				]),
@@ -476,6 +479,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 					errorCount: "3",
 					avgDurationMs: "14.25",
 					maxDurationMs: "88",
+					p95DurationMs: "31",
 					estimatedSpanCount: "63",
 				},
 			])
@@ -489,6 +493,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 					errorCount: 3,
 					avgDurationMs: 14.25,
 					maxDurationMs: 88,
+					p95DurationMs: 31,
 					estimatedSpanCount: 63,
 				},
 			])

@@ -394,6 +394,69 @@ describe.skipIf(!clickhouseE2eEnabled)("service map raw-vs-rollup parity", () =>
 		}
 	})
 
+	// Migration 0022 gave the edge rollups a t-digest so a database node can show a
+	// real p95 instead of the max it showed for months. The digest is merged from
+	// the sealed hourly buckets and computed live over the partial boundary hours,
+	// so this asserts the SPLICED merge lands on the same value as one quantile
+	// taken over the whole window in a single pass — the boundary and the digest
+	// have to be right together for that to hold.
+	it("merges a p95 equal to a single-pass quantile over the same window", async () => {
+		const [spliced, truth] = await Promise.all([
+			runJson(Effect.runSync(CH.serviceDbEdgesSQL({}, window)).sql),
+			runJson(`
+				SELECT
+					toString(ServiceName) AS sourceService,
+					SpanAttributes['db.system.name'] AS dbSystem,
+					SpanAttributes['db.namespace'] AS dbNamespace,
+					arrayElement(
+						quantilesTDigestWeighted(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0))),
+						2
+					) / 1000000 AS p95DurationMs
+				FROM traces
+				WHERE OrgId = ${quote(ORG_ID)}
+					AND Timestamp >= ${quote(START_TIME)}
+					AND Timestamp <= ${quote(END_TIME)}
+					AND SpanKind IN ('Client', 'Producer')
+					AND ServiceName != ''
+					AND SpanAttributes['db.system.name'] != ''
+				GROUP BY sourceService, dbSystem, dbNamespace
+			`),
+		])
+
+		const key = (row: Record<string, unknown>) =>
+			`${String(row.sourceService)}::${String(row.dbSystem)}::${String(row.dbNamespace)}`
+		const bySplice = new Map(spliced.map((row) => [key(row), row]))
+
+		let compared = 0
+		for (const expected of truth) {
+			const actual = bySplice.get(key(expected))
+			assert.isDefined(actual, `missing edge ${key(expected)}`)
+			// A t-digest is approximate by construction, and the spliced value merges
+			// several partial digests where the baseline builds one. The tolerance is
+			// on the ORDER of the value, not a fixed epsilon, so it stays meaningful
+			// across the fixture's 120ms and 900ms groups — and it is nowhere near
+			// wide enough to let a max (3s against a 7ms p95) pass as a p95.
+			assert.closeTo(
+				num(actual?.p95DurationMs),
+				num(expected.p95DurationMs),
+				Math.max(num(expected.p95DurationMs) * 0.1, 1),
+				`p95 ${key(expected)}`,
+			)
+			compared += 1
+		}
+		assert.isAbove(compared, 1, "p95 comparison covered fewer than two edges")
+	})
+
+	it("reports a p95 well below the max when the tail is long", async () => {
+		// The guard against the comparison above passing vacuously on a fixture
+		// whose durations are all identical: if p95 and max coincide, a regression
+		// back to `max(MaxDurationMs)` would satisfy every assertion here.
+		const rows = await runJson(Effect.runSync(CH.serviceDbEdgesSQL({}, window)).sql)
+		const orders = rows.find((row) => String(row.dbNamespace) === "orders")
+		assert.isDefined(orders, "the `orders` edge is missing from the fixture")
+		assert.isAbove(num(orders?.maxDurationMs), num(orders?.p95DurationMs) * 2)
+	})
+
 	it("matches a flat scan — service edges", async () => {
 		const [spliced, truth] = await Promise.all([
 			runJson(Effect.runSync(CH.serviceDependenciesSQL({}, window)).sql),

@@ -69,12 +69,17 @@ export interface ServiceNodeData {
 	samplingWeight: number
 	errorRate: number
 	avgLatencyMs: number
-	/** Service nodes only: a real merged-tDigest p95 from the service overview. */
+	/**
+	 * A real merged-tDigest p95: from `serviceOverview` on a service node, from the
+	 * edge rollup's digest on a database node. Undefined on a database node whose
+	 * window predates migration 0022 and therefore has no digest to merge.
+	 */
 	p95LatencyMs?: number
 	/**
-	 * Database nodes only: the window's slowest call. Deliberately NOT
-	 * `p95LatencyMs` — the edge rollups store a max and have no quantile state,
-	 * and sharing the field is what let a max render under a "p95" label.
+	 * Database nodes only: the window's slowest call. Deliberately a separate field
+	 * from `p95LatencyMs` — sharing one is what let a max render under a "p95"
+	 * label for months. It is the fallback when no digest exists, and the card
+	 * relabels itself to "max" when it shows this instead.
 	 */
 	maxLatencyMs?: number
 	selected: boolean
@@ -321,6 +326,7 @@ export function buildFlowElements({
 			errorCount: number
 			durationSumMs: number
 			maxLatencyMs: number
+			p95LatencyMs: number
 			hasSampling: boolean
 			samplingWeight: number
 		}
@@ -336,6 +342,7 @@ export function buildFlowElements({
 			errorCount: 0,
 			durationSumMs: 0,
 			maxLatencyMs: 0,
+			p95LatencyMs: 0,
 			hasSampling: false,
 			samplingWeight: 1,
 		}
@@ -344,6 +351,13 @@ export function buildFlowElements({
 		existing.errorCount += e.errorCount
 		existing.durationSumMs += e.avgDurationMs * e.callCount
 		existing.maxLatencyMs = Math.max(existing.maxLatencyMs, e.maxDurationMs)
+		// The WORST CALLER's p95, not the node's true p95 — merging the callers'
+		// t-digests is a server-side operation and this is a client-side fold. It is
+		// an upper bound on the real figure and is itself a p95, so it stays the same
+		// KIND of number; the exact node-level p95, merged across every caller, is
+		// what the detail panel shows when you open the node. Most database nodes
+		// have one or two callers, where the two coincide.
+		existing.p95LatencyMs = Math.max(existing.p95LatencyMs, e.p95DurationMs)
 		// One sampled caller makes the node's number an estimate. The weight shown
 		// is the heaviest contributing edge's, which is what the "~" prefix means.
 		existing.hasSampling = existing.hasSampling || e.hasSampling
@@ -429,10 +443,13 @@ export function buildFlowElements({
 				samplingWeight: agg.samplingWeight,
 				errorRate: agg.callCount > 0 ? agg.errorCount / agg.callCount : 0,
 				avgLatencyMs: agg.callCount > 0 ? agg.durationSumMs / agg.callCount : 0,
-				// The slowest call, not a percentile — the field it reads is a `max`.
-				// `p95LatencyMs` on a SERVICE node is a real tDigest p95 off the
-				// overview, which is exactly why these cannot share a name.
+				// Both, because they answer different questions and because the p95 is
+				// unavailable for windows sealed before migration 0022 — the card falls
+				// back to the max and relabels itself rather than showing one as the
+				// other. `p95LatencyMs` means the same thing on a service node (a real
+				// merged tDigest, there off `serviceOverview`).
 				maxLatencyMs: agg.maxLatencyMs,
+				p95LatencyMs: agg.p95LatencyMs > 0 ? agg.p95LatencyMs : undefined,
 				selected: false,
 				dbSystem: agg.dbSystem,
 				dbNamespace: agg.dbNamespace,

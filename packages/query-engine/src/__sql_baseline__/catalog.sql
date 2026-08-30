@@ -1476,7 +1476,7 @@ SELECT
         GROUP BY hourTs
         FORMAT JSON
 
--- builder:service-map:serviceDbEdgesForServiceQuery:default  [7083634d]
+-- builder:service-map:serviceDbEdgesForServiceQuery:default  [7adb3fed]
 SELECT
           sourceService AS sourceService,
           dbSystem AS dbSystem,
@@ -1485,6 +1485,7 @@ SELECT
           sum(bucketErrorCount) AS errorCount,
           sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
           max(bucketMaxDurationMs) AS maxDurationMs,
+          if(sum(bucketCallCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bucketDurationQuantiles), 2) / 1000000, 0) AS p95DurationMs,
           sum(bucketEstimatedSpanCount) AS estimatedSpanCount
         FROM (
 SELECT
@@ -1495,7 +1496,8 @@ SELECT
           sum(ErrorCount) AS bucketErrorCount,
           sum(DurationSumMs) AS bucketDurationSumMs,
           max(MaxDurationMs) AS bucketMaxDurationMs,
-          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
+          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount,
+          quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles) AS bucketDurationQuantiles
         FROM service_map_db_edges_hourly
         WHERE OrgId = 'org_sql_catalog'
           AND ServiceName = 'web'
@@ -1512,7 +1514,8 @@ SELECT
           countIf(StatusCode = 'Error') AS bucketErrorCount,
           sum(Duration / 1000000) AS bucketDurationSumMs,
           max(Duration / 1000000) AS bucketMaxDurationMs,
-          sum(SampleRate) AS bucketEstimatedSpanCount
+          sum(SampleRate) AS bucketEstimatedSpanCount,
+          quantilesTDigestWeightedState(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0))) AS bucketDurationQuantiles
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
           AND ServiceName = 'web'
@@ -1528,7 +1531,7 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceDbEdgesSQL:default  [fa979fe3]
+-- builder:service-map:serviceDbEdgesSQL:default  [e06f1809]
 SELECT
           sourceService AS sourceService,
           dbSystem AS dbSystem,
@@ -1537,6 +1540,7 @@ SELECT
           sum(bucketErrorCount) AS errorCount,
           sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
           max(bucketMaxDurationMs) AS maxDurationMs,
+          if(sum(bucketCallCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bucketDurationQuantiles), 2) / 1000000, 0) AS p95DurationMs,
           sum(bucketEstimatedSpanCount) AS estimatedSpanCount
         FROM (
 SELECT
@@ -1547,7 +1551,8 @@ SELECT
           sum(ErrorCount) AS bucketErrorCount,
           sum(DurationSumMs) AS bucketDurationSumMs,
           max(MaxDurationMs) AS bucketMaxDurationMs,
-          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
+          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount,
+          quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles) AS bucketDurationQuantiles
         FROM service_map_db_edges_hourly
         WHERE OrgId = 'org_sql_catalog'
           AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
@@ -1563,7 +1568,8 @@ SELECT
           countIf(StatusCode = 'Error') AS bucketErrorCount,
           sum(Duration / 1000000) AS bucketDurationSumMs,
           max(Duration / 1000000) AS bucketMaxDurationMs,
-          sum(SampleRate) AS bucketEstimatedSpanCount
+          sum(SampleRate) AS bucketEstimatedSpanCount,
+          quantilesTDigestWeightedState(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0))) AS bucketDurationQuantiles
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
           AND ServiceName != ''
@@ -1579,7 +1585,7 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceDbEdgesSQL:env-scoped  [3d0a3dbf]
+-- builder:service-map:serviceDbEdgesSQL:env-scoped  [64270f13]
 SELECT
           sourceService AS sourceService,
           dbSystem AS dbSystem,
@@ -1588,6 +1594,7 @@ SELECT
           sum(bucketErrorCount) AS errorCount,
           sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
           max(bucketMaxDurationMs) AS maxDurationMs,
+          if(sum(bucketCallCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bucketDurationQuantiles), 2) / 1000000, 0) AS p95DurationMs,
           sum(bucketEstimatedSpanCount) AS estimatedSpanCount
         FROM (
 SELECT
@@ -1598,7 +1605,8 @@ SELECT
           sum(ErrorCount) AS bucketErrorCount,
           sum(DurationSumMs) AS bucketDurationSumMs,
           max(MaxDurationMs) AS bucketMaxDurationMs,
-          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
+          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount,
+          quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles) AS bucketDurationQuantiles
         FROM service_map_db_edges_hourly
         WHERE OrgId = 'org_sql_catalog'
           AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
@@ -1615,7 +1623,8 @@ SELECT
           countIf(StatusCode = 'Error') AS bucketErrorCount,
           sum(Duration / 1000000) AS bucketDurationSumMs,
           max(Duration / 1000000) AS bucketMaxDurationMs,
-          sum(SampleRate) AS bucketEstimatedSpanCount
+          sum(SampleRate) AS bucketEstimatedSpanCount,
+          quantilesTDigestWeightedState(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0))) AS bucketDurationQuantiles
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
           AND ServiceName != ''
@@ -2047,7 +2056,7 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceExternalEdgesSQL:default  [172c6963]
+-- builder:service-map:serviceExternalEdgesSQL:default  [1709b03d]
 SELECT
           sourceService AS sourceService,
           targetType AS targetType,
@@ -2057,6 +2066,7 @@ SELECT
           sum(bucketErrorCount) AS errorCount,
           sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
           max(bucketMaxDurationMs) AS maxDurationMs,
+          if(sum(bucketCallCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bucketDurationQuantiles), 2) / 1000000, 0) AS p95DurationMs,
           sum(bucketEstimatedSpanCount) AS estimatedSpanCount
         FROM (
 SELECT
@@ -2068,7 +2078,8 @@ SELECT
           sum(ErrorCount) AS bucketErrorCount,
           sum(DurationSumMs) AS bucketDurationSumMs,
           max(MaxDurationMs) AS bucketMaxDurationMs,
-          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
+          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount,
+          quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles) AS bucketDurationQuantiles
         FROM service_external_edges_hourly
         WHERE OrgId = 'org_sql_catalog'
           AND ServiceName = 'web'
@@ -2086,7 +2097,8 @@ SELECT
           countIf(StatusCode = 'Error') AS bucketErrorCount,
           sum(Duration / 1000000) AS bucketDurationSumMs,
           max(Duration / 1000000) AS bucketMaxDurationMs,
-          sum(SampleRate) AS bucketEstimatedSpanCount
+          sum(SampleRate) AS bucketEstimatedSpanCount,
+          quantilesTDigestWeightedState(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0))) AS bucketDurationQuantiles
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
           AND ServiceName = 'web'
@@ -2113,7 +2125,7 @@ SELECT
         LIMIT 200
         FORMAT JSON
 
--- builder:service-map:serviceExternalEdgesSQL:env-scoped  [db028e72]
+-- builder:service-map:serviceExternalEdgesSQL:env-scoped  [f137812a]
 SELECT
           sourceService AS sourceService,
           targetType AS targetType,
@@ -2123,6 +2135,7 @@ SELECT
           sum(bucketErrorCount) AS errorCount,
           sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
           max(bucketMaxDurationMs) AS maxDurationMs,
+          if(sum(bucketCallCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bucketDurationQuantiles), 2) / 1000000, 0) AS p95DurationMs,
           sum(bucketEstimatedSpanCount) AS estimatedSpanCount
         FROM (
 SELECT
@@ -2134,7 +2147,8 @@ SELECT
           sum(ErrorCount) AS bucketErrorCount,
           sum(DurationSumMs) AS bucketDurationSumMs,
           max(MaxDurationMs) AS bucketMaxDurationMs,
-          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
+          sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount,
+          quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles) AS bucketDurationQuantiles
         FROM service_external_edges_hourly
         WHERE OrgId = 'org_sql_catalog'
           AND ServiceName = 'web'
@@ -2153,7 +2167,8 @@ SELECT
           countIf(StatusCode = 'Error') AS bucketErrorCount,
           sum(Duration / 1000000) AS bucketDurationSumMs,
           max(Duration / 1000000) AS bucketMaxDurationMs,
-          sum(SampleRate) AS bucketEstimatedSpanCount
+          sum(SampleRate) AS bucketEstimatedSpanCount,
+          quantilesTDigestWeightedState(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0))) AS bucketDurationQuantiles
         FROM traces
         WHERE OrgId = 'org_sql_catalog'
           AND ServiceName = 'web'

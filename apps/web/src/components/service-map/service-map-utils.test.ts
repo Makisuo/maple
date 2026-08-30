@@ -38,6 +38,7 @@ const baseDbEdge = (overrides: Partial<ServiceDbEdge> = {}): ServiceDbEdge => ({
 	errorRate: 0,
 	avgDurationMs: 8,
 	maxDurationMs: 20,
+	p95DurationMs: 12,
 	hasSampling: false,
 	samplingWeight: 1,
 	...overrides,
@@ -266,6 +267,51 @@ describe("buildFlowElements database node metrics", () => {
 	// p95 to show. It rendered one anyway, from the max, beside a panel showing a
 	// real tDigest p95 off the same node — 3s against 7ms. `p95LatencyMs` stays
 	// undefined on a database node so the two can never be confused again.
+	// Migration 0022 gave the edge rollups a t-digest, so the node shows a real
+	// p95 whenever there is one to merge.
+	it("prefers the rollup p95 and keeps the max beside it", () => {
+		const { nodes } = buildFlowElements({
+			edges: [],
+			dbEdges: [
+				baseDbEdge({
+					dbSystem: "scylladb",
+					dbNamespace: "events",
+					maxDurationMs: 3_000,
+					p95DurationMs: 7,
+				}),
+			],
+			serviceOverviews: [baseOverview()],
+			durationSeconds: 1,
+		})
+
+		const db = nodes.find((n) => n.id === dbNodeId("scylladb", "events"))
+		expect(db?.data.p95LatencyMs).toBe(7)
+		expect(db?.data.maxLatencyMs).toBe(3_000)
+	})
+
+	// Buckets sealed before 0022 hold an empty digest, which the query reports as
+	// 0. The node must fall back to the max rather than render a fabricated 0ms
+	// p95 — and the card relabels itself when it does.
+	it("leaves p95 undefined when the window has no digest, so the card can relabel", () => {
+		const { nodes } = buildFlowElements({
+			edges: [],
+			dbEdges: [
+				baseDbEdge({
+					dbSystem: "scylladb",
+					dbNamespace: "events",
+					maxDurationMs: 3_000,
+					p95DurationMs: 0,
+				}),
+			],
+			serviceOverviews: [baseOverview()],
+			durationSeconds: 1,
+		})
+
+		const db = nodes.find((n) => n.id === dbNodeId("scylladb", "events"))
+		expect(db?.data.p95LatencyMs).toBeUndefined()
+		expect(db?.data.maxLatencyMs).toBe(3_000)
+	})
+
 	it("exposes the max as maxLatencyMs and never as a p95", () => {
 		const { nodes } = buildFlowElements({
 			edges: [],
@@ -276,7 +322,6 @@ describe("buildFlowElements database node metrics", () => {
 
 		const db = nodes.find((n) => n.id === dbNodeId("scylladb", "events"))
 		expect(db?.data.maxLatencyMs).toBe(3_000)
-		expect(db?.data.p95LatencyMs).toBeUndefined()
 	})
 
 	// Several services calling one database collapse to a single node; the
@@ -313,6 +358,9 @@ describe("buildFlowElements database node metrics", () => {
 		expect(db?.data.tracedThroughput).toBe(300)
 		expect(db?.data.hasSampling).toBe(true)
 		expect(db?.data.maxLatencyMs).toBe(900)
+		// The worst caller's p95 — see the note on the fold. An upper bound on the
+		// node's true p95, and still a p95 rather than a different statistic.
+		expect(db?.data.p95LatencyMs).toBe(baseDbEdge().p95DurationMs)
 	})
 })
 

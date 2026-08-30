@@ -183,6 +183,7 @@ function DatabaseNode({ data }: { data: ServiceNodeData }) {
 		errorRate,
 		avgLatencyMs,
 		maxLatencyMs,
+		p95LatencyMs,
 		dbSystem,
 		dbNamespace,
 		selected,
@@ -254,10 +255,13 @@ function DatabaseNode({ data }: { data: ServiceNodeData }) {
 							value={formatLatency(avgLatencyMs)}
 							valueClassName={latencyToneClass(avgLatencyMs, "avg")}
 						/>
+						{/* A p95 when the rollup has a digest to merge; the slowest call
+						    otherwise, and then the label says so. Never one under the
+						    other's name — that gap read 3s against a 7ms p95. */}
 						<MetricCell
-							label="max"
-							value={formatLatency(maxLatencyMs ?? 0)}
-							valueClassName={latencyToneClass(maxLatencyMs ?? 0, "p95")}
+							label={p95LatencyMs === undefined ? "max" : "p95"}
+							value={formatLatency(p95LatencyMs ?? maxLatencyMs ?? 0)}
+							valueClassName={latencyToneClass(p95LatencyMs ?? maxLatencyMs ?? 0, "p95")}
 						/>
 					</div>
 

@@ -188,6 +188,7 @@ function generateBenchGraph(params: BenchParams): BenchGraph {
 			errorRate,
 			avgDurationMs: 1 + rng() * 40,
 			maxDurationMs: 10 + rng() * 200,
+			p95DurationMs: 8 + rng() * 120,
 			hasSampling: false,
 			samplingWeight: 1,
 		})
