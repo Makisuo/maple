@@ -45,13 +45,21 @@ export const createMapleElectric = ({ stage, domains, region, network }: CreateM
 		const taskSize = resolveElectricTaskSize(stage)
 		const name = (base: string) => resolveAwsResourceName(base, stage, region)
 
+		// Ids are `electric-lb-sg` / `electric-task-sg`, NOT `electric-alb-sg` /
+		// `electric-sg`: those two were created in the short-lived VPC this service
+		// used to have, and a security group cannot change VPC. Alchemy planned the
+		// task group as an in-place `update`, which left it pointing at an ALB group
+		// in another network — `InvalidGroup.NotFound: You have specified two
+		// resources that belong to different networks`. New ids create them fresh
+		// here. The originals are orphaned in the abandoned VPC; reap both with it.
+		//
 		// Two groups because `AWS.ECS.Service` applies `securityGroups` to BOTH the
 		// ALB and the tasks, so the split has to live in the rules: the internet
 		// reaches the listener, and ELECTRIC_PORT only the ALB's group. Tasks carry
 		// public IPs, so without that second rule a task's own address would serve
 		// Electric over plaintext HTTP, around the certificate.
 		const listenerPort = domains.electric ? 443 : 80
-		const albSecurityGroup = yield* AWS.EC2.SecurityGroup("electric-alb-sg", {
+		const albSecurityGroup = yield* AWS.EC2.SecurityGroup("electric-lb-sg", {
 			vpcId: network.vpcId,
 			groupName: name("electric-alb"),
 			description: `Maple ElectricSQL - public ${listenerPort === 443 ? "HTTPS" : "HTTP"} to the load balancer`,
@@ -70,7 +78,7 @@ export const createMapleElectric = ({ stage, domains, region, network }: CreateM
 			],
 		})
 
-		const taskSecurityGroup = yield* AWS.EC2.SecurityGroup("electric-sg", {
+		const taskSecurityGroup = yield* AWS.EC2.SecurityGroup("electric-task-sg", {
 			vpcId: network.vpcId,
 			groupName: name("electric"),
 			description: "Maple ElectricSQL sync service",
