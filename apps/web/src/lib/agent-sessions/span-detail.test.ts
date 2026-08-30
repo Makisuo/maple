@@ -154,8 +154,38 @@ describe("spanToolCalls", () => {
 				description: undefined,
 				argumentsText: '{"path":"src/retry.ts"}',
 				resultText: "120 lines",
+				own: true,
 			},
 		])
+	})
+
+	// Only the call a span EXECUTED may be read against that span's status. A
+	// model call that died on its own error never learned whether the tools it
+	// asked for ran, so its output calls are not its own.
+	it("marks the span's own executed call, and only that one", () => {
+		const executed = toolSpan({
+			spanId: "t2",
+			startMs: 0,
+			durationMs: 1000,
+			toolName: "run_tests",
+			genAi: { toolCallId: "toolu_02", toolCallArguments: { suite: "webhooks" } },
+		})
+		expect(spanToolCalls(executed).map((call) => call.own)).toEqual([true])
+
+		const requested = llmSpan({
+			spanId: "l2",
+			startMs: 0,
+			durationMs: 1000,
+			genAi: {
+				outputMessages: [
+					{
+						role: "assistant",
+						parts: [{ type: "tool_call", id: "toolu_03", name: "run_tests", arguments: {} }],
+					},
+				],
+			},
+		})
+		expect(spanToolCalls(requested).map((call) => call.own)).toEqual([false])
 	})
 
 	it("reads the tool_call parts of the output this call produced, not the history", () => {

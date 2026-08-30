@@ -23,17 +23,19 @@ import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { MCP_ANTICIPATED_ERROR_IDENTIFIERS } from "@/mcp/expected-failures"
 import {
 	decodeChatTurnTenant,
+	investigationIdFromChatSessionId,
 	type ChatMessage,
 	type ChatTurnTenantEncoded,
 } from "@maple/domain/chat-session"
 import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/effect-cloudflare"
 import { LLM, Message, type LanguageModel, type LLMClientService } from "@opencode-ai/ai"
-import { Cause, Effect, Layer, ManagedRuntime, Stream } from "effect"
+import { Cause, Effect, Layer, ManagedRuntime, Option, Schema, Stream } from "effect"
 import type { ChatSession } from "./ChatSession"
 import type { TurnUsage } from "./loop"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { summarizeCause } from "@/platform/describe-cause"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
+import { InvestigationId } from "@maple/domain/primitives"
 
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
@@ -201,11 +203,13 @@ const compactIfNeeded = (
 				},
 			}),
 		)
-		// Housekeeping the org still pays for, so it is added to the turn's total and
-		// billed with it. Safe to mutate here: the near-limit check above has read
-		// `usage.input` already, and `submit_diagnosis` — the only mid-turn reader —
-		// ran long before the answer this is compacting behind.
+		// Housekeeping is still spend. The compaction call is billed to the same turn as the answer
+		// it follows — it is charged to us either way, and a turn that hides it under-reports what
+		// the conversation cost. Safe to mutate here: the near-limit check above has already read
+		// `usage.input`, and `submit_diagnosis` — the only mid-turn reader — ran long before the
+		// answer this is compacting behind.
 		addUsage(usage, response.usage)
+
 		const summary = response.text.trim()
 		if (summary === "") return
 		input.session.append({ type: "compaction", messageId: input.messageId, summary, throughSeq })
@@ -230,55 +234,97 @@ const compactIfNeeded = (
 		),
 	)
 
+const decodeInvestigationIdOption = Schema.decodeUnknownOption(InvestigationId)
+
 /** Compaction is housekeeping; it must not hold the turn slot open. */
 const COMPACTION_TIMEOUT = "20 seconds"
+
+/**
+ * So is metering, and it runs even later — after the answer, on the way out of the turn.
+ *
+ * `endTurn` sits in the `finally` of `ChatSession.runTurn`, so whatever the metering finalizer
+ * waits on holds the session's turn slot, and the stale-claim reclaim is 15 minutes out
+ * (`TURN_STALE_MS` in `ChatSession.ts`). Unbounded, a POST to Autumn that never answers is a way
+ * for a third party's outage to wedge a conversation — the exact hazard `COMPACTION_TIMEOUT`
+ * exists for, one step later in the same tail.
+ *
+ * On timeout the request is abandoned rather than aborted: it may still land, and if it does not,
+ * one turn goes unbilled. That is the trade the tracker already makes for a failed request.
+ */
+const METERING_TIMEOUT = "5 seconds"
 
 /** Stable copy for the durable/browser event; detailed causes stay server-side. */
 const CHAT_TURN_FAILED = "Maple couldn't complete this response."
 
 /**
- * Meter what this turn spent into the org's AI usage, alongside the fan-out
- * workflow's triage passes and the Slack agent.
+ * Meter what this turn spent into the org's AI usage, alongside the fan-out workflow's triage
+ * passes and the Slack agent.
  *
- * **The only meter on this path**, deliberately. `submit_diagnosis` used to bill the
- * running total it reports to `InvestigationService`, which is the same turn from a
- * different angle: metering both double-billed a diagnosis turn, and suppressing this
- * one in its favour lost the charge entirely, because that key is the investigation id
- * and a superseding diagnosis deduplicates against the first. So the investigation
- * still records the tokens on its row, and this bills them, once, per turn.
+ * **One meter per turn, and this is it.** Two things used to bill the same tokens from different
+ * angles: `submit_diagnosis` billed the running total it reports to `InvestigationService`, keyed
+ * on the bare investigation id, so an investigation was charged exactly once however much it went
+ * on to cost — every follow-up turn was free, and so was any turn that errored or ran out of steps
+ * before reaching the tool. Suppressing this one in its favour lost the charge entirely, because a
+ * superseding diagnosis deduplicates against the first. So the investigation still records its
+ * tokens on the row, and this bills them, once, per turn.
  *
- * `usage` is the turn's whole total: every step, every sub-agent (they share the
- * parent's accumulator), and the compaction that runs after the answer.
+ * **Source and key follow the session.** An investigation session bills as `triage`, keyed
+ * `<investigationId>:turn-<messageId>` — the `turn-` prefix keeps the key space disjoint from the
+ * fan-out's `<id>:<attempt>` under that same source, where an unprefixed turn id could collide
+ * with an attempt number and silently swallow a real charge. Every other session is an attended
+ * chat turn and bills as `chat`, keyed `<sessionId>:<messageId>`. Either way the key carries the
+ * turn, so a turn that somehow ran twice still meters once, and a restarted investigation's new
+ * turn is real new spend that bills.
  *
- * Two more deliberate choices:
+ * `usage` is the turn's whole total: every step, every sub-agent (they share the parent's
+ * accumulator), and the compaction that runs after the answer.
  *
- *   - **In the `finally`, not on the happy path.** A turn that failed or was stopped
- *     is still billed for every step the provider actually served — the loop accounts
- *     a step's usage before it checks whether the turn survived. Metering follows the
- *     spend, not the outcome. (A step interrupted before the provider's terminal event
- *     reports no usage at all, so that much is unbillable rather than unbilled.)
- *   - **Keyed on the message id**, which identifies the turn: the session claims one
- *     per turn and never reuses it, so a turn that somehow ran twice still meters
- *     once, and a restarted investigation's new turn is real new spend that bills.
- *
- * Exported for tests; the only production caller is the `finally` below.
+ * **In a finalizer, not on the happy path.** A turn that failed, was stopped, or ran out of steps
+ * is still billed for every step the provider actually served — the loop accounts a step's usage
+ * before it checks whether the turn survived. Metering follows the spend, not the outcome. (A step
+ * interrupted before the provider's terminal event reports no usage at all, so that much is
+ * unbillable rather than unbilled.)
  */
-export const meterTurn = async (
-	input: {
-		readonly env: Record<string, unknown>
-		readonly sessionId: string
-		readonly messageId: string
-	},
-	orgId: TenantContext["orgId"],
-	usage: TurnUsage,
-): Promise<void> => {
-	await trackTokenUsage(input.env, {
-		orgId,
-		inputTokens: usage.input,
-		outputTokens: usage.output,
+export const meterTurn = (
+	input: Pick<RunChatSessionTurnInput, "sessionId" | "messageId" | "env">,
+	tenant: Pick<TenantContext, "orgId">,
+	usage: { readonly input: number; readonly output: number },
+): Effect.Effect<void> => {
+	if (usage.input <= 0 && usage.output <= 0) return Effect.void
+	const billing = investigationBilling(input.sessionId, input.messageId) ?? {
+		source: "chat" as const,
 		idempotencyKey: `${input.sessionId}:${input.messageId}`,
-		source: "chat",
-	})
+	}
+	// Bookkeeping must never fail a delivered answer. `trackTokenUsage` already swallows its own
+	// transport errors; the `catch` covers the rest so this can be an infallible Effect.
+	return Effect.promise(() =>
+		trackTokenUsage(input.env, {
+			orgId: tenant.orgId,
+			inputTokens: usage.input,
+			outputTokens: usage.output,
+			idempotencyKey: billing.idempotencyKey,
+			source: billing.source,
+		}).catch(() => undefined),
+	).pipe(Effect.timeout(METERING_TIMEOUT), Effect.ignore)
+}
+
+/**
+ * `triage` billing coordinates for an investigation session, or `undefined` if this is not one.
+ *
+ * The `InvestigationId` decode is the same guard `buildDiagnosisCompletion` uses, so the set of
+ * sessions that bill as triage is exactly the set that gets a `submit_diagnosis` tool: an `inv-`
+ * suffix that is not a UUID is not an investigation, and must not be charged as one. It still
+ * bills — as the plain chat turn it is.
+ */
+const investigationBilling = (
+	sessionId: string,
+	messageId: string,
+): { readonly source: "triage"; readonly idempotencyKey: string } | undefined => {
+	const rawId = investigationIdFromChatSessionId(sessionId)
+	if (rawId === undefined) return undefined
+	const decoded = decodeInvestigationIdOption(rawId)
+	if (Option.isNone(decoded)) return undefined
+	return { source: "triage", idempotencyKey: `${decoded.value}:turn-${messageId}` }
 }
 
 /**
@@ -318,10 +364,9 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 
 	const tenant = toTenantContext(input.tenant)
 	const observability = loop.makeTurnObservability()
-	// Out here so the `finally` can bill a turn that failed or was aborted mid-stream.
-	// Shared with the turn so `submit_diagnosis` can report what the investigation cost —
-	// see `TurnUsage`: the tool is invoked mid-turn, so there is no later moment to hand
-	// it a total.
+	// Hoisted out of the program: `submit_diagnosis` reads it mid-turn — see `TurnUsage`, the tool
+	// is invoked mid-turn so there is no later moment to hand it a total — and the metering
+	// finalizer reads it after the turn has ended, including when it ended by failing.
 	const usage = loop.makeTurnUsage()
 	let recordedTerminal = false
 	const annotateTurn = () =>
@@ -402,6 +447,9 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 		yield* annotateTurn()
 		yield* compactIfNeeded(input, model, usage)
 	}).pipe(
+		// `ensuring`, not a trailing statement: a turn that failed, was aborted, or ran out of steps
+		// still burned the tokens it burned, and the pre-`ensuring` shape billed none of them.
+		Effect.ensuring(Effect.suspend(() => meterTurn(input, tenant, usage))),
 		Effect.tapCause((cause) => {
 			observability.outcome = "error"
 			observability.failureReason ??= "UnhandledTurnFailure"
@@ -440,7 +488,6 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 			})
 		}
 	} finally {
-		await meterTurn(input, tenant.orgId, usage).catch(() => undefined)
 		await runtime.dispose().catch(() => undefined)
 		await telemetry.flush(input.env).catch(() => undefined)
 	}

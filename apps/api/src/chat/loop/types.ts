@@ -180,11 +180,11 @@ export interface StepState {
 /**
  * Running token total for one turn, accumulated across its steps.
  *
- * Mutable and shared rather than returned, because the one consumer — `submit_diagnosis` — is a
- * *tool* invoked mid-turn, so there is no "after the turn" moment at which to hand it a total.
- * In practice the diagnosis call is the last thing an investigation does, so this is the whole turn
- * bar the final assistant message. Before this, `SubmitDiagnosisRequest` was built with no usage at
- * all, so `InvestigationService`'s `if (env && (inputTokens || outputTokens))` was always false:
+ * Mutable and shared rather than returned, because one of its consumers — `submit_diagnosis` — is a
+ * *tool* invoked mid-turn, so there is no "after the turn" moment at which to hand it a total. It
+ * records what the investigation cost onto the row; the billing charge is raised separately, from
+ * the finalizer in `turn-runner.ts`, which reads the same record once the turn has ended however it
+ * ended. Before this record existed, `SubmitDiagnosisRequest` was built with no usage at all, so
  * `investigations.model` stayed null and Autumn was never metered for autonomous investigations,
  * which the pre-`@opencode-ai/ai` workflow path did meter.
  */

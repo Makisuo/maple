@@ -1012,12 +1012,16 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 					...(row.fanoutState === "ranked" ? { fanoutState: "superseded" as const } : undefined),
 				}).pipe(Effect.mapError(makePersistenceError), Effect.provideService(Database, database))
 
-				// The token counts land on the row, but are NOT metered here. Every caller that
-				// supplies them is a chat-session turn, and the session runner meters that turn
-				// in full — including whatever the turn spends after this call. Metering here as
-				// well double-billed it; metering here *instead* under-billed it, because this
-				// key is the investigation id and a superseding diagnosis deduplicates against
-				// the first one. One meter, at the turn boundary, keyed on the turn.
+				// Deliberately does NOT meter. `request.inputTokens`/`outputTokens` are persisted onto
+				// the row above for display, but the charge is raised per *turn* in
+				// `chat/turn-runner.ts` — see `meterTurn`. Every caller that supplies usage here is a
+				// chat-session turn, and the runner meters that turn in full, including whatever it
+				// spends after this call. Metering here as well double-billed the turn; metering here
+				// *instead* under-billed it, because this key is the investigation id: a superseding
+				// diagnosis deduplicates against the first, so every follow-up turn (and every turn
+				// that failed before reaching this tool) was free. This path also carries no usage at
+				// all when reached over internal RPC, which never populates those fields.
+
 				const updated = yield* loadRow(orgId, id)
 				return yield* documentFor(orgId, updated ?? row)
 			})

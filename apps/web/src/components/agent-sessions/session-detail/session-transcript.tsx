@@ -40,8 +40,9 @@ import {
 import type { SessionToolResults } from "@/lib/agent-sessions/span-detail"
 import { formatClockInTimezone } from "@/lib/timezone-format"
 import { ClampedText, firstLine } from "./clamped-text"
-import { useJsonPayload, useMessageBody, ViewSwitch } from "./payload-view"
+import { disclosed, useJsonPayload, useMessageBody, ViewSwitch } from "./payload-view"
 import { Pill } from "./pill"
+import { ToolIo, ToolIoSummary } from "./tool-io"
 
 /**
  * The session as a conversation.
@@ -230,17 +231,6 @@ interface BlockProps {
 	selected: boolean
 	onSelectSpan: (spanId: string | undefined) => void
 	onOpenTraceView: () => void
-}
-
-/**
- * Is this disclosure open?
- *
- * The set holds the rows the reader has flipped AWAY from their default, so the
- * "Expand tool payloads" chip still moves every card they have not touched, and a card
- * they opened by hand stays open when the chip goes off.
- */
-function disclosed(openRows: ReadonlySet<string>, key: string, byDefault: boolean): boolean {
-	return openRows.has(key) ? !byDefault : byDefault
 }
 
 function TranscriptBlock(props: BlockProps) {
@@ -881,8 +871,10 @@ function ToolBlock({
 						<span className={cn(META, "shrink-0")}>
 							· {row.span.serviceName}
 							{!row.fromMessageOnly && ` · ${formatDuration(row.span.durationMs)}`}
-							{!open && payloadSummary(row)}
 						</span>
+						{/* Sizes in gutter order while the pair is shut, so the reader knows
+						    what opening it costs before they pay for it. */}
+						{!open && <ToolIoSummary args={row.args} result={row.result} />}
 					</button>
 					{row.failed && row.span.genAi.errorType !== undefined && (
 						<Pill tone="error" className={WIRE_PILL}>
@@ -893,66 +885,38 @@ function ToolBlock({
 						<span className={cn(META, "shrink-0")}>{row.callId}</span>
 					)}
 					{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
-				</div>
-
-				{open ? (
-					<>
-						{row.args !== undefined && (
-							<PayloadSection
-								label="Arguments"
-								payload={row.args}
-								openRows={openRows}
-								onToggleRow={onToggleRow}
-								textKey={`${row.key}:args-text`}
-							/>
-						)}
-						{row.result !== undefined ? (
-							<PayloadSection
-								label="Result"
-								payload={row.result}
-								meta={row.failed ? `span status ${row.span.statusCode}` : undefined}
-								tone={row.failed ? "text-destructive/90" : undefined}
-								bordered={row.args !== undefined}
-								openRows={openRows}
-								onToggleRow={onToggleRow}
-								textKey={`${row.key}:result-text`}
-							/>
-						) : (
-							<MissingResult fromMessageOnly={row.fromMessageOnly} />
-						)}
-						<button
-							type="button"
-							onClick={() => onToggleRow(payloadsKey)}
-							aria-expanded
-							className="flex cursor-pointer items-center gap-2 border-border/60 border-t px-3 py-1.5 text-chart-2 text-xs"
-						>
-							<ChevronDownIcon size={11} />
-							collapse payloads
-						</button>
-					</>
-				) : (
+					{/* The one control that opens the pair, in the header where the reader
+					    already is — not a footer they have to scroll the payloads to reach. */}
 					<button
 						type="button"
 						onClick={() => onToggleRow(payloadsKey)}
-						aria-expanded={false}
-						className="flex cursor-pointer items-center gap-2 border-border/60 border-t px-3 py-1.5 text-chart-2 text-xs"
+						aria-expanded={open}
+						aria-label={open ? "Collapse payloads" : "Expand payloads"}
+						className="-mr-1 shrink-0 cursor-pointer p-1 text-muted-foreground hover:text-foreground"
 					>
-						<ChevronRightIcon size={11} />
-						expand payloads
+						{open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
 					</button>
+				</div>
+
+				{open && (
+					<ToolIo
+						args={row.args}
+						result={row.result}
+						failed={row.failed}
+						resultMeta={row.failed ? `span status ${row.span.statusCode}` : undefined}
+						missingResultNote={
+							row.fromMessageOnly
+								? "not captured — this call is known only from the message that made it. Whether it ran is unknown."
+								: "not captured — the span carries no result attribute and no later message echoes this call id. Whether it succeeded is unknown."
+						}
+						keyPrefix={row.key}
+						openRows={openRows}
+						onToggleRow={onToggleRow}
+					/>
 				)}
 			</div>
 		</Row>
 	)
-}
-
-/** The one-line stand-in when payloads are collapsed — sizes, so the reader
- *  knows what expanding costs them. */
-function payloadSummary(row: Extract<TranscriptRow, { kind: "tool" }>): string {
-	const parts: string[] = []
-	if (row.args !== undefined) parts.push(`args ${formatBytes(row.args.byteLength)}`)
-	parts.push(row.result === undefined ? "no result" : `result ${formatBytes(row.result.byteLength)}`)
-	return ` · ${parts.join(" · ")}`
 }
 
 function PayloadSection({
@@ -1034,23 +998,6 @@ function PayloadSection({
 					Cut off here by the instrumentation, not by Maple — the tail was never recorded.
 				</p>
 			)}
-		</div>
-	)
-}
-
-/** A missing result is not a successful one, and this row refuses to imply it. */
-function MissingResult({ fromMessageOnly }: { fromMessageOnly: boolean }) {
-	return (
-		<div className="flex items-center gap-2.5 border-input border-t border-dashed bg-muted/20 px-3 py-2.5">
-			<CircleQuestionIcon size={13} className="shrink-0 text-muted-foreground" />
-			<span className="font-medium font-mono text-[10px] text-muted-foreground uppercase tracking-[0.1em]">
-				Result
-			</span>
-			<span className="min-w-0 text-muted-foreground text-xs">
-				{fromMessageOnly
-					? "not captured — this call is known only from the message that made it. Whether it ran is unknown."
-					: "not captured — the span carries no result attribute and no later message echoes this call id. Whether it succeeded is unknown."}
-			</span>
 		</div>
 	)
 }
