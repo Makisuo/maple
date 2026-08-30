@@ -143,6 +143,16 @@ describe("meterTurn", () => {
 		assert.deepEqual(keysFor("ai_output_tokens"), [`${INVESTIGATION}:turn-msg-1:triage:output`])
 	})
 
+	it("survives a tracker that rejects, rather than failing a delivered answer", async () => {
+		// This runs in `Effect.ensuring` on the turn's own program: a defect escaping here would
+		// turn an answer the user already has into a failed turn.
+		globalThis.fetch = () => Promise.reject(new Error("autumn is down"))
+
+		await meter(`${ORG}:inv-${INVESTIGATION}`, "msg-1", 1000, 100)
+
+		assert.deepEqual(tracked, [])
+	})
+
 	it("gives up on a tracker that never answers, rather than holding the turn slot", async () => {
 		// `endTurn` waits on this finalizer, and a wedged slot is only reclaimed after 15 minutes.
 		globalThis.fetch = () => new Promise<Response>(() => {})
