@@ -1093,8 +1093,10 @@ export type TraceDetailSpansRow = InferRow<typeof traceDetailSpans>
  * to plain columns, so the same detection is a scan of ~10k narrow rows per day.
  *
  * `StatusCode`/`ErrorType`/`ResponseStatus` carry the failure signal of the
- * agent spans themselves (the list's `errorSpanCount` attribute half), so the
- * list query can stop reading Map columns outside the per-trace fan-out.
+ * agent spans themselves. Nothing reads them yet: they are here so the planned
+ * limit-first list restructure (and ad-hoc `run_sql` reads) can count agent-span
+ * failures without touching Map columns, and adding them later would mean a
+ * second migration plus a second backfill of this table.
  *
  * Session ids live only on the turn-owning spans, so `SessionId` is '' for most
  * rows — resolution to a session key stays per-TRACE at read time, exactly as

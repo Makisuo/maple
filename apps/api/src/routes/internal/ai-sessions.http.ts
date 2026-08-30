@@ -11,6 +11,7 @@ import {
 } from "@maple/domain/http"
 import { traceSessionTraceId } from "@maple/domain/gen-ai"
 import { Effect } from "effect"
+import { isMissingAiTraceIndex } from "@/services/warehouse/missing-table"
 import { CH } from "@maple/query-engine"
 import * as Integrations from "@maple/query-engine-integrations"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -48,10 +49,17 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 						)
 						// The row schema already coerces the UInt64 aggregates and decodes
 						// exactly the response's fields, so rows pass through unmapped.
-						const rows = yield* warehouse.compiledQuery(tenant, compiled, {
-							profile: "list",
-							context: "listAiSessions",
-						})
+						// A BYO-ClickHouse cluster only gains `ai_trace_index` when an org
+						// admin applies migration 0023 (`requiredForIngest: false`, so
+						// nothing reconciles it — see `missing-table.ts`). Degrade to an
+						// empty page instead of a 502: the same face the fill-forward
+						// index shows for windows predating its deploy.
+						const rows = yield* warehouse
+							.compiledQuery(tenant, compiled, {
+								profile: "list",
+								context: "listAiSessions",
+							})
+							.pipe(Effect.catchIf(isMissingAiTraceIndex, () => Effect.succeed([])))
 						return new ListAiSessionsResponse({ data: rows })
 					}),
 				)
@@ -64,10 +72,13 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 							startTime: payload.startTime,
 							endTime: payload.endTime,
 						})
-						const rows = yield* warehouse.compiledQuery(tenant, compiled, {
-							profile: "list",
-							context: "aiSessionsFacets",
-						})
+						// Same missing-table degrade as the list read above.
+						const rows = yield* warehouse
+							.compiledQuery(tenant, compiled, {
+								profile: "list",
+								context: "aiSessionsFacets",
+							})
+							.pipe(Effect.catchIf(isMissingAiTraceIndex, () => Effect.succeed([])))
 						// One UNION ALL result carrying both dimensions, split by facetType.
 						const pick = (facetType: string) =>
 							rows

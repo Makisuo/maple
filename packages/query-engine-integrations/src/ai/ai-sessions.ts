@@ -69,8 +69,10 @@
 //
 // A caller that has no window — a deep link carrying only a session id —
 // resolves one with `aiSessionWindowQuery` first, rather than running the
-// fan-out unpruned. That query is the detection scan alone, which the
-// `mapValues(SpanAttributes)` bloom index and the table's 30-day TTL do bound.
+// fan-out unpruned. That query still reads raw `traces`, and can: it prunes by
+// the session id VALUE, which the `mapValues(SpanAttributes)` bloom index does
+// serve (the id is rare), unlike the presence-of-key detection this file moved
+// off `traces` — and the table's 30-day TTL bounds what is left.
 //
 // A `trace:` id needs neither the attribute detection nor the fan-out: it names
 // the trace outright, so `aiTraceWindowQuery`/`aiTraceSpansQuery` are the same

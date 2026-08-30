@@ -132,7 +132,7 @@ describe("aiSessionListQuery", () => {
 	it("omits the optional filters when none are given", () => {
 		const { sql } = compileUnsafe(aiSessionListQuery(), params)
 
-		expect(sql).not.toContain("SpanAttributes['maple_ai.vendor.id'] IN")
+		expect(sql).not.toContain("VendorId IN")
 		expect(sql).not.toContain("ServiceName IN")
 	})
 
