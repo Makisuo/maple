@@ -3,12 +3,7 @@ import * as AWS from "alchemy/AWS"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import type { MapleRegion } from "@maple/infra/aws"
-import {
-	resolveAwsRegion,
-	resolveAwsResourceName,
-	resolveElectricCidrBlock,
-	resolveElectricTaskSize,
-} from "@maple/infra/aws"
+import { resolveAwsRegion, resolveAwsResourceName, resolveElectricTaskSize } from "@maple/infra/aws"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import { requiredPlain } from "@maple/infra/env"
 
@@ -26,32 +21,29 @@ export interface CreateMapleElectricOptions {
 	domains: MapleDomains
 	/** Geographic instance. Every AWS resource here is scoped to it. */
 	region: MapleRegion
+	/**
+	 * The ingest fleet's VPC — see `createMapleIngest`'s return for why this is
+	 * shared rather than a second `AWS.EC2.Network`.
+	 */
+	network: Pick<AWS.EC2.Network, "vpcId" | "publicSubnetIds">
 }
 
 /**
  * Self-hosted ElectricSQL (`electricsql/electric`) on ECS Fargate — the upstream
  * behind the `apps/electric-sync` Worker.
  *
- * Its own VPC/cluster/ALB rather than a tenant of the ingest fleet's: sharing
- * would mean lifting `apps/ingest`'s network into a factory both call, a
- * refactor of the busiest thing we run to save one load balancer.
+ * Runs in the ingest fleet's VPC with its OWN cluster, ALB, security groups and
+ * certificate. The shared VPC is not an economy — it is forced: two
+ * `AWS.EC2.Network`s in one stack fight over the internet gateway, and the
+ * second one's create tries to detach the first's from a VPC full of public
+ * IPs. The two services want the same network anyway.
  *
  * See `docs/electric-sync.md` for the runbook and the cutover.
  */
-export const createMapleElectric = ({ stage, domains, region }: CreateMapleElectricOptions) =>
+export const createMapleElectric = ({ stage, domains, region, network }: CreateMapleElectricOptions) =>
 	Effect.gen(function* () {
 		const taskSize = resolveElectricTaskSize(stage)
 		const name = (base: string) => resolveAwsResourceName(base, stage, region)
-
-		// Public subnets, public IPs, no NAT — the ingest fleet's reasoning applies
-		// unchanged, and the traffic NAT would bill here is the replication stream.
-		const network = yield* AWS.EC2.Network("electric-network", {
-			cidrBlock: resolveElectricCidrBlock(region),
-			availabilityZones: 2,
-			nat: "none",
-			gatewayEndpoints: ["s3"],
-			tags: { Service: "maple-electric", Region: region },
-		})
 
 		// Two groups because `AWS.ECS.Service` applies `securityGroups` to BOTH the
 		// ALB and the tasks, so the split has to live in the rules: the internet
