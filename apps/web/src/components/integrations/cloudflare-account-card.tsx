@@ -22,6 +22,8 @@ import {
 	IntegrationEmptyMedia,
 } from "./integration-empty-state"
 import { CloudflareStatCards } from "./cloudflare-stat-cards"
+import { CloudflareIngestBanner } from "@/components/infra/cloudflare/cloudflare-ingest-status"
+import { useCloudflareIngestPhase } from "@/components/infra/cloudflare/use-cloudflare-ingest-phase"
 import {
 	CloudflareWorkersCard,
 	CloudflareZoneBoard,
@@ -94,18 +96,10 @@ function CloudflareAccountsStrip({ accounts }: { readonly accounts: ReadonlyArra
  * Logpush jobs) instead of the manual copy-paste setup.
  */
 export function CloudflareAccountCard() {
-	// Assigned once so the refresh hooks target the same memoized query atoms.
-	const statusQuery = retainedQuery("integrations", "cloudflareStatus", {
-		reactivityKeys: ["cloudflareIntegrationStatus"],
-	})
-	const statusResult = useAtomValue(statusQuery)
-
-	// Warehouse-derived ingest volume: loads independently so the card renders instantly
-	// from status and the usage columns hydrate (or silently stay absent) afterwards.
-	const usageQuery = retainedQuery("integrations", "cloudflareUsage", {
-		reactivityKeys: ["cloudflareIntegrationUsage"],
-	})
-	const usageResult = useAtomValue(usageQuery)
+	// Status plus the warehouse-derived ingest volume (which loads independently, so the card
+	// renders instantly from status and the usage columns hydrate afterwards) — and the ingest
+	// phase they imply, which also drives the polling that fills a fresh connection in place.
+	const { statusResult, usageResult, phase } = useCloudflareIngestPhase()
 
 	// Connect flow (popup, busy, refresh-on-return) lives in IntegrationConnectProvider —
 	// shared with the drill-in header's Connect/Reconnect/Disconnect buttons.
@@ -339,6 +333,8 @@ export function CloudflareAccountCard() {
 	return (
 		<div className="flex flex-col gap-4">
 			<CloudflareAccountsStrip accounts={connectedAccounts} />
+			{/* A broken grant or a paused account outranks "still collecting" — never stack both. */}
+			{banner == null && phase != null ? <CloudflareIngestBanner phase={phase} /> : null}
 			{hasReadout ? (
 				<>
 					{!usageFailed ? (
@@ -365,12 +361,15 @@ export function CloudflareAccountCard() {
 					</div>
 				</>
 			) : (
+				// Nothing discovered yet. The phase banner above already says what is happening and
+				// when to expect data; this only has to keep the card from looking finished.
 				<>
 					{banner}
-					<p className="text-xs text-muted-foreground">
-						Traffic data starts arriving within a few minutes — your zones and Workers will appear
-						here.
-					</p>
+					{banner != null || phase == null ? (
+						<p className="text-xs text-muted-foreground">
+							Your zones and Workers will appear here once collection starts.
+						</p>
+					) : null}
 				</>
 			)}
 		</div>

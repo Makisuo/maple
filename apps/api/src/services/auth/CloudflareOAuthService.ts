@@ -14,7 +14,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { listAccounts } from "@/services/integrations/CloudflareApi"
 import { Database } from "@/platform/DatabaseLive"
 import { Env, type EnvConfig } from "@/platform/Env"
-import { msToDate } from "@/platform/time"
+import { dateToMs, msToDate } from "@/platform/time"
 import { makeOAuthConnectionHelpers, OAUTH_STATE_TTL_MS } from "./oauth/connection-helpers"
 
 const CLOUDFLARE_PROVIDER = "cloudflare"
@@ -126,9 +126,14 @@ export interface CloudflareConnectedAccount {
  * own principal, first in grant order) without asserting an index is there.
  */
 export type CloudflareConnectionStatus =
-	| { readonly connected: false; readonly accounts: readonly [] }
+	| { readonly connected: false; readonly accounts: readonly []; readonly connectedAt: null }
 	| {
 			readonly connected: true
+			/**
+			 * When the grant row was created (epoch ms). A reconnect over a live grant keeps it,
+			 * and a token refresh never touches it — so it dates the connection, not the token.
+			 */
+			readonly connectedAt: number
 			readonly accounts: Arr.NonEmptyReadonlyArray<CloudflareConnectedAccount>
 	  }
 
@@ -364,10 +369,15 @@ export class CloudflareOAuthService extends Context.Service<
 		const getStatus = Effect.fn("CloudflareOAuthService.getStatus")(function* (orgId: OrgId) {
 			const row = yield* oauth.loadConnection(orgId)
 			if (!row) {
-				return { connected: false, accounts: [] } satisfies CloudflareConnectionStatus
+				return {
+					connected: false,
+					accounts: [],
+					connectedAt: null,
+				} satisfies CloudflareConnectionStatus
 			}
 			return {
 				connected: true,
+				connectedAt: dateToMs(row.createdAt),
 				// `Arr.map` carries the non-emptiness through, so the connected branch keeps its
 				// at-least-one-account guarantee.
 				accounts: Arr.map(
