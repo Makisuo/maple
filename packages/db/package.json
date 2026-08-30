@@ -26,6 +26,7 @@
 	"dependencies": {
 		"@electric-sql/pglite": "^0.5.2",
 		"@maple/domain": "workspace:*",
+		"@neondatabase/serverless": "^1.1.0",
 		"drizzle-orm": "^0.45.1",
 		"effect": "catalog:effect",
 		"postgres": "^3.4.9"

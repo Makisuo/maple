@@ -379,7 +379,12 @@ export async function runClickHouseSchemaApply(
 	if (source._tag === "Unavailable") {
 		throw new Error(source.reason)
 	}
-	const connection = makePgConnectionScope(source.connectionString, source.attributes)
+	const connection = makePgConnectionScope(
+		source.connectionString,
+		source.attributes,
+		undefined,
+		source.wsProxyUrl,
+	)
 	try {
 		return await runWithDb(connection, env, event, step)
 	} finally {

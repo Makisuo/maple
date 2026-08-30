@@ -1,0 +1,50 @@
+# celld Worker runtime. Same Maple Worker sources as Cloudflare; no alchemy.
+# Build from repo root: docker build -f deploy/celld-self-host/docker/Dockerfile.celld .
+FROM oven/bun:1.4.0 AS base
+WORKDIR /app
+
+ARG CELLD_VERSION=v0.4.0
+ARG TARGETARCH=arm64
+
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends ca-certificates curl gzip \
+	&& rm -rf /var/lib/apt/lists/*
+
+RUN set -euo pipefail; \
+	case "$TARGETARCH" in \
+		amd64) asset=celld-x86_64-unknown-linux-gnu.gz ;; \
+		arm64) asset=celld-aarch64-unknown-linux-gnu.gz ;; \
+		*) echo "unsupported TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
+	esac; \
+	curl -fsSL "https://github.com/denoland/celld/releases/download/${CELLD_VERSION}/${asset}" \
+		| gzip -d > /usr/local/bin/celld; \
+	chmod +x /usr/local/bin/celld; \
+	celld --version
+
+COPY package.json bun.lock bunfig.toml turbo.json ./
+COPY apps ./apps
+COPY packages ./packages
+COPY lib ./lib
+COPY patches ./patches
+
+ARG ESBUILD_VERSION=0.24.2
+RUN set -euo pipefail; \
+	case "$TARGETARCH" in \
+		amd64) plat=linux-x64 ;; \
+		arm64) plat=linux-arm64 ;; \
+		*) echo "unsupported TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
+	esac; \
+	curl -fsSL "https://registry.npmjs.org/@esbuild/${plat}/-/${plat}-${ESBUILD_VERSION}.tgz" \
+		| tar -xz -C /tmp; \
+	install -m 0755 /tmp/package/bin/esbuild /usr/local/bin/esbuild; \
+	esbuild --version
+
+# Workspace install can flake on npm (pglite/alchemy are unused at celld runtime).
+RUN bun install || bun install
+
+COPY deploy/celld-self-host/docker/entrypoint-celld.sh /entrypoint-celld.sh
+RUN chmod +x /entrypoint-celld.sh
+
+ENV CELLD_BIN=/usr/local/bin/celld
+EXPOSE 3472 3476 8788
+ENTRYPOINT ["/entrypoint-celld.sh"]

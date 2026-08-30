@@ -87,7 +87,11 @@ const buildHandler = async () => {
 				HttpRouter.cors({
 					allowedOrigins: ["*"],
 					allowedMethods: ["GET", "OPTIONS"],
-					allowedHeaders: ["*"],
+					// `Authorization` is excluded from the `*` wildcard by the Fetch
+					// spec. Listing only `*` makes Chrome drop the credentialed
+					// preflight (`Access-Control-Allow-Headers: *` cannot authorize
+					// the Authorization request header). Same pairing as apps/api.
+					allowedHeaders: ["*", "Authorization"],
 					// Load-bearing, not hygiene: the electric-* headers must be
 					// readable cross-origin or @electric-sql/client cannot advance
 					// the shape cursor (handle/offset/up-to-date) through the proxy,

@@ -1,4 +1,6 @@
 import type { PGlite } from "@electric-sql/pglite"
+import { neonConfig, Pool } from "@neondatabase/serverless"
+import { drizzle as drizzleNeon } from "drizzle-orm/neon-serverless"
 import { drizzle as drizzlePglite } from "drizzle-orm/pglite"
 import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
@@ -25,6 +27,13 @@ export interface MaplePgSocketHandle {
 	readonly sql: MaplePgSocket
 	/** Closes the underlying postgres.js connection pool. */
 	readonly end: () => Promise<void>
+	/**
+	 * Bind drizzle for one logical call. Defaults to `wrapMaplePgClient`.
+	 * celld uses drizzle-orm/neon-serverless over the host WS proxy because
+	 * workerd postgres.js SCRAM against real Postgres fails (`malformed SCRAM
+	 * message`) and drizzle-orm/pg-proxy cannot `db.transaction()`.
+	 */
+	readonly wrapClient?: (options?: Pick<MaplePgClientOptions, "onQuery">) => MaplePgClient
 }
 
 export interface MaplePgSocketOptions {
@@ -42,6 +51,13 @@ export interface MaplePgSocketOptions {
 	 * `connect_timeout` calls `socket.destroy()` and frees the slot.
 	 */
 	readonly connectTimeoutSeconds?: number
+	/**
+	 * Host-side `scripts/pg-ws-proxy.ts`. On celld the worker uses
+	 * `@neondatabase/serverless` through the proxy's Neon `/v1` WebSocket pipe.
+	 * POST `/sql` on the same process is tests/fallback only. Unset keeps the
+	 * current TCP postgres.js path for wrangler / Hyperdrive.
+	 */
+	readonly wsProxyUrl?: string
 }
 
 export interface MaplePgClientOptions extends MaplePgSocketOptions {
@@ -81,10 +97,54 @@ const toDrizzleLogger = (onQuery: ((query: string) => void) | undefined) =>
  * across reuse of one long-lived connection, which a request-lived client by
  * definition does not have. Do not flip it back without measuring.
  */
+/**
+ * Point `@neondatabase/serverless` at the host `pg-ws-proxy` Neon `/v1` pipe.
+ * `neonConfig` is process-global; this is idempotent for a single proxy URL.
+ */
+const configureNeonWsProxy = (wsProxyUrl: string): void => {
+	const proxy = new URL(wsProxyUrl)
+	neonConfig.webSocketConstructor = WebSocket
+	neonConfig.useSecureWebSocket = proxy.protocol === "wss:"
+	neonConfig.pipelineConnect = false
+	neonConfig.pipelineTLS = false
+	neonConfig.forceDisablePgSSL = true
+	neonConfig.wsProxy = (host, port) => `${proxy.host}/v1?address=${host}:${port}`
+}
+
+const createNeonHandle = (
+	connectionString: string,
+	wsProxyUrl: string,
+	options: MaplePgSocketOptions,
+): MaplePgSocketHandle => {
+	configureNeonWsProxy(wsProxyUrl)
+	const connectTimeoutSeconds = options.connectTimeoutSeconds
+	const pool = new Pool({
+		connectionString,
+		max: options.maxConnections ?? 5,
+		...(!(connectTimeoutSeconds === undefined)
+			? { connectionTimeoutMillis: connectTimeoutSeconds * 1000 }
+			: undefined),
+	})
+	const wrapClient = (wrapOptions?: Pick<MaplePgClientOptions, "onQuery">): MaplePgClient =>
+		drizzleNeon(pool, {
+			schema,
+			logger: toDrizzleLogger(wrapOptions?.onQuery),
+		}) as unknown as MaplePgClient
+	return {
+		// Unused on the neon path; wrapClient is the drizzle factory.
+		sql: null as unknown as MaplePgSocket,
+		end: () => pool.end(),
+		wrapClient,
+	}
+}
+
 export const createMaplePgSocket = (
 	connectionString: string,
 	options?: MaplePgSocketOptions,
 ): MaplePgSocketHandle => {
+	if (options?.wsProxyUrl !== undefined) {
+		return createNeonHandle(connectionString, options.wsProxyUrl, options)
+	}
 	const connectTimeoutSeconds = options?.connectTimeoutSeconds
 	const sql = postgres(connectionString, {
 		max: options?.maxConnections ?? 5,

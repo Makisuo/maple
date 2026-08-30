@@ -117,10 +117,12 @@ export const makePgConnectionScope = (
 	connectionString: string,
 	extraAttributes?: Record<string, unknown>,
 	seams?: PgConnectionScopeSeams,
+	wsProxyUrl?: string,
 ): PgConnectionScopeApi => {
 	const options: MaplePgSocketOptions = {
 		maxConnections: MAX_CONNECTIONS,
 		connectTimeoutSeconds: CONNECT_TIMEOUT_SECONDS,
+		...(wsProxyUrl === undefined ? undefined : { wsProxyUrl }),
 	}
 	const create =
 		seams?.openSocket ?? ((opts: MaplePgSocketOptions) => createMaplePgSocket(connectionString, opts))
@@ -170,7 +172,10 @@ export const makePgConnectionScope = (
 						// Wrapped per call so each call's statements land in its own span.
 						// One shared wrapper would cross-attribute `db.query.text` between
 						// concurrent calls; the wrapper is cheap (relational config only).
-						return await fn(wrapMaplePgClient(open.sql, { onQuery: hooks.collect }))
+						const db =
+							open.wrapClient?.({ onQuery: hooks.collect }) ??
+							wrapMaplePgClient(open.sql, { onQuery: hooks.collect })
+						return await fn(db)
 					}, extraAttributes),
 				)
 			}),
@@ -213,9 +218,10 @@ export const executeOnFreshPgClient = <T>(
 	connectionString: string,
 	fn: (db: DatabaseClient) => Promise<T>,
 	extraAttributes?: Record<string, unknown>,
+	wsProxyUrl?: string,
 ): Effect.Effect<T, DatabaseError> =>
 	Effect.suspend(() => {
-		const scope = makePgConnectionScope(connectionString, extraAttributes)
+		const scope = makePgConnectionScope(connectionString, extraAttributes, undefined, wsProxyUrl)
 		// Never let a socket-teardown error shadow the real DB error from fn(db).
 		return scope.run(fn).pipe(Effect.ensuring(Effect.promise(() => scope.close())))
 	})
@@ -251,7 +257,7 @@ export const withPgConnectionScope = <A, E, R>(
 		if (source._tag === "Unavailable") return yield* program
 
 		return yield* withPgConnectionScopeOf(
-			makePgConnectionScope(source.connectionString, source.attributes),
+			makePgConnectionScope(source.connectionString, source.attributes, undefined, source.wsProxyUrl),
 			program,
 		)
 	})

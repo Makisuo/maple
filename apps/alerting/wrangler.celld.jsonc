@@ -1,0 +1,31 @@
+{
+	// celld-safe subset of wrangler.jsonc. Forbidden keys (`hyperdrive`, `ai`,
+	// `ratelimits`, `send_email`, `routes`, `dev`, `workers_dev`) stop `celld
+	// deploy` / `celld dev`. Secrets overlay via CELLD_VARS_FILE — see
+	// docs/celld-self-host.md and scripts/celld-dev.sh. Do not commit secrets.
+	// Own project: never `celld deploy` this onto the maple-api fleet.
+	"name": "maple-alerting",
+	"main": "src/worker.ts",
+	"compatibility_date": "2026-04-08",
+	"compatibility_flags": ["nodejs_compat"],
+	"vars": {
+		"API_V2_RATE_LIMIT_PARTITION": "local",
+		"MAPLE_AUTH_MODE": "self_hosted",
+		"MAPLE_DEFAULT_ORG_ID": "default",
+		"MAPLE_ENVIRONMENT": "development",
+		"MAPLE_ALERTING_ALLOW_NONPROD": "1",
+		"MAPLE_INGEST_PUBLIC_URL": "http://127.0.0.1:3474",
+		"MAPLE_APP_BASE_URL": "http://127.0.0.1:3471",
+		"CLICKHOUSE_PROVIDER": "clickhouse",
+		"CLICKHOUSE_URL": "http://127.0.0.1:8123",
+		"CLICKHOUSE_USER": "maple",
+		"CLICKHOUSE_DATABASE": "default",
+		"MAPLE_PG_URL": "postgres://maple:maple@127.0.0.1:5499/maple",
+		"MAPLE_PG_WS_PROXY": "ws://127.0.0.1:5498",
+		"TINYBIRD_HOST": "http://127.0.0.1:7181",
+		"TINYBIRD_TOKEN": "local-placeholder"
+	},
+	"triggers": {
+		"crons": ["* * * * *", "*/5 * * * *", "*/15 * * * *", "0 * * * *"]
+	}
+}

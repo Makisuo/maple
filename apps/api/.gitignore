@@ -1,3 +1,4 @@
 
 # cold-path measurement bundle output
 .coldpath-out
+.celld/

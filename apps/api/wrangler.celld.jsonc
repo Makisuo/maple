@@ -1,0 +1,65 @@
+{
+	// celld-safe subset of wrangler.jsonc. Forbidden keys (`hyperdrive`, `ai`,
+	// `ratelimits`, `send_email`, `routes`, `dev`, `workers_dev`) stop `celld
+	// deploy` / `celld dev`. Secrets overlay via CELLD_VARS_FILE — see
+	// docs/celld-self-host.md and scripts/celld-dev.sh. Do not commit secrets.
+	"name": "maple-api",
+	"main": "src/worker.ts",
+	"compatibility_date": "2026-04-08",
+	"compatibility_flags": ["nodejs_compat"],
+	"vars": {
+		"API_V2_RATE_LIMIT_PARTITION": "local",
+		"PLANETSCALE_WEBHOOK_QUEUE_NAME": "maple-planetscale-webhooks-local",
+		"VCS_SYNC_QUEUE_NAME": "maple-vcs-sync-local",
+		"MAPLE_AUTH_MODE": "self_hosted",
+		"MAPLE_DEFAULT_ORG_ID": "default",
+		"MAPLE_ENVIRONMENT": "development",
+		"MAPLE_INGEST_PUBLIC_URL": "http://127.0.0.1:3474",
+		"MAPLE_APP_BASE_URL": "http://127.0.0.1:3471",
+		"CLICKHOUSE_PROVIDER": "clickhouse",
+		"CLICKHOUSE_URL": "http://127.0.0.1:8123",
+		"CLICKHOUSE_USER": "maple",
+		"CLICKHOUSE_DATABASE": "default",
+		"MAPLE_PG_URL": "postgres://maple:maple@127.0.0.1:5499/maple",
+		"MAPLE_PG_WS_PROXY": "ws://127.0.0.1:5498",
+		"TINYBIRD_HOST": "http://127.0.0.1:7181",
+		"TINYBIRD_TOKEN": "local-placeholder"
+	},
+	"triggers": {
+		"crons": ["0 */12 * * *", "0 * * * *", "0 */6 * * *"]
+	},
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "CHAT_SESSION",
+				"class_name": "ChatSession"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["ChatSession"]
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "MCP_SESSIONS",
+			"id": "00000000000000000000000000000000"
+		}
+	],
+	// Queues omitted: celld refuses a queue consumer on a Worker that also
+	// exports fetch(). Existing queue code no-ops without the binding.
+	"workflows": [
+		{
+			"name": "clickhouse-schema-apply-workflow",
+			"binding": "CLICKHOUSE_SCHEMA_APPLY_WORKFLOW",
+			"class_name": "ClickHouseSchemaApplyWorkflow"
+		},
+		{
+			"name": "investigation-fanout-workflow",
+			"binding": "INVESTIGATION_FANOUT_WORKFLOW",
+			"class_name": "InvestigationFanoutWorkflow"
+		}
+	]
+}

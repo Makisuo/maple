@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maple-alerting
+  namespace: maple
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: maple-alerting
+  template:
+    metadata:
+      labels:
+        app: maple-alerting
+    spec:
+      containers:
+        - name: celld
+          image: maple-celld:dev
+          env:
+            - name: CELLD_APP_DIR
+              value: /app/apps/alerting
+            - name: CELLD_PORT
+              value: "8788"
+            - name: CELLD_BUCKET
+              value: s3://maple-celld/alerting
+            - name: CELLD_VARS_FILE
+              value: /run/maple/celld-vars.env
+            - name: CELLD_WATCH
+              value: /var/lib/celld
+            - name: S3_ENDPOINT
+              value: http://minio:9000
+            - name: AWS_REGION
+              value: us-east-1
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: maple-minio
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: maple-minio
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
+          volumeMounts:
+            - name: vars
+              mountPath: /run/maple
+      volumes:
+        - name: vars
+          secret:
+            secretName: maple-selfhost
+            items:
+              - key: CELLD_VARS
+                path: celld-vars.env
