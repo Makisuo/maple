@@ -21,6 +21,7 @@ x-celld: &celld
     CELLD_VARS_FILE: /run/maple/celld-vars.env
     CELLD_WATCH: /var/lib/celld
     CELLD_TRUST_FORWARDED_HEADERS: "1"
+    RUST_LOG: ${RUST_LOG:-warn}
     S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
     AWS_REGION: ${AWS_REGION:-us-east-1}
     AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-maplecelld}

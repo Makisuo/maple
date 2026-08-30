@@ -16,6 +16,7 @@ spec:
       containers:
         - name: celld
           image: maple-celld:dev
+          imagePullPolicy: IfNotPresent
           args: []
           env:
             - name: CELLD_APP_DIR
@@ -49,6 +50,8 @@ spec:
               value: "true"
             - name: CELLD_TRUST_FORWARDED_HEADERS
               value: "1"
+            - name: RUST_LOG
+              value: warn
           volumeMounts:
             - name: vars
               mountPath: /run/maple
@@ -56,6 +59,13 @@ spec:
               mountPath: /var/lib/celld
           ports:
             - containerPort: 3472
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3472
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            failureThreshold: 24
       volumes:
         - name: vars
           secret:

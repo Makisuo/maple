@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { PGlite } from "@electric-sql/pglite"
 import { describe, expect, it } from "vitest"
+import { ELECTRIC_SYNCED_TABLES, ELECTRIC_UNSYNCED_TABLES } from "./electric-publication"
 import { readBundledMigrationsSql } from "./migrate"
 
 type MigrationJournal = {
@@ -82,24 +83,12 @@ describe("drizzle migrations", () => {
 // WASM engine + replaying every migration is ~5s on CI runners (well over
 // vitest's 5s default), so the whole `it` is bounded at 30s.
 describe("bundled migrations", () => {
-	const SYNCED_TABLES = [
-		"dashboards",
-		"alert_rules",
-		"alert_rule_states",
-		"alert_incidents",
-		// Wave 1 (0011_electric_publication_wave1)
-		"alert_destinations",
-		// API-key live reads (0014_electric_publication_api_keys)
-		"api_keys",
-		// Investigation detail page (0037_electric_publication_investigations)
-		"investigations",
-		"investigation_lens_runs",
-	]
+	const SYNCED_TABLES = [...ELECTRIC_SYNCED_TABLES]
 
 	// Published by 0009/0011, then pruned by 0022 once their client collections were
 	// removed. Asserted explicitly so re-adding a table to the publication without a
 	// consumer (or a prune migration that silently no-ops) fails here.
-	const UNSYNCED_TABLES = ["error_issues", "actors", "error_incidents", "scrape_target_checks"]
+	const UNSYNCED_TABLES = [...ELECTRIC_UNSYNCED_TABLES]
 
 	it("apply cleanly and create the Electric publication with REPLICA IDENTITY FULL", async () => {
 		const pg = new PGlite()

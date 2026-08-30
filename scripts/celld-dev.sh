@@ -243,25 +243,8 @@ ensure_data_plane() {
 # 503s shapes for unpublished tables. Heal membership idempotently.
 ensure_electric_publication() {
 	log "ensuring electric_publication_default tables"
-	docker compose -f docker-compose.development.yml exec -T postgres psql -U maple -d maple <<'SQL'
-DO $$ 
-DECLARE
-	t text;
-BEGIN
-	IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'electric_publication_default') THEN
-		CREATE PUBLICATION electric_publication_default;
-	END IF;
-	FOREACH t IN ARRAY ARRAY['dashboards','alert_rules','alert_rule_states','alert_incidents','alert_destinations','api_keys'] LOOP
-		EXECUTE format('ALTER TABLE %I REPLICA IDENTITY FULL', t);
-		IF NOT EXISTS (
-			SELECT 1 FROM pg_publication_tables
-			WHERE pubname = 'electric_publication_default' AND schemaname = 'public' AND tablename = t
-		) THEN
-			EXECUTE format('ALTER PUBLICATION electric_publication_default ADD TABLE %I', t);
-		END IF;
-	END LOOP;
-END $$;
-SQL
+	DATABASE_URL="postgres://maple:maple@127.0.0.1:${PG_PORT}/maple" \
+		bun run --cwd packages/db db:ensure-electric-publication
 }
 
 start_proxy() {
@@ -349,6 +332,7 @@ start_worker_celld() {
 		cd "$ROOT/$dir"
 		export CELLD_VARS_FILE="$VARS_FILE"
 		export PATH="$TOOLS_DIR:$PATH"
+		export RUST_LOG="${RUST_LOG:-warn}"
 		exec "$CELLD_BIN" dev wrangler.celld.jsonc --port "$port"
 	) >"$logfile" 2>&1 &
 	PIDS+=("$!")

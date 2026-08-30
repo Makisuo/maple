@@ -16,6 +16,7 @@ spec:
       containers:
         - name: celld
           image: maple-celld:dev
+          imagePullPolicy: IfNotPresent
           env:
             - name: CELLD_APP_DIR
               value: /app/apps/alerting
@@ -43,6 +44,8 @@ spec:
                   key: AWS_SECRET_ACCESS_KEY
             - name: AWS_EC2_METADATA_DISABLED
               value: "true"
+            - name: RUST_LOG
+              value: warn
           volumeMounts:
             - name: vars
               mountPath: /run/maple

@@ -1,0 +1,23 @@
+# Copy this overlay and replace YOUR_NODE. Kustomize is the overlay mechanism
+# (not Helm, not envsubst): base YAML stays generic; environment pins live here.
+#
+#   kubectl apply -k deploy/celld-self-host/k8s/overlays/example
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../..
+patches:
+  - target:
+      kind: Deployment
+    patch: |-
+      - op: add
+        path: /spec/template/spec/nodeSelector
+        value:
+          kubernetes.io/hostname: YOUR_NODE
+  - target:
+      kind: Job
+    patch: |-
+      - op: add
+        path: /spec/template/spec/nodeSelector
+        value:
+          kubernetes.io/hostname: YOUR_NODE

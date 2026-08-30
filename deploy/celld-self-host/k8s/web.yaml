@@ -16,6 +16,7 @@ spec:
       containers:
         - name: nginx
           image: maple-web:dev
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
 ---

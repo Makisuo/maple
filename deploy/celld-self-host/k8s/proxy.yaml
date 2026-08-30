@@ -16,6 +16,7 @@ spec:
       containers:
         - name: proxy
           image: maple-pg-ws-proxy:dev
+          imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
                 name: maple-selfhost

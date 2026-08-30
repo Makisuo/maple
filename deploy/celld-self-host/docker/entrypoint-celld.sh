@@ -20,6 +20,8 @@ if [[ -z "${CELLD_ESBUILD}" ]]; then
 fi
 export CELLD_TRUST_FORWARDED_HEADERS="${CELLD_TRUST_FORWARDED_HEADERS:-1}"
 export CELLD_WATCH="${CELLD_WATCH:-/var/lib/celld}"
+# celld defaults RUST_LOG=info and emits a ship-loop / lease line every second.
+export RUST_LOG="${RUST_LOG:-warn}"
 mkdir -p "$CELLD_WATCH"
 
 echo "celld-entrypoint: deploy $CONFIG → $BUCKET ($ENDPOINT)"

@@ -4,12 +4,21 @@ namespace: maple
 resources:
   - namespace.yaml
   - configmap.yaml
+  - postgres.yaml
+  - clickhouse.yaml
+  - electric.yaml
   - minio.yaml
+  - otel.yaml
   - proxy.yaml
+  - migrate.yaml
   - api.yaml
   - sync.yaml
   - alerting.yaml
   - web.yaml
   - caddy.yaml
 # Own S3: delete minio.yaml and set CELLD_BUCKET / S3_ENDPOINT / AWS_* on the
-# celld Deployments. Own Postgres/CH/Electric: set URLs on maple-selfhost ConfigMap.
+# celld Deployments. Own Postgres/CH/Electric: delete those yamls and set URLs
+# on maple-selfhost ConfigMap.
+#
+# Environment pins (nodeSelector, image names, ingress host) belong in a
+# Kustomize overlay, not in these files — see overlays/example.
