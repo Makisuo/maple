@@ -30,8 +30,10 @@ import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/effect-clo
 import { LLM, Message, type LanguageModel, type LLMClientService } from "@opencode-ai/ai"
 import { Cause, Effect, Layer, ManagedRuntime, Stream } from "effect"
 import type { ChatSession } from "./ChatSession"
+import type { TurnUsage } from "./loop"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { summarizeCause } from "@/platform/describe-cause"
+import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 
 const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
@@ -145,12 +147,17 @@ export const toLlmMessages = (
 const compactIfNeeded = (
 	input: RunChatSessionTurnInput,
 	model: LanguageModel,
-	usage: { readonly input: number },
+	usage: TurnUsage,
 ): Effect.Effect<void, never, LLMClientService> =>
 	Effect.gen(function* () {
 		const { contextLimitOf, outputLimitOf } = yield* Effect.promise(() => import("../platform/Llm"))
-		const { isNearContextLimit, annotateModelResponse, modelCallAttributes, modelCallSpanName } =
-			yield* Effect.promise(() => import("./loop"))
+		const {
+			addUsage,
+			isNearContextLimit,
+			annotateModelResponse,
+			modelCallAttributes,
+			modelCallSpanName,
+		} = yield* Effect.promise(() => import("./loop"))
 		if (
 			!isNearContextLimit(usage.input, {
 				context: contextLimitOf(model),
@@ -194,6 +201,11 @@ const compactIfNeeded = (
 				},
 			}),
 		)
+		// Housekeeping the org still pays for, so it is added to the turn's total and
+		// billed with it. Safe to mutate here: the near-limit check above has read
+		// `usage.input` already, and `submit_diagnosis` — the only mid-turn reader —
+		// ran long before the answer this is compacting behind.
+		addUsage(usage, response.usage)
 		const summary = response.text.trim()
 		if (summary === "") return
 		input.session.append({ type: "compaction", messageId: input.messageId, summary, throughSeq })
@@ -223,6 +235,44 @@ const COMPACTION_TIMEOUT = "20 seconds"
 
 /** Stable copy for the durable/browser event; detailed causes stay server-side. */
 const CHAT_TURN_FAILED = "Maple couldn't complete this response."
+
+/**
+ * Meter what this turn spent into the org's AI usage, alongside autonomous triage
+ * and the Slack agent.
+ *
+ * `usage` is the turn's whole total: every step, every sub-agent (they share the
+ * parent's accumulator), and the compaction that runs after the answer.
+ *
+ * Two deliberate choices:
+ *
+ *   - **In the `finally`, not on the happy path.** A turn that failed or was aborted
+ *     mid-stream still spent whatever the provider had already served. Metering
+ *     follows the spend, not the outcome.
+ *   - **Keyed on the message id**, which identifies the turn: the session claims one
+ *     per turn and never reuses it, so a turn that somehow ran twice still meters
+ *     once.
+ *
+ * Exported for tests; the only production caller is the `finally` below.
+ */
+export const meterTurn = async (
+	input: {
+		readonly env: Record<string, unknown>
+		readonly sessionId: string
+		readonly messageId: string
+	},
+	orgId: TenantContext["orgId"],
+	usage: TurnUsage,
+): Promise<void> => {
+	// `submit_diagnosis` already billed this turn under `triage`; see `TurnUsage.metered`.
+	if (usage.metered) return
+	await trackTokenUsage(input.env, {
+		orgId,
+		inputTokens: usage.input,
+		outputTokens: usage.output,
+		idempotencyKey: `${input.sessionId}:${input.messageId}`,
+		source: "chat",
+	})
+}
 
 /**
  * Drive one turn to completion.
@@ -261,6 +311,11 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 
 	const tenant = toTenantContext(input.tenant)
 	const observability = loop.makeTurnObservability()
+	// Out here so the `finally` can bill a turn that failed or was aborted mid-stream.
+	// Shared with the turn so `submit_diagnosis` can report what the investigation cost —
+	// see `TurnUsage`: the tool is invoked mid-turn, so there is no later moment to hand
+	// it a total.
+	const usage = loop.makeTurnUsage()
 	let recordedTerminal = false
 	const annotateTurn = () =>
 		Effect.annotateCurrentSpan({
@@ -288,9 +343,6 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 			orgId: tenant.orgId,
 			sessionId: input.sessionId,
 		})
-		// Shared with the turn so `submit_diagnosis` can report what the investigation cost. See
-		// `TurnUsage` — the tool is invoked mid-turn, so there is no later moment to hand it a total.
-		const usage = loop.makeTurnUsage()
 		// One value: the tool *and* whether this turn's answer is a call to it. Passing the tool alone
 		// is what left an autonomous investigation with no way to file its report once it ran out of
 		// steps — see `buildDiagnosisCompletion`.
@@ -381,6 +433,7 @@ export const runChatSessionTurn = async (input: RunChatSessionTurnInput): Promis
 			})
 		}
 	} finally {
+		await meterTurn(input, tenant.orgId, usage).catch(() => undefined)
 		await runtime.dispose().catch(() => undefined)
 		await telemetry.flush(input.env).catch(() => undefined)
 	}

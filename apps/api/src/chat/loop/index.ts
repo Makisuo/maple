@@ -21,6 +21,7 @@
  */
 export { runChatTurn } from "./turn"
 export {
+	addUsage,
 	makeTurnObservability,
 	makeTurnUsage,
 	type ChatTurnEvent,
