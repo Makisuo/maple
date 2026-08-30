@@ -81,6 +81,9 @@ interface SessionWaterfallProps {
 	onToggleTurn: (turnId: string) => void
 	/** The one span open in the popover (`?span=`). */
 	selectedSpanId: string | undefined
+	/** A span sent here from another view's inspection panel: its row is scrolled
+	 *  to and marked, with no panel over it. */
+	revealedSpanId: string | undefined
 	/** Raised with a span id to open it, `undefined` to close. */
 	onSelectSpan: (spanId: string | undefined) => void
 	/** The popover's tab, shared with the other views. */
@@ -99,6 +102,7 @@ export function SessionWaterfall({
 	collapsedTurns,
 	onToggleTurn,
 	selectedSpanId,
+	revealedSpanId,
 	onSelectSpan,
 	spanTab,
 	onSpanTabChange,
@@ -159,22 +163,24 @@ export function SessionWaterfall({
 		},
 	})
 
-	// A pasted `?span=` link lands on the exact span it names: the cursor starts
-	// there and the row is scrolled into view, so the row is waiting underneath
-	// when the reader closes the overlay. Once, on mount — after that the URL
-	// follows the reader rather than leading them.
+	// A pasted `?span=` link — or a span sent across from another view — lands on
+	// the exact row it names: the cursor starts there and the row is scrolled to
+	// the middle of the viewport, clear of both edges, so it reads with the rows
+	// around it rather than hard against the ruler or the fold. Once, on mount —
+	// after that the URL follows the reader rather than leading them.
+	const landingSpanId = revealedSpanId ?? selectedSpanId
 	const didInitialScroll = useRef(false)
 	useEffect(() => {
-		if (didInitialScroll.current || selectedSpanId === undefined) return
+		if (didInitialScroll.current || landingSpanId === undefined) return
 		// Not before the scroller exists: the list element attaches in a layout
 		// effect, so on the render that mounts this view there is nothing to
 		// scroll and the link would silently land at the top.
 		if (getScrollElement() === null) return
 		didInitialScroll.current = true
-		setFocusedId(selectedSpanId)
-		const index = spanRowIndexById.get(selectedSpanId)
+		setFocusedId(landingSpanId)
+		const index = spanRowIndexById.get(landingSpanId)
 		if (index !== undefined) virtualizer.scrollToIndex(index, { align: "center" })
-	}, [selectedSpanId, spanRowIndexById, setFocusedId, virtualizer, getScrollElement])
+	}, [landingSpanId, spanRowIndexById, setFocusedId, virtualizer, getScrollElement])
 
 	return (
 		<div className="@container flex grow flex-col">
@@ -258,6 +264,7 @@ export function SessionWaterfall({
 											axis={axis}
 											spansById={spansById}
 											selected={selected}
+											revealed={revealedSpanId === row.span.spanId}
 											focused={focusedId === row.span.spanId}
 											onClick={() => {
 												setFocusedId(row.span.spanId)
@@ -497,6 +504,7 @@ function SpanRow({
 	axis,
 	spansById,
 	selected,
+	revealed,
 	focused,
 	onClick,
 }: {
@@ -504,6 +512,8 @@ function SpanRow({
 	axis: SessionAxis
 	spansById: ReadonlyMap<string, AiSessionSpan>
 	selected: boolean
+	/** The row the reader was sent here to see: marked until they move on. */
+	revealed: boolean
 	/** Under the keyboard's span cursor — distinct from `selected`, which means open. */
 	focused: boolean
 	onClick: () => void
@@ -524,6 +534,9 @@ function SpanRow({
 			type="button"
 			onClick={onClick}
 			aria-current={selected || undefined}
+			// The mark is a background colour; this is how the page's tests — and
+			// anything else looking for it — find the row wearing it.
+			data-revealed={revealed || undefined}
 			aria-haspopup="dialog"
 			aria-expanded={selected}
 			className={cn(
@@ -531,6 +544,9 @@ function SpanRow({
 				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
 				errored && "bg-destructive/6",
 				focused && "bg-accent/60",
+				// Louder than the open row's mark on purpose: nothing is on screen
+				// saying which span the reader crossed views for except this row.
+				revealed && "border-l-2 border-l-primary bg-primary/12",
 				selected && "border-l-2 border-l-primary bg-primary/5",
 			)}
 		>

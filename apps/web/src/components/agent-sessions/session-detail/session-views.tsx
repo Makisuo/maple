@@ -86,13 +86,37 @@ export function SessionViews({
 	// spans — or views — keeps the reader on the tab they chose. `undefined`
 	// means no choice yet, and the panel picks by content.
 	const [spanTab, setSpanTab] = useState<SpanDetailTab | undefined>(undefined)
+	// The span the reader was sent to the Traces view to look at. The panel
+	// closes on the way — the whole point of the door is to see the row in its
+	// waterfall — so the waterfall needs to be told which row that was, or the
+	// reader lands at the top of six hundred of them. Component state rather
+	// than the URL: it is where the reader was just sent, not a place to link to.
+	const [revealedSpanId, setRevealedSpanId] = useState<string | undefined>(undefined)
+
+	// Opening the panel on any span — or picking another view by hand — is the
+	// reader moving on, and the mark comes off the row they were sent to.
+	const selectSpan = (spanId: string | undefined) => {
+		setRevealedSpanId(undefined)
+		onSelectSpan(spanId)
+	}
+	const changeView = (next: SessionView) => {
+		setRevealedSpanId(undefined)
+		onViewChange(next)
+	}
+
+	/** The panel's "Open in Traces view": close it, cross, and land on the row. */
+	const openInTraceView = () => {
+		setRevealedSpanId(selectedSpanId)
+		onSelectSpan(undefined)
+		onViewChange("trace")
+	}
 
 	// 1/2/3/4 switch views from anywhere on the page — the switcher stays
 	// reachable without the mouse, which is the point of pinning it up here.
-	useAppHotkey("session.viewOverview", () => onViewChange("overview"))
-	useAppHotkey("session.viewTrace", () => onViewChange("trace"))
-	useAppHotkey("session.viewFlow", () => onViewChange("flow"))
-	useAppHotkey("session.viewTranscript", () => onViewChange("transcript"))
+	useAppHotkey("session.viewOverview", () => changeView("overview"))
+	useAppHotkey("session.viewTrace", () => changeView("trace"))
+	useAppHotkey("session.viewFlow", () => changeView("flow"))
+	useAppHotkey("session.viewTranscript", () => changeView("transcript"))
 
 	// The sticky control bar wraps at narrow widths, so the views stack under its
 	// measured height rather than an assumed one.
@@ -117,7 +141,7 @@ export function SessionViews({
 		<Tabs
 			value={view}
 			onValueChange={(value) => {
-				if (isSessionView(value)) onViewChange(value)
+				if (isSessionView(value)) changeView(value)
 			}}
 			// `grow` with its auto basis, never `flex-1`: a zero basis makes every
 			// ancestor between here and the page scroller report ~zero intrinsic
@@ -217,11 +241,11 @@ export function SessionViews({
 					turns={turns}
 					summary={summary}
 					selectedSpanId={view === "overview" ? selectedSpanId : undefined}
-					onSelectSpan={onSelectSpan}
+					onSelectSpan={selectSpan}
 					spanTab={spanTab}
 					onSpanTabChange={setSpanTab}
 					toolResults={toolResults}
-					onOpenTraceView={() => onViewChange("trace")}
+					onOpenTraceView={openInTraceView}
 				/>
 			</TabsContent>
 			<TabsContent value="trace" className="flex flex-[1_1_auto] flex-col pb-4">
@@ -234,7 +258,8 @@ export function SessionViews({
 					collapsedTurns={collapsedTurns}
 					onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
 					selectedSpanId={view === "trace" ? selectedSpanId : undefined}
-					onSelectSpan={onSelectSpan}
+					revealedSpanId={revealedSpanId}
+					onSelectSpan={selectSpan}
 					spanTab={spanTab}
 					onSpanTabChange={setSpanTab}
 					toolResults={toolResults}
@@ -249,11 +274,11 @@ export function SessionViews({
 					zoom={zoom}
 					onZoomChange={setZoom}
 					selectedSpanId={view === "flow" ? selectedSpanId : undefined}
-					onSelectSpan={onSelectSpan}
+					onSelectSpan={selectSpan}
 					spanTab={spanTab}
 					onSpanTabChange={setSpanTab}
 					toolResults={toolResults}
-					onOpenTraceView={() => onViewChange("trace")}
+					onOpenTraceView={openInTraceView}
 				/>
 			</TabsContent>
 			<TabsContent value="transcript" className="flex flex-[1_1_auto] flex-col pb-4">
@@ -269,8 +294,8 @@ export function SessionViews({
 					openRows={openRows}
 					onToggleRow={(key) => setOpenRows((previous) => toggled(previous, key))}
 					selectedSpanId={selectedSpanId}
-					onSelectSpan={onSelectSpan}
-					onOpenTraceView={() => onViewChange("trace")}
+					onSelectSpan={selectSpan}
+					onOpenTraceView={openInTraceView}
 				/>
 			</TabsContent>
 		</Tabs>

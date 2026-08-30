@@ -299,6 +299,7 @@ function Waterfall(props: {
 	collapsedTurns?: ReadonlySet<string>
 	onToggleTurn?: (turnId: string) => void
 	selectedSpanId?: string
+	revealedSpanId?: string
 	onSelectSpan?: (spanId: string | undefined) => void
 	spanTab?: SpanDetailTab
 }) {
@@ -312,6 +313,7 @@ function Waterfall(props: {
 			collapsedTurns={props.collapsedTurns ?? EMPTY}
 			onToggleTurn={props.onToggleTurn ?? noop}
 			selectedSpanId={props.selectedSpanId}
+			revealedSpanId={props.revealedSpanId}
 			onSelectSpan={props.onSelectSpan ?? noop}
 			spanTab={props.spanTab}
 			onSpanTabChange={noop}
@@ -1064,23 +1066,35 @@ describe("SessionViews", () => {
 		expect(screen.getByRole("button", { name: /Turn 1/ }).getAttribute("aria-expanded")).toBe("false")
 	})
 
-	// One panel for the whole page, and the page behind it is scrimmed, so the
-	// way to cross views with a span still open is the panel's own door — which
-	// keeps both the span and the reader's tab.
-	it("carries the open span and its tab through the panel's door into Traces", () => {
+	// The panel's door exists to show the span in its waterfall, so the panel
+	// closes on the way through: crossing views only to find the same overlay
+	// still covering the rows was the one thing the door could not do.
+	it("closes the panel and marks the row it sent the reader to", () => {
 		render(<Views view="flow" />)
 
 		fireEvent.click(screen.getByText("grep_repo"))
-		fireEvent.click(within(spanPopover()).getByRole("button", { name: "Details" }))
-
 		fireEvent.click(within(spanPopover()).getByRole("button", { name: "Open in Traces view" }))
 
 		// The waterfall's own column header: the Traces view is what is on screen.
 		expect(screen.getByText("Model / target")).toBeTruthy()
-		expect(spanPopoverCount()).toBe(1)
-		expect(
-			within(spanPopover()).getByRole("button", { name: "Details" }).getAttribute("aria-pressed"),
-		).toBe("true")
+		expect(spanPopoverCount()).toBe(0)
+
+		// And the row the reader crossed for is the one carrying the mark.
+		const marked = document.querySelectorAll("[data-revealed]")
+		expect(marked.length).toBe(1)
+		expect(marked[0]!.textContent).toContain("grep_repo")
+	})
+
+	// The mark says "this is the row you were sent to", so it comes off the
+	// moment the reader goes somewhere else themselves.
+	it("takes the mark off once the reader opens another span", () => {
+		render(<Views view="flow" />)
+
+		fireEvent.click(screen.getByText("grep_repo"))
+		fireEvent.click(within(spanPopover()).getByRole("button", { name: "Open in Traces view" }))
+
+		fireEvent.click(screen.getAllByText("read_file")[0]!)
+		expect(document.querySelector("[data-revealed]")).toBeNull()
 	})
 
 	// The tab choice lives beside the other cross-view state in SessionViews:
