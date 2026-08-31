@@ -11,6 +11,14 @@ export const digestSubscriptions = pgTable(
 		enabled: boolean("enabled").notNull().default(true),
 		dayOfWeek: integer("day_of_week").notNull().default(1),
 		timezone: text("timezone").notNull().default("UTC"),
+		/**
+		 * JSON-encoded string arrays scoping the digest to a slice of the org.
+		 * Empty array = every namespace / environment, which is the default and
+		 * what every pre-existing row carries. Same shape as
+		 * `alert_rules.environments_json`.
+		 */
+		namespacesJson: text("namespaces_json").notNull().default("[]"),
+		environmentsJson: text("environments_json").notNull().default("[]"),
 		lastSentAt: timestamp("last_sent_at", { withTimezone: true, mode: "date" }),
 		lastAttemptedAt: timestamp("last_attempted_at", { withTimezone: true, mode: "date" }),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),

@@ -741,6 +741,14 @@ export function serviceApdexTimeseriesQuery(
 
 export interface ServiceUsageOpts {
 	serviceName?: string
+	/**
+	 * Multi-value spelling, matching `TracesBaseWhereOpts.serviceNames`. Wins
+	 * over the scalar field when non-empty. `service_usage` carries no
+	 * environment or namespace column, so a namespace/environment-scoped caller
+	 * approximates the slice by resolving its service membership and passing the
+	 * names here.
+	 */
+	serviceNames?: readonly string[]
 }
 
 export interface ServiceUsageOutput {
@@ -811,7 +819,9 @@ export function serviceUsageQuery(opts: ServiceUsageOpts) {
 			// window) which is the only sensible answer when the MV is hourly.
 			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("startTime")))),
 			$.Hour.lte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))),
-			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
+			opts.serviceNames?.length
+				? CH.inList($.ServiceName, opts.serviceNames)
+				: CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 		])
 		.groupBy("serviceName")
 		.orderBy(["totalSizeBytes", "desc"])
@@ -883,7 +893,9 @@ export function serviceUsageWithPreviousQuery(opts: ServiceUsageOpts) {
 			// it into the two periods. Hour-floored bounds match serviceUsageQuery.
 			$.Hour.gte(hourFloor("previousStartTime")),
 			$.Hour.lte(hourFloor("endTime")),
-			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
+			opts.serviceNames?.length
+				? CH.inList($.ServiceName, opts.serviceNames)
+				: CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 		])
 		.groupBy("serviceName")
 		.orderBy(["totalSizeBytes", "desc"])

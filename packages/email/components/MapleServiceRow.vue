@@ -14,7 +14,7 @@ defineProps({
 </script>
 
 <template><tr>
-<td class="px-3 py-2.5" :style="`border-bottom:${rowBorder}`"><a :href="url" target="_blank" class="font-mono text-[13px] font-medium text-maple-fg no-underline"><span :style="`color:${dotColor};font-size:9px;margin-right:6px`">&#9679;</span>{{ name }}</a></td>
+<td class="px-3 py-2.5" :style="`border-bottom:${rowBorder}`"><a :href="url" target="_blank" class="font-mono text-[13px] font-medium text-maple-fg no-underline"><span :style="`color:${dotColor};font-size:9px;margin-right:6px`">&#9679;</span>{{ name }}</a>[[#serviceScope]]</td>
 <td class="px-3 py-2.5 text-right align-middle" :style="`border-bottom:${rowBorder}`"><p class="m-0 font-mono text-[13px] leading-[24px] text-maple-fg-muted">{{ requests }}</p>[[#serviceRequestsDelta]]</td>
 <td class="px-3 py-2.5 text-right align-middle" :style="`border-bottom:${rowBorder}`"><p class="m-0 font-mono text-[13px] leading-[24px]" :style="`color:${errRateColor}`">{{ errRate }}</p></td>
 <td class="px-3 py-2.5 text-right align-middle" :style="`border-bottom:${rowBorder}`"><p class="m-0 font-mono text-[13px] leading-[24px] text-maple-fg-muted">{{ p95 }}</p></td>

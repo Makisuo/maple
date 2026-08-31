@@ -22,6 +22,8 @@ export const HttpDigestLive = HttpApiBuilder.group(MapleInternalApi, "digest", (
 						enabled: payload.enabled,
 						dayOfWeek: payload.dayOfWeek,
 						timezone: payload.timezone,
+						namespaces: payload.namespaces,
+						environments: payload.environments,
 					})
 				}),
 			)
@@ -34,7 +36,7 @@ export const HttpDigestLive = HttpApiBuilder.group(MapleInternalApi, "digest", (
 			.handle("preview", () =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					return yield* digest.preview(tenant.orgId)
+					return yield* digest.preview(tenant.orgId, tenant.userId)
 				}),
 			)
 	}),

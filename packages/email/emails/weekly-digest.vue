@@ -12,7 +12,7 @@
 <template>
 <MapleShell>
 <MapleHeader title="[[orgName]]" subtitle="">
-<template #subtitle>Weekly digest &middot; [[dateStart]] &ndash; [[dateEnd]]</template>
+<template #subtitle>Weekly digest &middot; [[dateStart]] &ndash; [[dateEnd]][[#scopeLine]]</template>
 </MapleHeader>
 <MapleDivider />
 [[#statusBanner]]
@@ -23,10 +23,11 @@
 <tr>[[#summaryRowTwo]]</tr>
 </tbody></table>
 </MapleSection>
+[[#breakdownSections]]
 [[#servicesSection]]
 [[#errorsSection]]
 <MapleSection class="px-6 pt-5">
-<MapleSectionLabel class="mb-3">Ingestion</MapleSectionLabel>
+<MapleSectionLabel class="mb-3">[[ingestionHeading]]</MapleSectionLabel>
 <table class="w-full border-collapse"><tbody><tr>[[#ingestionCells]]</tr></tbody></table>
 </MapleSection>
 <MapleSection class="px-6 pb-2 pt-6">
