@@ -47,6 +47,7 @@ function buildQueryParams(
 		excludedDeploymentEnvs: filters?.excludedDeploymentEnvs,
 		excludedNamespaces: pinned ? undefined : filters?.excludedNamespaces,
 		search: filters?.search,
+		traceId: filters?.traceId,
 	}
 }
 

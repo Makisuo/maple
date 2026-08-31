@@ -187,9 +187,14 @@ export default Alchemy.Stack(
 		// reads `ELECTRIC_URL` from the secret store, so standing this service up
 		// and cutting over to it are two separate, independently revertible acts.
 		// Point `ELECTRIC_URL` at `https://${domains.electric}` once it is verified.
-		const electric = stageDeploysElectric(stage)
-			? yield* createMapleElectric({ stage, domains, region })
-			: undefined
+		// `ingest &&` is not a stage gate — it is the VPC dependency. Electric runs
+		// in the ingest fleet's network (see `createMapleElectric`), so a stage
+		// without ingest has no VPC to put it in. Every stage that deploys Electric
+		// deploys ingest, so this never silently drops it.
+		const electric =
+			ingest && stageDeploysElectric(stage)
+				? yield* createMapleElectric({ stage, domains, region, network: ingest.network })
+				: undefined
 
 		// Standalone ElectricSQL shape-proxy worker (DB-free); its public origin is
 		// baked into the web build (VITE_ELECTRIC_SYNC_URL).

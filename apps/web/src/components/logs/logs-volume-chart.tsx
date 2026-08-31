@@ -277,6 +277,7 @@ export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartP
 						pinnedNamespace === null && filters?.excludedNamespaces
 							? [...filters.excludedNamespaces]
 							: undefined,
+					traceId: filters?.traceId,
 				},
 			},
 		}),

@@ -48,6 +48,7 @@ import { v8ToV9MvSweepModule } from "./local-store-migrations/v8-to-v9-mv-sweep"
 import { v9ToV10SemconvKeyRenamesModule } from "./local-store-migrations/v9-to-v10-semconv-key-renames"
 import { v10ToV11ProductEventsModule } from "./local-store-migrations/v10-to-v11-product-events"
 import { v11ToV12ServiceMapEdgeQuantilesModule } from "./local-store-migrations/v11-to-v12-service-map-edge-quantiles"
+import { v12ToV13ServiceOperationsDiscriminatorsModule } from "./local-store-migrations/v12-to-v13-service-operations-discriminators"
 import type {
 	AnyLocalStoreMigrationModule,
 	LocalStoreMigration,
@@ -117,6 +118,7 @@ export const localStoreMigrations: ReadonlyArray<AnyLocalStoreMigrationModule> =
 	v9ToV10SemconvKeyRenamesModule,
 	v10ToV11ProductEventsModule,
 	v11ToV12ServiceMapEdgeQuantilesModule,
+	v12ToV13ServiceOperationsDiscriminatorsModule,
 ]
 
 export const validateMigrationRegistry = (

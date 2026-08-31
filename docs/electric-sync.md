@@ -148,8 +148,14 @@ a build-time constant, so a Vite restart is needed after changing it.
 ## Production (PlanetScale + self-hosted Electric on ECS)
 
 Electric Cloud is gone. `apps/electric` runs the upstream `electricsql/electric`
-image on ECS Fargate — its own VPC, ALB and cluster, modelled on
-`apps/ingest/alchemy.run.ts` — at `electric.maple.dev` / `electric-staging.maple.dev`.
+image on ECS Fargate at `electric.maple.dev` / `electric-staging.maple.dev`, with
+its own cluster, ALB, security groups and certificate **inside the ingest fleet's
+VPC**. The shared VPC is forced, not an economy: two `AWS.EC2.Network`s in one
+alchemy stack fight over the internet gateway — under `--adopt` the second one's
+create resolves to the first's IGW and tries to detach it, which AWS refuses on a
+VPC whose tasks hold public IPs (`DependencyViolation: … has some mapped public
+address(es)`). Both services want the same network anyway: public subnets, public
+IPs, no NAT.
 Nothing was migrated to get there: Postgres is the source of truth and Electric
 is a cache over its logical replication stream.
 

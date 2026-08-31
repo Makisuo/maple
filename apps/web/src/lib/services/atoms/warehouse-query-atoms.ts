@@ -18,6 +18,7 @@ import { getErrorsByType, getErrorsFacets, getErrorsSpark, getErrorsSummary } fr
 import {
 	getLog,
 	getLogAttributeKeys,
+	getLogsCount,
 	getLogsFacetValues,
 	getLogsFacets,
 	listLogs,
@@ -54,6 +55,7 @@ import {
 	workloadInfraTimeseries,
 } from "@/api/warehouse/infra"
 import { getServiceUsage } from "@/api/warehouse/service-usage"
+import { getServiceEndpoints } from "@/api/warehouse/service-endpoints"
 import { getServiceOperations } from "@/api/warehouse/service-operations"
 import {
 	getServiceDependenciesBundle,
@@ -264,6 +266,10 @@ export const getServiceOperationsResultAtom = makeQueryAtomFamily(getServiceOper
 	staleTime: 30_000,
 })
 
+export const getServiceEndpointsResultAtom = makeQueryAtomFamily(getServiceEndpoints, {
+	staleTime: 30_000,
+})
+
 export const getServicesFacetsResultAtom = makeQueryAtomFamily(getServicesFacets, {
 	// 5 min idle TTL — environments / commit SHAs / service names move slowly,
 	// and the dashboard route now reuses this atom for demo-detection (was a
@@ -422,6 +428,11 @@ export const listLogsResultAtom = makeQueryAtomFamily(listLogs, {
 
 export const getLogResultAtom = makeQueryAtomFamily(getLog, {
 	staleTime: 60_000,
+})
+
+export const getLogsCountResultAtom = makeQueryAtomFamily(getLogsCount, {
+	staleTime: 60_000,
+	globalNamespace: "top",
 })
 
 export const getLogsFacetsResultAtom = makeQueryAtomFamily(getLogsFacets, {

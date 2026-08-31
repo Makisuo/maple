@@ -11,6 +11,7 @@ import schemaV9Sql from "./schema/local-schema-v9.sql" with { type: "text" }
 import schemaV10Sql from "./schema/local-schema-v10.sql" with { type: "text" }
 import schemaV11Sql from "./schema/local-schema-v11.sql" with { type: "text" }
 import schemaV12Sql from "./schema/local-schema-v12.sql" with { type: "text" }
+import schemaV13Sql from "./schema/local-schema-v13.sql" with { type: "text" }
 import { schemaDigest as digestSchema, schemaFingerprint as fingerprintSchema } from "./store-version"
 import { buildLocalSchemaManifest, type LocalSchemaManifest } from "./schema-manifest"
 import { LOCAL_SCHEMA_VERSION } from "./local-schema-version"
@@ -67,6 +68,7 @@ const SNAPSHOT_SQL: ReadonlyArray<string> = [
 	schemaV10Sql,
 	schemaV11Sql,
 	schemaV12Sql,
+	schemaV13Sql,
 ]
 
 export interface LocalSchemaSnapshot {
@@ -115,6 +117,8 @@ export const LOCAL_SCHEMA_V11_SQL = snapshotAt(11).sql
 export const LOCAL_SCHEMA_V11_MANIFEST = snapshotAt(11).manifest
 export const LOCAL_SCHEMA_V12_SQL = snapshotAt(12).sql
 export const LOCAL_SCHEMA_V12_MANIFEST = snapshotAt(12).manifest
+export const LOCAL_SCHEMA_V13_SQL = snapshotAt(13).sql
+export const LOCAL_SCHEMA_V13_MANIFEST = snapshotAt(13).manifest
 
 export interface LocalSchemaIdentity {
 	readonly version: number
@@ -157,6 +161,7 @@ export const LOCAL_SCHEMA_V9 = identityAt(9)
 export const LOCAL_SCHEMA_V10 = identityAt(10)
 export const LOCAL_SCHEMA_V11 = identityAt(11)
 export const LOCAL_SCHEMA_V12 = identityAt(12)
+export const LOCAL_SCHEMA_V13 = identityAt(13)
 
 export const CURRENT_LOCAL_SCHEMA: LocalSchemaIdentity = Object.freeze({
 	version: LOCAL_SCHEMA_VERSION,

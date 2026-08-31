@@ -591,6 +591,30 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 			),
 	},
 	{
+		// routes/internal/query-engine.http.ts — service detail "API" tab. Same
+		// splice as the Operations fixture with the HTTP-endpoint predicate on
+		// every tier, so the sweep validates the filtered form separately.
+		module: "service-endpoints",
+		name: "serviceEndpointsSummaryQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(CH.serviceEndpointsSummaryQuery({ serviceName: "api", limit: 50 }), window),
+	},
+	{
+		module: "service-endpoints",
+		name: "serviceEndpointsSummaryQuery",
+		label: "envFiltered",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.serviceEndpointsSummaryQuery({
+					serviceName: "api",
+					environments: ["production"],
+					limit: 50,
+				}),
+				window,
+			),
+	},
+	{
 		module: "service-operations",
 		name: "serviceOperationsTimeseriesQuery",
 		label: "default",
