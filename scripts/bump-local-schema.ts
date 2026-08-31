@@ -14,7 +14,7 @@
  *   bun run local-schema:bump <slug> [--description "..."]
  */
 import { execFileSync } from "node:child_process"
-import { copyFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { buildLocalSchemaManifest } from "../apps/cli/src/server/schema-manifest"
 import { schemaDigest, schemaFingerprint } from "../apps/cli/src/server/store-version"
@@ -36,8 +36,18 @@ const fail: (message: string) => never = (message) => {
 
 const read = (path: string): string => readFileSync(path, "utf8")
 
-/** Every edit is anchored. A patch that stops matching must stop the bump, not silently no-op. */
-const patch = (path: string, edits: ReadonlyArray<readonly [string | RegExp, string]>): void => {
+interface PlannedWrite {
+	readonly path: string
+	readonly content: string
+}
+
+/**
+ * Every edit is anchored, and nothing reaches disk until all of them have
+ * matched. A bump that half-applied was worse than one that refused: the
+ * `existsSync` guards then rejected the retry, so the developer had to unpick
+ * a partial scaffold by hand before trying again.
+ */
+const plan = (path: string, edits: ReadonlyArray<readonly [string | RegExp, string]>): PlannedWrite => {
 	let source = read(path)
 	for (const [needle, replacement] of edits) {
 		const matches =
@@ -52,7 +62,7 @@ const patch = (path: string, edits: ReadonlyArray<readonly [string | RegExp, str
 				? source.replace(needle, replacement)
 				: source.replace(new RegExp(needle.source, `${needle.flags.replace("g", "")}g`), replacement)
 	}
-	writeFileSync(path, source)
+	return { path, content: source }
 }
 
 const pascal = (slug: string): string =>
@@ -161,9 +171,12 @@ const derivedModule = read(join(MIGRATIONS_DIR, previousModuleFile))
 	.replaceAll(pascal(previousSlug), pascal(slug))
 	// The registry's own description is edge-specific prose; carrying the
 	// previous edge's forward silently would mislabel the migration in the CLI.
+	// A replacer function, not a replacement string: `--description` is free-form
+	// text, and a `$&` or `$1` in it would otherwise be expanded as a pattern.
 	.replace(
 		/(\tmoduleVersion: \d+,\n\tdescription:\s*)"(?:[^"\\]|\\.)*"/,
-		`$1${JSON.stringify(description ?? `TODO(v${from} -> v${to}): what this edge does, in one line`)}`,
+		(_match, prefix: string) =>
+			`${prefix}${JSON.stringify(description ?? `TODO(v${from} -> v${to}): what this edge does, in one line`)}`,
 	)
 
 const todoBanner = `// TODO(v${from} -> v${to}): derived from ${previousModuleFile}. Version plumbing, the
@@ -176,25 +189,26 @@ const todoBanner = `// TODO(v${from} -> v${to}): derived from ${previousModuleFi
 // native migration probe rather than shipping a wrong edge.
 `
 
-writeFileSync(
-	modulePath,
-	derivedModule.replace(/^(\/\*\*\n \* The local mirror of ClickHouse migration)/m, `${todoBanner}\n$1`),
-)
+const plannedModule: PlannedWrite = {
+	path: modulePath,
+	content: derivedModule.replace(
+		/^(\/\*\*\n \* The local mirror of ClickHouse migration)/m,
+		`${todoBanner}\n$1`,
+	),
+}
 
 // ---------------------------------------------------------------------------
 // The mechanical edits
 // ---------------------------------------------------------------------------
 
-copyFileSync(`${SCHEMA_DIR}/local-schema.sql`, snapshotPath)
-
-patch(`${SERVER_DIR}/local-schema-version.ts`, [
+const plannedVersion: PlannedWrite = plan(`${SERVER_DIR}/local-schema-version.ts`, [
 	[
 		`export const LOCAL_SCHEMA_VERSION = ${from} as const`,
 		`export const LOCAL_SCHEMA_VERSION = ${to} as const`,
 	],
 ])
 
-patch(`${SERVER_DIR}/schema-identity.ts`, [
+const plannedIdentity: PlannedWrite = plan(`${SERVER_DIR}/schema-identity.ts`, [
 	[
 		`import schemaV${from}Sql from "./schema/local-schema-v${from}.sql" with { type: "text" }`,
 		`import schemaV${from}Sql from "./schema/local-schema-v${from}.sql" with { type: "text" }\nimport schemaV${to}Sql from "./schema/local-schema-v${to}.sql" with { type: "text" }`,
@@ -210,7 +224,7 @@ patch(`${SERVER_DIR}/schema-identity.ts`, [
 	],
 ])
 
-patch(`${SERVER_DIR}/local-schema-history.ts`, [
+const plannedHistory: PlannedWrite = plan(`${SERVER_DIR}/local-schema-history.ts`, [
 	[
 		"] as const)",
 		`\tObject.freeze({
@@ -230,7 +244,7 @@ patch(`${SERVER_DIR}/local-schema-history.ts`, [
 	],
 ])
 
-patch(`${SERVER_DIR}/local-store-migrations.ts`, [
+const plannedRegistry: PlannedWrite = plan(`${SERVER_DIR}/local-store-migrations.ts`, [
 	[
 		`import { ${previousExport} } from "./local-store-migrations/${previousModuleFile.replace(/\.ts$/, "")}"`,
 		`import { ${previousExport} } from "./local-store-migrations/${previousModuleFile.replace(/\.ts$/, "")}"\nimport { ${newExport} } from "./local-store-migrations/v${from}-to-v${to}-${slug}"`,
@@ -238,7 +252,7 @@ patch(`${SERVER_DIR}/local-store-migrations.ts`, [
 	[`\t${previousExport},\n]`, `\t${previousExport},\n\t${newExport},\n]`],
 ])
 
-patch(TEST_FILE, [
+const plannedTest: PlannedWrite = plan(TEST_FILE, [
 	[`\tLOCAL_SCHEMA_V${from},\n`, `\tLOCAL_SCHEMA_V${from},\n\tLOCAL_SCHEMA_V${to},\n`],
 	[/matches the generated v\d+ revision/, `matches the generated v${to} revision`],
 	[
@@ -263,12 +277,26 @@ patch(TEST_FILE, [
 	[new RegExp(`(\\t+)"${previousModuleId}",\\n`), `$1"${previousModuleId}",\n$1"${moduleId}",\n`],
 ])
 
-patch(NATIVE_PROBE, [
+const plannedProbe: PlannedWrite = plan(NATIVE_PROBE, [
 	[
 		/\.schemaVersion == \d+ and \.schema == "[0-9a-f]+"/,
 		`.schemaVersion == ${to} and .schema == "${identity.fingerprint}"`,
 	],
 ])
+
+// Every anchor matched, so the bump is now committed to disk in one go.
+const writes: ReadonlyArray<PlannedWrite> = [
+	plannedModule,
+	// The retained snapshot is the generated DDL, verbatim.
+	{ path: snapshotPath, content: currentSql },
+	plannedVersion,
+	plannedIdentity,
+	plannedHistory,
+	plannedRegistry,
+	plannedTest,
+	plannedProbe,
+]
+for (const write of writes) writeFileSync(write.path, write.content)
 
 try {
 	execFileSync("git", ["add", "--intent-to-add", snapshotPath, modulePath], { stdio: "ignore" })
