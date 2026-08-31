@@ -134,3 +134,24 @@ jobs:
               run: |
                   echo "::error::alchemy deploy failed and the certificate-validation retry did not recover it (retry outcome: ${{ steps.retry.outcome }})"
                   exit 1
+
+    # A skipped job does not fail its run, so with CI red this workflow reported
+    # SUCCESS while nothing deployed — which is how a broken `main` looked like a
+    # string of clean deploys for several commits, and why an Electric deploy
+    # nobody had noticed was never running took an hour to spot. This job always
+    # runs, so the run's conclusion says what actually happened.
+    deployment-gate:
+        needs: deploy-stg
+        if: ${{ always() }}
+        runs-on: ubuntu-latest
+        steps:
+            - name: Report whether the deploy ran
+              run: |
+                  result="${{ needs.deploy-stg.result }}"
+                  if [ "$result" = "skipped" ]; then
+                      echo "::error::Nothing was deployed: CI did not pass for ${{ github.event.workflow_run.head_sha || github.sha }}. Fix main, then re-run."
+                      exit 1
+                  fi
+                  # A genuine deploy failure already fails its own job and reddens
+                  # the run; there is nothing to add here.
+                  echo "deploy-stg: $result"
