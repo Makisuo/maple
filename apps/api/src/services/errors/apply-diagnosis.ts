@@ -117,7 +117,10 @@ const writeDiagnosis = async (db: MaplePgClient, input: ApplyDiagnosisInput): Pr
 		.set({
 			status: "diagnosed",
 			reportJson: input.report,
-			severity: input.report.severityAssessment,
+			// Explicit null rather than `undefined`: an unassessed report must write
+			// "no severity" onto the row, not silently omit the column from the UPDATE
+			// and leave a stale one standing.
+			severity: input.report.severityAssessment ?? null,
 			confidence,
 			model: input.model,
 			inputTokens: input.inputTokens,
@@ -161,7 +164,7 @@ const writeDiagnosis = async (db: MaplePgClient, input: ApplyDiagnosisInput): Pr
 				payloadJson: {
 					investigationId: input.investigationId,
 					summary: input.report.summary,
-					severityAssessment: input.report.severityAssessment,
+					severityAssessment: input.report.severityAssessment ?? null,
 					confidence,
 					applied: applied.applied,
 				},
