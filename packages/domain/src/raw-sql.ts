@@ -73,18 +73,24 @@ const INTO_OUTFILE_RE = /\bINTO\s+OUTFILE\b/i
  * touch it. On BYO and self-hosted clusters that is a working SSRF primitive
  * with the response handed back as rows.
  *
- * A deny list is the wrong shape long-term — ClickHouse keeps adding table
- * functions, and only an allow list of Maple's own tables closes the class. It
- * is what fits behind the existing text checks today; replacing all of this with
- * a parser is the real fix.
+ * A deny list is the wrong shape long-term — only an allow list of Maple's own
+ * tables closes the class, which needs a parser. Until then the shape that
+ * matters is *prefix* matching, below: ClickHouse suffixes these families freely
+ * (`iceberg`, `icebergS3`, `icebergAzure`, `icebergS3Cluster`, `deltaLakeAzure`,
+ * `s3Cluster`), so an exact-name list goes stale the moment a variant lands —
+ * and goes stale silently, because the check keeps passing. No ClickHouse scalar
+ * function begins with any of these, which is what makes the prefix safe.
  */
-const DISALLOWED_FUNCTIONS = [
-	"url",
-	"urlCluster",
+const DISALLOWED_FUNCTION_PREFIXES = [
+	"iceberg",
+	"deltaLake",
+	"hudi",
+	"s3",
+	"gcs",
+	"azureBlobStorage",
+	"hdfs",
 	"remote",
-	"remoteSecure",
 	"cluster",
-	"clusterAllReplicas",
 	"mysql",
 	"postgresql",
 	"mongodb",
@@ -92,26 +98,35 @@ const DISALLOWED_FUNCTIONS = [
 	"sqlite",
 	"odbc",
 	"jdbc",
-	"hdfs",
-	"hdfsCluster",
-	"s3",
-	"s3Cluster",
-	"gcs",
-	"azureBlobStorage",
-	"azureBlobStorageCluster",
-	"deltaLake",
-	"hudi",
-	"iceberg",
+	"executable",
+	"arrowFlight",
+	"ytsaurus",
+] as const
+
+/**
+ * Names that must match *exactly*, because each is a prefix of a legitimate
+ * scalar function: `url` would take `URLHash` and `URLPathHierarchy`, `file`
+ * would take `filesystemAvailable`, `hive` would take `hiveHash`, `dictionary`
+ * would take nothing today but sits beside the whole `dict*` family.
+ */
+const DISALLOWED_FUNCTION_NAMES = [
+	"url",
+	"urlCluster",
 	"file",
 	"fileCluster",
 	"input",
-	"executable",
 	"dictionary",
+	"hive",
 ] as const
 
-// Anchored on the opening paren so a *column* named `file` or a function like
-// `urlHash` is untouched — only the call form is a table function.
-const DISALLOWED_FUNCTION_RE = new RegExp(`\\b(${DISALLOWED_FUNCTIONS.join("|")})\\s*\\(`, "i")
+// Anchored on the opening paren so a *column* named `file`, or a scalar function
+// like `urlHash`, is untouched — only the call form is a table function. The
+// leading `\b` is what keeps the exact names exact: there is no word boundary
+// inside `urlHash`, so its `url` prefix is never a match start.
+const DISALLOWED_FUNCTION_RE = new RegExp(
+	`\\b(${DISALLOWED_FUNCTION_PREFIXES.join("|")})[A-Za-z0-9_]*\\s*\\(|\\b(${DISALLOWED_FUNCTION_NAMES.join("|")})\\s*\\(`,
+	"i",
+)
 
 /** Macros the engine expands. Anything else `$__`-shaped is a typo. */
 export const RAW_SQL_MACROS = [
@@ -164,8 +179,17 @@ export const rawSqlIssue = (
 				: "SQL must reference $__orgFilter so the query is scoped to your org.",
 		)
 	}
-	if (options.workload === "alert" && !sql.includes("$__timeFilter(")) {
-		return issue("InvalidMacro", "Raw SQL alerts must reference $__timeFilter(...) to bound alert reads.")
+	// Masked, for the same reason as the org filter: an alert whose only
+	// `$__timeFilter(` sits in a comment expands to nothing and then rescans all
+	// of history on every evaluation, which is the cost the requirement exists to
+	// prevent.
+	if (options.workload === "alert" && !maskedSql.includes("$__timeFilter(")) {
+		return issue(
+			"InvalidMacro",
+			sql.includes("$__timeFilter(")
+				? "$__timeFilter(...) must appear in the query itself, not inside a comment or string literal."
+				: "Raw SQL alerts must reference $__timeFilter(...) to bound alert reads.",
+		)
 	}
 
 	for (const macro of ["$__timeFilter", "$__timeGroup"] as const) {

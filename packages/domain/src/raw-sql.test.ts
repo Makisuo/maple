@@ -14,6 +14,16 @@ describe("rawSqlIssue", () => {
 		expect(rawSqlIssue("SELECT 1 FROM logs")?.code).toBe("MissingOrgFilter")
 	})
 
+	// Same masking bug the org filter had: a macro in a comment expands to nothing,
+	// so the alert would rescan all of history on every evaluation.
+	it.each([
+		"SELECT count() AS v FROM traces WHERE $__orgFilter -- $__timeFilter(Timestamp)",
+		"SELECT count() AS v FROM traces WHERE $__orgFilter /* $__timeFilter(Timestamp) */",
+		"SELECT count() AS v, '$__timeFilter(Timestamp)' AS x FROM traces WHERE $__orgFilter",
+	])("rejects an alert whose $__timeFilter is not executable: %s", (sql) => {
+		expect(rawSqlIssue(sql, { workload: "alert" })?.code).toBe("InvalidMacro")
+	})
+
 	it("requires $__timeFilter for alerts only", () => {
 		const sql = "SELECT count() FROM logs WHERE $__orgFilter"
 		expect(rawSqlIssue(sql)).toBeNull()
@@ -75,6 +85,15 @@ describe("rawSqlIssue", () => {
 		"SELECT OrgId FROM traces WHERE $__orgFilter AND SpanId IN (SELECT * FROM url('http://internal/'))",
 		// Case and whitespace are not a bypass.
 		"SELECT * FROM URL ('http://internal/') WHERE $__orgFilter",
+		// Suffixed variants: an exact-name list matched `iceberg` but not
+		// `icebergS3`, so every lake-format reader walked straight through.
+		"SELECT * FROM icebergS3('https://x/y', 'k', 's') WHERE $__orgFilter",
+		"SELECT * FROM icebergAzure('https://x/y') WHERE $__orgFilter",
+		"SELECT * FROM deltaLakeS3('https://x/y') WHERE $__orgFilter",
+		"SELECT * FROM deltaLakeAzure('https://x/y') WHERE $__orgFilter",
+		"SELECT * FROM icebergS3Cluster('c', 'https://x/y') WHERE $__orgFilter",
+		"SELECT * FROM s3Cluster('c', 'https://x/y.parquet') WHERE $__orgFilter",
+		"SELECT * FROM executablePool('script', TSV, 'x UInt32') WHERE $__orgFilter",
 	])("rejects network and filesystem table functions: %s", (sql) => {
 		expect(rawSqlIssue(sql)?.code).toBe("DisallowedFunction")
 	})
@@ -85,6 +104,12 @@ describe("rawSqlIssue", () => {
 		"SELECT file FROM traces WHERE $__orgFilter",
 		"SELECT domain(Url) AS d FROM traces WHERE $__orgFilter",
 		"SELECT 'url(' AS literal FROM traces WHERE $__orgFilter",
+		// Scalar functions sharing a prefix with a blocked name. These are why
+		// `url`, `file` and `hive` are matched exactly rather than as prefixes.
+		"SELECT URLHash(Url) AS h FROM traces WHERE $__orgFilter",
+		"SELECT URLPathHierarchy(Url) AS p FROM traces WHERE $__orgFilter",
+		"SELECT filesystemAvailable() AS free FROM traces WHERE $__orgFilter",
+		"SELECT hiveHash(SpanName) AS h FROM traces WHERE $__orgFilter",
 	])("does not mistake a column or unrelated function for a table function: %s", (sql) => {
 		expect(rawSqlIssue(sql)).toBeNull()
 	})
