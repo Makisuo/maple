@@ -156,6 +156,11 @@ function LensBody({
 				workloadName: workload?.workloadName ?? "",
 				namespace: workload?.namespace || undefined,
 				metric: "cpu_limit",
+				// Per pod, then collapsed to the worst below. Ungrouped, the query
+				// AVERAGES every pod into one line, so three pods at 97% among
+				// fifteen at 20% read as ~33% and the verdict can never see the
+				// saturation it exists to find.
+				groupByPod: true,
 				startTime,
 				endTime,
 				bucketSeconds,
@@ -197,17 +202,28 @@ function LensBody({
 		.onSuccess((r) => r.totalCount)
 		.orElse(() => 0)
 
+	// One collapse, used by both the strip and the verdict, so the line you read
+	// and the sentence above it are the same series.
+	const worstCpuRows = useMemo(() => worstPerBucket(cpuRows), [cpuRows])
+
 	const verdict = useMemo(
 		() =>
 			deriveLensVerdict({
 				hasWorkload: workload != null,
 				pods,
-				points,
-				// The strip is grouped by pod when it has an attribute; the verdict
-				// wants one number per bucket, so it takes the worst pod at each.
-				cpuOfLimit: worstPerBucket(cpuRows),
+				// The true size of the workload — `pods` is a worst-first PAGE of it.
+				totalPods,
+				latency: points.map((point) => ({
+					bucket: point.bucket,
+					value: point.p99LatencyMs,
+					// A zero-filled bucket is not a fast bucket; it is one the service
+					// did not serve, and it must not drag the baseline to zero.
+					hasTraffic: point.totalCount > 0,
+				})),
+				cpuOfLimit: worstCpuRows,
+				bucketSeconds,
 			}),
-		[workload, pods, points, cpuRows],
+		[workload, pods, totalPods, points, worstCpuRows, bucketSeconds],
 	)
 
 	const strips: StripSeries[] = useMemo(
@@ -226,10 +242,10 @@ function LensBody({
 			{
 				id: "cpu",
 				label: "CPU of limit",
-				source: workload ? `${workload.workloadKind} ${workload.workloadName}` : "no workload",
+				source: workload ? `worst pod · ${workload.workloadName}` : "no workload",
 				unit: "percent",
 				showThreshold: true,
-				rows: cpuRows,
+				rows: worstCpuRows.map((row) => ({ ...row, attributeValue: "" })),
 			},
 			{
 				id: "throughput",
@@ -259,7 +275,16 @@ function LensBody({
 		return <QueryErrorState error={overviewResult.cause} titleOverride="Failed to load this service" />
 	}
 
-	const loading = Result.isInitial(overviewResult) || Result.isInitial(workloadsResult)
+	// The headline reads pods and CPU as well as the overview, and both of those
+	// atoms re-key once the workload resolves — so a naive gate on the first two
+	// publishes a diagnosis over `[]` twice: once before pods land, once again
+	// after the re-key. `Result.builder` turns a FAILURE into `[]` too, which is
+	// indistinguishable from "no pods" and would read as a confident "healthy".
+	const evidenceMissing = workload != null && (Result.isFailure(podsResult) || Result.isFailure(cpuResult))
+	const loading =
+		Result.isInitial(overviewResult) ||
+		Result.isInitial(workloadsResult) ||
+		(workload != null && (Result.isInitial(podsResult) || Result.isInitial(cpuResult)))
 	const waiting =
 		(Result.isSuccess(overviewResult) && overviewResult.waiting) ||
 		(Result.isSuccess(cpuResult) && cpuResult.waiting)
@@ -271,6 +296,16 @@ function LensBody({
 					<>
 						<Skeleton className="h-9 w-[520px]" />
 						<Skeleton className="h-4 w-[420px]" />
+					</>
+				) : evidenceMissing ? (
+					<>
+						<h1 className="max-w-[820px] text-[30px] font-semibold leading-[1.15] tracking-tight text-foreground">
+							{serviceName} — evidence incomplete.
+						</h1>
+						<p className="max-w-[700px] text-[13px] leading-relaxed text-muted-foreground">
+							The pod list or the CPU series failed to load, so this page can't say whether
+							Kubernetes is involved. The charts below show what did arrive.
+						</p>
 					</>
 				) : (
 					<>

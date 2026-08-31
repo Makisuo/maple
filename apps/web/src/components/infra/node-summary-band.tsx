@@ -134,12 +134,15 @@ function ScopeCell({
 		<button
 			type="button"
 			aria-pressed={active}
-			disabled={value === 0}
+			// `&& !active` so a scope that empties out — after a refresh, or from a
+			// shared URL — can still be toggled off. Disabling the only control
+			// that clears it strands the table empty.
+			disabled={value === 0 && !active}
 			onClick={() => onSelect(active ? undefined : status)}
 			className={cn(
 				"flex flex-1 flex-col justify-center gap-1.5 border-l px-4 py-3 text-left transition-colors",
 				"focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
-				value === 0 ? "cursor-default" : "hover:bg-muted/40",
+				value === 0 && !active ? "cursor-default" : "hover:bg-muted/40",
 				active && "bg-muted/60",
 			)}
 		>
