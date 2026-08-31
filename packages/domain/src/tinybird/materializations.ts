@@ -1430,6 +1430,15 @@ export const serviceOperationsMinutelyMv = defineMaterializedView("service_opera
 	description:
 		"Pre-aggregates every span by service operation and minute with normalized HTTP names, exact/estimated counts, errors, duration sum, and unweighted t-digest state.",
 	datasource: serviceOperationsMinutely,
+	// Migration 0023 adds three counter columns to the target. Without this,
+	// Tinybird treats a changed MV node as a reason to REBUILD the target by
+	// replaying its source — and the source here is `traces`, which keeps 30 days
+	// against this rollup's 90. The deploy warns and then drops eight months of
+	// history that cannot be reconstructed. `alter` applies the column addition
+	// with no data movement at promotion, which is what an additive change
+	// actually needs, and is also why these rollups need no FORWARD_QUERY (a
+	// leftover one makes every later deploy fail — see the note in datasources).
+	deploymentMethod: "alter",
 	nodes: [
 		node({
 			name: "service_operations_minutely_mv_node",
@@ -1464,6 +1473,10 @@ export const serviceOperationsMinutelyMv = defineMaterializedView("service_opera
 export const serviceOperationsHourlyMv = defineMaterializedView("service_operations_hourly_mv", {
 	description: "Merges minutely service-operation aggregates into an hour-grain one-year rollup.",
 	datasource: serviceOperationsHourly,
+	// Same reason as the minutely view, one tier worse: this target keeps 365 days
+	// and its source keeps 90, so a rebuild silently truncates the annual rollup
+	// to a quarter.
+	deploymentMethod: "alter",
 	nodes: [
 		node({
 			name: "service_operations_hourly_mv_node",
