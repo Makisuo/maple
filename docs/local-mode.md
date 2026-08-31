@@ -18,9 +18,10 @@ brew install Makisuo/tap/maple
 
 Homebrew downloads the matching release bundle, verifies its checksum, installs
 `maple` and `libchdb.so` together in the Homebrew Cellar, and links `maple` onto
-your PATH. macOS Apple Silicon and Linux (x86_64 & arm64) are supported. If
-Homebrew asks you to trust the third-party tap, run `brew trust Makisuo/tap`
-once and retry the install.
+your PATH. If Homebrew asks you to trust the third-party tap, run
+`brew trust Makisuo/tap` once and retry the install. The tap lives in
+`Makisuo/homebrew-tap`, not this repo, so its platform coverage is set there —
+Intel macOS currently installs via the manual installer below.
 
 Manual installer:
 
@@ -35,7 +36,16 @@ curl -fsSL https://maple.dev/cli/install | sh
 The manual installer detects your OS/arch, downloads the matching bundle from
 the latest GitHub release, verifies its checksum, installs the two files into
 `~/.maple/bin`, clears the macOS Gatekeeper quarantine, and symlinks `maple`
-onto your PATH. Then:
+onto your PATH.
+
+Released targets: macOS (Apple Silicon & Intel) and Linux (x86_64 & arm64).
+Intel macOS builds on GitHub's `macos-15-intel` runner, which is the scarcest
+capacity in the pool — its tarball can land minutes after the others on a
+release. Each build job publishes independently, so the rest of the release is
+never held up. GitHub retires Intel macOS in Fall 2027; the target goes away
+with it.
+
+Then:
 
 ```bash
 maple start            # OTLP ingest + embedded ClickHouse on :4318; UI from local.maple.dev
