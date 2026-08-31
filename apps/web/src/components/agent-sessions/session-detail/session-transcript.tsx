@@ -8,7 +8,6 @@ import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { formatBytes, formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 
-import { MessageResponse } from "@/components/ai-elements/message-response"
 import {
 	AlertWarningIcon,
 	BranchForkIcon,
@@ -40,7 +39,7 @@ import {
 import type { SessionToolResults } from "@/lib/agent-sessions/span-detail"
 import { formatClockInTimezone } from "@/lib/timezone-format"
 import { ClampedText, firstLine } from "./clamped-text"
-import { disclosed, useJsonPayload, useMessageBody, ViewSwitch } from "./payload-view"
+import { disclosed, MessageBody, useJsonPayload, useMessageBody, ViewSwitch } from "./payload-view"
 import { Pill } from "./pill"
 import { ToolIo, ToolIoSummary } from "./tool-io"
 
@@ -473,17 +472,10 @@ function UserBlock({
 				</div>
 				{/* Clamped like every other long body: a pasted 400-line prompt is one
 				    block of a conversation, not the page. "Show full" opens it. */}
-				<ClampedText
-					text={raw ? row.text : body.formatted}
-					html={raw ? undefined : body.highlighted}
-					mono={!raw && body.rendered === "json"}
-					body={
-						raw || body.rendered === "json" ? undefined : (
-							<MessageResponse className="text-foreground text-sm leading-relaxed">
-								{row.text}
-							</MessageResponse>
-						)
-					}
+				<MessageBody
+					text={row.text}
+					body={body}
+					raw={raw}
 					expanded={disclosed(openRows, textKey, false)}
 					onToggleExpanded={() => onToggleRow(textKey)}
 				/>
@@ -566,15 +558,11 @@ function SystemBlock({
 			{open && (
 				<div className="flex items-start gap-1.5 pb-2 pl-6">
 					<div className="min-w-0 grow">
-						<ClampedText
-							text={raw ? row.text : body.formatted}
-							html={raw ? undefined : body.highlighted}
-							mono={!raw && body.rendered === "json"}
-							body={
-								raw || body.rendered === "json" ? undefined : (
-									<MessageResponse className="text-sm">{row.text}</MessageResponse>
-								)
-							}
+						<MessageBody
+							text={row.text}
+							body={body}
+							raw={raw}
+							proseClassName="text-sm"
 							expanded={disclosed(openRows, textKey, false)}
 							onToggleExpanded={() => onToggleRow(textKey)}
 						/>
@@ -608,6 +596,7 @@ function AssistantBlock({
 	// payload. Empty where the call succeeded, and the hook is cheap on "".
 	const error = useJsonPayload(row.failed ? row.span.statusMessage : "")
 	const body = useMessageBody(row.text ?? "")
+	const textKey = `${row.key}:text`
 	const rawKey = `${row.key}:raw`
 	const raw = disclosed(openRows, rawKey, false)
 	const errorRawKey = `${row.key}:error-raw`
@@ -649,21 +638,17 @@ function AssistantBlock({
 				)}
 				{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
 			</div>
-			{row.text !== undefined &&
-				(raw ? (
-					<p className="whitespace-pre-wrap break-words pt-2.5 text-foreground text-sm leading-relaxed">
-						{row.text}
-					</p>
-				) : body.highlighted !== undefined ? (
-					<div
-						className="min-w-0 whitespace-pre-wrap break-words pt-2.5 font-mono text-muted-foreground text-xs leading-relaxed"
-						dangerouslySetInnerHTML={{ __html: body.highlighted }}
+			{row.text !== undefined && (
+				<div className="pt-2.5">
+					<MessageBody
+						text={row.text}
+						body={body}
+						raw={raw}
+						expanded={disclosed(openRows, textKey, false)}
+						onToggleExpanded={() => onToggleRow(textKey)}
 					/>
-				) : (
-					<MessageResponse className="pt-2.5 text-foreground text-sm leading-relaxed">
-						{row.text}
-					</MessageResponse>
-				))}
+				</div>
+			)}
 			{row.failed && (
 				<div className="flex flex-col gap-1.5 pt-2.5">
 					{row.span.statusMessage !== "" && (
@@ -719,6 +704,7 @@ function PromptBlock({
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "prompt" }> }) {
 	const rawKey = `${row.key}:raw`
 	const raw = disclosed(openRows, rawKey, false)
+	const textKey = `${row.key}:text`
 	const body = useMessageBody(row.text)
 
 	return (
@@ -736,20 +722,13 @@ function PromptBlock({
 						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
 					/>
 				</div>
-				{raw ? (
-					<p className="whitespace-pre-wrap break-words text-foreground text-sm leading-relaxed">
-						{row.text}
-					</p>
-				) : body.highlighted !== undefined ? (
-					<div
-						className="min-w-0 whitespace-pre-wrap break-words font-mono text-muted-foreground text-xs leading-relaxed"
-						dangerouslySetInnerHTML={{ __html: body.highlighted }}
-					/>
-				) : (
-					<MessageResponse className="text-foreground text-sm leading-relaxed">
-						{row.text}
-					</MessageResponse>
-				)}
+				<MessageBody
+					text={row.text}
+					body={body}
+					raw={raw}
+					expanded={disclosed(openRows, textKey, false)}
+					onToggleExpanded={() => onToggleRow(textKey)}
+				/>
 				<InlineNote>
 					The reply isn't captured. This emitter records{" "}
 					<span className="font-mono">gen_ai.input.messages</span> but not{" "}
