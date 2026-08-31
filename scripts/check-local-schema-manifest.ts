@@ -38,11 +38,35 @@ for (let index = 1; index < LOCAL_SCHEMA_HISTORY.length; index += 1) {
 		fail("local schema identity history must be strictly increasing by schema version")
 }
 
+// The gate already holds every value a new history entry needs, so a mismatch
+// prints the entry rather than only naming two of its four hashes. Reading a
+// digest out of a failure string and hand-assembling the literal was its own
+// source of typos.
+const historyEntrySource = (identity: typeof CURRENT_LOCAL_SCHEMA): string =>
+	[
+		"\tObject.freeze({",
+		`\t\tversion: ${identity.version},`,
+		`\t\tfingerprint: "${identity.fingerprint}",`,
+		`\t\tdigest: "${identity.digest}",`,
+		`\t\tmanifestDigest: "${identity.manifestDigest}",`,
+		`\t\tprojectRevision: "${identity.projectRevision}",`,
+		"\t}),",
+	].join("\n")
+
 const latest = LOCAL_SCHEMA_HISTORY[LOCAL_SCHEMA_HISTORY.length - 1]!
 if (!sameIdentity(latest, CURRENT_LOCAL_SCHEMA)) {
-	fail(
-		`current local schema identity is not the append-only history tip (current v${LOCAL_SCHEMA_VERSION} ${LOCAL_SCHEMA_MANIFEST_DIGEST}; history tip v${latest.version} ${latest.manifestDigest}). Append a new versioned identity and migration edge before changing the schema.`,
+	console.error(
+		`current local schema identity is not the append-only history tip (current v${LOCAL_SCHEMA_VERSION} ${LOCAL_SCHEMA_MANIFEST_DIGEST}; history tip v${latest.version} ${latest.manifestDigest}).`,
 	)
+	if (CURRENT_LOCAL_SCHEMA.version === latest.version)
+		console.error(
+			`\nThe schema changed without a version bump. Run \`bun run local-schema:bump <slug>\` to append v${latest.version + 1} and scaffold its migration edge.`,
+		)
+	else
+		console.error(
+			`\nAppend this entry to LOCAL_SCHEMA_HISTORY in apps/cli/src/server/local-schema-history.ts,\nthen register a migration edge reaching v${CURRENT_LOCAL_SCHEMA.version}:\n\n${historyEntrySource(CURRENT_LOCAL_SCHEMA)}\n`,
+		)
+	fail("append a new versioned identity and migration edge before changing the schema")
 }
 
 // A loop is only a gate while it has something to iterate. The history carries
