@@ -8,6 +8,7 @@ import { TraceId } from "@maple/domain"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useAppHotkey } from "@/hooks/use-app-hotkey"
 import { TraceReplayLink } from "@/components/replays/trace-replay-link"
+import { TraceLogsLink } from "@/components/traces/trace-logs-link"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { TraceViewTabs } from "@maple/ui/components/traces/trace-view-tabs"
 import { SpanDetailPanel } from "@/components/traces/span-detail-panel"
@@ -313,6 +314,11 @@ function TraceDetailContent({
 							}
 						>
 							<div className="flex items-center gap-2">
+								<TraceLogsLink
+									traceId={traceId}
+									traceStartTime={traceStartTime}
+									totalDurationMs={data.totalDurationMs}
+								/>
 								<TraceReplayLink traceId={traceId} />
 							</div>
 						</DashboardLayout.Header>

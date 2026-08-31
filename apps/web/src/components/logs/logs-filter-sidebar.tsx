@@ -28,6 +28,14 @@ import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 
 const routeApi = getRouteApi("/logs/")
 
+const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/i
+const TRACEPARENT_PATTERN = /^[0-9a-f]{2}-([0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$/i
+
+function extractTraceId(value: string): string | undefined {
+	if (TRACE_ID_PATTERN.test(value)) return value.toLowerCase()
+	return TRACEPARENT_PATTERN.exec(value)?.[1]?.toLowerCase()
+}
+
 function LoadingState() {
 	return <FilterSidebarLoading sectionCount={3} />
 }
@@ -45,9 +53,19 @@ export function LogsFilterSidebar() {
 	const [searchText, setSearchText] = useState(search.search ?? "")
 
 	const debouncedNavigate = useDebouncedCallback((value: string) => {
-		const trimmed = value.trim() || undefined
+		const trimmed = value.trim()
+		// A pasted trace ID (or full W3C traceparent) becomes the trace filter —
+		// body search is ILIKE on the message text, where a 32-hex ID never matches.
+		const traceId = extractTraceId(trimmed)
+		if (traceId) {
+			setSearchText("")
+			navigate({
+				search: (prev) => ({ ...prev, search: undefined, traceId }),
+			})
+			return
+		}
 		navigate({
-			search: (prev) => ({ ...prev, search: trimmed }),
+			search: (prev) => ({ ...prev, search: trimmed || undefined }),
 		})
 	}, 300)
 
@@ -98,7 +116,8 @@ export function LogsFilterSidebar() {
 		(search.excludedSeverities?.length ?? 0) > 0 ||
 		(search.excludedDeploymentEnvs?.length ?? 0) > 0 ||
 		(search.excludedNamespaces?.length ?? 0) > 0 ||
-		!!search.search
+		!!search.search ||
+		!!search.traceId
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
@@ -125,7 +144,7 @@ export function LogsFilterSidebar() {
 									size="sm"
 									value={searchText}
 									onChange={(e) => handleSearchChange(e.target.value)}
-									placeholder="Search log messages..."
+									placeholder="Search messages or trace ID..."
 									data-shortcut-focus="search"
 								/>
 								{!searchText && (

@@ -27,6 +27,9 @@ const logsSearchSchema = Schema.Struct({
 	// Attribute keys pinned as columns in the logs stream. Shareable via URL.
 	columns: OptionalStringArrayParam,
 	search: Schema.optional(Schema.String),
+	// Scopes the stream to one trace. Set by pasting a trace ID into the search
+	// box or following "View Logs" from a trace; cleared via its chip.
+	traceId: Schema.optional(Schema.String),
 	...TimeRangeSearchFields,
 })
 
@@ -69,6 +72,9 @@ function LogsPage() {
 			label: chip.label,
 			values: chip.values,
 			negated: chip.negated,
+			// The chip's tooltip still carries the full ID; the trace page itself
+			// abbreviates to the same 8 characters.
+			getValueLabel: chip.param === "traceId" ? (value: string) => value.slice(0, 8) : undefined,
 			onRemove: () => navigate({ search: (prev) => ({ ...prev, [chip.param]: undefined }) }),
 		}))
 

@@ -18,6 +18,7 @@ import { getErrorsByType, getErrorsFacets, getErrorsSpark, getErrorsSummary } fr
 import {
 	getLog,
 	getLogAttributeKeys,
+	getLogsCount,
 	getLogsFacetValues,
 	getLogsFacets,
 	listLogs,
@@ -427,6 +428,11 @@ export const listLogsResultAtom = makeQueryAtomFamily(listLogs, {
 
 export const getLogResultAtom = makeQueryAtomFamily(getLog, {
 	staleTime: 60_000,
+})
+
+export const getLogsCountResultAtom = makeQueryAtomFamily(getLogsCount, {
+	staleTime: 60_000,
+	globalNamespace: "top",
 })
 
 export const getLogsFacetsResultAtom = makeQueryAtomFamily(getLogsFacets, {
