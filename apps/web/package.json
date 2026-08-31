@@ -92,6 +92,7 @@
 		"@types/react-dom": "catalog:react",
 		"@types/three": "^0.181.0",
 		"@vitejs/plugin-react": "^6.0.2",
+		"dialkit": "1.4.3",
 		"jsdom": "^29.1.1",
 		"typescript": "catalog:tooling",
 		"vite": "catalog:",
