@@ -11,9 +11,9 @@
 // So this suite proves rows, not text: it inserts vendor-stamped spans into
 // `traces` on a database built by replaying the real migration chain, then
 // asserts the MV materialized them — per column, because a `TO`-table view
-// inserts by NAME and silently fills a mistyped alias's target column with
-// `''` — and finally runs the real compiled list query end to end over the
-// same data.
+// maps by NAME, so what the write filter admits and what each alias resolves
+// to are facts only a real insert settles — and finally runs the real compiled
+// list query end to end over the same data.
 
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
@@ -22,7 +22,6 @@ import {
 	MAPLE_AI_SESSION_ID_ATTR,
 	MAPLE_AI_TRACE_SESSION_PREFIX,
 	MAPLE_AI_VENDOR_ID_ATTR,
-	MAPLE_AI_VENDOR_VERSION_ATTR,
 } from "@maple/domain/gen-ai"
 import * as Integrations from "@maple/query-engine-integrations"
 import { normalizeSqlForClickHouseClient } from "@maple/query-engine/execution"
@@ -64,8 +63,8 @@ interface SeedSpan {
 }
 
 // Three populations, keyed off the constants the MV's write filter is rendered
-// from: a session-bearing agent span, a sessionless agent span carrying the
-// failure attributes, and a plain span that must NOT materialize.
+// from: a session-bearing agent span, a sessionless agent span, and a plain
+// span that must NOT materialize.
 const SEED_SPANS: ReadonlyArray<SeedSpan> = [
 	{
 		traceId: AGENT_TRACE,
@@ -75,7 +74,6 @@ const SEED_SPANS: ReadonlyArray<SeedSpan> = [
 		status: "Ok",
 		attrs: {
 			[MAPLE_AI_VENDOR_ID_ATTR]: "eve",
-			[MAPLE_AI_VENDOR_VERSION_ATTR]: "1.2.3",
 			[MAPLE_AI_SESSION_ID_ATTR]: SESSION_ID,
 		},
 	},
@@ -85,11 +83,7 @@ const SEED_SPANS: ReadonlyArray<SeedSpan> = [
 		ms: BASE_MS + 60_000,
 		service: "agent-service",
 		status: "Error",
-		attrs: {
-			[MAPLE_AI_VENDOR_ID_ATTR]: "vercel_ai_sdk",
-			"error.type": "RateLimitError",
-			"gen_ai.response.status": "failed",
-		},
+		attrs: { [MAPLE_AI_VENDOR_ID_ATTR]: "vercel_ai_sdk" },
 	},
 	{
 		traceId: PLAIN_TRACE,
@@ -159,7 +153,7 @@ describe.skipIf(!clickhouseE2eEnabled)("ai_trace_index materialization", () => {
 
 	it("materializes exactly the vendor-stamped spans, column by column", async () => {
 		const rows = await runJson(
-			`SELECT OrgId, toString(Timestamp) AS Timestamp, TraceId, SessionId, VendorId, VendorVersion, ServiceName, StatusCode, ErrorType, ResponseStatus
+			`SELECT OrgId, toString(Timestamp) AS Timestamp, TraceId, SessionId, VendorId, ServiceName
 			 FROM ai_trace_index ORDER BY Timestamp ASC`,
 		)
 
@@ -170,11 +164,7 @@ describe.skipIf(!clickhouseE2eEnabled)("ai_trace_index materialization", () => {
 				TraceId: AGENT_TRACE,
 				SessionId: SESSION_ID,
 				VendorId: "eve",
-				VendorVersion: "1.2.3",
 				ServiceName: "agent-service",
-				StatusCode: "Ok",
-				ErrorType: "",
-				ResponseStatus: "",
 			},
 			{
 				OrgId: ORG_ID,
@@ -182,11 +172,7 @@ describe.skipIf(!clickhouseE2eEnabled)("ai_trace_index materialization", () => {
 				TraceId: SESSIONLESS_TRACE,
 				SessionId: "",
 				VendorId: "vercel_ai_sdk",
-				VendorVersion: "",
 				ServiceName: "agent-service",
-				StatusCode: "Error",
-				ErrorType: "RateLimitError",
-				ResponseStatus: "failed",
 			},
 			{
 				OrgId: FOREIGN_ORG_ID,
@@ -194,11 +180,7 @@ describe.skipIf(!clickhouseE2eEnabled)("ai_trace_index materialization", () => {
 				TraceId: FOREIGN_SPAN.traceId,
 				SessionId: "",
 				VendorId: "eve",
-				VendorVersion: "",
 				ServiceName: "agent-service",
-				StatusCode: "Ok",
-				ErrorType: "",
-				ResponseStatus: "",
 			},
 		])
 	})

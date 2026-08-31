@@ -37,8 +37,3 @@ const isMissingTable =
 export const isMissingProductEvents = isMissingTable(/product_events/i)
 
 export const isMissingServiceOperationsRollup = isMissingTable(/service_operations_(?:minutely|hourly)/i)
-
-/** Agent Sessions detection reads this `requiredForIngest: false` projection;
- *  the callers degrade to an empty page rather than 502ing an org whose admin
- *  has not applied migration 0023 yet. */
-export const isMissingAiTraceIndex = isMissingTable(/ai_trace_index/i)

@@ -118,11 +118,7 @@ export const AiTraceIndex = table("ai_trace_index", {
 	TraceId: T.string,
 	SessionId: T.string,
 	VendorId: T.string,
-	VendorVersion: T.string,
 	ServiceName: T.string,
-	StatusCode: T.string,
-	ErrorType: T.string,
-	ResponseStatus: T.string,
 })
 
 export const TraceListMv = table("trace_list_mv", {

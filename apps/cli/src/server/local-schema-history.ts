@@ -126,9 +126,9 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		// projectRevision stays the hardcoded constant, as for v12 — the identity
 		// this gate compares is the fingerprint/digest pair.
 		version: 13,
-		fingerprint: "af29f0e6df47b053",
-		digest: "af29f0e6df47b0534939d33f0678283296c564ebaff0ffce7f5c550137bfc3f5",
-		manifestDigest: "51ef8a76b2430488aa0a789e42942507aa30a562fdd0109284bef69e0d1a91ff",
+		fingerprint: "b0cb5bfd7495f715",
+		digest: "b0cb5bfd7495f715b0c1b028a9881826f5cdea119089c6d0d16461a876fa82a3",
+		manifestDigest: "18fd207ad0705051c7c1c062693e7e716a73c391f430395a435072291562b287",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 ] as const)

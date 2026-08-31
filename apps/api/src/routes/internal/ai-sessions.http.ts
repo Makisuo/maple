@@ -11,37 +11,9 @@ import {
 } from "@maple/domain/http"
 import { traceSessionTraceId } from "@maple/domain/gen-ai"
 import { Effect } from "effect"
-import { isMissingAiTraceIndex } from "@/services/warehouse/missing-table"
 import { CH } from "@maple/query-engine"
 import * as Integrations from "@maple/query-engine-integrations"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
-
-/**
- * Empty result instead of a 502 when `ai_trace_index` is absent — it ships in
- * a `requiredForIngest: false` migration, so a BYO-ClickHouse cluster gains it
- * only when an admin applies migration 0023, and nothing reconciles that (see
- * `missing-table.ts`). Never silently, though: an empty page is otherwise
- * indistinguishable from "no agent traces", which is exactly the 0-row blind
- * spot the rollups doc warns about — the warning and the span flag are the
- * difference. Same log/annotation shape as `makeRollupFallback`, and a plain
- * helper rather than `Effect.fn` for the same reason: the annotation must land
- * on the handler's own span.
- */
-const emptyWhenIndexMissing =
-	(orgId: string) =>
-	<A, E, R>(effect: Effect.Effect<ReadonlyArray<A>, E, R>): Effect.Effect<ReadonlyArray<A>, E, R> =>
-		effect.pipe(
-			Effect.catch((error) => {
-				if (!isMissingAiTraceIndex(error)) return Effect.fail(error)
-				return Effect.gen(function* () {
-					yield* Effect.logWarning(
-						"ai_trace_index is absent on this cluster; serving an empty agent-sessions response. Apply ClickHouse schema to restore the read.",
-					).pipe(Effect.annotateLogs({ orgId }))
-					yield* Effect.annotateCurrentSpan("query.rollup.fallback", true)
-					return [] as ReadonlyArray<A>
-				})
-			}),
-		)
 
 /**
  * Dashboard-only AI agent session reads.
@@ -76,12 +48,10 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 						)
 						// The row schema already coerces the UInt64 aggregates and decodes
 						// exactly the response's fields, so rows pass through unmapped.
-						const rows = yield* warehouse
-							.compiledQuery(tenant, compiled, {
-								profile: "list",
-								context: "listAiSessions",
-							})
-							.pipe(emptyWhenIndexMissing(tenant.orgId))
+						const rows = yield* warehouse.compiledQuery(tenant, compiled, {
+							profile: "list",
+							context: "listAiSessions",
+						})
 						return new ListAiSessionsResponse({ data: rows })
 					}),
 				)
@@ -94,12 +64,10 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 							startTime: payload.startTime,
 							endTime: payload.endTime,
 						})
-						const rows = yield* warehouse
-							.compiledQuery(tenant, compiled, {
-								profile: "list",
-								context: "aiSessionsFacets",
-							})
-							.pipe(emptyWhenIndexMissing(tenant.orgId))
+						const rows = yield* warehouse.compiledQuery(tenant, compiled, {
+							profile: "list",
+							context: "aiSessionsFacets",
+						})
 						// One UNION ALL result carrying both dimensions, split by facetType.
 						const pick = (facetType: string) =>
 							rows

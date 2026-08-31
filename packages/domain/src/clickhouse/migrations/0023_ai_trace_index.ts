@@ -10,17 +10,17 @@
  * Agent Sessions page wants 30.
  *
  * `ai_trace_index` is a filtered projection (the `error_events` shape): only
- * the vendor-stamped spans, with the `maple_ai.*` identity and the failure
- * attributes pre-extracted to plain columns. Roughly 10k narrow rows per day at
- * current volume, against 70M raw spans. `aiSessionListQuery`'s detection
- * subquery and `aiSessionFacetsQuery` read it; the per-trace fan-out still
- * reads `trace_detail_spans`.
+ * the vendor-stamped spans, with the `maple_ai.*` identity pre-extracted to
+ * plain columns. Roughly 10k narrow rows per day at current volume, against
+ * 70M raw spans. `aiSessionListQuery`'s detection subquery and
+ * `aiSessionFacetsQuery` read it; the per-trace fan-out still reads
+ * `trace_detail_spans`, which is where every other fact about an agent span
+ * (its status, its failure attributes, its vendor version) is read from.
  *
  * NOTHING IS BACKFILLED here: a materialized view sees inserts from creation
  * forward, so windows predating this migration under-report until the raw
  * table's 30-day TTL ages the gap out (agent tracing shipped 2026-08-20, so
- * the gap is small and shrinking). A chunked `BackfillSpec` from `traces` is
- * the follow-up if that month matters — see `../backfill.ts`.
+ * the gap is small and shrinking).
  *
  * `requiredForIngest: false` — nothing writes `ai_trace_index` directly; the
  * gateway keeps writing `traces` and the view fans out inside ClickHouse.
@@ -36,7 +36,7 @@ export const migration_0023_ai_trace_index = {
 		"Create ai_trace_index + ai_trace_index_mv: filtered projection of GenAI agent spans for Agent Sessions detection and facets",
 	requiredForIngest: false,
 	statements: [
-		"CREATE TABLE IF NOT EXISTS ai_trace_index (\n    OrgId LowCardinality(String),\n    Timestamp DateTime64(9),\n    TraceId String,\n    SessionId String,\n    VendorId LowCardinality(String),\n    VendorVersion LowCardinality(String),\n    ServiceName LowCardinality(String),\n    StatusCode LowCardinality(String),\n    ErrorType LowCardinality(String),\n    ResponseStatus LowCardinality(String)\n)\nENGINE = MergeTree\nPARTITION BY toDate(Timestamp)\nORDER BY (OrgId, Timestamp, TraceId)\nTTL toDate(Timestamp) + INTERVAL 30 DAY",
-		"CREATE MATERIALIZED VIEW IF NOT EXISTS ai_trace_index_mv TO ai_trace_index AS\nSELECT\n          OrgId,\n          Timestamp,\n          TraceId,\n          SpanAttributes['maple_ai.session.id'] AS SessionId,\n          SpanAttributes['maple_ai.vendor.id'] AS VendorId,\n          SpanAttributes['maple_ai.vendor.version'] AS VendorVersion,\n          ServiceName,\n          StatusCode,\n          SpanAttributes['error.type'] AS ErrorType,\n          SpanAttributes['gen_ai.response.status'] AS ResponseStatus\n        FROM traces\n        WHERE SpanAttributes['maple_ai.vendor.id'] != ''",
+		"CREATE TABLE IF NOT EXISTS ai_trace_index (\n    OrgId LowCardinality(String),\n    Timestamp DateTime64(9),\n    TraceId String,\n    SessionId String,\n    VendorId LowCardinality(String),\n    ServiceName LowCardinality(String)\n)\nENGINE = MergeTree\nPARTITION BY toDate(Timestamp)\nORDER BY (OrgId, Timestamp, TraceId)\nTTL toDate(Timestamp) + INTERVAL 30 DAY",
+		"CREATE MATERIALIZED VIEW IF NOT EXISTS ai_trace_index_mv TO ai_trace_index AS\nSELECT\n          OrgId,\n          Timestamp,\n          TraceId,\n          SpanAttributes['maple_ai.session.id'] AS SessionId,\n          SpanAttributes['maple_ai.vendor.id'] AS VendorId,\n          ServiceName\n        FROM traces\n        WHERE SpanAttributes['maple_ai.vendor.id'] != ''",
 	],
 } as const

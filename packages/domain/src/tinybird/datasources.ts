@@ -1092,11 +1092,10 @@ export type TraceDetailSpansRow = InferRow<typeof traceDetailSpans>
  * one hour, timeout at a day). This table holds only those spans, pre-extracted
  * to plain columns, so the same detection is a scan of ~10k narrow rows per day.
  *
- * `StatusCode`/`ErrorType`/`ResponseStatus` carry the failure signal of the
- * agent spans themselves. Nothing reads them yet: they are here so the planned
- * limit-first list restructure (and ad-hoc `run_sql` reads) can count agent-span
- * failures without touching Map columns, and adding them later would mean a
- * second migration plus a second backfill of this table.
+ * The columns are exactly what the two readers need — the trace-id set, the
+ * grouping key, and the two filter dimensions. Everything else about an agent
+ * span (its failure attributes, its vendor version) is read per-trace off
+ * `trace_detail_spans`, which the fan-out already touches.
  *
  * Session ids live only on the turn-owning spans, so `SessionId` is '' for most
  * rows — resolution to a session key stays per-TRACE at read time, exactly as
@@ -1112,11 +1111,7 @@ export const aiTraceIndex = defineDatasource("ai_trace_index", {
 		TraceId: t.string(),
 		SessionId: t.string(),
 		VendorId: t.string().lowCardinality(),
-		VendorVersion: t.string().lowCardinality(),
 		ServiceName: t.string().lowCardinality(),
-		StatusCode: t.string().lowCardinality(),
-		ErrorType: t.string().lowCardinality(),
-		ResponseStatus: t.string().lowCardinality(),
 	},
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",

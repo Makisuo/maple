@@ -108,9 +108,6 @@ import {
 	MAPLE_AI_VENDOR_VERSION_ATTR,
 } from "@maple/domain/gen-ai"
 
-// The domain constants, not local literals: `ai_trace_index_mv`'s write filter
-// is rendered from the same values, which is what keeps the write filter and
-// the read predicates from drifting apart silently.
 const SESSION_ID_ATTR = MAPLE_AI_SESSION_ID_ATTR
 const VENDOR_ID_ATTR = MAPLE_AI_VENDOR_ID_ATTR
 const VENDOR_VERSION_ATTR = MAPLE_AI_VENDOR_VERSION_ATTR
