@@ -1445,7 +1445,10 @@ export const serviceOperationsMinutelyMv = defineMaterializedView("service_opera
           countIf(StatusCode = 'Error') AS ErrorCount,
           sumIf(SampleRate, StatusCode = 'Error') AS EstimatedErrorCount,
           sum(toFloat64(Duration)) AS DurationSum,
-          quantilesTDigestState(0.5, 0.95)(Duration) AS DurationQuantiles
+          quantilesTDigestState(0.5, 0.95)(Duration) AS DurationQuantiles,
+          count() AS ClassifiedSpanCount,
+          countIf(SpanKind IN ('Server', 'Consumer')) AS ServerSpanCount,
+          countIf(SpanAttributes['http.route'] != '') AS RoutedSpanCount
         FROM traces
         GROUP BY OrgId, Minute, ServiceName, DeploymentEnv, SpanName
       `,
@@ -1476,7 +1479,10 @@ export const serviceOperationsHourlyMv = defineMaterializedView("service_operati
           sum(ErrorCount) AS ErrorCount,
           sum(EstimatedErrorCount) AS EstimatedErrorCount,
           sum(DurationSum) AS DurationSum,
-          quantilesTDigestMergeState(0.5, 0.95)(DurationQuantiles) AS DurationQuantiles
+          quantilesTDigestMergeState(0.5, 0.95)(DurationQuantiles) AS DurationQuantiles,
+          sum(ClassifiedSpanCount) AS ClassifiedSpanCount,
+          sum(ServerSpanCount) AS ServerSpanCount,
+          sum(RoutedSpanCount) AS RoutedSpanCount
         FROM service_operations_minutely
         GROUP BY OrgId, Hour, ServiceName, DeploymentEnv, SpanName
       `,

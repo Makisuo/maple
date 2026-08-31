@@ -1539,6 +1539,26 @@ export const serviceOperationsMinutely = defineDatasource("service_operations_mi
 		EstimatedErrorCount: t.simpleAggregateFunction("sum", t.float64()),
 		DurationSum: t.simpleAggregateFunction("sum", t.float64()),
 		DurationQuantiles: t.aggregateFunction("quantilesTDigest(0.5, 0.95)", t.uint64()),
+		// Discriminators added by migration 0023, as additive MEASURES rather than
+		// GROUP BY dimensions: a new dimension would have to join the sorting key,
+		// and on an AggregatingMergeTree a non-key column merges rows together and
+		// sums across the values you were trying to separate. Counting instead keeps
+		// the grain, the cardinality and the sorting key exactly as they were.
+		//
+		// ClassifiedSpanCount is written only by the post-0023 MV, so a bucket where
+		// it is 0 predates the migration and its two siblings mean "unknown", not
+		// "none" — that distinction is what stops historical windows reading as
+		// zero-endpoint. Nothing is backfilled: raw `traces` keeps 30 days against
+		// this table's 90, so a backfill could only ever repair part of the window.
+		ClassifiedSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		// Spans that actually served a request. Outbound HTTP calls normalize to the
+		// same `METHOD /path` name as an endpoint, so without this the API tab lists
+		// a service's own outbound calls as endpoints it serves.
+		ServerSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		// Spans that carried `http.route`. The normalized name falls back to
+		// `url.path`, so a route template and a raw URL are indistinguishable in
+		// SpanName alone — this is the difference.
+		RoutedSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
 	},
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Minute)",
@@ -1576,6 +1596,26 @@ export const serviceOperationsHourly = defineDatasource("service_operations_hour
 		EstimatedErrorCount: t.simpleAggregateFunction("sum", t.float64()),
 		DurationSum: t.simpleAggregateFunction("sum", t.float64()),
 		DurationQuantiles: t.aggregateFunction("quantilesTDigest(0.5, 0.95)", t.uint64()),
+		// Discriminators added by migration 0023, as additive MEASURES rather than
+		// GROUP BY dimensions: a new dimension would have to join the sorting key,
+		// and on an AggregatingMergeTree a non-key column merges rows together and
+		// sums across the values you were trying to separate. Counting instead keeps
+		// the grain, the cardinality and the sorting key exactly as they were.
+		//
+		// ClassifiedSpanCount is written only by the post-0023 MV, so a bucket where
+		// it is 0 predates the migration and its two siblings mean "unknown", not
+		// "none" — that distinction is what stops historical windows reading as
+		// zero-endpoint. Nothing is backfilled: raw `traces` keeps 30 days against
+		// this table's 365, so a backfill could only ever repair part of the window.
+		ClassifiedSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		// Spans that actually served a request. Outbound HTTP calls normalize to the
+		// same `METHOD /path` name as an endpoint, so without this the API tab lists
+		// a service's own outbound calls as endpoints it serves.
+		ServerSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		// Spans that carried `http.route`. The normalized name falls back to
+		// `url.path`, so a route template and a raw URL are indistinguishable in
+		// SpanName alone — this is the difference.
+		RoutedSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
 	},
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toYYYYMM(Hour)",
