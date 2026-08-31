@@ -272,6 +272,23 @@ export class CloudflareDisconnectResponse extends Schema.Class<CloudflareDisconn
 	disconnected: Schema.Boolean,
 }) {}
 
+/**
+ * Result of the post-connect prime poll. The dashboard fires this the moment a grant lands so
+ * the integration fills in immediately instead of waiting on the alerting cron's next five-minute tick —
+ * the OAuth callback used to run it inline, which left the popup blank for the duration.
+ */
+export class CloudflarePrimeResponse extends Schema.Class<CloudflarePrimeResponse>("CloudflarePrimeResponse")(
+	{
+		/**
+		 * False when the org has no usable grant — the poll was a no-op. Lets the caller tell a
+		 * premature prime (fired before the callback committed) from one that really ran.
+		 */
+		connected: Schema.Boolean,
+		/** False when the poll hit its time budget; whatever is left resumes on the next cron tick. */
+		complete: Schema.Boolean,
+	},
+) {}
+
 // These shapes now serve two callers at once, which is why they are camelCase
 // with epoch-ms timestamps and the v2 file is not:
 //
@@ -972,6 +989,13 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 	.add(
 		HttpApiEndpoint.delete("cloudflareDisconnect", "/cloudflare", {
 			success: CloudflareDisconnectResponse,
+			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
+		}),
+	)
+	.add(
+		// Bounded discovery + first-window poll, run on demand right after a connect.
+		HttpApiEndpoint.post("cloudflarePrime", "/cloudflare/prime", {
+			success: CloudflarePrimeResponse,
 			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
 		}),
 	)

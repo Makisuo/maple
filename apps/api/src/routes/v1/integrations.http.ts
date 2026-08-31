@@ -3,6 +3,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
 	CloudflareDisconnectResponse,
 	CloudflareHyperdrivesResponse,
+	CloudflarePrimeResponse,
 	CloudflareStartConnectResponse,
 	CloudflareTopTrafficResponse,
 	CloudflareTopTrafficRow,
@@ -80,11 +81,12 @@ const CLOUDFLARE_MESSAGE_TYPE = "maple:integration:cloudflare"
 const PLANETSCALE_MESSAGE_TYPE = "maple:integration:planetscale"
 
 /**
- * How long the Cloudflare callback waits on the post-connect prime poll. Long enough for zone
- * discovery plus a first window on an ordinary account, short enough that a slow or many-zoned
- * one still gets its success page promptly — the cron finishes whatever is left.
+ * How long `cloudflarePrime` spends on the post-connect poll. Long enough for zone discovery plus
+ * a first window on an ordinary account; whatever a slow or many-zoned one does not finish resumes
+ * on the next cron tick. It is deliberately NOT on the OAuth callback's critical path — see the
+ * callback handler.
  */
-const CLOUDFLARE_PRIME_TIMEOUT = "12 seconds"
+const CLOUDFLARE_PRIME_TIMEOUT = "20 seconds"
 
 const resolveRequestOrigin = (req: HttpServerRequest.HttpServerRequest): string => {
 	const headers = req.headers as Record<string, string | undefined>
@@ -487,6 +489,29 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 						return new CloudflareDisconnectResponse(result)
 					}),
 				)
+				.handle("cloudflarePrime", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* requireAdmin(tenant.roles)
+						// Discovery (the part that stops the integration looking empty) commits in
+						// the first seconds; the rest spends what call budget it has on the newest
+						// window. Timing out is an ordinary outcome, not a failure — the cron picks
+						// up where this left off, and a lease dropped by the timeout expires.
+						const summary = yield* Effect.timeoutOption(
+							cloudflareAnalytics.pollOrg(tenant.orgId),
+							CLOUDFLARE_PRIME_TIMEOUT,
+						)
+						// A prime that arrives before the callback committed the grant polls nothing.
+						// Reporting that plainly lets the dashboard retry rather than assume it ran.
+						return new CloudflarePrimeResponse({
+							connected: Option.match(summary, {
+								onNone: () => true,
+								onSome: (value) => value.skipped !== "not connected",
+							}),
+							complete: Option.isSome(summary),
+						})
+					}),
+				)
 				.handle("githubStatus", () =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
@@ -722,6 +747,7 @@ const renderCallbackPage = (params: {
       .glyph svg { width: 1.25rem; height: 1.25rem; }
       h1 { font-size: 1rem; font-weight: 600; margin: 0 0 0.5rem; }
       p { font-size: 0.8125rem; line-height: 1.5; color: var(--muted-foreground); margin: 0; }
+      p.hint { margin-top: 0.75rem; opacity: 0.8; }
       a.button {
         display: inline-block;
         margin-top: 1.25rem;
@@ -749,6 +775,7 @@ const renderCallbackPage = (params: {
       <div class="glyph">${glyph}</div>
       <h1>${isSuccess ? `${params.label} connected` : `${params.label} connection failed`}</h1>
       <p>${safeMessage}</p>
+      ${isSuccess ? "" : `<p class="hint">Close this window and try connecting again from Maple.</p>`}
       ${safeReturn ? `<a class="button" href="${safeReturn}">Return to Maple</a>` : ""}
       <div class="wordmark">Maple</div>
     </main>
@@ -756,7 +783,10 @@ const renderCallbackPage = (params: {
       try {
         if (window.opener) {
           window.opener.postMessage(${payload}, ${targetOrigin});
-          setTimeout(function () { window.close(); }, 600);
+          // Only a success closes itself. A failure's message is the one place the actual
+          // cause is written out in full ("the OAuth app must grant offline_access", …) —
+          // closing it after half a second leaves the user with a toast and no detail.
+          ${isSuccess ? "setTimeout(function () { window.close(); }, 600);" : ""}
         }
       } catch (_) {}
     </script>
@@ -1098,27 +1128,12 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 						),
 					),
 				),
-				// Prime the org before the popup reports success. Without this the integration is
-				// entirely blank — no zones, no Workers, no data — until the alerting cron's next
-				// */5 tick discovers them, which reads as "connecting did nothing". `resetOrgState`
-				// above cleared `discoveredAt`, so this poll rediscovers and then spends what call
-				// budget it has on the newest window.
-				//
-				// Bounded and best-effort: discovery (the part that makes the UI stop looking
-				// empty) commits in the first seconds, and whatever polling the timeout cuts short
-				// resumes on the next tick — a lease released by interruption or expiry, never a
-				// failed callback page.
-				Effect.tap((result) =>
-					cloudflareAnalytics.pollOrg(result.orgId).pipe(
-						Effect.timeout(CLOUDFLARE_PRIME_TIMEOUT),
-						Effect.catchCause((cause) =>
-							Effect.logWarning("cloudflare post-connect prime poll incomplete", {
-								orgId: result.orgId,
-								error: summarizeCause(cause),
-							}),
-						),
-					),
-				),
+				// The prime poll that fills the integration in (discovery + a first window)
+				// deliberately does NOT run here. It used to, and it held the callback response —
+				// so the popup sat blank for its whole budget after the user had already consented,
+				// long enough to read as a hang and be closed, which aborted the poll and left a
+				// lease behind. The dashboard calls `cloudflarePrime` instead, from a tab that
+				// stays open and already renders the "finding your zones" phase while it runs.
 				Effect.map((result) =>
 					htmlResponse(
 						cloudflareCallbackPage({
