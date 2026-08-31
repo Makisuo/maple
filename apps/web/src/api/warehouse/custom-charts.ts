@@ -26,6 +26,7 @@ import {
 	ServiceNamespace,
 	SpanName,
 } from "@maple/domain/http"
+import { TraceId } from "@maple/domain"
 import {
 	WarehouseDateTimeString,
 	decodeInput,
@@ -232,6 +233,8 @@ const SharedFiltersSchema = Schema.Struct({
 	excludedSeverities: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
 	excludedEnvironments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
 	excludedNamespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
+	// Logs-source only: the /logs volume chart scoped to one trace.
+	traceId: Schema.optional(TraceId),
 	metricName: Schema.optional(MetricName),
 	metricType: Schema.optional(Schema.Literals(QUERY_BUILDER_METRIC_TYPES)),
 	rootSpansOnly: Schema.optional(Schema.Boolean),
@@ -368,6 +371,7 @@ function buildTimeseriesQuerySpec(data: CustomChartTimeSeriesDecoded): QuerySpec
 				excludedNamespaces: data.filters?.excludedNamespaces,
 				environments: data.filters?.environments,
 				namespaces: data.filters?.namespaces,
+				traceId: data.filters?.traceId,
 			},
 			bucketSeconds: data.bucketSeconds,
 		}

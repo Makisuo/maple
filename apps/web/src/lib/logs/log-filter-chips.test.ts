@@ -24,4 +24,15 @@ describe("logFilterChips", () => {
 	it("ignores params present but empty", () => {
 		expect(logFilterChips({ services: [], excludedServices: [] })).toEqual([])
 	})
+
+	it("puts the trace scope ahead of everything, exclusions included", () => {
+		const traceId = "0af7651916cd43dd8448eb211c80319c"
+		const chips = logFilterChips({ traceId, excludedSeverities: ["DEBUG"], services: ["api"] })
+		expect(chips.map((c) => [c.label, c.negated])).toEqual([
+			["Trace", false],
+			["Severity", true],
+			["Service", false],
+		])
+		expect(chips[0]).toEqual({ param: "traceId", label: "Trace", values: [traceId], negated: false })
+	})
 })

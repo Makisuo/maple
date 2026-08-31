@@ -21,9 +21,14 @@ export interface LogFilterChipDescriptor {
 
 /** The applied facet filters, exclusions first — see `traceFilterChips` for why they lead. */
 export function logFilterChips(
-	search: Pick<LogsSearchParams, (typeof FACETS)[number]["include" | "exclude"]>,
+	search: Pick<LogsSearchParams, (typeof FACETS)[number]["include" | "exclude"] | "traceId">,
 ): LogFilterChipDescriptor[] {
 	const chips: LogFilterChipDescriptor[] = []
+	// The trace scope leads even the exclusions: it redefines what the page shows
+	// (one trace's logs) rather than trimming it, and it has no sidebar section.
+	if (search.traceId) {
+		chips.push({ param: "traceId", label: "Trace", values: [search.traceId], negated: false })
+	}
 	for (const facet of FACETS) {
 		const excluded = search[facet.exclude]
 		if (excluded?.length) {
