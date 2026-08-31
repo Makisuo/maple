@@ -271,6 +271,16 @@ entries in CI, and requires every historical identity to reach the current one
 through registered migration edges. Changing a schema digest or manifest
 therefore requires a new versioned entry and executable edge together.
 
+Everything that pairing demands except the DDL is derived from the new version
+number, so `bun run local-schema:bump <slug>` writes it: the retained snapshot,
+the version constant, the `schema-identity.ts` edit sites, the history entry's
+hashes, the registry entry, and the identities pinned in
+`apps/cli/test/local-store-migrations.test.ts` and the native probe. It
+scaffolds the edge from the previous module and leaves `apply` to be written.
+When the gate fails because the schema moved without a bump, it names that
+command; when a hand-bump left the history behind, it prints the entry to
+append.
+
 The Linux native probe `apps/cli/test/native-local-store-migration.sh` uses a
 native chDB setup helper to create a stopped historical raw-table fixture,
 applies the legacy marker, runs the public migration command, checks rebuilt

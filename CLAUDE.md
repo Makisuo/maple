@@ -33,6 +33,7 @@ bun --filter=@maple/web dev:app # single app, raw port, no portless proxy
 bun run test                   # Vitest via turbo (NOT `bun test` — that's Bun's own runner)
 bun typecheck
 bun run tinybird:manifest      # regenerate after editing datasources.ts
+bun run local-schema:bump <slug>   # scaffold the local chDB schema bump a datasources.ts change needs
 bun db:up && bun db:migrate:local   # docker Postgres for wrangler dev (vitest uses embedded PGlite)
 bun run --cwd apps/api tinybird:deploy   # tinybird:dev / :build / :deploy live in apps/api
 ```
