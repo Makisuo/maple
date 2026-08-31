@@ -21,6 +21,7 @@ import type {
 	ContainersSummaryRequest,
 	HostDetailSummaryRequest,
 	ListContainersRequest,
+	InfraPresenceRequest,
 	ListHostsRequest,
 	ListLogsRequest,
 	ListMetricsRequest,
@@ -369,6 +370,24 @@ export const metricsSummary = defineQuery({
 	cache: 60,
 	compile: (payload: MetricsSummaryRequest, orgId: string) =>
 		CH.compile(CH.metricsSummaryQuery({ serviceName: payload.service }), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
+/**
+ * Sidebar gate: which Infrastructure surfaces this org reports. Runs on every
+ * page load, so it is cached generously — a surface appearing or disappearing
+ * is not something the nav has to notice within the minute, and the probe's
+ * whole value is that it costs less than the pages it hides.
+ */
+export const infraPresence = defineQuery({
+	id: "infraPresence",
+	profile: "discovery",
+	cache: 300,
+	compile: (payload: InfraPresenceRequest, orgId: string) =>
+		CH.compileUnion(CH.infraPresenceQuery(), {
 			orgId,
 			startTime: payload.startTime,
 			endTime: payload.endTime,

@@ -43,6 +43,8 @@ import {
 	GetLogResponse,
 	ListMetricsResponse,
 	MetricsSummaryResponse,
+	InfraPresenceResponse,
+	InfraSurfaceLiteral,
 	ListHostsResponse,
 	HostDetailSummaryResponse,
 	HostInfraTimeseriesResponse,
@@ -1244,6 +1246,19 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								metricCount: Number(row.metricCount),
 								dataPointCount: Number(row.dataPointCount),
 							})),
+						})
+					}),
+				)
+				.handle("infraPresence", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const rows = yield* runQuery(Queries.infraPresence, tenant, payload)
+						// The union emits at most one row per surface, and only for
+						// surfaces that reported — the row set IS the answer.
+						return new InfraPresenceResponse({
+							surfaces: rows.flatMap((row) =>
+								Schema.is(InfraSurfaceLiteral)(row.surface) ? [row.surface] : [],
+							),
 						})
 					}),
 				)

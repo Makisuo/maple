@@ -1091,6 +1091,30 @@ export class ListHostsResponse extends Schema.Class<ListHostsResponse>("ListHost
 	data: Schema.Array(HostRow),
 }) {}
 
+/**
+ * Which Infrastructure surfaces an org actually reports. Drives the sidebar's
+ * Infrastructure section, so it is requested on every page load — the query
+ * behind it is five short-circuiting existence checks, not five list queries.
+ */
+export class InfraPresenceRequest extends Schema.Class<InfraPresenceRequest>("InfraPresenceRequest")({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+}) {}
+
+export const InfraSurfaceLiteral = Schema.Literals([
+	"hosts",
+	"containers",
+	"k8sPods",
+	"k8sNodes",
+	"k8sWorkloads",
+])
+export type InfraSurfaceLiteral = typeof InfraSurfaceLiteral.Type
+
+export class InfraPresenceResponse extends Schema.Class<InfraPresenceResponse>("InfraPresenceResponse")({
+	/** Only the surfaces that reported in the window — absent means nothing to show. */
+	surfaces: Schema.Array(InfraSurfaceLiteral),
+}) {}
+
 export class HostDetailSummaryRequest extends Schema.Class<HostDetailSummaryRequest>(
 	"HostDetailSummaryRequest",
 )({
@@ -2438,6 +2462,13 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("metricsSummary", "/metrics-summary", {
 			payload: MetricsSummaryRequest,
 			success: MetricsSummaryResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("infraPresence", "/infra-presence", {
+			payload: InfraPresenceRequest,
+			success: InfraPresenceResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

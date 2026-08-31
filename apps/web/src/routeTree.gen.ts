@@ -40,6 +40,7 @@ import { Route as DashboardsTemplatesRouteImport } from './routes/dashboards/tem
 import { Route as ErrorsIndexRouteImport } from './routes/errors/index'
 import { Route as InfraIndexRouteImport } from './routes/infra/index'
 import { Route as InfraHostNameRouteImport } from './routes/infra/$hostName'
+import { Route as InfraDiscoverRouteImport } from './routes/infra/discover'
 import { Route as InvestigationsIndexRouteImport } from './routes/investigations/index'
 import { Route as InvestigationsIdRouteImport } from './routes/investigations/$id'
 import { Route as LabIndexRouteImport } from './routes/lab/index'
@@ -240,6 +241,11 @@ const InfraIndexRoute = InfraIndexRouteImport.update({
 const InfraHostNameRoute = InfraHostNameRouteImport.update({
   id: '/infra/$hostName',
   path: '/infra/$hostName',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InfraDiscoverRoute = InfraDiscoverRouteImport.update({
+  id: '/infra/discover',
+  path: '/infra/discover',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InvestigationsIndexRoute = InvestigationsIndexRouteImport.update({
@@ -508,6 +514,7 @@ export interface FileRoutesByFullPath {
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
   '/dashboards/templates': typeof DashboardsTemplatesRoute
   '/infra/$hostName': typeof InfraHostNameRoute
+  '/infra/discover': typeof InfraDiscoverRoute
   '/investigations/$id': typeof InvestigationsIdRoute
   '/lab/agent-session': typeof LabAgentSessionRoute
   '/lab/charts': typeof LabChartsRoute
@@ -586,6 +593,7 @@ export interface FileRoutesByTo {
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
   '/dashboards/templates': typeof DashboardsTemplatesRoute
   '/infra/$hostName': typeof InfraHostNameRoute
+  '/infra/discover': typeof InfraDiscoverRoute
   '/investigations/$id': typeof InvestigationsIdRoute
   '/lab/agent-session': typeof LabAgentSessionRoute
   '/lab/charts': typeof LabChartsRoute
@@ -666,6 +674,7 @@ export interface FileRoutesById {
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
   '/dashboards/templates': typeof DashboardsTemplatesRoute
   '/infra/$hostName': typeof InfraHostNameRoute
+  '/infra/discover': typeof InfraDiscoverRoute
   '/investigations/$id': typeof InvestigationsIdRoute
   '/lab/agent-session': typeof LabAgentSessionRoute
   '/lab/charts': typeof LabChartsRoute
@@ -747,6 +756,7 @@ export interface FileRouteTypes {
     | '/dashboards/$dashboardId'
     | '/dashboards/templates'
     | '/infra/$hostName'
+    | '/infra/discover'
     | '/investigations/$id'
     | '/lab/agent-session'
     | '/lab/charts'
@@ -825,6 +835,7 @@ export interface FileRouteTypes {
     | '/dashboards/$dashboardId'
     | '/dashboards/templates'
     | '/infra/$hostName'
+    | '/infra/discover'
     | '/investigations/$id'
     | '/lab/agent-session'
     | '/lab/charts'
@@ -904,6 +915,7 @@ export interface FileRouteTypes {
     | '/dashboards/$dashboardId'
     | '/dashboards/templates'
     | '/infra/$hostName'
+    | '/infra/discover'
     | '/investigations/$id'
     | '/lab/agent-session'
     | '/lab/charts'
@@ -984,6 +996,7 @@ export interface RootRouteChildren {
   DashboardsDashboardIdRoute: typeof DashboardsDashboardIdRoute
   DashboardsTemplatesRoute: typeof DashboardsTemplatesRoute
   InfraHostNameRoute: typeof InfraHostNameRoute
+  InfraDiscoverRoute: typeof InfraDiscoverRoute
   InvestigationsIdRoute: typeof InvestigationsIdRoute
   LogsLogIdRoute: typeof LogsLogIdRoute
   MetricsMetricNameRoute: typeof MetricsMetricNameRoute
@@ -1240,6 +1253,13 @@ declare module '@tanstack/react-router' {
       path: '/infra/$hostName'
       fullPath: '/infra/$hostName'
       preLoaderRoute: typeof InfraHostNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/infra/discover': {
+      id: '/infra/discover'
+      path: '/infra/discover'
+      fullPath: '/infra/discover'
+      preLoaderRoute: typeof InfraDiscoverRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/investigations/': {
@@ -1634,6 +1654,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardsDashboardIdRoute: DashboardsDashboardIdRoute,
   DashboardsTemplatesRoute: DashboardsTemplatesRoute,
   InfraHostNameRoute: InfraHostNameRoute,
+  InfraDiscoverRoute: InfraDiscoverRoute,
   InvestigationsIdRoute: InvestigationsIdRoute,
   LogsLogIdRoute: LogsLogIdRoute,
   MetricsMetricNameRoute: MetricsMetricNameRoute,

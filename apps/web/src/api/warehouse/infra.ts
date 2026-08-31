@@ -2,6 +2,7 @@ import {
 	FleetUtilizationTimeseriesRequest,
 	HostDetailSummaryRequest,
 	HostInfraTimeseriesRequest,
+	InfraPresenceRequest,
 	ListHostsRequest,
 	ListPodsRequest,
 	PodsSummaryRequest,
@@ -24,6 +25,7 @@ import {
 	type FleetUtilizationTimeseriesResponse,
 	type HostDetailSummaryResponse,
 	type HostInfraTimeseriesResponse,
+	type InfraPresenceResponse,
 	type ListHostsResponse,
 	type ListPodsResponse,
 	type PodsSummaryResponse,
@@ -57,6 +59,27 @@ export type SortDirection = "asc" | "desc"
 
 /** One-click fleet scopes from the summary band. */
 export type PodScope = "saturated" | "elevated" | "unbounded" | "stale"
+
+export interface InfraPresenceInput {
+	startTime: string
+	endTime: string
+}
+
+/** Which Infrastructure surfaces report telemetry — the sidebar's visibility gate. */
+export function infraPresence({ data }: { data: InfraPresenceInput }) {
+	return runWarehouseQuery("infraPresence", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleInternalAtomClient
+			const response: InfraPresenceResponse = yield* client.queryEngine.infraPresence({
+				payload: new InfraPresenceRequest({
+					startTime: data.startTime,
+					endTime: data.endTime,
+				}),
+			})
+			return response
+		}),
+	)
+}
 
 export interface ListHostsInput {
 	startTime: string

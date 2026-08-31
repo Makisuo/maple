@@ -499,6 +499,9 @@ export {
 	type WorkloadGaugeTimeseriesOpts,
 	type WorkloadFacetsOutput,
 	type WorkloadKind,
+	infraPresenceQuery,
+	type InfraSurface,
+	type InfraPresenceOutput,
 } from "./queries/infra"
 
 // Queries — Containers (Docker, docker_stats receiver)

@@ -42,6 +42,7 @@ import {
 	listContainers,
 	hostDetailSummary,
 	hostInfraTimeseries,
+	infraPresence,
 	listHosts,
 	listPods,
 	podsSummary,
@@ -482,6 +483,13 @@ export const getMetricAttributeKeysResultAtom = makeQueryAtomFamily(getMetricAtt
 
 export const getMetricAttributeValuesResultAtom = makeQueryAtomFamily(getMetricAttributeValues, {
 	staleTime: 60_000,
+})
+
+// Long idle TTL on purpose: this gates the sidebar, so it is mounted on every
+// page, and an org growing a new infra surface is not something the nav has to
+// notice within the minute. Matches the 300s server-side cache on the query.
+export const infraPresenceResultAtom = makeQueryAtomFamily(infraPresence, {
+	staleTime: 300_000,
 })
 
 export const listHostsResultAtom = makeQueryAtomFamily(listHosts, {

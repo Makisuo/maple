@@ -22,6 +22,20 @@ import {
 import { PLANETSCALE_COLOR } from "@/components/infra/planetscale/metrics"
 import type { OrganizationFeatureFlags } from "@/lib/organization-feature-flags"
 
+/**
+ * What a nav child needs from the org before it's worth a row. The five OTel
+ * surfaces come from the warehouse presence probe; Cloudflare and PlanetScale
+ * are integration pages, so their gate is whether the integration is connected.
+ */
+export type NavSurface =
+	| "hosts"
+	| "containers"
+	| "k8sPods"
+	| "k8sNodes"
+	| "k8sWorkloads"
+	| "cloudflare"
+	| "planetscale"
+
 export interface NavSubItem {
 	title: string
 	href: string
@@ -33,6 +47,11 @@ export interface NavSubItem {
 	 * to sit beside them rather than reading as a disabled sibling.
 	 */
 	iconColor?: string
+	/**
+	 * Gate for this row. A child with no `surface` is unconditional. See
+	 * `partitionInfraSubItems` for what happens when the gate says no.
+	 */
+	surface?: NavSurface
 }
 
 export interface NavItem {
@@ -47,6 +66,12 @@ export interface NavItem {
 	 */
 	subItems?: NavSubItem[]
 	badge?: string
+	/**
+	 * Where the section sends you for the children it isn't showing. Present only
+	 * on sections whose hidden children are offers rather than destinations — a
+	 * page you don't have yet is a setup step, and a page is where that belongs.
+	 */
+	discoverTo?: "/infra/discover"
 }
 
 export interface NavGroup {
@@ -79,20 +104,85 @@ const infrastructureItem: NavItem = {
 	title: "Infrastructure",
 	href: "/infra",
 	icon: ComputerIcon,
+	discoverTo: "/infra/discover",
 	subItems: [
-		{ title: "Hosts", href: "/infra", icon: ServerIcon },
-		{ title: "Containers", href: "/infra/containers", icon: DockerIcon },
-		{ title: "K8s Pods", href: "/infra/kubernetes/pods", icon: KubernetesIcon },
-		{ title: "K8s Nodes", href: "/infra/kubernetes/nodes", icon: KubernetesIcon },
-		{ title: "K8s Workloads", href: "/infra/kubernetes/workloads", icon: KubernetesIcon },
-		{ title: "Cloudflare", href: "/infra/cloudflare", icon: CloudflareIcon },
+		{ title: "Hosts", href: "/infra", icon: ServerIcon, surface: "hosts" },
+		{ title: "Containers", href: "/infra/containers", icon: DockerIcon, surface: "containers" },
+		{ title: "K8s Pods", href: "/infra/kubernetes/pods", icon: KubernetesIcon, surface: "k8sPods" },
+		{
+			title: "K8s Nodes",
+			href: "/infra/kubernetes/nodes",
+			icon: KubernetesIcon,
+			surface: "k8sNodes",
+		},
+		{
+			title: "K8s Workloads",
+			href: "/infra/kubernetes/workloads",
+			icon: KubernetesIcon,
+			surface: "k8sWorkloads",
+		},
+		{ title: "Cloudflare", href: "/infra/cloudflare", icon: CloudflareIcon, surface: "cloudflare" },
 		{
 			title: "PlanetScale",
 			href: "/infra/planetscale",
 			icon: PlanetScaleIcon,
 			iconColor: PLANETSCALE_COLOR,
+			surface: "planetscale",
 		},
 	],
+}
+
+/**
+ * Shown when the org reports none of the seven. Not a ranking of the section —
+ * a first-run answer to "what would you plug in?", so it's the three broadest
+ * collector targets rather than the two that need an OAuth handshake first.
+ */
+const INFRA_FALLBACK: ReadonlyArray<NavSurface> = ["hosts", "containers", "k8sPods"]
+
+export interface InfraSubItemSplit {
+	/** Rendered directly under the section. */
+	readonly shown: NavSubItem[]
+	/** Behind the section's reveal — reachable, just not by default. */
+	readonly hidden: NavSubItem[]
+}
+
+/**
+ * Splits Infrastructure's children into what an org has and what it doesn't.
+ *
+ * Seven rows is the whole section, and almost nobody runs all seven — a Docker
+ * shop scrolls past three Kubernetes pages every time. So the ones reporting
+ * telemetry (or connected, for the two integration pages) render, and the rest
+ * wait behind the reveal.
+ *
+ * Three rules keep that from ever costing someone a page:
+ *
+ *  - `present: null` means the probe hasn't answered or has failed. Everything
+ *    shows. A nav that hides rows because a query 500'd is worse than one
+ *    listing a page you don't use.
+ *  - The route you're on always shows, gate or no gate. Otherwise you land on
+ *    /infra/kubernetes/pods and the section has no row for where you are.
+ *  - An org reporting nothing gets `INFRA_FALLBACK` rather than an empty
+ *    section — "you have no infrastructure" is not a useful thing for a nav to
+ *    say, and the reveal still holds the other four.
+ */
+export function partitionInfraSubItems(
+	subItems: ReadonlyArray<NavSubItem>,
+	present: ReadonlySet<NavSurface> | null,
+	currentPath: string,
+): InfraSubItemSplit {
+	if (present === null) return { shown: [...subItems], hidden: [] }
+
+	const anyPresent = subItems.some((sub) => sub.surface && present.has(sub.surface))
+	const keep = (sub: NavSubItem): boolean => {
+		if (isPathActive(currentPath, sub.href)) return true
+		if (!sub.surface) return true
+		return anyPresent ? present.has(sub.surface) : INFRA_FALLBACK.includes(sub.surface)
+	}
+
+	const shown: NavSubItem[] = []
+	const hidden: NavSubItem[] = []
+	for (const sub of subItems) (keep(sub) ? shown : hidden).push(sub)
+	return { shown, hidden }
 }
 
 /**

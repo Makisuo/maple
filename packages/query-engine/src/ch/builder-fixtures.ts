@@ -652,6 +652,17 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 			),
 	},
 
+	{
+		// Sidebar presence gate — no params beyond the org + window, so one fixture
+		// covers it. What the catalog is watching here is that it stays free of
+		// aggregates: a `count()` would read the whole match set before LIMIT 1
+		// could trim its single output row.
+		module: "infra",
+		name: "infraPresenceQuery",
+		label: "default",
+		compile: () => CH.compileUnionUnsafe(CH.infraPresenceQuery(), window),
+	},
+
 	// Infra gauge timeseries and facet unions.
 	{
 		module: "infra",
