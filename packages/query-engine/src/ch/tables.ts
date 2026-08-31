@@ -48,10 +48,7 @@ const spanId = T.custom("String", SpanId)
  * the point: a new table without one is a type error, not a table that silently
  * compiles every query as `cross-tenant`.
  */
-const table = <
-	const Name extends string,
-	const Columns extends ColumnDefs & { OrgId: T.CHStringLike },
->(
+const table = <const Name extends string, const Columns extends ColumnDefs & { OrgId: T.CHStringLike }>(
 	name: Name,
 	columns: Columns,
 ): Table<Name, Columns> => chTable(name, columns, { tenantColumn: "OrgId" })
@@ -433,6 +430,10 @@ export const ServiceOperationsMinutely = table("service_operations_minutely", {
 	DurationSum: T.float64,
 	// AggregateFunction(quantilesTDigest(0.5, 0.95), UInt64) — opaque state.
 	DurationQuantiles: T.string,
+	// Added by migration 0023; 0 across all three means the bucket predates it.
+	ClassifiedSpanCount: T.uint64,
+	ServerSpanCount: T.uint64,
+	RoutedSpanCount: T.uint64,
 })
 
 export const LogsAggregatesHourly = table("logs_aggregates_hourly", {
@@ -556,6 +557,10 @@ export const ServiceOperationsHourly = table("service_operations_hourly", {
 	EstimatedErrorCount: T.float64,
 	DurationSum: T.float64,
 	DurationQuantiles: T.string,
+	// Added by migration 0023; 0 across all three means the bucket predates it.
+	ClassifiedSpanCount: T.uint64,
+	ServerSpanCount: T.uint64,
+	RoutedSpanCount: T.uint64,
 })
 
 export const AlertChecks = table("alert_checks", {

@@ -920,6 +920,7 @@ export class ServiceOperationsResponse extends Schema.Class<ServiceOperationsRes
 			avgDurationMs: Schema.Number,
 			p50DurationMs: Schema.Number,
 			p95DurationMs: Schema.Number,
+			p99DurationMs: Schema.Number,
 			// Sampling-weighted per-bucket counts, joined per operation server-side.
 			sparkline: Schema.Array(
 				Schema.Struct({
@@ -927,6 +928,45 @@ export class ServiceOperationsResponse extends Schema.Class<ServiceOperationsRes
 					count: Schema.Number,
 				}),
 			),
+		}),
+	),
+}) {}
+
+export class ServiceEndpointsRequest extends Schema.Class<ServiceEndpointsRequest>("ServiceEndpointsRequest")(
+	{
+		serviceName: ServiceName,
+		startTime: TinybirdDateTime,
+		endTime: TinybirdDateTime,
+		environments: Schema.optional(Schema.Array(DeploymentEnvironment)),
+		limit: Schema.optional(Schema.Number),
+	},
+) {}
+
+/**
+ * The HTTP slice of {@link ServiceOperationsResponse}, with the normalized name
+ * pre-split into method and route so the table does not re-derive it per render,
+ * and p99 alongside p50/p95.
+ */
+export class ServiceEndpointsResponse extends Schema.Class<ServiceEndpointsResponse>(
+	"ServiceEndpointsResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			// Normalized name ("GET /api/users") — the /traces spanNames filter
+			// accepts it, so a row click drills straight through.
+			spanName: Schema.String,
+			method: Schema.String,
+			route: Schema.String,
+			spanCount: Schema.Number,
+			estimatedSpanCount: Schema.Number,
+			errorCount: Schema.Number,
+			estimatedErrorCount: Schema.Number,
+			// 0–1 ratio, sampling-weighted.
+			errorRate: Schema.Number,
+			avgDurationMs: Schema.Number,
+			p50DurationMs: Schema.Number,
+			p95DurationMs: Schema.Number,
+			p99DurationMs: Schema.Number,
 		}),
 	),
 }) {}
@@ -2363,6 +2403,13 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("serviceOperations", "/service-operations", {
 			payload: ServiceOperationsRequest,
 			success: ServiceOperationsResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("serviceEndpoints", "/service-endpoints", {
+			payload: ServiceEndpointsRequest,
+			success: ServiceEndpointsResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)
