@@ -43,8 +43,61 @@ describe("validateExternalUrlSync", () => {
 		"http://[::ffff:10.0.0.1]/",
 		"http://[::ffff:192.168.1.1]/",
 		"http://[::ffff:172.20.0.1]/",
+		// A trailing dot is the same name fully qualified, but the URL parser keeps
+		// it, so a blocklist keyed on the bare name used to miss it entirely.
+		"http://localhost./",
+		"http://metadata.google.internal./computeMetadata/v1/",
+		// Link-local is fe80::/10, not fe80::/16 — everything up to febf: is in range.
+		"http://[fe9f::1]/",
+		"http://[fea0::1]/",
+		"http://[febf::1]/",
+		// Deprecated site-local, still routed on plenty of internal networks.
+		"http://[fec0::1]/",
+		// Transition mechanisms delivering to an embedded IPv4 address.
+		"http://[2002:7f00:1::]/",
+		"http://[64:ff9b::7f00:1]/",
+		"http://[64:ff9b::169.254.169.254]/",
+		// Oracle Cloud metadata, documentation ranges, multicast and reserved.
+		"http://192.0.0.192/opc/v1/instance/",
+		"http://192.0.2.1/",
+		"http://198.51.100.1/",
+		"http://203.0.113.1/",
+		"http://224.0.0.1/",
+		"http://239.255.255.250/",
+		"http://240.0.0.1/",
 	])("rejects private/loopback host: %s", (raw) => {
 		expect(() => validateExternalUrlSync(raw)).toThrow(UrlValidationError)
+	})
+
+	// The parser's host here is `internal`, not `real.example.com` — the credentials
+	// hide the real destination from anyone eyeballing the stored URL.
+	it.each(["https://real.example.com@localhost/", "https://user:pw@api.example.com/"])(
+		"rejects embedded credentials: %s",
+		(raw) => {
+			expect(() => validateExternalUrlSync(raw)).toThrow(UrlValidationError)
+		},
+	)
+
+	// Public addresses that merely sit near a blocked range must still pass, or
+	// the widened patterns would start rejecting legitimate destinations.
+	it.each([
+		"https://api.example.com./webhook",
+		"http://100.63.255.255/",
+		"http://100.128.0.1/",
+		"http://192.0.1.1/",
+		"http://192.1.0.1/",
+		"http://198.20.0.1/",
+		"http://223.255.255.255/",
+		"http://[2001:db8::1]/",
+		"http://[2002::1]/",
+		// Hostnames that merely start like a blocked range. The IPv4 patterns are
+		// prefix matches, so they are only applied to actual address literals.
+		"https://10.example.com/hook",
+		"https://240.example.com/hook",
+		"https://127.acme.io/hook",
+		"https://192.168.example.com/hook",
+	])("accepts public host: %s", (raw) => {
+		expect(() => validateExternalUrlSync(raw)).not.toThrow()
 	})
 
 	it("rejects empty string", () => {

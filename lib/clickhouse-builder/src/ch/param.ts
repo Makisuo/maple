@@ -33,8 +33,16 @@ export type ParamKind = string
  */
 export const paramPlaceholder = (kind: ParamKind, name: string): string => {
 	assertValidParamName(name)
-	return `__PARAM_${kind}_${name}__`
+	return `${PARAM_MARKER_PREFIX}${kind}_${name}__`
 }
+
+/**
+ * The text every placeholder starts with — the one substring that must never
+ * appear in rendered SQL except as a real marker. `escapeClickHouseString`
+ * hex-escapes it out of user values for exactly that reason, and `compile`
+ * checks for it as a post-condition once params are resolved.
+ */
+export const PARAM_MARKER_PREFIX = "__PARAM_"
 
 export const PARAM_PLACEHOLDER_PATTERN = /__PARAM_([A-Za-z][A-Za-z0-9]*)_(.+?)__/g
 

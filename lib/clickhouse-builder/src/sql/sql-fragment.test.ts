@@ -43,6 +43,16 @@ describe("compile", () => {
 		it("hex-escapes semicolons so gateway statement splitters never see the raw byte", () => {
 			expect(compile(str("bot;"))).toBe("'bot\\x3B'")
 		})
+
+		it("hex-escapes the param marker so a value can never spell a placeholder", () => {
+			expect(compile(str("__PARAM_string_serviceName__"))).toBe("'\\x5F_PARAM_string_serviceName__'")
+		})
+
+		it("neutralises the marker in overlapping runs of underscores", () => {
+			for (const value of ["___PARAM_x__", "____PARAM_x__", "a__PARAM_b__PARAM_c"]) {
+				expect(compile(str(value))).not.toContain("__PARAM_")
+			}
+		})
 	})
 
 	describe("Int", () => {

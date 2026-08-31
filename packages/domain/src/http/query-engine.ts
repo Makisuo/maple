@@ -2098,6 +2098,7 @@ export class RawSqlValidationError extends Schema.TaggedError<RawSqlValidationEr
 			"MissingOrgFilter",
 			"InvalidMacro",
 			"DisallowedStatement",
+			"DisallowedFunction",
 			"MultipleStatements",
 			"UnresolvedMacro",
 			"ResourceLimit",
