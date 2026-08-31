@@ -1,14 +1,19 @@
 import type { GetServiceEndpointsInput } from "@/api/warehouse/service-endpoints"
-import { OPERATIONS_SPARKLINE_BUCKETS, windowSeconds } from "./service-operations"
 
-/** Endpoints are a filtered slice of a service's operations, so the list is
- *  shorter for the same window; a higher cap costs the same single scan. */
-export const ENDPOINTS_LIMIT = 50
-
-export function endpointsBucketSeconds(startTime: string, endTime: string): number {
-	const targetMinutes = windowSeconds(startTime, endTime) / OPERATIONS_SPARKLINE_BUCKETS / 60
-	return Math.max(1, Math.round(targetMinutes)) * 60
-}
+/**
+ * The list is capped server-side by traffic, BEFORE the browser classifies
+ * probes and unrouted paths — so a noisy service can spend part of the budget on
+ * rows that end up collapsed. 200 rather than the Operations tab's 25 because
+ * this tab draws no sparklines: it issues no companion timeseries, so it is not
+ * bounded by that query's 10k `rows × buckets` ceiling, and the summary is a
+ * single aggregate over the rollup either way.
+ *
+ * Classifying before the limit would need the warehouse to know which rows are
+ * endpoints at all, which is the same `http.route` discriminator the collapsed
+ * buckets are guessing at. Until that exists the cap is stated in the UI rather
+ * than hidden — see `isTruncated`.
+ */
+export const ENDPOINTS_LIMIT = 200
 
 export function serviceEndpointsQueryInput(args: {
 	serviceName: string
@@ -21,7 +26,11 @@ export function serviceEndpointsQueryInput(args: {
 		startTime: args.effectiveStartTime,
 		endTime: args.effectiveEndTime,
 		environments: args.environments?.length ? args.environments : undefined,
-		bucketSeconds: endpointsBucketSeconds(args.effectiveStartTime, args.effectiveEndTime),
 		limit: ENDPOINTS_LIMIT,
 	}
+}
+
+/** The warehouse returned a full page, so there are probably more endpoints. */
+export function isTruncated(returned: number): boolean {
+	return returned >= ENDPOINTS_LIMIT
 }

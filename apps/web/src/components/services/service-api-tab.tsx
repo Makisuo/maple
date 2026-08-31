@@ -10,8 +10,9 @@ import { getServiceEndpointsResultAtom } from "@/lib/services/atoms/warehouse-qu
 import { QueryErrorState } from "@/components/common/query-error-state"
 import type { ServiceEndpoint } from "@/api/warehouse/service-endpoints"
 import { errorTone, formatErrorRate, formatRate } from "./service-table-cells"
-import { serviceEndpointsQueryInput } from "./service-endpoints"
+import { ENDPOINTS_LIMIT, isTruncated, serviceEndpointsQueryInput } from "./service-endpoints"
 import { callsPerSecond, operationTraceSearch, windowSeconds } from "./service-operations"
+import { normalizeTimestampInput } from "@/lib/timezone-format"
 import { groupEndpoints, leafLabel, type EndpointGroup, type EndpointSort } from "./endpoint-grouping"
 
 interface ServiceApiTabProps {
@@ -71,7 +72,12 @@ export function ServiceApiTab({
 	const seconds = windowSeconds(effectiveStartTime, effectiveEndTime)
 	const traceDetailLimited = seconds > 30 * 24 * 60 * 60
 	const traceDetailStartTime = traceDetailLimited
-		? new Date(Date.parse(effectiveEndTime) - 30 * 24 * 60 * 60 * 1000).toISOString()
+		? // normalizeTimestampInput first: the effective range carries warehouse
+			// timestamps ("2026-08-31 12:00:00"), which Date.parse reads as LOCAL time.
+			// Outside UTC that shifts the drill-down's 30-day window by the offset.
+			new Date(
+				Date.parse(normalizeTimestampInput(effectiveEndTime)) - 30 * 24 * 60 * 60 * 1000,
+			).toISOString()
 		: startTime
 
 	const endpoints = useMemo<ServiceEndpoint[]>(
@@ -113,14 +119,20 @@ export function ServiceApiTab({
 	return (
 		<div className={cn("flex flex-col gap-3 transition-opacity", isWaiting && "opacity-60")}>
 			<div className="flex items-center justify-between">
-				{traceDetailLimited ? (
-					<p className="text-xs text-muted-foreground">
-						Endpoint summaries cover the selected range; trace drill-downs show the latest 30
-						days.
-					</p>
-				) : (
-					<span />
-				)}
+				<div className="flex flex-col gap-1">
+					{isTruncated(endpoints.length) && (
+						<p className="text-xs text-muted-foreground">
+							Showing the {ENDPOINTS_LIMIT} busiest endpoints — this service has more. Narrow
+							the time range or environment to see the rest.
+						</p>
+					)}
+					{traceDetailLimited && (
+						<p className="text-xs text-muted-foreground">
+							Endpoint summaries cover the selected range; trace drill-downs show the latest 30
+							days.
+						</p>
+					)}
+				</div>
 				<div className="flex items-center gap-1.5 text-[11px]">
 					<span className="uppercase tracking-wider text-muted-foreground/60">Sort</span>
 					{(

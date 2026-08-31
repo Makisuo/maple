@@ -3,11 +3,6 @@ import { DeploymentEnvironment, ServiceEndpointsRequest, ServiceName } from "@ma
 import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
-export interface ServiceEndpointSparklinePoint {
-	bucket: string
-	count: number
-}
-
 export interface ServiceEndpoint {
 	/** Normalized name ("GET /api/users") — valid as a /traces `spanNames` filter. */
 	spanName: string
@@ -23,7 +18,6 @@ export interface ServiceEndpoint {
 	p50DurationMs: number
 	p95DurationMs: number
 	p99DurationMs: number
-	sparkline: ServiceEndpointSparklinePoint[]
 }
 
 const GetServiceEndpointsInput = Schema.Struct({
@@ -31,7 +25,6 @@ const GetServiceEndpointsInput = Schema.Struct({
 	startTime: WarehouseDateTimeString,
 	endTime: WarehouseDateTimeString,
 	environments: Schema.optional(Schema.Array(DeploymentEnvironment)),
-	bucketSeconds: Schema.optional(Schema.Number),
 	limit: Schema.optional(Schema.Number),
 })
 
@@ -53,7 +46,6 @@ export const getServiceEndpoints = Effect.fn("QueryEngine.getServiceEndpoints")(
 					startTime: input.startTime,
 					endTime: input.endTime,
 					environments: input.environments,
-					bucketSeconds: input.bucketSeconds,
 					limit: input.limit,
 				}),
 			})
@@ -73,7 +65,6 @@ export const getServiceEndpoints = Effect.fn("QueryEngine.getServiceEndpoints")(
 		p50DurationMs: row.p50DurationMs,
 		p95DurationMs: row.p95DurationMs,
 		p99DurationMs: row.p99DurationMs,
-		sparkline: row.sparkline.map((point) => ({ bucket: point.bucket, count: point.count })),
 	}))
 
 	return { endpoints }

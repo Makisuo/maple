@@ -25,6 +25,7 @@ import {
 	serviceOperationsQueryInput,
 	windowSeconds,
 } from "./service-operations"
+import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 interface ServiceOperationsTabProps {
 	serviceName: string
@@ -79,7 +80,10 @@ export function ServiceOperationsTab({
 	const seconds = windowSeconds(effectiveStartTime, effectiveEndTime)
 	const traceDetailLimited = seconds > 30 * 24 * 60 * 60
 	const traceDetailStartTime = traceDetailLimited
-		? new Date(Date.parse(effectiveEndTime) - 30 * 24 * 60 * 60 * 1000).toISOString()
+		? // See the note in service-api-tab: warehouse timestamps parse as local time.
+			new Date(
+				Date.parse(normalizeTimestampInput(effectiveEndTime)) - 30 * 24 * 60 * 60 * 1000,
+			).toISOString()
 		: startTime
 
 	const operations = useMemo<ServiceOperation[]>(

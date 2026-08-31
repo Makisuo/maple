@@ -88,6 +88,26 @@ const HTTP_ENDPOINT_NAME_RE = "^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) "
 
 const matchRegex = defineCondFn<[CH.Expr<string>, string]>("match")
 
+/**
+ * KNOWN GAP — this matches the NAME, not the span kind, so an outbound HTTP call
+ * named `GET` with a `url.path` attribute normalizes to `GET /path` and is
+ * listed as an endpoint this service serves. Measured on Maple's own org over
+ * 24h: 406 such Client spans against 114,335 Server spans, one of them an
+ * outbound Slack call.
+ *
+ * It is not fixable on the read side. `service_operations_minutely/_hourly` do
+ * not retain SpanKind, and adding the predicate to the raw branch alone would
+ * give the two tiers different semantics — the splice would count a span in the
+ * boundary minutes and not in the interior, which inflates or deflates totals
+ * depending only on where the window edge falls. That failure is silent and the
+ * SQL looks reasonable while it happens.
+ *
+ * The fix is a SpanKind (or endpoint-discriminator) column in the rollup's
+ * GROUP BY, applied to both tiers at once. Same shape as the `http.route`
+ * discriminator the web layer's `unrouted` bucket is guessing at, and worth
+ * doing as one migration rather than two.
+ */
+
 /** Undefined when `httpOnly` is unset, so the Operations tab's SQL is unchanged. */
 const httpEndpointCondition = (name: CH.Expr<string>, httpOnly: boolean | undefined) =>
 	httpOnly ? matchRegex(name, HTTP_ENDPOINT_NAME_RE) : undefined

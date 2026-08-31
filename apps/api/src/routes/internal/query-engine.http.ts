@@ -186,6 +186,11 @@ const withServiceOperationsFallback = makeRollupFallback(
 	"service_operations rollup is absent on this cluster; reading raw traces. Apply ClickHouse schema to restore the fast path.",
 )
 
+interface SparklinePoint {
+	readonly bucket: string
+	readonly count: number
+}
+
 const decodeTraceId = Schema.decodeSync(TraceId)
 const decodeSpanId = Schema.decodeSync(SpanId)
 const decodeServiceName = Schema.decodeUnknownSync(ServiceName)
@@ -278,6 +283,13 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 					CH.ServiceOperationsSummaryOutput
 				>
 				readonly label: string
+				/**
+				 * The Operations tab draws a sparkline per row; the API tab does not,
+				 * and issuing its timeseries anyway cost a second warehouse query whose
+				 * result was discarded — and capped the summary at ~50 rows, since the
+				 * timeseries returns `rows × buckets` against a 10k limit.
+				 */
+				readonly sparklines: boolean
 			},
 		) =>
 			Effect.gen(function* () {
@@ -295,6 +307,24 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 					return []
 				}
 
+				const toRow = (row: (typeof summaryRows)[number], sparkline: SparklinePoint[]) => ({
+					spanName: String(row.spanName),
+					spanCount: toNumber(row.spanCount),
+					estimatedSpanCount: toNumber(row.estimatedSpanCount),
+					errorCount: toNumber(row.errorCount),
+					estimatedErrorCount: toNumber(row.estimatedErrorCount),
+					errorRate: toNumber(row.errorRate),
+					avgDurationMs: toNumber(row.avgDurationMs),
+					p50DurationMs: toNumber(row.p50DurationMs),
+					p95DurationMs: toNumber(row.p95DurationMs),
+					p99DurationMs: toNumber(row.p99DurationMs),
+					sparkline,
+				})
+
+				if (!queries.sparklines) {
+					return summaryRows.map((row) => toRow(row, []))
+				}
+
 				const spanNames = summaryRows.map((row) => String(row.spanName))
 				// The rollup is minute-grain, so every sparkline interval must be
 				// a whole-minute multiple. Nearest-minute rounding keeps ~50 points.
@@ -304,7 +334,8 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 						Date.parse(`${payload.startTime.replace(" ", "T")}Z`)) /
 						1000,
 				)
-				const requestedBucketSeconds = payload.bucketSeconds ?? windowSeconds / 50
+				const requestedBucketSeconds =
+					("bucketSeconds" in payload ? payload.bucketSeconds : undefined) ?? windowSeconds / 50
 				const bucketSeconds = Math.max(1, Math.round(requestedBucketSeconds / 60)) * 60
 				const timeseriesInput = { ...payload, spanNames, bucketSeconds }
 				const timeseriesRows = yield* mapExecError(
@@ -317,7 +348,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 					"serviceOperationsTimeseries query failed",
 				)
 
-				const sparklines = new Map<string, Array<{ bucket: string; count: number }>>()
+				const sparklines = new Map<string, SparklinePoint[]>()
 				for (const row of timeseriesRows) {
 					const key = String(row.spanName)
 					const points = sparklines.get(key) ?? []
@@ -325,19 +356,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 					sparklines.set(key, points)
 				}
 
-				return summaryRows.map((row) => ({
-					spanName: String(row.spanName),
-					spanCount: toNumber(row.spanCount),
-					estimatedSpanCount: toNumber(row.estimatedSpanCount),
-					errorCount: toNumber(row.errorCount),
-					estimatedErrorCount: toNumber(row.estimatedErrorCount),
-					errorRate: toNumber(row.errorRate),
-					avgDurationMs: toNumber(row.avgDurationMs),
-					p50DurationMs: toNumber(row.p50DurationMs),
-					p95DurationMs: toNumber(row.p95DurationMs),
-					p99DurationMs: toNumber(row.p99DurationMs),
-					sparkline: sparklines.get(String(row.spanName)) ?? [],
-				}))
+				return summaryRows.map((row) => toRow(row, sparklines.get(String(row.spanName)) ?? []))
 			})
 
 		const executeRawSql = makeExecuteRawSql<
@@ -1163,6 +1182,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								summary: Queries.serviceOperationsSummary,
 								summaryRaw: Queries.serviceOperationsSummaryRaw,
 								label: "serviceOperations",
+								sparklines: true,
 							}),
 							30,
 						)
@@ -1180,6 +1200,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								summary: Queries.serviceEndpointsSummary,
 								summaryRaw: Queries.serviceEndpointsSummaryRaw,
 								label: "serviceEndpoints",
+								sparklines: false,
 							}),
 							30,
 						)

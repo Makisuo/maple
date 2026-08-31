@@ -938,7 +938,6 @@ export class ServiceEndpointsRequest extends Schema.Class<ServiceEndpointsReques
 		startTime: TinybirdDateTime,
 		endTime: TinybirdDateTime,
 		environments: Schema.optional(Schema.Array(DeploymentEnvironment)),
-		bucketSeconds: Schema.optional(BucketSeconds),
 		limit: Schema.optional(Schema.Number),
 	},
 ) {}
@@ -968,12 +967,6 @@ export class ServiceEndpointsResponse extends Schema.Class<ServiceEndpointsRespo
 			p50DurationMs: Schema.Number,
 			p95DurationMs: Schema.Number,
 			p99DurationMs: Schema.Number,
-			sparkline: Schema.Array(
-				Schema.Struct({
-					bucket: Schema.String,
-					count: Schema.Number,
-				}),
-			),
 		}),
 	),
 }) {}

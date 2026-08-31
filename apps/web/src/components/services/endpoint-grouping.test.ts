@@ -15,7 +15,6 @@ const endpoint = (method: string, route: string, calls = 100, errors = 0): Servi
 	p50DurationMs: 10,
 	p95DurationMs: 20,
 	p99DurationMs: 30,
-	sparkline: [],
 })
 
 const stems = (groups: ReturnType<typeof groupEndpoints>) =>
