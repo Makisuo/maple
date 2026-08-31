@@ -66,7 +66,7 @@ function ServiceLensPage() {
 		range: { startTime?: string; endTime?: string; presetValue?: string },
 		options?: { replace?: boolean },
 	) => {
-		navigate({
+		void navigate({
 			replace: options?.replace,
 			search: (prev) => ({ ...applyTimeRangeSearch(prev, range) }),
 		})
@@ -113,18 +113,32 @@ function LensBody({
 	// The `find` runs outside the Result builder: the builder unifies its
 	// success and fallback branches, which widens the guard's narrowing back to
 	// the raw row type.
-	const workloads = Result.builder(workloadsResult)
-		.onSuccess((r) => r.workloads)
-		.orElse(() => [])
-	const workload = firstLinkedWorkload(workloads)
+	//
+	// Memoized on the Result, like every derivation below it: `Result.builder`
+	// returns a NEW array each call, so anything that reads one of these as a
+	// dependency re-runs on every render. That made the verdict, the strips and
+	// the shared axis recompute on each hover of the linked cursor.
+	const workload = useMemo(
+		() =>
+			firstLinkedWorkload(
+				Result.builder(workloadsResult)
+					.onSuccess((r) => r.workloads)
+					.orElse(() => []),
+			),
+		[workloadsResult],
+	)
 
 	const overviewResult = useAtomValue(
 		getServiceDetailOverviewResultAtom({ data: { serviceName, startTime, endTime } }),
 	)
 
-	const points = Result.builder(overviewResult)
-		.onSuccess((r) => r.data)
-		.orElse(() => [])
+	const points = useMemo(
+		() =>
+			Result.builder(overviewResult)
+				.onSuccess((r) => r.data)
+				.orElse(() => []),
+		[overviewResult],
+	)
 
 	/**
 	 * The bucket width the SERVICE series actually came back on, so the pod gauges
@@ -192,12 +206,20 @@ function LensBody({
 	 * `toIsoBucket` is the codebase's existing normalizer and is idempotent, so
 	 * one format reaches the domain, the strips, and the verdict alike.
 	 */
-	const cpuRows = Result.builder(cpuResult)
-		.onSuccess((r) => r.data.map((row) => ({ ...row, bucket: toIsoBucket(row.bucket) })))
-		.orElse(() => [])
-	const pods = Result.builder(podsResult)
-		.onSuccess((r) => r.data)
-		.orElse(() => [])
+	const cpuRows = useMemo(
+		() =>
+			Result.builder(cpuResult)
+				.onSuccess((r) => r.data.map((row) => ({ ...row, bucket: toIsoBucket(row.bucket) })))
+				.orElse(() => []),
+		[cpuResult],
+	)
+	const pods = useMemo(
+		() =>
+			Result.builder(podsResult)
+				.onSuccess((r) => r.data)
+				.orElse(() => []),
+		[podsResult],
+	)
 	const totalPods = Result.builder(podsResult)
 		.onSuccess((r) => r.totalCount)
 		.orElse(() => 0)
@@ -259,7 +281,7 @@ function LensBody({
 				})),
 			},
 		],
-		[points, cpuRows, workload],
+		[points, worstCpuRows, workload],
 	)
 
 	// One axis for all three strips. Built from the union rather than from either

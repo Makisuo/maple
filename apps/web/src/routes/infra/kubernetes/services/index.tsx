@@ -40,7 +40,7 @@ function ServiceLensIndexPage() {
 			timeSearch={search}
 			timePreset={search.timePreset ?? (search.startTime ? undefined : "12h")}
 			onTimeChange={(range, options) =>
-				navigate({
+				void navigate({
 					replace: options?.replace,
 					search: (prev) => ({ ...applyTimeRangeSearch(prev, range) }),
 				})

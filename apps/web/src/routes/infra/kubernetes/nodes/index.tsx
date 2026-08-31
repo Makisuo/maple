@@ -52,7 +52,7 @@ function NodesPage() {
 	const statusScope = search.status
 
 	const patchSearch = (patch: Partial<NodesSearchParams>) => {
-		navigate({ search: (prev) => ({ ...prev, ...patch }) })
+		void navigate({ search: (prev) => ({ ...prev, ...patch }) })
 	}
 
 	const { startTime, endTime } = useEffectiveTimeRange(
@@ -87,7 +87,7 @@ function NodesPage() {
 	)
 
 	const onFilterChange = <K extends keyof NodeFilters>(key: K, value: NodeFilters[K]) => {
-		navigate({
+		void navigate({
 			search: (prev) => ({
 				...prev,
 				[key]:
@@ -97,7 +97,7 @@ function NodesPage() {
 	}
 
 	const onClearFilters = () => {
-		navigate({
+		void navigate({
 			search: {
 				startTime: search.startTime,
 				endTime: search.endTime,
@@ -110,7 +110,7 @@ function NodesPage() {
 		range: { startTime?: string; endTime?: string; presetValue?: string },
 		options?: { replace?: boolean },
 	) => {
-		navigate({
+		void navigate({
 			replace: options?.replace,
 			search: (prev) => ({ ...applyTimeRangeSearch(prev, range) }),
 		})

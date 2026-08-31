@@ -92,7 +92,7 @@ function WorkloadsPage() {
 	)
 
 	const onFilterChange = <K extends keyof WorkloadFilters>(key: K, value: WorkloadFilters[K]) => {
-		navigate({
+		void navigate({
 			search: (prev) => ({
 				...prev,
 				[key]:
@@ -103,7 +103,7 @@ function WorkloadsPage() {
 
 	const onClearFilters = () => {
 		setSearchText("")
-		navigate({
+		void navigate({
 			search: {
 				kind: search.kind,
 				startTime: search.startTime,
@@ -117,7 +117,7 @@ function WorkloadsPage() {
 		range: { startTime?: string; endTime?: string; presetValue?: string },
 		options?: { replace?: boolean },
 	) => {
-		navigate({
+		void navigate({
 			replace: options?.replace,
 			search: (prev) => ({ ...applyTimeRangeSearch(prev, range) }),
 		})
@@ -169,7 +169,7 @@ function WorkloadsPage() {
 												key={k}
 												type="button"
 												onClick={() =>
-													navigate({
+													void navigate({
 														search: (prev) => ({
 															...prev,
 															kind: k,

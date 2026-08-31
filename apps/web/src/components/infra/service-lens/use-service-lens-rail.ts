@@ -35,7 +35,7 @@ export function useServiceLensRail({ startTime, endTime }: { startTime: string; 
 		() =>
 			Result.builder(overviewResult)
 				.onSuccess((r) => [...new Set(r.data.map((row) => row.serviceName))].sort())
-				.orElse(() => [] as string[]),
+				.orElse((): string[] => []),
 		[overviewResult],
 	)
 
@@ -76,13 +76,18 @@ export function useServiceLensRail({ startTime, endTime }: { startTime: string; 
 					}
 					return [...byService.values()].sort(byUtilizationThenName)
 				})
-				.orElse(() => [] as RailService[]),
+				.orElse((): RailService[] => []),
 		[workloadsResult],
 	)
 
 	return {
 		services,
-		unlinkedCount: Math.max(serviceNames.length - services.length, 0),
+		// Only once the join has answered. While it is in flight `services` is
+		// empty, and the difference is then every service in the org — the rail
+		// would flash "42 services not linked" on the way to listing them.
+		unlinkedCount: Result.isSuccess(workloadsResult)
+			? Math.max(serviceNames.length - services.length, 0)
+			: 0,
 		loading: Result.isInitial(overviewResult) || Result.isInitial(workloadsResult),
 		waiting:
 			(Result.isSuccess(overviewResult) && overviewResult.waiting) ||
