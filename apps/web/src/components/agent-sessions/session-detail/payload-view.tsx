@@ -2,8 +2,10 @@ import { useMemo } from "react"
 
 import { cn } from "@maple/ui/lib/utils"
 
+import { MessageResponse } from "@/components/ai-elements/message-response"
 import { tryParseJson } from "@/components/attributes"
 import { highlightCode } from "@/lib/sugar-high"
+import { ClampedText } from "./clamped-text"
 
 /**
  * The rendered ↔ raw affordances every captured body shares, wherever it is
@@ -124,4 +126,46 @@ export function toggled(set: ReadonlySet<string>, id: string): ReadonlySet<strin
 	const next = new Set(set)
 	if (!next.delete(id)) next.add(id)
 	return next
+}
+
+/**
+ * A captured message body, in whichever reading is selected, clamped with a
+ * "Show full" control. Every message the transcript shows goes through here:
+ * an uncapped body — one 900-line reply, one pasted file — pushes every row
+ * after it off the page, and the list stops being a list.
+ */
+export function MessageBody({
+	text,
+	body,
+	raw,
+	clampClass,
+	proseClassName = "text-foreground text-sm leading-relaxed",
+	expanded,
+	onToggleExpanded,
+}: {
+	text: string
+	/** The reading chosen by `useMessageBody`, hoisted so the caller's ViewSwitch
+	 *  can label the segment it selects. */
+	body: { rendered: "md" | "json"; formatted: string; highlighted: string | undefined }
+	raw: boolean
+	clampClass?: string
+	proseClassName?: string
+	expanded: boolean
+	onToggleExpanded: () => void
+}) {
+	return (
+		<ClampedText
+			text={raw ? text : body.formatted}
+			html={raw ? undefined : body.highlighted}
+			mono={!raw && body.rendered === "json"}
+			clampClass={clampClass}
+			body={
+				raw || body.rendered === "json" ? undefined : (
+					<MessageResponse className={proseClassName}>{text}</MessageResponse>
+				)
+			}
+			expanded={expanded}
+			onToggleExpanded={onToggleExpanded}
+		/>
+	)
 }
