@@ -27,6 +27,14 @@ export class DigestSubscriptionResponse extends Schema.Class<DigestSubscriptionR
 	updatedAt: Schema.Number,
 }) {}
 
+/**
+ * A scope is a pick-list of values the org actually reports, so a handful of
+ * short strings. Bounded at the boundary because every stored scope is later
+ * sorted, joined into query params, logged and rendered on each digest tick —
+ * an unbounded array would let one subscriber inflate all of that.
+ */
+const ScopeValues = Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(50))
+
 export class UpsertDigestSubscriptionRequest extends Schema.Class<UpsertDigestSubscriptionRequest>(
 	"UpsertDigestSubscriptionRequest",
 )({
@@ -34,8 +42,8 @@ export class UpsertDigestSubscriptionRequest extends Schema.Class<UpsertDigestSu
 	enabled: Schema.optionalKey(Schema.Boolean),
 	dayOfWeek: Schema.optionalKey(Schema.Number),
 	timezone: Schema.optionalKey(Schema.String),
-	namespaces: Schema.optionalKey(Schema.Array(Schema.String)),
-	environments: Schema.optionalKey(Schema.Array(Schema.String)),
+	namespaces: Schema.optionalKey(ScopeValues),
+	environments: Schema.optionalKey(ScopeValues),
 }) {}
 
 export class DigestPreviewResponse extends Schema.Class<DigestPreviewResponse>("DigestPreviewResponse")({

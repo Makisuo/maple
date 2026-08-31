@@ -223,14 +223,18 @@ function errorRow(error: DigestTopError, index: number, total: number): string {
 }
 
 /**
- * A service row's deep link. Carries the environment and namespace so the link
- * lands on the same slice the row describes rather than on the service's
- * org-wide totals.
+ * A service row's deep link, carrying the environment so the page opens on the
+ * same slice the row describes rather than the service's org-wide totals.
+ *
+ * Namespace is deliberately not in the URL: `/services/$serviceName` has no
+ * `namespaces` search field, so the parameter would be silently dropped by
+ * `validateSearch` and the link would read as scoped while showing
+ * cross-namespace totals. Namespace scoping on that page is the global
+ * namespace pin, not a URL param.
  */
 function serviceUrl(baseUrl: string, service: DigestService): string {
 	const params = new URLSearchParams({ timePreset: "7d" })
 	if (service.environment !== "") params.set("environments", service.environment)
-	if (service.namespace !== "") params.set("namespaces", service.namespace)
 	return `${baseUrl}/services/${encodeURIComponent(service.name)}?${params.toString()}`
 }
 

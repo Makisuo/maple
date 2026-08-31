@@ -198,6 +198,18 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 		params: { group_by_all: "1", root_only: "1", limit: 1 },
 	},
 	{
+		// True namespace grain — service_overview's namespace column is a dominant
+		// argMax, so per-namespace totals cannot be summed out of it.
+		pipe: "custom_traces_breakdown",
+		label: "by-namespace",
+		params: { group_by_namespace: "1", root_only: "1", limit: 10 },
+	},
+	{
+		pipe: "custom_traces_breakdown",
+		label: "by-environment",
+		params: { group_by_environment: "1", root_only: "1", limit: 10 },
+	},
+	{
 		pipe: "custom_traces_breakdown",
 		label: "all-scoped",
 		params: {

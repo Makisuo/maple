@@ -5283,6 +5283,50 @@ SELECT
         LIMIT 10
         FORMAT JSON
 
+-- pipe:custom_traces_breakdown:by-environment:baseline  [de3cd3da]
+SELECT
+          DeploymentEnv AS name,
+          sum(SampleRate) AS count,
+          count() AS spanCount,
+          avg(Duration) / 1000000 AS avgDuration,
+          quantile(0.5)(Duration) / 1000000 AS p50Duration,
+          quantile(0.95)(Duration) / 1000000 AS p95Duration,
+          quantile(0.99)(Duration) / 1000000 AS p99Duration,
+          if(sum(SampleRate) > 0, sumIf(SampleRate, StatusCode = 'Error') / sum(SampleRate), 0) AS errorRate,
+          countIf((NOT (StatusCode = 'Error') AND Duration / 1000000 < 500)) AS satisfiedCount,
+          countIf((NOT (StatusCode = 'Error') AND (Duration / 1000000 >= 500 AND Duration / 1000000 < 2000))) AS toleratingCount,
+          if(count() > 0, round(countIf((NOT (StatusCode = 'Error') AND Duration / 1000000 < 500)) / count() + countIf((NOT (StatusCode = 'Error') AND (Duration / 1000000 >= 500 AND Duration / 1000000 < 2000))) * 0.5 / count(), 4), 0) AS apdexScore
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 10
+        FORMAT JSON
+
+-- pipe:custom_traces_breakdown:by-namespace:baseline  [735a6bbc]
+SELECT
+          ServiceNamespace AS name,
+          sum(SampleRate) AS count,
+          count() AS spanCount,
+          avg(Duration) / 1000000 AS avgDuration,
+          quantile(0.5)(Duration) / 1000000 AS p50Duration,
+          quantile(0.95)(Duration) / 1000000 AS p95Duration,
+          quantile(0.99)(Duration) / 1000000 AS p99Duration,
+          if(sum(SampleRate) > 0, sumIf(SampleRate, StatusCode = 'Error') / sum(SampleRate), 0) AS errorRate,
+          countIf((NOT (StatusCode = 'Error') AND Duration / 1000000 < 500)) AS satisfiedCount,
+          countIf((NOT (StatusCode = 'Error') AND (Duration / 1000000 >= 500 AND Duration / 1000000 < 2000))) AS toleratingCount,
+          if(count() > 0, round(countIf((NOT (StatusCode = 'Error') AND Duration / 1000000 < 500)) / count() + countIf((NOT (StatusCode = 'Error') AND (Duration / 1000000 >= 500 AND Duration / 1000000 < 2000))) * 0.5 / count(), 4), 0) AS apdexScore
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 10
+        FORMAT JSON
+
 -- pipe:custom_traces_breakdown:by-service:baseline  [12aefc0f]
 SELECT
           ServiceName AS name,

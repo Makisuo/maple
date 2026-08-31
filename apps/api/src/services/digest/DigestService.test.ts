@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer } from "effect"
 import { TestClock } from "effect/testing"
-import { OrgId, WarehouseQueryResponse } from "@maple/domain/http"
+import { OrgId, WarehouseQueryError, WarehouseQueryResponse } from "@maple/domain/http"
 import type { WeeklyDigestProps } from "@maple/email/weekly-digest-core"
 import { digestSubscriptions } from "@maple/db"
 import { eq } from "drizzle-orm"
@@ -75,26 +75,51 @@ const summaryRow = (count: number, errorRate: number, p95Duration: number) => ({
 	p95Duration,
 })
 
-/** Pipe name → rows. Anything unlisted answers with no rows. */
+/**
+ * Fixture key → rows. Anything unlisted answers with no rows.
+ *
+ * `custom_traces_breakdown` is issued at two different grains, so its key
+ * carries the grouping: `custom_traces_breakdown:all` for the summary row and
+ * `custom_traces_breakdown:namespace` for the namespace table.
+ */
 type WarehouseFixture = Readonly<Record<string, ReadonlyArray<unknown>>>
+
+const fixtureKey = (pipeName: string, params: Record<string, unknown>): string => {
+	// The previous-window error lookup is the fingerprint-filtered one.
+	if (pipeName === "errors_by_type") {
+		return params.fingerprint_hashes != null ? "errors_by_type:previous" : "errors_by_type"
+	}
+	if (pipeName !== "custom_traces_breakdown") return pipeName
+	if (params.group_by_namespace != null) return "custom_traces_breakdown:namespace"
+	return "custom_traces_breakdown:all"
+}
 
 const defaultFixture = {
 	service_overview_compare: [overviewRow],
-	custom_traces_breakdown: [summaryRow(100, 0.02, 50)],
+	"custom_traces_breakdown:all": [summaryRow(100, 0.02, 50)],
 } satisfies WarehouseFixture
 
 const makeWarehouseStub = (
 	fixture: WarehouseFixture = defaultFixture,
 	seen?: Array<{ pipeName: string; params: Record<string, unknown> }>,
+	/** Fixture keys whose query should fail, simulating a warehouse blip. */
+	failing: ReadonlySet<string> = new Set(),
 ) =>
 	Layer.succeed(WarehouseQueryService, {
 		query: (_tenant, payload) =>
-			Effect.sync(() => {
-				seen?.push({
-					pipeName: payload.pipeName,
-					params: (payload.params ?? {}) as Record<string, unknown>,
-				})
-				return new WarehouseQueryResponse({ data: [...(fixture[payload.pipeName] ?? [])] })
+			Effect.suspend(() => {
+				const params = (payload.params ?? {}) as Record<string, unknown>
+				const key = fixtureKey(payload.pipeName, params)
+				seen?.push({ pipeName: payload.pipeName, params })
+				if (failing.has(key)) {
+					return Effect.fail(
+						new WarehouseQueryError({
+							message: `stubbed failure for ${key}`,
+							pipeName: payload.pipeName,
+						}),
+					)
+				}
+				return Effect.succeed(new WarehouseQueryResponse({ data: [...(fixture[key] ?? [])] }))
 			}),
 		sqlQuery: () => Effect.die("sqlQuery not used by DigestService tests"),
 		rawSqlQuery: () => Effect.die("rawSqlQuery not used by DigestService tests"),
@@ -111,6 +136,7 @@ const makeWarehouseStub = (
 const makeHarness = (
 	fixture: WarehouseFixture = defaultFixture,
 	seen?: Array<{ pipeName: string; params: Record<string, unknown> }>,
+	failing?: ReadonlySet<string>,
 ) => {
 	const sends: string[] = []
 	const emailStub = Layer.succeed(EmailService, {
@@ -126,7 +152,7 @@ const makeHarness = (
 		Layer.provide(
 			Layer.mergeAll(
 				emailStub,
-				makeWarehouseStub(fixture, seen),
+				makeWarehouseStub(fixture, seen, failing),
 				Layer.succeed(EdgeCacheService, makeEdgeCacheService(makeMemoryBackend())),
 			),
 		),
@@ -278,7 +304,14 @@ const multiEnvFixture = {
 			period: "previous",
 		}),
 	],
-	custom_traces_breakdown: [summaryRow(1_005_000, 0.004, 130)],
+	"custom_traces_breakdown:all": [summaryRow(1_005_000, 0.004, 130)],
+	// True namespace grain — a service's traffic can be split across namespaces,
+	// which is exactly what summing the overview rows could not express.
+	"custom_traces_breakdown:namespace": [
+		{ name: "edge", count: 700_000, errorRate: 0.003, p95Duration: 110 },
+		{ name: "checkout", count: 305_000, errorRate: 0.006, p95Duration: 210 },
+	],
+	"custom_traces_breakdown:namespace:previous": [],
 } satisfies WarehouseFixture
 
 const findService = (props: WeeklyDigestProps, environment: string) => {
@@ -340,7 +373,8 @@ describe("DigestService.generateDigestData", () => {
 					["staging", 5_000],
 				],
 			)
-			// Subtotals cover the rendered rows, so they add up to what a reader sees.
+			// With fewer services than the render cap the header total and the
+			// visible rows coincide; the >10 case is covered separately.
 			for (const group of props.environmentGroups) {
 				assert.strictEqual(
 					group.requests,
@@ -357,6 +391,8 @@ describe("DigestService.generateDigestData", () => {
 			const digest = yield* DigestService
 			const props = yield* digest.generateDigestData(ORG_ID)
 
+			// Environment IS a grouping key on the overview query, so summing its
+			// rows is exact.
 			assert.deepStrictEqual(
 				props.breakdown.environments.map((r) => [r.label, r.requests]),
 				[
@@ -364,10 +400,16 @@ describe("DigestService.generateDigestData", () => {
 					["staging", 5_000],
 				],
 			)
-			// Both environments share one namespace, so it collapses to a single row.
+			// Namespace is NOT: the overview reports only a dominant `argMax`
+			// namespace ("edge" on every row here), so summing those rows would file
+			// all 1,005,000 requests under "edge". The namespace-grouped query shows
+			// the traffic is really split with "checkout".
 			assert.deepStrictEqual(
 				props.breakdown.namespaces.map((r) => [r.label, r.requests]),
-				[["edge", 1_005_000]],
+				[
+					["edge", 700_000],
+					["checkout", 305_000],
+				],
 			)
 		}).pipe(Effect.provide(layer))
 	})
@@ -491,6 +533,168 @@ describe("DigestService.generateDigestData", () => {
 				assert.isUndefined(call.params.services)
 			}
 			assert.isFalse(props.ingestion.approximate)
+		}).pipe(Effect.provide(layer))
+	})
+})
+
+describe("DigestService.generateDigestData — comparison identity", () => {
+	it.effect("still matches a service whose dominant namespace changed week to week", () => {
+		// `serviceOverviewQuery` reports `argMax(cServiceNamespace, …)` — the
+		// busiest namespace, display metadata rather than row identity. Keying the
+		// comparison on it made a service whose busiest namespace shifted look new.
+		const { layer } = makeHarness({
+			...multiEnvFixture,
+			service_overview_compare: [
+				overview({
+					serviceName: "api",
+					serviceNamespace: "checkout",
+					estimatedSpanCount: 1_000_000,
+					period: "current",
+				}),
+				overview({
+					serviceName: "api",
+					serviceNamespace: "edge",
+					estimatedSpanCount: 900_000,
+					period: "previous",
+				}),
+			],
+		})
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(TICK_MS)
+			const digest = yield* DigestService
+			const props = yield* digest.generateDigestData(ORG_ID)
+
+			assert.deepStrictEqual(props.services[0]?.requestsDelta, {
+				kind: "pct",
+				value: ((1_000_000 - 900_000) / 900_000) * 100,
+			})
+		}).pipe(Effect.provide(layer))
+	})
+
+	it.effect("compares whole environments, not the rendered top ten against everything", () => {
+		// Twelve services in one environment: only ten are rendered, but the header
+		// total and its delta must cover the environment, or a flat week reports a
+		// decline purely because two rows did not fit.
+		const many = (period: "current" | "previous") =>
+			Array.from({ length: 12 }, (_, index) =>
+				overview({
+					serviceName: `svc-${index}`,
+					estimatedSpanCount: 10_000,
+					period,
+				}),
+			)
+		const { layer } = makeHarness({
+			...multiEnvFixture,
+			service_overview_compare: [...many("current"), ...many("previous")],
+		})
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(TICK_MS)
+			const digest = yield* DigestService
+			const props = yield* digest.generateDigestData(ORG_ID)
+
+			const group = props.environmentGroups[0]
+			assert.strictEqual(group?.services.length, 10, "renders the top ten")
+			assert.strictEqual(group?.requests, 120_000, "but totals all twelve")
+			assert.deepStrictEqual(group?.requestsDelta, { kind: "pct", value: 0 })
+		}).pipe(Effect.provide(layer))
+	})
+})
+
+describe("DigestService.generateDigestData — scope containment", () => {
+	it.effect("scopes errors by service membership, not just by environment", () => {
+		// `error_events` has no namespace column, so a namespace-only scope would
+		// otherwise pull top errors from the whole org into a scoped digest.
+		const seen: Array<{ pipeName: string; params: Record<string, unknown> }> = []
+		const { layer } = makeHarness(multiEnvFixture, seen)
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(TICK_MS)
+			const digest = yield* DigestService
+			yield* digest.generateDigestData(ORG_ID, { environments: [], namespaces: ["edge"] })
+
+			const errors = seen.find((call) => call.pipeName === "errors_by_type")
+			assert.strictEqual(errors?.params.services, "api")
+			assert.isUndefined(errors?.params.deployment_envs, "no environment in this scope")
+		}).pipe(Effect.provide(layer))
+	})
+
+	it.effect("treats a scope that matches nothing as empty, not as unfiltered", () => {
+		const seen: Array<{ pipeName: string; params: Record<string, unknown> }> = []
+		const { layer } = makeHarness({ ...multiEnvFixture, service_overview_compare: [] }, seen)
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(TICK_MS)
+			const digest = yield* DigestService
+			const props = yield* digest.generateDigestData(ORG_ID, {
+				environments: [],
+				namespaces: ["nonexistent"],
+			})
+
+			// Dropping the filter here would have shown org-wide ingestion and
+			// org-wide errors inside a digest claiming to cover one namespace.
+			assert.isUndefined(seen.find((call) => call.pipeName === "get_service_usage_compare"))
+			assert.isUndefined(seen.find((call) => call.pipeName === "errors_by_type"))
+			assert.strictEqual(props.ingestion.totalBytes, 0)
+			assert.deepStrictEqual(props.topErrors, [])
+		}).pipe(Effect.provide(layer))
+	})
+
+	const errorRow = {
+		fingerprintHash: "111",
+		errorLabel: "Boom",
+		sampleMessage: "Boom",
+		count: 10,
+		affectedServicesCount: 1,
+		firstSeen: "2026-07-01 00:00:00",
+		lastSeen: "2026-07-05 00:00:00",
+	}
+
+	it.effect("badges an error new only when the previous window genuinely lacks it", () => {
+		const { layer } = makeHarness({
+			...multiEnvFixture,
+			errors_by_type: [errorRow],
+			"errors_by_type:previous": [],
+		})
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(TICK_MS)
+			const digest = yield* DigestService
+			const props = yield* digest.generateDigestData(ORG_ID)
+
+			assert.strictEqual(props.topErrors[0]?.isNew, true)
+		}).pipe(Effect.provide(layer))
+	})
+
+	it.effect("does not badge every error new when the previous-window lookup fails", () => {
+		const { layer } = makeHarness(
+			{ ...multiEnvFixture, errors_by_type: [errorRow], "errors_by_type:previous": [] },
+			undefined,
+			new Set(["errors_by_type:previous"]),
+		)
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(TICK_MS)
+			const digest = yield* DigestService
+			const props = yield* digest.generateDigestData(ORG_ID)
+
+			// A warehouse blip must not invent first-seen badges. Losing the badge is
+			// the safe direction; the digest itself still sends.
+			assert.strictEqual(props.topErrors[0]?.isNew, false)
+		}).pipe(Effect.provide(layer))
+	})
+})
+
+describe("DigestService.runDigestTick — stored scope handling", () => {
+	it.effect("a malformed scope column widens that digest instead of aborting the tick", () => {
+		const { sends, layer } = makeHarness()
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(TICK_MS)
+			yield* seedSub({ email: "broken@example.com", namespacesJson: "{not json" })
+			yield* seedSub({ email: "fine@example.com" })
+
+			const digest = yield* DigestService
+			const result = yield* digest.runDigestTick()
+
+			// A throw while partitioning subscriptions would have taken the healthy
+			// subscriber down with the bad row.
+			assert.deepStrictEqual(sends.sort(), ["broken@example.com", "fine@example.com"])
+			assert.strictEqual(result.errorCount, 0)
 		}).pipe(Effect.provide(layer))
 	})
 })

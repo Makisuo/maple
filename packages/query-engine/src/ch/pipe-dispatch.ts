@@ -850,6 +850,8 @@ function pipeParamsToTracesBreakdownOpts(params: PipeParams): TracesBreakdownOpt
 	let groupBy = "service"
 	let groupByAttributeKey: string | undefined
 	if (str("group_by_all")) groupBy = "all"
+	else if (str("group_by_namespace")) groupBy = "namespace"
+	else if (str("group_by_environment")) groupBy = "environment"
 	else if (str("group_by_service")) groupBy = "service"
 	else if (str("group_by_span_name")) groupBy = "span_name"
 	else if (str("group_by_status_code")) groupBy = "status_code"

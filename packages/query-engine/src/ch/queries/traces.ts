@@ -275,6 +275,14 @@ function buildBreakdownGroupExpr(
 			return CH.lit("all")
 		case "service":
 			return $.ServiceName
+		// Raw `traces` has no extracted namespace/environment columns — those live
+		// only on the MVs. Read the resource attributes so this route stays valid;
+		// a root-only breakdown routes to `service_overview_spans` anyway, which
+		// has the real columns (see buildMvBreakdownGroupExpr).
+		case "namespace":
+			return $.ResourceAttributes.get("service.namespace")
+		case "environment":
+			return $.ResourceAttributes.get("deployment.environment")
 		case "span_name":
 			return $.SpanName
 		case "status_code":
@@ -295,6 +303,10 @@ function buildMvBreakdownGroupExpr(
 	switch (groupBy) {
 		case "all":
 			return CH.lit("all")
+		case "namespace":
+			return $.ServiceNamespace
+		case "environment":
+			return $.DeploymentEnv
 		case "status_code":
 			return $.StatusCode
 		case "service":

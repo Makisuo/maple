@@ -676,6 +676,11 @@ export interface CustomTracesBreakdownParams {
 	/** Collapse to a single row for the whole window — the only shape that yields
 	 * a true org-wide quantile, since per-group quantiles cannot be merged. */
 	group_by_all?: string
+	/** True `service.namespace` / `deployment.environment` grain. Needed because
+	 * `service_overview`'s namespace column is a dominant-value `argMax`, not a
+	 * grouping key, so per-namespace totals cannot be summed out of it. */
+	group_by_namespace?: string
+	group_by_environment?: string
 	group_by_service?: string
 	group_by_span_name?: string
 	group_by_status_code?: string
