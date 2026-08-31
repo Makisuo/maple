@@ -4,7 +4,7 @@ import { Result } from "@/lib/effect-atom"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { getServiceWorkloadsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import type { ServiceWorkload } from "@/api/warehouse/service-infra"
-import { UsageBar } from "@/components/infra/usage-bar"
+import { MeterRows } from "@/components/infra/primitives/meter-rows"
 import { SectionCard } from "./section-card"
 
 interface ServiceWorkloadsPanelProps {
@@ -92,30 +92,19 @@ export function ServiceWorkloadsPanel({
 						</div>
 						{(workload.avgCpuLimitUtilization != null ||
 							workload.avgMemoryLimitUtilization != null) && (
-							<div className="grid grid-cols-2 gap-4">
-								{workload.avgCpuLimitUtilization != null && (
-									<div className="flex items-center gap-2">
-										<span className="w-7 text-[10px] uppercase tracking-wider text-muted-foreground/60">
-											cpu
-										</span>
-										<UsageBar
-											fraction={workload.avgCpuLimitUtilization}
-											className="flex-1"
-										/>
-									</div>
-								)}
-								{workload.avgMemoryLimitUtilization != null && (
-									<div className="flex items-center gap-2">
-										<span className="w-7 text-[10px] uppercase tracking-wider text-muted-foreground/60">
-											mem
-										</span>
-										<UsageBar
-											fraction={workload.avgMemoryLimitUtilization}
-											className="flex-1"
-										/>
-									</div>
-								)}
-							</div>
+							<MeterRows
+								className="max-w-[280px]"
+								meters={[
+									workload.avgCpuLimitUtilization != null && {
+										label: "CPU",
+										fraction: workload.avgCpuLimitUtilization,
+									},
+									workload.avgMemoryLimitUtilization != null && {
+										label: "MEM",
+										fraction: workload.avgMemoryLimitUtilization,
+									},
+								].filter((meter) => meter !== false)}
+							/>
 						)}
 					</li>
 				))}

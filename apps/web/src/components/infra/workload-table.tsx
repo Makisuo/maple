@@ -7,8 +7,9 @@ import type { ListWorkloadsResponse } from "@maple/domain/http"
 import type { WorkloadKind } from "@/api/warehouse/infra"
 
 import { HostStatusBadge } from "./status-badge"
-import { UsageBar } from "./usage-bar"
-import { ColumnHead, DataTable, MetaChip, ROW_LINK_CLASS, useTableSort } from "./primitives/data-table"
+import { MeterRows } from "./primitives/meter-rows"
+import { MetaLine } from "./primitives/meta-line"
+import { ColumnHead, DataTable, ROW_LINK_CLASS, useTableSort } from "./primitives/data-table"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 export type WorkloadRow = ListWorkloadsResponse["data"][number]
@@ -119,11 +120,7 @@ export function WorkloadTable({ workloads, kind, waiting, referenceTime }: Workl
 						<div className="truncate font-mono text-[13px] font-medium text-foreground transition-colors group-hover:text-primary">
 							{wl.workloadName}
 						</div>
-						<div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-							{wl.namespace && <MetaChip>ns {wl.namespace}</MetaChip>}
-							<span className="text-foreground/20">·</span>
-							<MetaChip>kind {kind}</MetaChip>
-						</div>
+						<MetaLine items={[wl.namespace && `ns ${wl.namespace}`, `kind ${kind}`]} />
 					</div>
 					<div className="w-[88px]">
 						<HostStatusBadge lastSeen={wl.lastSeen} referenceTime={referenceTime} />
@@ -132,10 +129,10 @@ export function WorkloadTable({ workloads, kind, waiting, referenceTime }: Workl
 						{wl.podCount}
 					</div>
 					<div className="hidden w-[160px] md:block">
-						<UsageBar fraction={wl.avgCpuLimitPct} />
+						<MeterRows hideLabels meters={[{ label: "CPU", fraction: wl.avgCpuLimitPct }]} />
 					</div>
 					<div className="hidden w-[160px] lg:block">
-						<UsageBar fraction={wl.avgMemoryLimitPct} />
+						<MeterRows hideLabels meters={[{ label: "MEM", fraction: wl.avgMemoryLimitPct }]} />
 					</div>
 					<div className="w-[100px] text-right">
 						<Tooltip>

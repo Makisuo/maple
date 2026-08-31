@@ -52,6 +52,13 @@ export interface NavSubItem {
 	 * `partitionInfraSubItems` for what happens when the gate says no.
 	 */
 	surface?: NavSurface
+	/**
+	 * Whether this row can stand in `INFRA_FALLBACK` for an org reporting
+	 * nothing. Defaults to true; set false for a row that reads an existing
+	 * surface rather than being a collector target of its own, so the first-run
+	 * list stays an answer to "what would you plug in?".
+	 */
+	starter?: boolean
 }
 
 export interface NavItem {
@@ -94,11 +101,12 @@ const overviewItem: NavItem = {
  * being ragged — before this only Cloudflare and PlanetScale had marks, so the
  * four host/k8s rows sat text-only beside two brand glyphs.
  *
- * The three k8s pages deliberately share one mark: their labels already
- * separate them, and the preview dedupes by icon. With Containers this section
- * now carries five unique glyphs, which is past `NavRow`'s all-or-nothing
- * preview cap (each glyph costs the label ~14px) — so the closed row shows no
- * miniatures until the icon variety shrinks again.
+ * The four k8s pages deliberately share one mark: their labels already
+ * separate them, and the preview dedupes by icon. That keeps the section at
+ * five unique glyphs — exactly `NavRow`'s all-or-nothing preview cap (each
+ * glyph costs the label ~14px), so a sixth would drop the miniatures entirely.
+ * The preview reads this whole list, not the org's pruned one: it advertises
+ * what the section covers, which is the part `partitionInfraSubItems` hides.
  */
 const infrastructureItem: NavItem = {
 	title: "Infrastructure",
@@ -120,6 +128,18 @@ const infrastructureItem: NavItem = {
 			href: "/infra/kubernetes/workloads",
 			icon: KubernetesIcon,
 			surface: "k8sWorkloads",
+		},
+		{
+			title: "K8s Services",
+			href: "/infra/kubernetes/services",
+			icon: KubernetesIcon,
+			// Gated on pod presence, not a surface of its own: the lens reads the
+			// same kubeletstats gauges, so an org with pods can always open it —
+			// and one without has nothing for it to correlate against.
+			surface: "k8sPods",
+			// ...but it is not something you install, so it stays out of the
+			// first-run fallback that "K8s Pods" already covers.
+			starter: false,
 		},
 		{ title: "Cloudflare", href: "/infra/cloudflare", icon: CloudflareIcon, surface: "cloudflare" },
 		{
@@ -176,7 +196,8 @@ export function partitionInfraSubItems(
 	const keep = (sub: NavSubItem): boolean => {
 		if (isPathActive(currentPath, sub.href)) return true
 		if (!sub.surface) return true
-		return anyPresent ? present.has(sub.surface) : INFRA_FALLBACK.includes(sub.surface)
+		if (anyPresent) return present.has(sub.surface)
+		return sub.starter !== false && INFRA_FALLBACK.includes(sub.surface)
 	}
 
 	const shown: NavSubItem[] = []
