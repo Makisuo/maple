@@ -19,6 +19,9 @@ export class DigestSubscriptionResponse extends Schema.Class<DigestSubscriptionR
 	enabled: Schema.Boolean,
 	dayOfWeek: Schema.Number,
 	timezone: Schema.String,
+	/** Empty = every namespace / environment. */
+	namespaces: Schema.Array(Schema.String),
+	environments: Schema.Array(Schema.String),
 	lastSentAt: Schema.NullOr(Schema.Number),
 	createdAt: Schema.Number,
 	updatedAt: Schema.Number,
@@ -31,6 +34,8 @@ export class UpsertDigestSubscriptionRequest extends Schema.Class<UpsertDigestSu
 	enabled: Schema.optionalKey(Schema.Boolean),
 	dayOfWeek: Schema.optionalKey(Schema.Number),
 	timezone: Schema.optionalKey(Schema.String),
+	namespaces: Schema.optionalKey(Schema.Array(Schema.String)),
+	environments: Schema.optionalKey(Schema.Array(Schema.String)),
 }) {}
 
 export class DigestPreviewResponse extends Schema.Class<DigestPreviewResponse>("DigestPreviewResponse")({

@@ -267,6 +267,12 @@ function buildBreakdownGroupExpr(
 	groupByAttributeKey: string | undefined,
 ): CH.Expr<string> {
 	switch (groupBy) {
+		// One row for the whole window — the same "no dimension" shape the
+		// timeseries builder emits for an empty `groupBy`. Lets a caller take a
+		// real merged quantile over every span instead of averaging per-service
+		// quantiles, which is not a quantile.
+		case "all":
+			return CH.lit("all")
 		case "service":
 			return $.ServiceName
 		case "span_name":
@@ -287,6 +293,8 @@ function buildMvBreakdownGroupExpr(
 	groupBy: string,
 ): CH.Expr<string> {
 	switch (groupBy) {
+		case "all":
+			return CH.lit("all")
 		case "status_code":
 			return $.StatusCode
 		case "service":

@@ -178,6 +178,7 @@ export interface GetServiceUsageOutput {
 export interface GetServiceUsageParams {
 	org_id: string
 	service?: string
+	services?: string
 	start_time?: string
 	end_time?: string
 }
@@ -191,6 +192,9 @@ export type GetServiceUsageComparedOutput = GetServiceUsageOutput & {
 export interface GetServiceUsageCompareParams {
 	org_id: string
 	service?: string
+	/** Comma-separated. `service_usage` has no env/namespace column, so a scoped
+	 * caller passes its resolved service membership here instead. */
+	services?: string
 	current_start_time: string
 	current_end_time: string
 	previous_start_time: string
@@ -357,6 +361,7 @@ export interface ServiceOverviewCompareParams {
 	previous_start_time: string
 	previous_end_time: string
 	environments?: string
+	namespaces?: string
 	commit_shas?: string
 }
 
@@ -668,6 +673,9 @@ export interface CustomTracesBreakdownParams {
 	service_name?: string
 	span_name?: string
 	limit?: number
+	/** Collapse to a single row for the whole window — the only shape that yields
+	 * a true org-wide quantile, since per-group quantiles cannot be merged. */
+	group_by_all?: string
 	group_by_service?: string
 	group_by_span_name?: string
 	group_by_status_code?: string
@@ -675,6 +683,7 @@ export interface CustomTracesBreakdownParams {
 	group_by_attribute?: string
 	root_only?: boolean
 	environments?: string
+	namespaces?: string
 	commit_shas?: string
 	errors_only?: boolean
 	apdex_threshold_ms?: number

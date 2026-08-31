@@ -374,6 +374,7 @@ export function compilePipeQuery(
 					compile(
 						serviceOverviewQuery({
 							environments: str("environments")?.split(",").filter(Boolean),
+							namespaces: str("namespaces")?.split(",").filter(Boolean),
 							commitShas: str("commit_shas")?.split(",").filter(Boolean),
 						}),
 						{ orgId, startTime, endTime },
@@ -384,6 +385,7 @@ export function compilePipeQuery(
 				compileCompare(
 					serviceOverviewQuery({
 						environments: str("environments")?.split(",").filter(Boolean),
+						namespaces: str("namespaces")?.split(",").filter(Boolean),
 						commitShas: str("commit_shas")?.split(",").filter(Boolean),
 					}),
 					{
@@ -425,16 +427,21 @@ export function compilePipeQuery(
 			}),
 			Match.when("get_service_usage", () =>
 				eraseType(
-					compile(serviceUsageQuery({ serviceName: str("service") }), {
-						orgId,
-						startTime,
-						endTime,
-					}),
+					compile(
+						serviceUsageQuery({
+							serviceName: str("service"),
+							serviceNames: str("services")?.split(",").filter(Boolean),
+						}),
+						{ orgId, startTime, endTime },
+					),
 				),
 			),
 			Match.when("get_service_usage_compare", () =>
 				compileCompare(
-					serviceUsageQuery({ serviceName: str("service") }),
+					serviceUsageQuery({
+						serviceName: str("service"),
+						serviceNames: str("services")?.split(",").filter(Boolean),
+					}),
 					{
 						currentStart: str("current_start_time") ?? startTime,
 						currentEnd: str("current_end_time") ?? endTime,
@@ -829,6 +836,7 @@ function pipeParamsToTracesTimeseriesOpts(params: PipeParams): TracesTimeseriesO
 
 		errorsOnly: errorsOnlyParam(str("errors_only")),
 		environments: str("environments")?.split(",").filter(Boolean),
+		namespaces: str("namespaces")?.split(",").filter(Boolean),
 		commitShas: str("commit_shas")?.split(",").filter(Boolean),
 		attributeFilters: buildAttributeFiltersFromParams(params, "attribute_filter"),
 		resourceAttributeFilters: buildAttributeFiltersFromParams(params, "resource_filter"),
@@ -841,7 +849,8 @@ function pipeParamsToTracesBreakdownOpts(params: PipeParams): TracesBreakdownOpt
 
 	let groupBy = "service"
 	let groupByAttributeKey: string | undefined
-	if (str("group_by_service")) groupBy = "service"
+	if (str("group_by_all")) groupBy = "all"
+	else if (str("group_by_service")) groupBy = "service"
 	else if (str("group_by_span_name")) groupBy = "span_name"
 	else if (str("group_by_status_code")) groupBy = "status_code"
 	else if (str("group_by_http_method")) groupBy = "http_method"
@@ -863,6 +872,7 @@ function pipeParamsToTracesBreakdownOpts(params: PipeParams): TracesBreakdownOpt
 
 		errorsOnly: errorsOnlyParam(str("errors_only")),
 		environments: str("environments")?.split(",").filter(Boolean),
+		namespaces: str("namespaces")?.split(",").filter(Boolean),
 		commitShas: str("commit_shas")?.split(",").filter(Boolean),
 		attributeFilters: buildAttributeFiltersFromParams(params, "attribute_filter"),
 		resourceAttributeFilters: buildAttributeFiltersFromParams(params, "resource_filter"),
