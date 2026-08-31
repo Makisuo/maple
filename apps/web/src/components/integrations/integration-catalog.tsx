@@ -1,7 +1,14 @@
+import { useState } from "react"
 import { Badge } from "@maple/ui/components/ui/badge"
+import {
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+} from "@maple/ui/components/ui/collapsible"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
 import {
+	ChevronDownIcon,
 	ChevronRightIcon,
 	CloudflareIcon,
 	GithubIcon,
@@ -146,6 +153,15 @@ const CATALOG: ReadonlyArray<CatalogEntry> = [
 		docsUrl: "https://maple.dev/docs/integrations/slack",
 	},
 ]
+
+/**
+ * The three shown up front on an empty hub. Every other entry serves a specific
+ * piece of infrastructure and only matters to the orgs running it, so it waits
+ * behind "Discover more integrations" rather than padding the first screen.
+ *
+ * Order is the order they appear in.
+ */
+const RECOMMENDED: ReadonlyArray<IntegrationId> = ["cloudflare", "github", "slack"]
 
 export const catalogEntry = (id: IntegrationId): CatalogEntry => CATALOG.find((entry) => entry.id === id)!
 
@@ -774,6 +790,52 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 	)
 }
 
+/**
+ * The collapsed shelf for everything not connected and not recommended. The
+ * overlapping marks are the preview — they say which integrations are inside
+ * without spending a row each.
+ */
+function DiscoverMore({
+	entries,
+	onSelect,
+}: {
+	entries: ReadonlyArray<{ entry: CatalogEntry; overview: AvailableOverview }>
+	onSelect: (id: IntegrationId) => void
+}) {
+	const [open, setOpen] = useState(false)
+	return (
+		<Collapsible open={open} onOpenChange={setOpen}>
+			<CollapsibleTrigger className="group flex w-full cursor-pointer items-center gap-3 rounded-lg border border-border/60 border-dashed bg-card/50 px-4 py-3 text-left outline-none transition-colors hover:border-border hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 data-panel-open:border-solid">
+				<span className="flex shrink-0 items-center -space-x-2" aria-hidden>
+					{entries.map(({ entry }) => (
+						<IntegrationIconPlate
+							key={entry.id}
+							icon={entry.icon}
+							accent={entry.accent}
+							iconClassName={entry.iconClassName}
+							plateClassName="size-7 rounded-md"
+							size={14}
+						/>
+					))}
+				</span>
+				<span className="truncate text-sm font-medium">Discover more integrations</span>
+				<span className="hidden text-xs text-muted-foreground sm:inline">
+					{entries.length} available
+				</span>
+				<ChevronDownIcon
+					size={14}
+					className="ml-auto shrink-0 text-muted-foreground/70 transition-transform duration-200 group-hover:text-foreground group-data-panel-open:rotate-180 motion-reduce:transition-none"
+				/>
+			</CollapsibleTrigger>
+			<CollapsibleContent className="grid grid-cols-1 gap-3 pt-3 lg:grid-cols-2">
+				{entries.map(({ entry, overview }) => (
+					<AvailableCard key={entry.id} entry={entry} cta={overview.cta} onSelect={onSelect} />
+				))}
+			</CollapsibleContent>
+		</Collapsible>
+	)
+}
+
 export function IntegrationCatalog({ onSelect }: { onSelect: (id: IntegrationId) => void }) {
 	const overviews = useIntegrationOverviews()
 
@@ -788,6 +850,15 @@ export function IntegrationCatalog({ onSelect }: { onSelect: (id: IntegrationId)
 		return overview !== null && overview.kind === "available" ? [{ entry, overview }] : []
 	})
 	const loading = CATALOG.filter((entry) => overviews[entry.id] === null)
+
+	// Nothing connected yet, and nothing still resolving that could change that:
+	// lead with the three broadly useful integrations so the hub opens on a
+	// choice rather than a catalog. A partially loaded hub isn't empty — wait.
+	const showRecommended = connected.length === 0 && loading.length === 0
+	const recommended = showRecommended
+		? RECOMMENDED.flatMap((id) => available.filter(({ entry }) => entry.id === id))
+		: []
+	const more = available.filter(({ entry }) => !recommended.some((r) => r.entry.id === entry.id))
 
 	return (
 		<div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-1 [animation-duration:300ms] motion-reduce:animate-none">
@@ -809,11 +880,11 @@ export function IntegrationCatalog({ onSelect }: { onSelect: (id: IntegrationId)
 					</div>
 				</section>
 			)}
-			{available.length > 0 && (
+			{recommended.length > 0 && (
 				<section className="flex flex-col gap-2">
-					<SectionLabel>Available</SectionLabel>
+					<SectionLabel>Start here</SectionLabel>
 					<div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-						{available.map(({ entry, overview }) => (
+						{recommended.map(({ entry, overview }) => (
 							<AvailableCard
 								key={entry.id}
 								entry={entry}
@@ -824,6 +895,7 @@ export function IntegrationCatalog({ onSelect }: { onSelect: (id: IntegrationId)
 					</div>
 				</section>
 			)}
+			{more.length > 0 && <DiscoverMore entries={more} onSelect={onSelect} />}
 		</div>
 	)
 }
