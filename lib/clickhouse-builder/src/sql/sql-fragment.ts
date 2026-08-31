@@ -6,8 +6,25 @@ import { Data } from "effect"
 // split statements on the raw byte even inside string literals, truncating the
 // query mid-literal. The server unescapes `\x3B` back to `;`, so results are
 // byte-identical.
+//
+// `__PARAM_` gets the same treatment, for the same reason one layer up: params
+// are resolved by rewriting `__PARAM_<kind>_<name>__` across the *finished* SQL
+// (see `resolveParams`), which cannot tell an executable placeholder from one
+// that happens to sit inside an already-escaped literal. A value of
+// `__PARAM_string_serviceName__` used to be replaced with that param's rendered
+// literal — quotes included — and those quotes closed the literal it landed in,
+// letting a second user-controlled param continue as SQL. Escaping one `_` here
+// means no user value can ever spell a placeholder, so the rewrite can only
+// ever see the real ones. `\x5F` unescapes to `_`, so values stay byte-identical.
+//
+// Order matters: this runs after the backslash escape, or the `\` it introduces
+// would itself be escaped.
 export function escapeClickHouseString(value: string): string {
-	return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/;/g, "\\x3B")
+	return value
+		.replace(/\\/g, "\\\\")
+		.replace(/'/g, "\\'")
+		.replace(/;/g, "\\x3B")
+		.replace(/__PARAM_/g, "\\x5F_PARAM_")
 }
 
 // SQL Fragment AST

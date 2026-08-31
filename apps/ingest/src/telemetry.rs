@@ -28,7 +28,6 @@ use opentelemetry_proto::tonic::metrics::v1::{
     metric, number_data_point, Exemplar, NumberDataPoint,
 };
 use opentelemetry_proto::tonic::trace::v1::{span, status, Span};
-#[cfg(test)]
 use reqwest::Client;
 
 /// The shared outbound HTTP client type: plain `reqwest::Client` in normal
@@ -833,6 +832,23 @@ impl TelemetryPipeline {
         segment_store: Option<Arc<WalSegmentStore>>,
     ) -> Result<Self, String> {
         let http: HttpClient = http.into();
+        // A second client, for tenant-controlled destinations only.
+        //
+        // The shared one carries reqwest's default redirect policy, which is
+        // right for Tinybird and R2 but not for a BYO-ClickHouse endpoint: that
+        // URL is org-configured, and the API validates it when it is saved, not
+        // when it is used. A target that passes validation and then answers an
+        // export with `307 Location: http://169.254.169.254/` had the whole
+        // batch — and the request — follow it into the internal network.
+        // Refusing redirects outright is the fix; a ClickHouse endpoint has no
+        // legitimate reason to bounce an INSERT somewhere else.
+        let clickhouse_http: HttpClient = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .pool_max_idle_per_host(64)
+            .pool_idle_timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|error| format!("ClickHouse export HTTP client init: {error}"))?
+            .into();
         cfg.validate_for_pipeline(require_tinybird_credentials)?;
         std::fs::create_dir_all(&cfg.queue_dir)
             .map_err(|error| format!("create ingest WAL dir: {error}"))?;
@@ -883,6 +899,7 @@ impl TelemetryPipeline {
                     clickhouse_breakers: Arc::clone(&clickhouse_breakers),
                     clickhouse_targets: clickhouse_targets.clone(),
                     http: http.clone(),
+                    clickhouse_http: clickhouse_http.clone(),
                     receiver,
                 };
                 tokio::spawn(worker.run());
@@ -2662,6 +2679,9 @@ struct ExportWorker {
     clickhouse_breakers: Arc<ClickHouseBreakerRegistry>,
     clickhouse_targets: Option<Arc<dyn ClickHouseTargetProvider>>,
     http: HttpClient,
+    /// Redirect-refusing client, used only for org-configured ClickHouse
+    /// endpoints. See `new_with_object_store` for why it is separate.
+    clickhouse_http: HttpClient,
     receiver: mpsc::Receiver<QueuedFrame>,
 }
 
@@ -3181,7 +3201,7 @@ impl ExportWorker {
                     .append_pair("query", sql.as_str());
             }
             let mut request = self
-                .http
+                .clickhouse_http
                 .post(request_url)
                 .timeout(self.cfg.clickhouse_export_timeout)
                 .header("X-ClickHouse-User", target.user.as_str())
@@ -3212,8 +3232,33 @@ impl ExportWorker {
                     let status = response.status();
                     let status_code = status.as_u16();
                     let bucket = status_bucket(status_code);
+                    let response_location = response
+                        .headers()
+                        .get(reqwest::header::LOCATION)
+                        .and_then(|value| value.to_str().ok())
+                        .unwrap_or("")
+                        .to_owned();
                     let body = response.text().await.unwrap_or_default();
                     span.record("http.response.status_code", status_code);
+                    if status.is_redirection() {
+                        // The client refuses to follow these, so a redirect is a
+                        // drop either way — named separately because it is the
+                        // signature of a target trying to bounce the export
+                        // somewhere it could not have configured directly, and
+                        // "non_retryable 4xx" would bury that.
+                        span.record("maple.ingest.outcome", "dropped");
+                        record_stage_error(&span, "redirect_refused", &body, true);
+                        metrics::clickhouse_export_dropped(datasource, "redirect_refused", rows as u64);
+                        warn!(
+                            org_id,
+                            datasource,
+                            status = status_code,
+                            location = %response_location,
+                            rows,
+                            "Dropping ClickHouse batch: target answered with a redirect"
+                        );
+                        return Ok(ClickHouseExportOutcome::Dropped);
+                    }
                     if !is_retryable_clickhouse_status(status_code) {
                         // Non-retryable (4xx) is the batch's fault, not the
                         // target's health — drop it without tripping the breaker.
@@ -5086,6 +5131,88 @@ mod tests {
         assert!(
             tb_rx.try_recv().is_err(),
             "ClickHouse-routed frames should not fall back to Tinybird"
+        );
+
+        drop(std::fs::remove_dir_all(queue_dir));
+    }
+
+    /// A target that answers every export with a redirect to somewhere else —
+    /// the shape a tenant uses to bounce an export at an address the API's
+    /// save-time URL validation would have rejected outright.
+    /// The Location is relative so it resolves back onto this same test server,
+    /// where a second route records the hop. In production it is an absolute URL
+    /// at an address like `169.254.169.254` — unreachable from a test, and the
+    /// point is the following, not the destination.
+    async fn redirecting_clickhouse_handler(_body: Bytes) -> impl axum::response::IntoResponse {
+        (
+            StatusCode::TEMPORARY_REDIRECT,
+            [(axum::http::header::LOCATION, "/latest/")],
+        )
+    }
+
+    #[tokio::test]
+    async fn clickhouse_export_refuses_to_follow_a_redirect() {
+        // The BYO-ClickHouse endpoint is org-configured and validated when it is
+        // saved, not when it is used, so a target that passes validation and then
+        // 307s the export was an SSRF primitive: the shared client carried
+        // reqwest's default redirect policy and followed it. The export client
+        // now refuses redirects, so the batch is dropped at the first hop.
+        let (redirected_tx, mut redirected_rx) = mpsc::unbounded_channel();
+        let ch_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let ch_addr = ch_listener.local_addr().unwrap();
+        let ch_app = Router::new()
+            .route("/", post(redirecting_clickhouse_handler))
+            // Where the redirect points, so a followed hop is observable rather
+            // than inferred from the absence of one.
+            .route("/latest/", post(fake_clickhouse_import))
+            .with_state(redirected_tx);
+        tokio::spawn(async move {
+            axum::serve(ch_listener, ch_app).await.unwrap();
+        });
+
+        let queue_dir = unique_test_dir("fake-clickhouse-redirect");
+        let mut cfg = test_cfg();
+        cfg.queue_dir = queue_dir.clone();
+        cfg.wal_shards = 1;
+        cfg.batch_max_wait = Duration::from_millis(1);
+        cfg.export_max_attempts = 1;
+
+        let provider = Arc::new(StaticClickHouseTargetProvider {
+            target: ClickHouseTarget {
+                endpoint: format!("http://{ch_addr}"),
+                user: "ingest".to_owned(),
+                // Empty, so the https-when-passworded rule does not short-circuit
+                // the send and the redirect is what actually stops it.
+                password: String::new(),
+                database: "maple".to_owned(),
+            },
+        });
+        let pipeline = TelemetryPipeline::new_with_clickhouse(
+            cfg,
+            Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap(),
+            Some(provider),
+        )
+        .await
+        .unwrap();
+
+        pipeline
+            .accept_logs_to(
+                "org_ready",
+                &populated_log_request(),
+                ExportDestination::ClickHouse,
+            )
+            .await
+            .unwrap();
+
+        wait_for_export_drain(queue_dir.clone(), 0, ExportDestination::ClickHouse).await;
+        assert!(
+            redirected_rx.try_recv().is_err(),
+            "export must not follow a redirect from a tenant-configured target"
         );
 
         drop(std::fs::remove_dir_all(queue_dir));

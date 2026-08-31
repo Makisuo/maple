@@ -50,6 +50,45 @@ describe("rawSqlIssue", () => {
 		}
 	})
 
+	// `$__orgFilter` used to be checked with a raw `includes`, so a mention in a
+	// comment satisfied the requirement while expanding to nothing — the tenant
+	// predicate became opt-out for anyone who noticed.
+	it.each([
+		"SELECT 1 FROM traces WHERE 1=1 -- $__orgFilter",
+		"SELECT 1 FROM traces /* $__orgFilter */ WHERE 1=1",
+		"SELECT '$__orgFilter' AS x FROM traces",
+	])("rejects $__orgFilter hidden from the query: %s", (sql) => {
+		expect(rawSqlIssue(sql)?.code).toBe("MissingOrgFilter")
+	})
+
+	// Statement-shape checks say nothing about where a SELECT reads from, and a
+	// table function makes the *server* fetch — per-org credentials never see it.
+	it.each([
+		"SELECT * FROM url('http://169.254.169.254/', JSONEachRow) WHERE $__orgFilter",
+		"SELECT * FROM remote('10.0.0.1:9000', default.traces) WHERE $__orgFilter",
+		"SELECT * FROM s3('https://x/y.parquet') WHERE $__orgFilter",
+		"SELECT * FROM mysql('h:3306','d','t','u','p') WHERE $__orgFilter",
+		"SELECT * FROM postgresql('h:5432','d','t','u','p') WHERE $__orgFilter",
+		"SELECT * FROM file('/etc/passwd', LineAsString) WHERE $__orgFilter",
+		// A subquery is the documented way past the org-filter requirement: the
+		// outer query supplies OrgId while the inner one does the fetching.
+		"SELECT OrgId FROM traces WHERE $__orgFilter AND SpanId IN (SELECT * FROM url('http://internal/'))",
+		// Case and whitespace are not a bypass.
+		"SELECT * FROM URL ('http://internal/') WHERE $__orgFilter",
+	])("rejects network and filesystem table functions: %s", (sql) => {
+		expect(rawSqlIssue(sql)?.code).toBe("DisallowedFunction")
+	})
+
+	// The check is anchored on the call form, so ordinary names survive.
+	it.each([
+		"SELECT urlHash(Url) AS h FROM traces WHERE $__orgFilter",
+		"SELECT file FROM traces WHERE $__orgFilter",
+		"SELECT domain(Url) AS d FROM traces WHERE $__orgFilter",
+		"SELECT 'url(' AS literal FROM traces WHERE $__orgFilter",
+	])("does not mistake a column or unrelated function for a table function: %s", (sql) => {
+		expect(rawSqlIssue(sql)).toBeNull()
+	})
+
 	it("rejects INTO OUTFILE", () => {
 		expect(rawSqlIssue("SELECT 1 WHERE $__orgFilter INTO OUTFILE '/tmp/x'")?.message).toContain(
 			"INTO OUTFILE",

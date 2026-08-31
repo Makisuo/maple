@@ -755,3 +755,50 @@ describe("handwritten SQL", () => {
 		expect(built.rawSql).toBeUndefined()
 	})
 })
+
+// Params are resolved by rewriting `__PARAM_<kind>_<name>__` across the finished
+// SQL, so a *literal* whose text spells a placeholder used to be rewritten too —
+// and the replacement's own quotes closed the literal it sat in, letting a second
+// user-controlled param continue as SQL past the tenant predicate. The escaper
+// now hex-escapes the marker out of every value; these pin that shut.
+describe("param placeholders inside user literals", () => {
+	const table = CH.table(
+		"metrics",
+		{ OrgId: CH.string, ServiceName: CH.string, Host: CH.string },
+		{ tenantColumn: "OrgId" },
+	)
+
+	const compileWith = (host: string, serviceName: string) =>
+		compileCHUnsafe(
+			CH.from(table)
+				.select(($) => ({ host: $.Host }))
+				.where(($) => [
+					$.OrgId.eq(CH.param.string("orgId")),
+					$.ServiceName.eq(CH.param.string("serviceName")),
+					CH.inList($.Host, [host]),
+				]),
+			{ orgId: "org_victim", serviceName },
+		)
+
+	it("keeps a placeholder-shaped literal as one escaped string", () => {
+		const { sql } = compileWith("__PARAM_string_serviceName__", "svc")
+		expect(sql).toContain("Host IN ('\\x5F_PARAM_string_serviceName__')")
+		expect(sql).toContain("ServiceName = 'svc'")
+	})
+
+	// The payload needs no quotes of its own: the breakout quotes used to come
+	// from the substituted literal's own delimiters. It used to compile to
+	// `Host IN ('') OR 1=1 --'')`, which OR-ed the whole WHERE — OrgId included —
+	// into a tautology while `tenantScope` still read "single-tenant".
+	it("cannot break out of the literal to bypass the tenant predicate", () => {
+		const { sql, tenantScope } = compileWith("__PARAM_string_serviceName__", ") OR 1=1 --")
+
+		// The payload stays inside the param's own literal, and the host predicate
+		// stays one closed literal: no bare `OR` joins them at WHERE level.
+		expect(sql).toContain("ServiceName = ') OR 1=1 --'")
+		expect(sql).toContain("Host IN ('\\x5F_PARAM_string_serviceName__')")
+		expect(sql).not.toMatch(/IN \('[^']*'\)[^\n]*\bOR\b/)
+		expect(sql).toContain("OrgId = 'org_victim'")
+		expect(tenantScope).toBe("single-tenant")
+	})
+})
