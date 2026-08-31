@@ -85,6 +85,8 @@ import { Route as InfraKubernetesNodesIndexRouteImport } from './routes/infra/ku
 import { Route as InfraKubernetesNodesNodeNameRouteImport } from './routes/infra/kubernetes/nodes/$nodeName'
 import { Route as InfraKubernetesPodsIndexRouteImport } from './routes/infra/kubernetes/pods/index'
 import { Route as InfraKubernetesPodsPodNameRouteImport } from './routes/infra/kubernetes/pods/$podName'
+import { Route as InfraKubernetesServicesIndexRouteImport } from './routes/infra/kubernetes/services/index'
+import { Route as InfraKubernetesServicesServiceNameRouteImport } from './routes/infra/kubernetes/services/$serviceName'
 import { Route as InfraKubernetesWorkloadsIndexRouteImport } from './routes/infra/kubernetes/workloads/index'
 import { Route as InfraKubernetesWorkloadsKindWorkloadNameRouteImport } from './routes/infra/kubernetes/workloads/$kind/$workloadName'
 
@@ -476,6 +478,18 @@ const InfraKubernetesPodsPodNameRoute =
     path: '/infra/kubernetes/pods/$podName',
     getParentRoute: () => rootRouteImport,
   } as any)
+const InfraKubernetesServicesIndexRoute =
+  InfraKubernetesServicesIndexRouteImport.update({
+    id: '/infra/kubernetes/services/',
+    path: '/infra/kubernetes/services/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const InfraKubernetesServicesServiceNameRoute =
+  InfraKubernetesServicesServiceNameRouteImport.update({
+    id: '/infra/kubernetes/services/$serviceName',
+    path: '/infra/kubernetes/services/$serviceName',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const InfraKubernetesWorkloadsIndexRoute =
   InfraKubernetesWorkloadsIndexRouteImport.update({
     id: '/infra/kubernetes/workloads/',
@@ -564,8 +578,10 @@ export interface FileRoutesByFullPath {
   '/dashboards/$dashboardId/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
   '/infra/kubernetes/pods/$podName': typeof InfraKubernetesPodsPodNameRoute
+  '/infra/kubernetes/services/$serviceName': typeof InfraKubernetesServicesServiceNameRoute
   '/infra/kubernetes/nodes/': typeof InfraKubernetesNodesIndexRoute
   '/infra/kubernetes/pods/': typeof InfraKubernetesPodsIndexRoute
+  '/infra/kubernetes/services/': typeof InfraKubernetesServicesIndexRoute
   '/infra/kubernetes/workloads/': typeof InfraKubernetesWorkloadsIndexRoute
   '/infra/kubernetes/workloads/$kind/$workloadName': typeof InfraKubernetesWorkloadsKindWorkloadNameRoute
 }
@@ -643,8 +659,10 @@ export interface FileRoutesByTo {
   '/dashboards/$dashboardId/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
   '/infra/kubernetes/pods/$podName': typeof InfraKubernetesPodsPodNameRoute
+  '/infra/kubernetes/services/$serviceName': typeof InfraKubernetesServicesServiceNameRoute
   '/infra/kubernetes/nodes': typeof InfraKubernetesNodesIndexRoute
   '/infra/kubernetes/pods': typeof InfraKubernetesPodsIndexRoute
+  '/infra/kubernetes/services': typeof InfraKubernetesServicesIndexRoute
   '/infra/kubernetes/workloads': typeof InfraKubernetesWorkloadsIndexRoute
   '/infra/kubernetes/workloads/$kind/$workloadName': typeof InfraKubernetesWorkloadsKindWorkloadNameRoute
 }
@@ -724,8 +742,10 @@ export interface FileRoutesById {
   '/dashboards/$dashboardId_/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
   '/infra/kubernetes/pods/$podName': typeof InfraKubernetesPodsPodNameRoute
+  '/infra/kubernetes/services/$serviceName': typeof InfraKubernetesServicesServiceNameRoute
   '/infra/kubernetes/nodes/': typeof InfraKubernetesNodesIndexRoute
   '/infra/kubernetes/pods/': typeof InfraKubernetesPodsIndexRoute
+  '/infra/kubernetes/services/': typeof InfraKubernetesServicesIndexRoute
   '/infra/kubernetes/workloads/': typeof InfraKubernetesWorkloadsIndexRoute
   '/infra/kubernetes/workloads/$kind/$workloadName': typeof InfraKubernetesWorkloadsKindWorkloadNameRoute
 }
@@ -806,8 +826,10 @@ export interface FileRouteTypes {
     | '/dashboards/$dashboardId/widgets/$widgetId'
     | '/infra/kubernetes/nodes/$nodeName'
     | '/infra/kubernetes/pods/$podName'
+    | '/infra/kubernetes/services/$serviceName'
     | '/infra/kubernetes/nodes/'
     | '/infra/kubernetes/pods/'
+    | '/infra/kubernetes/services/'
     | '/infra/kubernetes/workloads/'
     | '/infra/kubernetes/workloads/$kind/$workloadName'
   fileRoutesByTo: FileRoutesByTo
@@ -885,8 +907,10 @@ export interface FileRouteTypes {
     | '/dashboards/$dashboardId/widgets/$widgetId'
     | '/infra/kubernetes/nodes/$nodeName'
     | '/infra/kubernetes/pods/$podName'
+    | '/infra/kubernetes/services/$serviceName'
     | '/infra/kubernetes/nodes'
     | '/infra/kubernetes/pods'
+    | '/infra/kubernetes/services'
     | '/infra/kubernetes/workloads'
     | '/infra/kubernetes/workloads/$kind/$workloadName'
   id:
@@ -965,8 +989,10 @@ export interface FileRouteTypes {
     | '/dashboards/$dashboardId_/widgets/$widgetId'
     | '/infra/kubernetes/nodes/$nodeName'
     | '/infra/kubernetes/pods/$podName'
+    | '/infra/kubernetes/services/$serviceName'
     | '/infra/kubernetes/nodes/'
     | '/infra/kubernetes/pods/'
+    | '/infra/kubernetes/services/'
     | '/infra/kubernetes/workloads/'
     | '/infra/kubernetes/workloads/$kind/$workloadName'
   fileRoutesById: FileRoutesById
@@ -1030,8 +1056,10 @@ export interface RootRouteChildren {
   DashboardsDashboardIdWidgetsWidgetIdRoute: typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   InfraKubernetesNodesNodeNameRoute: typeof InfraKubernetesNodesNodeNameRoute
   InfraKubernetesPodsPodNameRoute: typeof InfraKubernetesPodsPodNameRoute
+  InfraKubernetesServicesServiceNameRoute: typeof InfraKubernetesServicesServiceNameRoute
   InfraKubernetesNodesIndexRoute: typeof InfraKubernetesNodesIndexRoute
   InfraKubernetesPodsIndexRoute: typeof InfraKubernetesPodsIndexRoute
+  InfraKubernetesServicesIndexRoute: typeof InfraKubernetesServicesIndexRoute
   InfraKubernetesWorkloadsIndexRoute: typeof InfraKubernetesWorkloadsIndexRoute
   InfraKubernetesWorkloadsKindWorkloadNameRoute: typeof InfraKubernetesWorkloadsKindWorkloadNameRoute
 }
@@ -1570,6 +1598,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InfraKubernetesPodsPodNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/infra/kubernetes/services/': {
+      id: '/infra/kubernetes/services/'
+      path: '/infra/kubernetes/services'
+      fullPath: '/infra/kubernetes/services/'
+      preLoaderRoute: typeof InfraKubernetesServicesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/infra/kubernetes/services/$serviceName': {
+      id: '/infra/kubernetes/services/$serviceName'
+      path: '/infra/kubernetes/services/$serviceName'
+      fullPath: '/infra/kubernetes/services/$serviceName'
+      preLoaderRoute: typeof InfraKubernetesServicesServiceNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/infra/kubernetes/workloads/': {
       id: '/infra/kubernetes/workloads/'
       path: '/infra/kubernetes/workloads'
@@ -1689,8 +1731,11 @@ const rootRouteChildren: RootRouteChildren = {
     DashboardsDashboardIdWidgetsWidgetIdRoute,
   InfraKubernetesNodesNodeNameRoute: InfraKubernetesNodesNodeNameRoute,
   InfraKubernetesPodsPodNameRoute: InfraKubernetesPodsPodNameRoute,
+  InfraKubernetesServicesServiceNameRoute:
+    InfraKubernetesServicesServiceNameRoute,
   InfraKubernetesNodesIndexRoute: InfraKubernetesNodesIndexRoute,
   InfraKubernetesPodsIndexRoute: InfraKubernetesPodsIndexRoute,
+  InfraKubernetesServicesIndexRoute: InfraKubernetesServicesIndexRoute,
   InfraKubernetesWorkloadsIndexRoute: InfraKubernetesWorkloadsIndexRoute,
   InfraKubernetesWorkloadsKindWorkloadNameRoute:
     InfraKubernetesWorkloadsKindWorkloadNameRoute,
