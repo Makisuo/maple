@@ -279,11 +279,16 @@ function NavRow({
 	// dropped once the section opens and the real rows are on screen. Repeated
 	// marks collapse to one: Infrastructure's three k8s pages share a glyph, and
 	// drawing it three times both crowds the label and overstates the variety.
+	//
+	// Drawn from *every* child, not the pruned `shown` list: the preview says
+	// what the section covers, and an org running only hosts should still see
+	// that Docker, Kubernetes, Cloudflare and PlanetScale live behind the row.
+	// The pruning is about how many rows you scroll past when it's open.
 	const preview = useMemo(() => {
-		if (isOpen || !subItems?.every((sub) => sub.icon)) return undefined
+		if (isOpen || !item.subItems?.every((sub) => sub.icon)) return undefined
 		const seen = new Set<NavSubItem["icon"]>()
 		const unique: NavSubItem[] = []
-		for (const sub of subItems) {
+		for (const sub of item.subItems) {
 			if (!sub.icon || seen.has(sub.icon)) continue
 			seen.add(sub.icon)
 			unique.push(sub)
@@ -293,7 +298,7 @@ function NavRow({
 		// preview is all or nothing. Five fits both sections we ship (Explore
 		// with Agent Sessions on, Infrastructure) at the tightened gap below.
 		return unique.length > 5 ? undefined : unique
-	}, [isOpen, subItems])
+	}, [isOpen, item.subItems])
 
 	// The sub-list can't render at 48px, so the rail turns the row into a menu.
 	// Without this, every child route is stranded while the sidebar is collapsed

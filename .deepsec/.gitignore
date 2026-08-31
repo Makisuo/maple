@@ -7,3 +7,5 @@ data/*/files/
 data/*/runs/
 data/*/reports/
 data/*/project.json
+.vercel
+.env*

@@ -1,0 +1,642 @@
+{
+  "infoMarkdown": "# maple\n\n## What this codebase does\n\nMaple is a multi-tenant OpenTelemetry observability platform with separate edge, ingestion,\nbackground-processing, local-mode, and agent-facing deployables.\n\n- The Rust ingest gateway accepts OTLP traces, logs, and metrics, browser replay and product\n  events, Cloudflare Logpush data, and optional OTLP gRPC traffic.\n- The Effect-based Cloudflare API exposes versioned product APIs, dashboard-internal APIs,\n  webhook receivers, SSE chat sessions, MCP tools, service-binding RPC, queues, and workflows.\n- Warehouse reads compile through Maple's ClickHouse query engine and execute against Tinybird,\n  managed ClickHouse, customer ClickHouse, or embedded chDB depending on tenant and mode.\n- The React dashboard, Electric shape proxy, and CLI consume those APIs; the CLI can also run a\n  local OTLP and SQL server backed by embedded chDB.\n- Cron workers evaluate alerts, anomalies, digests, integrations, retention, and AI-assisted error\n  investigations. A separate Slack agent invokes Maple through the authenticated MCP surface.\n\n## Auth shape\n\nAuthentication is deliberately different at each ingress boundary; there is no single global\nmiddleware covering every route family.\n\n- Product HTTP routes resolve `CurrentTenant` from Maple API keys, Clerk sessions, or self-hosted\n  session identities. V2 keys additionally carry scopes, and sensitive mutations check org roles.\n- MCP accepts tenant-scoped API keys, browser sessions, and a narrowly defined internal-service\n  mode. It installs `CurrentMcpTenant` before dispatch and rate-limits tool calls per principal.\n- Ingest resolves bearer or ingest-key headers through an HMAC-backed key store, then overwrites\n  client-supplied organization identity with the organization bound to that key.\n- Public webhook routes authenticate the raw request with Svix, GitHub-provider, PlanetScale, or\n  Slack signatures. OAuth callbacks instead rely on stored, expiring state.\n- Scraper and Slack service routes use timing-safe shared-bearer checks. Cloudflare RPC, queues,\n  cron events, workflows, and Durable Objects rely on platform binding isolation plus input decode.\n\n## Threat model\n\n- Internet clients control large compressed protobuf, JSON, NDJSON, replay, and metric payloads;\n  body, decompression, cardinality, parser, and downstream write limits are primary controls.\n- Cross-tenant access is the central authorization risk: org IDs appear in session IDs, headers,\n  queue jobs, RPC payloads, ClickHouse predicates, Postgres rows, cache keys, and agent context.\n- Telemetry text is attacker-influenced and later rendered in the dashboard or supplied to LLMs.\n  Treat log bodies, exceptions, span attributes, and tool output as prompt-injection and XSS input.\n- Scrape targets, integration APIs, OAuth providers, customer ClickHouse endpoints, and Logpush\n  connectors create outbound-request and credential-forwarding boundaries where SSRF matters.\n- Signed webhooks and asynchronous jobs may be replayed or delivered more than once; signature\n  freshness, idempotent persistence, queue decoding, retry limits, and terminal states need review.\n\n## Project-specific patterns to flag\n\n- Every warehouse query must carry an `OrgId` predicate. Verify that raw SQL, query-builder input,\n  cache keys, and service-binding RPC never bypass the executor's tenant enforcement.\n- Effect `HttpApi` routes receive schema decoding and typed failure mapping, while raw `HttpRouter`\n  routes such as SSE, OAuth, webhook, scraper, and MCP adapters must implement those checks manually.\n- Request-derived cursors, dates, bucket sizes, IDs, and query values should be constrained at the\n  HTTP boundary; compilation or decoding failures should not become generic 500 responses.\n- Internal RPC and queue bodies are only structured-cloned by Cloudflare unless explicitly decoded.\n  Treat caller-provided org IDs as trusted only after confirming the binding's caller set.\n- Review decrypted integration credentials, API-key secrets, Slack workspace caches, trace fields,\n  and error logs for accidental retention or cross-tenant reuse.\n\n## Known false-positives\n\n- `/health`, `/ready`, CORS preflight, discovery metadata, selected billing/catalog routes, and\n  signed OAuth or webhook callbacks are intentionally reachable without a user session.\n- The ingest onboarding sentinel intentionally acknowledges and discards payloads without resolving\n  a tenant; it is not a production ingest credential.\n- Expected ingest and scraper rejections in the 4xx range intentionally leave server spans `Ok`;\n  Maple follows the repository's OpenTelemetry status convention that only 5xx is `Error`.\n- The local CLI server intentionally permits loopback OTLP ingestion and arbitrary local SQL without\n  product authentication. Reassess this only when a non-loopback bind is allowed.\n- There are no Tinybird pipes or endpoints to audit. Domain endpoint declarations are type-only,\n  and production warehouse access is expected to pass through `WarehouseQueryService`.",
+  "surfaces": [
+    {
+      "id": "api-v1-http",
+      "kind": "http",
+      "description": "Cloudflare API worker and legacy/product HTTP routes, including auth, organizations, integrations, errors, replay, and SSE chat.",
+      "fileGlobs": [
+        "apps/api/src/worker.ts",
+        "apps/api/src/runtime/http-graph.ts",
+        "apps/api/src/routes/v1/*.http.ts",
+        "packages/domain/src/http/*.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "override fetch\\(|HttpApiBuilder\\.group|HttpRouter\\.use|router\\.add\\(",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/api/src/worker.ts",
+        "apps/api/src/routes/v1/auth.http.ts",
+        "apps/api/src/routes/v1/chat-sessions.http.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "CurrentTenant.Authorization",
+        "ApiAuthorizationLayer",
+        "SessionAuthorizationLayer",
+        "requireAdmin"
+      ],
+      "exposure": "mixed"
+    },
+    {
+      "id": "api-v2-http",
+      "kind": "http",
+      "description": "Versioned public API for telemetry queries and Maple resources, with scoped API keys, pagination, and v2 error envelopes.",
+      "fileGlobs": [
+        "apps/api/src/worker.ts",
+        "apps/api/src/routes/v2/*.http.ts",
+        "packages/domain/src/http/v2/*.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "HttpApiBuilder\\.group\\(MapleApiV2|\\.handle\\(",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/api/src/routes/v2/api-keys.http.ts",
+        "packages/domain/src/http/v2/auth.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "ApiAuthorizationV2Layer",
+        "CurrentTenant.Context",
+        "API key scopes",
+        "requireAdmin"
+      ],
+      "exposure": "mixed"
+    },
+    {
+      "id": "dashboard-internal-http",
+      "kind": "http",
+      "description": "Browser-dashboard APIs for query execution, billing, AI triage, chat, digests, demos, and replay data.",
+      "fileGlobs": [
+        "apps/api/src/routes/internal/*.http.ts",
+        "packages/domain/src/http/internal-api.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "MapleInternalApi|CurrentTenant\\.Context|\\.handle\\(",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/api/src/routes/internal/ai-triage.http.ts",
+        "apps/api/src/routes/internal/digest.http.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "SessionAuthorizationLayer",
+        "CurrentTenant.Context",
+        "requireAdmin"
+      ],
+      "exposure": "authenticated"
+    },
+    {
+      "id": "scraper-service-http",
+      "kind": "http",
+      "description": "Internal endpoints used by the Prometheus scraper to list targets, proxy credentialed scrapes, and report outcomes.",
+      "fileGlobs": [
+        "apps/api/src/routes/v1/scraper-internal.http.ts",
+        "apps/api/src/routes/v1/prometheus-scrape-proxy.http.ts",
+        "apps/api/src/services/auth/internal-auth.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "/api/internal/(scrape-targets|scrape-results|prometheus-scrape)|isValidInternalBearer",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/api/src/routes/v1/scraper-internal.http.ts",
+        "apps/api/src/routes/v1/prometheus-scrape-proxy.http.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "isValidInternalBearer",
+        "timingSafeEqual",
+        "server-side scrape credential resolution",
+        "SSRF target validation"
+      ],
+      "exposure": "internal"
+    },
+    {
+      "id": "slack-integration-http",
+      "kind": "http",
+      "description": "Slack OAuth callback plus service-only workspace resolution, revocation, and AI-usage reporting endpoints.",
+      "fileGlobs": [
+        "apps/api/src/routes/v1/slack-integration.http.ts",
+        "apps/api/src/services/integrations/SlackIntegrationService.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "SlackCallbackRouter|SlackInternalRouter|/internal/slack/workspaces|isValidServiceBearer",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/api/src/routes/v1/slack-integration.http.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "OAuthStateRepository",
+        "CurrentTenant.Context",
+        "isValidServiceBearer",
+        "timingSafeEqual"
+      ],
+      "exposure": "mixed"
+    },
+    {
+      "id": "api-webhooks",
+      "kind": "webhook",
+      "description": "Public Clerk, Autumn, GitHub, and PlanetScale webhook receivers that verify raw-body signatures before processing or enqueueing.",
+      "fileGlobs": [
+        "apps/api/src/routes/webhooks/*.http.ts",
+        "apps/api/src/routes/webhooks/svix-receiver.ts",
+        "apps/api/src/routes/v1/*webhook.http.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "receiveSvixWebhook|verifySvixSignature|verifyPlanetScaleSignature|webhookToJobs",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/api/src/routes/webhooks/clerk.http.ts",
+        "apps/api/src/routes/v1/vcs-webhook.http.ts",
+        "apps/api/src/routes/v1/planetscale-webhook.http.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "verifySvixSignature",
+        "provider.webhookToJobs",
+        "verifyPlanetScaleSignature",
+        "raw-body signature verification"
+      ],
+      "exposure": "public"
+    },
+    {
+      "id": "api-mcp-agent-tools",
+      "kind": "agent-tool",
+      "description": "Streamable HTTP MCP server exposing tenant-scoped observability queries and approved product mutations to agents.",
+      "fileGlobs": [
+        "apps/api/src/mcp/app.ts",
+        "apps/api/src/mcp/server.ts",
+        "apps/api/src/mcp/dispatcher.ts",
+        "apps/api/src/mcp/lib/query-warehouse.ts",
+        "apps/api/src/mcp/lib/resolve-tenant.ts",
+        "apps/api/src/mcp/tools/registry.ts",
+        "apps/api/src/mcp/tools/run-sql.ts",
+        "apps/api/src/mcp/tools/mutating.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "McpAuthorizationMiddleware|resolveMcpTenantContext|McpToolExecutor|server\\.tool\\(",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/api/src/mcp/app.ts",
+        "apps/api/src/mcp/server.ts",
+        "apps/api/src/mcp/dispatcher.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "resolveMcpTenantContext",
+        "McpAuthorizationMiddleware",
+        "CurrentMcpTenant",
+        "McpToolRateLimiter"
+      ],
+      "exposure": "authenticated"
+    },
+    {
+      "id": "cloudflare-rpc-and-durable-objects",
+      "kind": "rpc",
+      "description": "Cloudflare service-binding RPC for MCP and diagnosis operations, plus the Durable Object RPC backing authenticated chat sessions.",
+      "fileGlobs": [
+        "apps/api/src/worker.ts",
+        "apps/api/src/internal-rpc.ts",
+        "packages/domain/src/internal-rpc.ts",
+        "apps/api/src/chat/ChatSession.ts",
+        "apps/api/src/routes/v1/chat-sessions.http.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "listMcpTools\\(|callMcpTool\\(|submitDiagnosis\\(|extends DurableObject|beginTurn\\(",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/api/src/internal-rpc.ts",
+        "apps/api/src/chat/ChatSession.ts",
+        "apps/api/src/routes/v1/chat-sessions.http.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "Cloudflare service binding isolation",
+        "Schema.decodeUnknownEffect",
+        "orgIdFromChatSessionId",
+        "resolved tenant-to-session org match"
+      ],
+      "exposure": "internal"
+    },
+    {
+      "id": "api-queue-consumers",
+      "kind": "queue",
+      "description": "Cloudflare queue consumers for VCS synchronization and PlanetScale webhook persistence, with explicit ack, retry, and terminal handling.",
+      "fileGlobs": [
+        "apps/api/src/worker.ts",
+        "apps/api/src/queue-dispatch.ts",
+        "apps/api/src/*-runtime.ts",
+        "apps/api/src/services/integrations/vcs/VcsSyncQueue.ts",
+        "apps/api/src/services/integrations/planetscale/PlanetScaleWebhookQueue.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "override queue\\(|MessageBatch<|message\\.(ack|retry)\\(|processBatch",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/api/src/queue-dispatch.ts",
+        "apps/api/src/vcs-sync-runtime.ts",
+        "apps/api/src/planetscale-webhook-runtime.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "Cloudflare queue binding",
+        "queue-name classification",
+        "Schema.decodeUnknownEffect",
+        "message ack/retry discipline"
+      ],
+      "exposure": "internal"
+    },
+    {
+      "id": "api-cron-jobs",
+      "kind": "cron",
+      "description": "API-worker schedules for VCS reconciliation, scrape and PlanetScale retention, and Slack workspace reconciliation.",
+      "fileGlobs": [
+        "apps/api/src/worker.ts",
+        "apps/api/src/*-runtime.ts",
+        "apps/api/src/services/integrations/scrape-check-retention.ts",
+        "apps/api/src/services/integrations/planetscale-event-retention.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "override scheduled\\(|event\\.cron|runScheduledSync|runSlackReconciliation|Retention",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/api/src/worker.ts",
+        "apps/api/src/vcs-sync-runtime.ts",
+        "apps/api/src/slack-reconcile-runtime.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "Cloudflare cron binding",
+        "withPgConnectionScope",
+        "platform-controlled schedule dispatch"
+      ],
+      "exposure": "internal"
+    },
+    {
+      "id": "alerting-cron-worker",
+      "kind": "cron",
+      "description": "Scheduled-only worker evaluating alerts, errors, anomalies, digests, escalations, fix verification, integrations, and service-map rollups.",
+      "fileGlobs": [
+        "apps/alerting/src/worker.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "selectScheduledProgram|async scheduled\\(|scheduledTicks",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/alerting/src/worker.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "Cloudflare cron binding",
+        "production-stage gate",
+        "withPgConnectionScope",
+        "per-org service isolation"
+      ],
+      "exposure": "internal"
+    },
+    {
+      "id": "cloudflare-workflows",
+      "kind": "other",
+      "description": "Durable Cloudflare workflows for customer ClickHouse schema application and fan-out AI investigations.",
+      "fileGlobs": [
+        "apps/api/src/workflows/*Workflow.ts",
+        "apps/api/src/workflows/*Workflow.run.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "extends WorkflowEntrypoint|override async run\\(|WorkflowEvent<",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/api/src/workflows/ClickHouseSchemaApplyWorkflow.ts",
+        "apps/api/src/workflows/InvestigationFanoutWorkflow.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "Cloudflare workflow binding",
+        "typed workflow payload",
+        "tenant encoded in initiating service context",
+        "durable step idempotency"
+      ],
+      "exposure": "internal"
+    },
+    {
+      "id": "ingest-http",
+      "kind": "http",
+      "description": "Rust Axum gateway for OTLP HTTP, replay, product-event, and Cloudflare Logpush ingestion, plus health and readiness endpoints.",
+      "fileGlobs": [
+        "apps/ingest/src/main.rs"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "\\.route\\(\"/(health|ready|v1/)|handle_(traces|logs|metrics|replay|session|product|cloudflare)",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/ingest/src/main.rs"
+      ],
+      "expectedAuthPrimitives": [
+        "extract_ingest_key",
+        "resolve_ingest_key",
+        "HMAC-backed key lookup",
+        "resolve_connector"
+      ],
+      "exposure": "mixed"
+    },
+    {
+      "id": "ingest-otlp-grpc",
+      "kind": "rpc",
+      "description": "Optional public OTLP gRPC services for traces, logs, and metrics using the same tenant key resolution and ingestion pipeline.",
+      "fileGlobs": [
+        "apps/ingest/src/main.rs"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "TraceServiceServer::new|LogsServiceServer::new|MetricsServiceServer::new|resolve_grpc_ingest_key",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/ingest/src/main.rs"
+      ],
+      "expectedAuthPrimitives": [
+        "resolve_grpc_ingest_key",
+        "resolve_ingest_key",
+        "tenant scope overwrite",
+        "per-org quota enforcement"
+      ],
+      "exposure": "authenticated"
+    },
+    {
+      "id": "electric-shape-proxy",
+      "kind": "http",
+      "description": "Electric synchronization proxy exposing a fixed registry of tenant-filtered Postgres shapes to authenticated dashboard clients.",
+      "fileGlobs": [
+        "apps/electric-sync/src/worker.ts",
+        "apps/electric-sync/src/routes/*.http.ts",
+        "apps/electric-sync/src/auth/TenantResolver.ts",
+        "apps/electric-sync/src/shapes/registry.ts",
+        "apps/electric-sync/src/shapes/request.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "override fetch\\(|makeResolveTenant|shapeRegistry|buildShapeRequest",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/electric-sync/src/worker.ts",
+        "apps/electric-sync/src/routes/shape.http.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "makeResolveTenant",
+        "bearer session resolution",
+        "registered shape allowlist",
+        "server-pinned organization predicate"
+      ],
+      "exposure": "authenticated"
+    },
+    {
+      "id": "maple-cli",
+      "kind": "cli",
+      "description": "Command-line entrypoint for remote telemetry queries, authentication, local data, schema, archive, and embedded-server operations.",
+      "fileGlobs": [
+        "apps/cli/src/bin.ts",
+        "apps/cli/src/cli.ts",
+        "apps/cli/src/commands/*.ts",
+        "apps/cli/src/core/credential-store.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "Command\\.make|BunRuntime\\.runMain|credential|authorization",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/cli/src/bin.ts",
+        "apps/cli/src/cli.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "credential store",
+        "tenant-scoped API key",
+        "device authorization flow",
+        "remote API bearer header"
+      ],
+      "exposure": "internal"
+    },
+    {
+      "id": "local-query-and-otlp-server",
+      "kind": "http",
+      "description": "CLI-hosted local server for OTLP ingestion, arbitrary chDB SQL, checkpoint maintenance, retention, health, and the embedded UI.",
+      "fileGlobs": [
+        "apps/cli/src/server/serve.ts",
+        "apps/cli/src/server/chdb.ts",
+        "apps/cli/src/server/otlp/proto.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "Bun\\.serve|/local/query|/v1/(traces|logs|metrics)|/local/(checkpoint|retention)",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/cli/src/server/serve.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "loopback bind default",
+        "Host and Origin validation",
+        "maintenance bearer token",
+        "local trust boundary"
+      ],
+      "exposure": "internal"
+    },
+    {
+      "id": "prometheus-scraper-job",
+      "kind": "cron",
+      "description": "Long-running scheduler that polls internal target configuration, scrapes through the API-side proxy, emits OTLP metrics, and reports results.",
+      "fileGlobs": [
+        "apps/scraper/src/main.ts",
+        "apps/scraper/src/ScrapeScheduler.ts",
+        "apps/scraper/src/ApiClient.ts",
+        "apps/scraper/src/OtlpIngest.ts",
+        "apps/scraper/src/Env.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "ScrapeScheduler|Schedule\\.spaced|listTargets\\(|scrapeTarget\\(|Bun\\.serve",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/scraper/src/main.ts",
+        "apps/scraper/src/ScrapeScheduler.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "internal service bearer",
+        "per-organization ingest key",
+        "API-side credential decryption",
+        "API-side SSRF protection"
+      ],
+      "exposure": "mixed"
+    },
+    {
+      "id": "slack-agent-webhook",
+      "kind": "webhook",
+      "description": "Railway-hosted Eve service receiving Slack events, verifying signatures, resolving workspace credentials, and exposing locked Eve session routes.",
+      "fileGlobs": [
+        "apps/slack-agent/agent/channels/slack.ts",
+        "apps/slack-agent/agent/channels/eve.ts",
+        "apps/slack-agent/agent/lib/maple.ts",
+        "apps/slack-agent/agent/agent.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "slackChannel\\(|webhookVerifier|verifySlackV0Signature|eveChannel\\(|httpBasic",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/slack-agent/agent/channels/slack.ts",
+        "apps/slack-agent/agent/channels/eve.ts",
+        "apps/slack-agent/agent/lib/maple.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "verifySlackV0Signature",
+        "timestamp freshness check",
+        "timingSafeEqual",
+        "httpBasic",
+        "per-team workspace resolution"
+      ],
+      "exposure": "mixed"
+    },
+    {
+      "id": "slack-agent-tools",
+      "kind": "agent-tool",
+      "description": "Slack agent tool boundary: authenticated Maple MCP connection, human approval for mutations, Slack-context tools, and explicit disabling of unsafe framework tools.",
+      "fileGlobs": [
+        "apps/slack-agent/agent/tools/*.ts",
+        "apps/slack-agent/agent/connections/maple.ts",
+        "apps/slack-agent/agent/lib/approval.ts"
+      ],
+      "anchorPatterns": [
+        {
+          "source": "defineMcpClientConnection|mapleToolApproval|disableTool\\(|defineTool",
+          "flags": "i"
+        }
+      ],
+      "representativeFiles": [
+        "apps/slack-agent/agent/connections/maple.ts",
+        "apps/slack-agent/agent/lib/approval.ts"
+      ],
+      "expectedAuthPrimitives": [
+        "workspace-scoped Maple API key",
+        "mapleToolApproval",
+        "human approval for mutations",
+        "disabled host and exfiltration tools"
+      ],
+      "exposure": "authenticated"
+    }
+  ],
+  "inspectedPaths": [
+    "README.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "package.json",
+    "apps/api/package.json",
+    "apps/alerting/package.json",
+    "apps/cli/package.json",
+    "apps/electric-sync/package.json",
+    "apps/ingest/package.json",
+    "apps/ingest/Cargo.toml",
+    "apps/scraper/package.json",
+    "apps/slack-agent/package.json",
+    "apps/web/package.json",
+    "apps/api/src/index.ts",
+    "apps/api/src/worker.ts",
+    "apps/api/src/runtime/http-graph.ts",
+    "apps/api/src/services/auth/auth.ts",
+    "apps/api/src/services/auth/ApiAuthorizationLayer.ts",
+    "apps/api/src/services/auth/ApiAuthorizationV2Layer.ts",
+    "apps/api/src/services/auth/SessionAuthorizationLayer.ts",
+    "apps/api/src/services/auth/internal-auth.ts",
+    "apps/api/src/services/auth/scrape-auth.ts",
+    "packages/auth/src/index.ts",
+    "packages/domain/src/http/current-tenant.ts",
+    "packages/domain/src/http/v2/auth.ts",
+    "packages/domain/src/http/api.ts",
+    "packages/domain/src/http/internal-api.ts",
+    "packages/domain/src/http/v2/api.ts",
+    "packages/domain/src/internal-rpc.ts",
+    "apps/api/src/routes/v1/auth.http.ts",
+    "apps/api/src/routes/v1/chat-sessions.http.ts",
+    "apps/api/src/routes/v1/planetscale-webhook.http.ts",
+    "apps/api/src/routes/v1/vcs-webhook.http.ts",
+    "apps/api/src/routes/v1/prometheus-scrape-proxy.http.ts",
+    "apps/api/src/routes/v1/scraper-internal.http.ts",
+    "apps/api/src/routes/v1/slack-integration.http.ts",
+    "apps/api/src/routes/v2/api-keys.http.ts",
+    "apps/api/src/routes/internal/ai-triage.http.ts",
+    "apps/api/src/routes/internal/digest.http.ts",
+    "apps/api/src/routes/internal/demo.http.ts",
+    "apps/api/src/routes/webhooks/clerk.http.ts",
+    "apps/api/src/routes/webhooks/autumn.http.ts",
+    "apps/api/src/routes/webhooks/svix-receiver.ts",
+    "apps/api/src/mcp/app.ts",
+    "apps/api/src/mcp/server.ts",
+    "apps/api/src/mcp/dispatcher.ts",
+    "apps/api/src/mcp/lib/query-warehouse.ts",
+    "apps/api/src/mcp/lib/resolve-tenant.ts",
+    "apps/api/src/internal-rpc.ts",
+    "apps/api/src/queue-dispatch.ts",
+    "apps/api/src/alerting.ts",
+    "apps/api/src/vcs-sync-runtime.ts",
+    "apps/api/src/planetscale-webhook-runtime.ts",
+    "apps/api/src/slack-reconcile-runtime.ts",
+    "apps/api/src/workflows/ClickHouseSchemaApplyWorkflow.ts",
+    "apps/api/src/workflows/InvestigationFanoutWorkflow.ts",
+    "apps/api/src/chat/ChatSession.ts",
+    "apps/alerting/src/worker.ts",
+    "apps/electric-sync/src/worker.ts",
+    "apps/electric-sync/src/routes/shape.http.ts",
+    "apps/electric-sync/src/auth/TenantResolver.ts",
+    "apps/electric-sync/src/config.ts",
+    "apps/electric-sync/src/shapes/registry.ts",
+    "apps/electric-sync/src/shapes/request.ts",
+    "apps/ingest/src/main.rs",
+    "apps/cli/src/bin.ts",
+    "apps/cli/src/cli.ts",
+    "apps/cli/src/server/serve.ts",
+    "apps/scraper/src/main.ts",
+    "apps/scraper/src/ApiClient.ts",
+    "apps/scraper/src/OtlpIngest.ts",
+    "apps/scraper/src/Env.ts",
+    "apps/scraper/src/ScrapeScheduler.ts",
+    "apps/slack-agent/agent/channels/slack.ts",
+    "apps/slack-agent/agent/channels/eve.ts",
+    "apps/slack-agent/agent/agent.ts",
+    "apps/slack-agent/agent/connections/maple.ts",
+    "apps/slack-agent/agent/lib/maple.ts",
+    "apps/slack-agent/agent/lib/approval.ts",
+    "apps/slack-agent/agent/tools/web_fetch.ts",
+    "apps/slack-agent/agent/tools/bash.ts",
+    "apps/slack-agent/agent/tools/write_file.ts",
+    "apps/slack-agent/agent/tools/read_file.ts",
+    "apps/slack-agent/agent/tools/web_search.ts",
+    "apps/slack-agent/agent/tools/glob.ts",
+    "apps/slack-agent/agent/tools/grep.ts"
+  ]
+}
