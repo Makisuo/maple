@@ -16,7 +16,7 @@
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
-import { from, fromUnion, unionAll, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
+import { defineCondFn, from, fromUnion, unionAll, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import { httpDisplaySpanName } from "../../traces-shared"
 import { CHNumber } from "../schema"
 import { ServiceOperationsHourly, ServiceOperationsMinutely, Traces } from "../tables"
@@ -28,6 +28,12 @@ export interface ServiceOperationsSummaryOpts {
 	serviceName: string
 	environments?: readonly string[]
 	limit?: number
+	/**
+	 * Restrict to HTTP server endpoints — rows whose normalized name is
+	 * `METHOD /route`. Backs the service detail page's API tab; the Operations
+	 * tab leaves it unset and keeps internal spans in the ranking.
+	 */
+	httpOnly?: boolean
 }
 
 export interface ServiceOperationsSummaryOutput {
@@ -40,6 +46,7 @@ export interface ServiceOperationsSummaryOutput {
 	readonly avgDurationMs: number
 	readonly p50DurationMs: number
 	readonly p95DurationMs: number
+	readonly p99DurationMs: number
 }
 
 /**
@@ -56,17 +63,41 @@ export const serviceOperationsSummaryRowSchema = Schema.Struct({
 	avgDurationMs: CHNumber,
 	p50DurationMs: CHNumber,
 	p95DurationMs: CHNumber,
+	p99DurationMs: CHNumber,
 })
 
 const displaySpanName = ($: ColumnAccessor<typeof Traces.columns>) =>
 	httpDisplaySpanName($.SpanName, $.SpanAttributes.get("http.route"), $.SpanAttributes.get("url.path"))
 
-const RAW_DURATION_STATE = "quantilesTDigestState(0.5, 0.95)(Duration)"
-const ROLLUP_DURATION_STATE = "quantilesTDigestMergeState(0.5, 0.95)(DurationQuantiles)"
+// p50/p95/p99 off states that `service_operations_minutely/_hourly` wrote with
+// only `quantilesTDigest(0.5, 0.95)` (migration 0008). ClickHouse takes a WIDER
+// parameter list on the merge combinator than the stored state declares — the
+// t-digest centroids are the state, the quantile levels are a finalize-time
+// parameter — so p99 needed no migration and covers the full 90d/365d history,
+// not just buckets sealed after a schema change. Verified on CH 26.2 against a
+// real `AggregateFunction(quantilesTDigest(0.5, 0.95), UInt64)` column and
+// through the cascading `MergeState`, which re-types to the wider signature and
+// so unions cleanly with the raw branch's three-level state.
+/**
+ * The method set is deliberately identical to the one `normalizedSpanNameExpr`
+ * rewrites on. Widening it here (TRACE, CONNECT) would match spans the
+ * normalizer never produced — a span literally named `TRACE foo` is not an
+ * HTTP endpoint — so the read filter and the write-side rewrite move together.
+ */
+const HTTP_ENDPOINT_NAME_RE = "^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) "
+
+const matchRegex = defineCondFn<[CH.Expr<string>, string]>("match")
+
+/** Undefined when `httpOnly` is unset, so the Operations tab's SQL is unchanged. */
+const httpEndpointCondition = (name: CH.Expr<string>, httpOnly: boolean | undefined) =>
+	httpOnly ? matchRegex(name, HTTP_ENDPOINT_NAME_RE) : undefined
+
+const RAW_DURATION_STATE = "quantilesTDigestState(0.5, 0.95, 0.99)(Duration)"
+const ROLLUP_DURATION_STATE = "quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles)"
 
 /** The t-digest type both branches above produce — opaque, merged by the outer
  *  level, never decoded as a row. */
-const DURATION_STATE = T.aggregateState("quantilesTDigest(0.5, 0.95)", "UInt64")
+const DURATION_STATE = T.aggregateState("quantilesTDigest(0.5, 0.95, 0.99)", "UInt64")
 
 function rollupEnvironmentCondition(
 	$: ColumnAccessor<typeof ServiceOperationsMinutely.columns>,
@@ -82,9 +113,9 @@ function hourlyEnvironmentCondition(
 	return environments?.length ? CH.inList($.DeploymentEnv, environments) : undefined
 }
 
-const mergedDurationQuantile = (index: 1 | 2) =>
+const mergedDurationQuantile = (index: 1 | 2 | 3) =>
 	CH.rawExpr(
-		`if(sum(bSpanCount) > 0, arrayElement(quantilesTDigestMerge(0.5, 0.95)(bDurationQuantiles), ${index}) / 1000000, 0)`,
+		`if(sum(bSpanCount) > 0, arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), ${index}) / 1000000, 0)`,
 		T.float64,
 	)
 
@@ -107,14 +138,16 @@ export function serviceOperationsSummaryRawQuery(opts: ServiceOperationsSummaryO
 				avgDurationMs: CH.avg($.Duration).div(1_000_000),
 				p50DurationMs: CH.quantile(0.5)($.Duration).div(1_000_000),
 				p95DurationMs: CH.quantile(0.95)($.Duration).div(1_000_000),
+				p99DurationMs: CH.quantile(0.99)($.Duration).div(1_000_000),
 			}
 		})
-		.where(($) =>
-			tracesBaseWhereConditions($, {
+		.where(($) => [
+			...tracesBaseWhereConditions($, {
 				serviceName: opts.serviceName,
 				environments: opts.environments,
 			}),
-		)
+			httpEndpointCondition(displaySpanName($), opts.httpOnly),
+		])
 		.groupBy("spanName")
 		.orderBy(["estimatedSpanCount", "desc"])
 		.limit(opts.limit ?? 25)
@@ -138,6 +171,7 @@ export function serviceOperationsSummaryQuery(opts: ServiceOperationsSummaryOpts
 				environments: opts.environments,
 			}),
 			edgeCondition("Timestamp", minuteGrain),
+			httpEndpointCondition(displaySpanName($), opts.httpOnly),
 		])
 		.groupBy("bSpanName")
 
@@ -157,6 +191,7 @@ export function serviceOperationsSummaryQuery(opts: ServiceOperationsSummaryOpts
 			rollupEnvironmentCondition($, opts.environments),
 			...interiorConditions($.Minute, minuteGrain),
 			edgeCondition("Minute", hourGrain),
+			httpEndpointCondition($.SpanName, opts.httpOnly),
 		])
 		.groupBy("bSpanName")
 
@@ -175,6 +210,7 @@ export function serviceOperationsSummaryQuery(opts: ServiceOperationsSummaryOpts
 			$.ServiceName.eq(opts.serviceName),
 			hourlyEnvironmentCondition($, opts.environments),
 			...interiorConditions($.Hour, hourGrain),
+			httpEndpointCondition($.SpanName, opts.httpOnly),
 		])
 		.groupBy("bSpanName")
 
@@ -201,6 +237,7 @@ export function serviceOperationsSummaryQuery(opts: ServiceOperationsSummaryOpts
 				),
 				p50DurationMs: mergedDurationQuantile(1),
 				p95DurationMs: mergedDurationQuantile(2),
+				p99DurationMs: mergedDurationQuantile(3),
 			}
 		})
 		.groupBy("spanName")

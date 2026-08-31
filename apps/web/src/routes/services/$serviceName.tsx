@@ -25,6 +25,7 @@ import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-ran
 import { Button } from "@maple/ui/components/ui/button"
 import { BellIcon } from "@/components/icons"
 import { ServiceDependenciesTab } from "@/components/services/service-dependencies-tab"
+import { ServiceApiTab } from "@/components/services/service-api-tab"
 import { ServiceOperationsTab } from "@/components/services/service-operations-tab"
 import { ServiceDependencyStrip } from "@/components/services/service-dependency-strip"
 import { ServiceEnvironmentSwitcher } from "@/components/services/service-environment-switcher"
@@ -44,7 +45,7 @@ import { LONG_RANGE_PRESET_OPTIONS } from "@/lib/time-utils"
 const EMPTY_RELEASES: ReadonlyArray<ReleasePoint> = []
 const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60
 
-const ServiceDetailTab = Schema.Literals(["overview", "operations", "dependencies"])
+const ServiceDetailTab = Schema.Literals(["overview", "api", "operations", "dependencies"])
 type ServiceDetailTabValue = Schema.Schema.Type<typeof ServiceDetailTab>
 const decodeServiceDetailTab = Schema.decodeUnknownOption(ServiceDetailTab)
 
@@ -217,6 +218,12 @@ function ServiceDetailContent() {
 											Overview
 										</TabsTrigger>
 										<TabsTrigger
+											value="api"
+											className="h-6 flex-1 px-2.5 text-xs font-medium sm:h-6 sm:flex-initial sm:text-xs"
+										>
+											API
+										</TabsTrigger>
+										<TabsTrigger
 											value="operations"
 											className="h-6 flex-1 px-2.5 text-xs font-medium sm:h-6 sm:flex-initial sm:text-xs"
 										>
@@ -273,6 +280,17 @@ function ServiceDetailContent() {
 								environments={search.environments}
 								onShowDependencies={handleShowDependencies}
 								onShowOperations={handleShowOperations}
+							/>
+						)}
+						{activeTab === "api" && (
+							<ServiceApiTab
+								serviceName={serviceName}
+								effectiveStartTime={effectiveStartTime}
+								effectiveEndTime={effectiveEndTime}
+								environments={search.environments}
+								startTime={search.startTime}
+								endTime={search.endTime}
+								timePreset={search.timePreset}
 							/>
 						)}
 						{activeTab === "operations" && (

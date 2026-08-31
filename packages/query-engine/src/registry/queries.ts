@@ -1168,6 +1168,37 @@ export const serviceOperationsSummaryRaw = defineQuery({
 		),
 })
 
+/**
+ * The API tab. Same splice, same rollup tables, same cost — the only difference
+ * is the HTTP-endpoint predicate, so the raw fallback and its 10s ceiling apply
+ * identically. Its own id keeps the cache entries separate from the unfiltered
+ * Operations tab reading the same window.
+ */
+export const serviceEndpointsSummary = defineQuery({
+	id: "serviceEndpoints",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServiceOperationsRequest, orgId: string) =>
+		CH.compile(
+			CH.serviceEndpointsSummaryQuery(serviceOperationsSummaryOptions(payload)),
+			serviceOperationsParams(payload, orgId),
+			{ rowSchema: CH.serviceEndpointsSummaryRowSchema },
+		),
+})
+
+export const serviceEndpointsSummaryRaw = defineQuery({
+	id: "serviceEndpoints",
+	profile: "aggregation",
+	settings: SERVICE_OPERATIONS_RAW_SETTINGS,
+	cache: undefined,
+	compile: (payload: ServiceOperationsRequest, orgId: string) =>
+		CH.compile(
+			CH.serviceEndpointsSummaryRawQuery(serviceOperationsSummaryOptions(payload)),
+			serviceOperationsParams(payload, orgId),
+			{ rowSchema: CH.serviceEndpointsSummaryRowSchema },
+		),
+})
+
 // Derived after the summary; callers align buckets to the minute-grain rollup.
 type ServiceOperationsTimeseriesInput = ServiceOperationsRequest & {
 	readonly spanNames: ReadonlyArray<string>

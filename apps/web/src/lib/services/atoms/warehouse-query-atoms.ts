@@ -54,6 +54,7 @@ import {
 	workloadInfraTimeseries,
 } from "@/api/warehouse/infra"
 import { getServiceUsage } from "@/api/warehouse/service-usage"
+import { getServiceEndpoints } from "@/api/warehouse/service-endpoints"
 import { getServiceOperations } from "@/api/warehouse/service-operations"
 import {
 	getServiceDependenciesBundle,
@@ -261,6 +262,10 @@ export const getServiceUsageResultAtom = makeQueryAtomFamily(getServiceUsage, {
 })
 
 export const getServiceOperationsResultAtom = makeQueryAtomFamily(getServiceOperations, {
+	staleTime: 30_000,
+})
+
+export const getServiceEndpointsResultAtom = makeQueryAtomFamily(getServiceEndpoints, {
 	staleTime: 30_000,
 })
 
