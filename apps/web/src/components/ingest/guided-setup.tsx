@@ -1,5 +1,3 @@
-import { useAuth } from "@clerk/clerk-react"
-
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
 import { cn } from "@maple/ui/lib/utils"
 import { CodeBlock } from "@/components/quick-start/code-block"
@@ -15,6 +13,7 @@ import {
 import { sdkSnippets, type FrameworkId } from "@/components/quick-start/sdk-snippets"
 import { ingestUrl } from "@/lib/services/common/ingest-url"
 import { useQuickStart } from "@/hooks/use-quick-start"
+import { useActiveOrgId } from "@/lib/collections/org-collections"
 import type { RoleOption } from "@/atoms/quick-start-atoms"
 import { CopyableField } from "@maple/ui/components/ui/copyable-field"
 
@@ -47,7 +46,7 @@ interface GuidedSetupProps {
  * settings page (which composes the picker into its own section header).
  */
 export function useGuidedFramework() {
-	const { orgId } = useAuth()
+	const orgId = useActiveOrgId()
 	const { selectedFramework, setSelectedFramework, qualifyAnswers } = useQuickStart(orgId)
 
 	const roleDefault = qualifyAnswers.role ? ROLE_DEFAULT_FRAMEWORK[qualifyAnswers.role] : "nodejs"

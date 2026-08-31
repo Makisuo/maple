@@ -500,7 +500,11 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 					const window = yield* parseWindow(payload.start_time, payload.end_time, {
 						maxSeconds: MAX_SEARCH_RANGE_SECONDS,
 						rangeLabel: "Trace search",
-						precision: "millisecond",
+						// `traceSummariesQuery` reads `trace_list_mv.Timestamp`, a plain
+						// DateTime. Millisecond bounds are a TYPE_MISMATCH on vanilla CH
+						// (`Cannot convert string '….000' to type DateTime`). Raw `traces`
+						// is DateTime64; this listing is not.
+						precision: "second",
 					})
 					const limit = payload.limit ?? 20
 					const cursorParts = yield* decodeKeysetCursor(payload.cursor, "trc", 2)
@@ -554,7 +558,8 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 					const window = yield* parseWindow(payload.start_time, payload.end_time, {
 						maxSeconds: MAX_QUERY_RANGE_SECONDS,
 						rangeLabel: "Trace timeseries",
-						precision: "millisecond",
+						// Rollup splice (`service_overview_*`) stores DateTime Hour/Minute.
+						precision: "second",
 					})
 					const bucketSeconds = yield* validateTimeseriesBucket(
 						payload.start_time,
@@ -604,7 +609,7 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 					const window = yield* parseWindow(payload.start_time, payload.end_time, {
 						maxSeconds: MAX_BREAKDOWN_RANGE_SECONDS,
 						rangeLabel: "Trace breakdown",
-						precision: "millisecond",
+						precision: "second",
 					})
 					yield* validateBreakdownRange(window.rangeSeconds, payload.filters)
 					const request = yield* decodeQueryEngineRequest(

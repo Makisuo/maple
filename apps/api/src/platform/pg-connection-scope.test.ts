@@ -235,6 +235,23 @@ describe("PgConnectionScope", () => {
 		}),
 	)
 
+	it.effect("forwards the websocket proxy URL to the socket factory", () =>
+		Effect.gen(function* () {
+			const rec = recorder()
+			const scope = makePgConnectionScope(
+				"postgres://unused",
+				undefined,
+				{ openSocket: rec.openSocket },
+				"ws://127.0.0.1:5498",
+			)
+
+			yield* scope.run(noop)
+
+			assert.strictEqual(rec.lastOptions()?.wsProxyUrl, "ws://127.0.0.1:5498")
+			yield* Effect.promise(() => scope.close())
+		}),
+	)
+
 	it.effect("closes twice without opening a second connection", () =>
 		Effect.gen(function* () {
 			const rec = recorder()

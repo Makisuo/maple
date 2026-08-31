@@ -625,7 +625,7 @@ const dialWorkflowDb = (env: InvestigationFanoutWorkflowEnv): PgConnectionScopeA
 	if (source._tag === "Unavailable") {
 		throw new Error(source.reason)
 	}
-	return makePgConnectionScope(source.connectionString, source.attributes)
+	return makePgConnectionScope(source.connectionString, source.attributes, undefined, source.wsProxyUrl)
 }
 
 async function runWithDb(

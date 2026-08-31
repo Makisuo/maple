@@ -1,0 +1,34 @@
+# Single public hostname for Maple Cloud self-host.
+# Path split: API, Electric sync, OTLP, then the SPA.
+{
+	admin off
+}
+
+:8080 {
+	encode gzip
+
+	handle /health {
+		reverse_proxy api:3472
+	}
+	handle /.well-known/celld/* {
+		reverse_proxy api:3472
+	}
+	handle /v2/* {
+		reverse_proxy api:3472
+	}
+	handle /internal/* {
+		reverse_proxy api:3472
+	}
+	handle /api/sync/* {
+		reverse_proxy sync:3476
+	}
+	handle /api/* {
+		reverse_proxy api:3472
+	}
+	handle /v1/* {
+		reverse_proxy otel:4318
+	}
+	handle {
+		reverse_proxy web:80
+	}
+}

@@ -597,6 +597,35 @@ describe("v2 telemetry reads over HTTP", () => {
 		await harness.dispose()
 	})
 
+	it("sends second-precision window bounds to trace_list_mv search", async () => {
+		const observedSql: string[] = []
+		const observingWarehouse: WarehouseQueryServiceApi = {
+			...warehouseStub,
+			compiledQuery: (tenant, compiled, options) => {
+				observedSql.push(compiledQueryOf(compiled).sql)
+				return warehouseStub.compiledQuery(tenant, compiled, options)
+			},
+			compiledQueryFirst: (tenant, compiled, options) => {
+				observedSql.push(compiledQueryOf(compiled).sql)
+				return warehouseStub.compiledQueryFirst(tenant, compiled, options)
+			},
+		}
+		const harness = makeHarness(observingWarehouse)
+		const key = await harness.bootstrapKey()
+
+		const traces = await harness.request("POST", "/v2/traces/search", key.secret, {
+			start_time: "2026-07-15T12:00:00.900Z",
+			end_time: "2026-07-15T13:00:00.100Z",
+		})
+		expect(traces.status).toBe(200)
+		const sql = observedSql.find((statement) => statement.includes("FROM trace_list_mv"))
+		expect(sql).toBeDefined()
+		expect(sql).toContain("'2026-07-15 12:00:00'")
+		expect(sql).toContain("'2026-07-15 13:00:00'")
+		expect(sql).not.toMatch(/'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+'/)
+		await harness.dispose()
+	})
+
 	it("enforces signal query windows, bucket budgets, and breakdown narrowing", async () => {
 		const harness = makeHarness()
 		const key = await harness.bootstrapKey(["traces:read"])

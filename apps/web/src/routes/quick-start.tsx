@@ -13,6 +13,7 @@ import { StepDemo } from "@/components/onboarding/step-demo"
 
 import { useQuickStart, type StepId } from "@/hooks/use-quick-start"
 import { hasSelectedPlan, resolvePlanAccess } from "@/lib/billing/plan-gating"
+import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { STEP_IDS, type RoleOption } from "@/atoms/quick-start-atoms"
 
 const QuickStartSearch = Schema.Struct({
@@ -33,6 +34,14 @@ export const STEP_MOTION = {
 }
 
 function QuickStartPage() {
+	// Clerk onboarding wizard. Self-hosted has no ClerkProvider and no plan gate.
+	if (!isClerkAuthEnabled) {
+		return <Navigate to="/" replace />
+	}
+	return <QuickStartPageInner />
+}
+
+function QuickStartPageInner() {
 	const { orgId } = useAuth()
 	const {
 		activeStep,

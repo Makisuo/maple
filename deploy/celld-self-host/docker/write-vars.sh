@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+out=/run/maple/celld-vars.env
+: > "$out"
+for k in \
+	MAPLE_ROOT_PASSWORD \
+	MAPLE_INGEST_KEY_ENCRYPTION_KEY \
+	MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY \
+	TINYBIRD_HOST \
+	TINYBIRD_TOKEN \
+	MAPLE_PG_URL \
+	MAPLE_PG_WS_PROXY \
+	CLICKHOUSE_URL \
+	CLICKHOUSE_PROVIDER \
+	CLICKHOUSE_USER \
+	CLICKHOUSE_PASSWORD \
+	CLICKHOUSE_DATABASE \
+	ELECTRIC_URL \
+	MAPLE_AUTH_MODE \
+	MAPLE_DEFAULT_ORG_ID \
+	MAPLE_APP_BASE_URL
+do
+	eval "v=\${$k-}"
+	printf '%s=%s\n' "$k" "$v" >> "$out"
+done
+printf 'MAPLE_ENVIRONMENT=production\nMAPLE_ALERTING_ALLOW_NONPROD=1\n' >> "$out"
+exec tail -f /dev/null

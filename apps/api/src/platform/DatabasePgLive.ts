@@ -24,7 +24,12 @@ const makePgDatabase = Effect.gen(function* () {
 		execute: <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 			Effect.flatMap(PgConnectionScope, (scope) =>
 				scope === undefined
-					? executeOnFreshPgClient(source.connectionString, fn, source.attributes)
+					? executeOnFreshPgClient(
+							source.connectionString,
+							fn,
+							source.attributes,
+							source.wsProxyUrl,
+						)
 					: scope.run(fn),
 			),
 	} satisfies DatabaseApi)

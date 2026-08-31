@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: maple-postgres
+  namespace: maple
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maple-postgres
+  namespace: maple
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: maple-postgres
+  template:
+    metadata:
+      labels:
+        app: maple-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          args: ["postgres", "-c", "wal_level=logical"]
+          env:
+            - name: POSTGRES_USER
+              value: maple
+            - name: POSTGRES_PASSWORD
+              value: maple
+            - name: POSTGRES_DB
+              value: maple
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "maple", "-d", "maple"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: maple-postgres
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: maple
+spec:
+  selector:
+    app: maple-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

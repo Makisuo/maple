@@ -1,0 +1,34 @@
+# Host production check: one origin in front of a running celld + SPA build.
+# From repo root:
+#   caddy run --config deploy/celld-self-host/Caddyfile.host --adapter caddyfile
+{
+	admin off
+}
+
+:8080 {
+	encode gzip
+
+	handle /health {
+		reverse_proxy 127.0.0.1:3472
+	}
+	handle /.well-known/celld/* {
+		reverse_proxy 127.0.0.1:3472
+	}
+	handle /v2/* {
+		reverse_proxy 127.0.0.1:3472
+	}
+	handle /internal/* {
+		reverse_proxy 127.0.0.1:3472
+	}
+	handle /api/sync/* {
+		reverse_proxy 127.0.0.1:3476
+	}
+	handle /api/* {
+		reverse_proxy 127.0.0.1:3472
+	}
+	handle {
+		root * apps/web/dist
+		try_files {path} /index.html
+		file_server
+	}
+}

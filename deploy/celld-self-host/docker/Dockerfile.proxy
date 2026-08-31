@@ -1,0 +1,10 @@
+# Host-side Postgres WS/HTTP bridge for celld (no TCP in the Worker).
+FROM oven/bun:1.4.0-slim
+WORKDIR /app
+COPY scripts/pg-ws-proxy.ts ./pg-ws-proxy.ts
+RUN bun add postgres@3.4.9 \
+	&& bun -e 'const fs=require("fs"); const p="pg-ws-proxy.ts"; fs.writeFileSync(p, fs.readFileSync(p,"utf8").replace("from \"../packages/db/node_modules/postgres/src/index.js\"","from \"postgres\""))'
+
+ENV MAPLE_PG_URL=postgres://maple:maple@postgres:5432/maple
+EXPOSE 5498
+CMD ["bun", "pg-ws-proxy.ts", "--listen", "0.0.0.0:5498", "--target", "postgres:5432"]

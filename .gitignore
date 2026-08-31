@@ -20,6 +20,8 @@ mise.local.toml
 
 node_modules
 .DS_Store
+.tools/
+.celld/
 dist
 dist-ssr
 count.txt

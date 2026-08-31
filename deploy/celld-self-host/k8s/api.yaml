@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maple-api
+  namespace: maple
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: maple-api
+  template:
+    metadata:
+      labels:
+        app: maple-api
+    spec:
+      containers:
+        - name: celld
+          image: maple-celld:dev
+          imagePullPolicy: IfNotPresent
+          args: []
+          env:
+            - name: CELLD_APP_DIR
+              value: /app/apps/api
+            - name: CELLD_PORT
+              value: "3472"
+            - name: CELLD_BUCKET
+              value: s3://maple-celld/api
+            - name: CELLD_VARS_FILE
+              value: /run/maple/celld-vars.env
+            - name: CELLD_WATCH
+              value: /var/lib/celld
+            - name: S3_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: maple-selfhost
+                  key: S3_ENDPOINT
+            - name: AWS_REGION
+              value: us-east-1
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: maple-minio
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: maple-minio
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
+            - name: CELLD_TRUST_FORWARDED_HEADERS
+              value: "1"
+            - name: RUST_LOG
+              value: warn
+          volumeMounts:
+            - name: vars
+              mountPath: /run/maple
+            - name: watch
+              mountPath: /var/lib/celld
+          ports:
+            - containerPort: 3472
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3472
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            failureThreshold: 24
+      volumes:
+        - name: vars
+          secret:
+            secretName: maple-selfhost
+            items:
+              - key: CELLD_VARS
+                path: celld-vars.env
+        - name: watch
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: maple
+spec:
+  selector:
+    app: maple-api
+  ports:
+    - port: 3472
+      targetPort: 3472

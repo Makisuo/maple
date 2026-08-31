@@ -1,0 +1,313 @@
+# Maple Cloud self-host via celld (no Cloudflare, no alchemy).
+#
+# End user (from this directory):
+#   cp env.example .env
+#   docker compose --env-file .env up --build
+# Open http://127.0.0.1:8080
+#
+# Already have Postgres / ClickHouse / S3? Copy this folder, delete those
+# services (and their depends_on), and set MAPLE_PG_URL / S3_ENDPOINT / … in .env.
+
+name: maple-celld-selfhost
+
+x-celld: &celld
+  build:
+    context: ../..
+    dockerfile: deploy/celld-self-host/docker/Dockerfile.celld
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    CELLD_VARS_FILE: /run/maple/celld-vars.env
+    CELLD_WATCH: /var/lib/celld
+    CELLD_TRUST_FORWARDED_HEADERS: "1"
+    RUST_LOG: ${RUST_LOG:-warn}
+    S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+    AWS_REGION: ${AWS_REGION:-us-east-1}
+    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-maplecelld}
+    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-maplecelld-secret}
+    AWS_EC2_METADATA_DISABLED: "true"
+    MAPLE_PG_URL: ${MAPLE_PG_URL:-postgres://maple:maple@postgres:5432/maple}
+    MAPLE_PG_WS_PROXY: ${MAPLE_PG_WS_PROXY:-ws://pg-ws-proxy:5498}
+    CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://clickhouse:8123}
+    CLICKHOUSE_PROVIDER: ${CLICKHOUSE_PROVIDER:-clickhouse}
+    CLICKHOUSE_USER: ${CLICKHOUSE_USER:-maple}
+    CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-maple}
+    CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-default}
+    ELECTRIC_URL: ${ELECTRIC_URL:-http://electric:3000}
+    MAPLE_AUTH_MODE: ${MAPLE_AUTH_MODE:-self_hosted}
+    MAPLE_ROOT_PASSWORD: ${MAPLE_ROOT_PASSWORD:-change-me}
+    MAPLE_DEFAULT_ORG_ID: ${MAPLE_DEFAULT_ORG_ID:-default}
+    MAPLE_ENVIRONMENT: ${MAPLE_ENVIRONMENT:-production}
+    MAPLE_APP_BASE_URL: ${MAPLE_APP_BASE_URL:-http://127.0.0.1:8080}
+    TINYBIRD_HOST: ${TINYBIRD_HOST:-http://127.0.0.1:7181}
+    TINYBIRD_TOKEN: ${TINYBIRD_TOKEN:-local-placeholder}
+  volumes:
+    - celld-vars:/run/maple
+  restart: unless-stopped
+
+services:
+  vars:
+    image: alpine:3.21
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      MAPLE_ROOT_PASSWORD: ${MAPLE_ROOT_PASSWORD:-change-me}
+      MAPLE_INGEST_KEY_ENCRYPTION_KEY: ${MAPLE_INGEST_KEY_ENCRYPTION_KEY:-}
+      MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: ${MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY:-}
+      TINYBIRD_HOST: ${TINYBIRD_HOST:-http://127.0.0.1:7181}
+      TINYBIRD_TOKEN: ${TINYBIRD_TOKEN:-local-placeholder}
+      MAPLE_PG_URL: ${MAPLE_PG_URL:-postgres://maple:maple@postgres:5432/maple}
+      MAPLE_PG_WS_PROXY: ${MAPLE_PG_WS_PROXY:-ws://pg-ws-proxy:5498}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://clickhouse:8123}
+      CLICKHOUSE_PROVIDER: clickhouse
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-maple}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-maple}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-default}
+      ELECTRIC_URL: ${ELECTRIC_URL:-http://electric:3000}
+      MAPLE_AUTH_MODE: self_hosted
+      MAPLE_DEFAULT_ORG_ID: ${MAPLE_DEFAULT_ORG_ID:-default}
+      MAPLE_APP_BASE_URL: ${MAPLE_APP_BASE_URL:-http://127.0.0.1:8080}
+    volumes:
+      - celld-vars:/run/maple
+      - ./docker/write-vars.sh:/write-vars.sh:ro
+    command: ["/bin/sh", "/write-vars.sh"]
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-maplecelld}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-maplecelld-secret}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-11-17T19-35-25Z
+    environment:
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-maplecelld}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-maplecelld-secret}
+      CELLD_S3_BUCKET: ${CELLD_S3_BUCKET:-maple-celld}
+    volumes:
+      - ./docker/minio-init.sh:/minio-init.sh:ro
+    entrypoint: ["/bin/sh", "/minio-init.sh"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+
+  postgres:
+    image: postgres:17-alpine
+    command: ["postgres", "-c", "wal_level=logical"]
+    environment:
+      POSTGRES_USER: maple
+      POSTGRES_PASSWORD: maple
+      POSTGRES_DB: maple
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U maple -d maple"]
+      interval: 5s
+      timeout: 3s
+      retries: 8
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.2
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: maple
+      CLICKHOUSE_PASSWORD: maple
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  electric:
+    image: electricsql/electric:latest
+    environment:
+      DATABASE_URL: ${MAPLE_PG_URL:-postgresql://maple:maple@postgres:5432/maple?sslmode=disable}
+      ELECTRIC_INSECURE: "true"
+      ELECTRIC_MANUAL_TABLE_PUBLISHING: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+
+  otel:
+    build:
+      context: ../..
+      dockerfile: otel/otel-collector.Dockerfile
+    environment:
+      MAPLE_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-maple}
+    volumes:
+      - ../../otel/collector-config.clickhouse.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "4317:4317"
+    user: "0:0"
+
+  pg-ws-proxy:
+    build:
+      context: ../..
+      dockerfile: deploy/celld-self-host/docker/Dockerfile.proxy
+    environment:
+      MAPLE_PG_URL: ${MAPLE_PG_URL:-postgres://maple:maple@postgres:5432/maple}
+      MAPLE_PG_WS_ALLOW: ${MAPLE_PG_WS_ALLOW:-postgres}
+    command: ["bun", "pg-ws-proxy.ts", "--listen", "0.0.0.0:5498", "--target", "postgres:5432"]
+    restart: unless-stopped
+
+  migrate:
+    <<: *celld
+    restart: "no"
+    volumes: []
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      DATABASE_URL: ${MAPLE_PG_URL:-postgres://maple:maple@postgres:5432/maple}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://clickhouse:8123}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-maple}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-maple}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-default}
+    command:
+      - |
+        set -euo pipefail
+        export PATH="/usr/local/bin:/root/.bun/bin:$$PATH"
+        cd /app
+        bun run --cwd packages/db db:migrate:pg
+        bun run --cwd packages/clickhouse-cli start apply \
+          --url="$$CLICKHOUSE_URL" --user="$$CLICKHOUSE_USER" \
+          --password="$$CLICKHOUSE_PASSWORD" --database="$$CLICKHOUSE_DATABASE"
+        bun run --cwd packages/db db:ensure-electric-publication
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+  api:
+    <<: *celld
+    environment:
+      CELLD_APP_DIR: /app/apps/api
+      CELLD_PORT: "3472"
+      CELLD_BUCKET: s3://${CELLD_S3_BUCKET:-maple-celld}/api
+      CELLD_VARS_FILE: /run/maple/celld-vars.env
+      CELLD_WATCH: /var/lib/celld
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-maplecelld}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-maplecelld-secret}
+      AWS_EC2_METADATA_DISABLED: "true"
+      MAPLE_PG_URL: ${MAPLE_PG_URL:-postgres://maple:maple@postgres:5432/maple}
+      MAPLE_PG_WS_PROXY: ${MAPLE_PG_WS_PROXY:-ws://pg-ws-proxy:5498}
+    volumes:
+      - celld-vars:/run/maple
+      - celld-api-watch:/var/lib/celld
+    depends_on:
+      vars:
+        condition: service_started
+      pg-ws-proxy:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+        required: false
+
+  sync:
+    <<: *celld
+    environment:
+      CELLD_APP_DIR: /app/apps/electric-sync
+      CELLD_PORT: "3476"
+      CELLD_BUCKET: s3://${CELLD_S3_BUCKET:-maple-celld}/sync
+      CELLD_VARS_FILE: /run/maple/celld-vars.env
+      CELLD_WATCH: /var/lib/celld
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-maplecelld}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-maplecelld-secret}
+      AWS_EC2_METADATA_DISABLED: "true"
+      ELECTRIC_URL: ${ELECTRIC_URL:-http://electric:3000}
+      MAPLE_ROOT_PASSWORD: ${MAPLE_ROOT_PASSWORD:-change-me}
+      MAPLE_AUTH_MODE: self_hosted
+    volumes:
+      - celld-vars:/run/maple
+      - celld-sync-watch:/var/lib/celld
+    depends_on:
+      vars:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+        required: false
+
+  alerting:
+    <<: *celld
+    environment:
+      CELLD_APP_DIR: /app/apps/alerting
+      CELLD_PORT: "8788"
+      CELLD_BUCKET: s3://${CELLD_S3_BUCKET:-maple-celld}/alerting
+      CELLD_VARS_FILE: /run/maple/celld-vars.env
+      CELLD_WATCH: /var/lib/celld
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-maplecelld}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-maplecelld-secret}
+      AWS_EC2_METADATA_DISABLED: "true"
+    volumes:
+      - celld-vars:/run/maple
+      - celld-alerting-watch:/var/lib/celld
+    depends_on:
+      vars:
+        condition: service_started
+      pg-ws-proxy:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+        required: false
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_MAPLE_AUTH_MODE: self_hosted
+        VITE_API_BASE_URL: ""
+        VITE_ELECTRIC_SYNC_URL: ""
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.10-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - api
+      - sync
+      - web
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  clickhouse-data:
+  minio-data:
+  celld-vars:
+  celld-api-watch:
+  celld-sync-watch:
+  celld-alerting-watch:

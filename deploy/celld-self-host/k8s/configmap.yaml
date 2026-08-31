@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: maple-selfhost
+  namespace: maple
+data:
+  MAPLE_AUTH_MODE: self_hosted
+  MAPLE_DEFAULT_ORG_ID: default
+  MAPLE_ENVIRONMENT: production
+  MAPLE_PG_URL: postgres://maple:maple@postgres:5432/maple
+  MAPLE_PG_WS_PROXY: ws://pg-ws-proxy:5498
+  MAPLE_PG_WS_ALLOW: postgres
+  CLICKHOUSE_URL: http://clickhouse:8123
+  CLICKHOUSE_PROVIDER: clickhouse
+  CLICKHOUSE_USER: maple
+  CLICKHOUSE_DATABASE: default
+  ELECTRIC_URL: http://electric:3000
+  MAPLE_APP_BASE_URL: http://maple.example.internal
+  TINYBIRD_HOST: http://127.0.0.1:7181
+  TINYBIRD_TOKEN: local-placeholder
+  S3_ENDPOINT: http://minio:9000
+  AWS_REGION: us-east-1
+  CELLD_S3_BUCKET: maple-celld
+---
+# Fill from a sealed-secret / external-secret in real deploys.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: maple-selfhost
+  namespace: maple
+type: Opaque
+stringData:
+  MAPLE_ROOT_PASSWORD: change-me
+  MAPLE_INGEST_KEY_ENCRYPTION_KEY: replace-me
+  MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: replace-me
+  CLICKHOUSE_PASSWORD: maple
+  CELLD_VARS: |
+    MAPLE_AUTH_MODE=self_hosted
+    MAPLE_DEFAULT_ORG_ID=default
+    MAPLE_ENVIRONMENT=production
+    MAPLE_ROOT_PASSWORD=change-me
+    MAPLE_INGEST_KEY_ENCRYPTION_KEY=replace-me
+    MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY=replace-me
+    TINYBIRD_HOST=http://127.0.0.1:7181
+    TINYBIRD_TOKEN=local-placeholder
+    MAPLE_PG_URL=postgres://maple:maple@postgres:5432/maple
+    MAPLE_PG_WS_PROXY=ws://pg-ws-proxy:5498
+    CLICKHOUSE_URL=http://clickhouse:8123
+    CLICKHOUSE_PROVIDER=clickhouse
+    CLICKHOUSE_USER=maple
+    CLICKHOUSE_PASSWORD=maple
+    CLICKHOUSE_DATABASE=default
+    ELECTRIC_URL=http://electric:3000
+    MAPLE_APP_BASE_URL=http://maple.example.internal
+    MAPLE_ALERTING_ALLOW_NONPROD=1

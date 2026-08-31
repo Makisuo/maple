@@ -1,0 +1,37 @@
+# First boot: drizzle-kit migrate + ClickHouse schema + Electric publication heal.
+# Re-run: kubectl -n maple delete job maple-migrate && kubectl apply -k deploy/celld-self-host/k8s
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: maple-migrate
+  namespace: maple
+spec:
+  backoffLimit: 12
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: maple-celld:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: maple-selfhost
+            - secretRef:
+                name: maple-selfhost
+          env:
+            - name: DATABASE_URL
+              value: postgres://maple:maple@postgres:5432/maple
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              export PATH="/usr/local/bin:/root/.bun/bin:$PATH"
+              cd /app
+              bun run --cwd packages/db db:migrate:pg
+              bun run --cwd packages/clickhouse-cli start apply \
+                --url="$CLICKHOUSE_URL" \
+                --user="$CLICKHOUSE_USER" \
+                --password="$CLICKHOUSE_PASSWORD" \
+                --database="$CLICKHOUSE_DATABASE"
+              bun run --cwd packages/db db:ensure-electric-publication

@@ -1,4 +1,3 @@
-import { useAuth } from "@clerk/clerk-react"
 import { useNavigate } from "@tanstack/react-router"
 import { toastManager } from "@maple/ui/components/ui/toast"
 import { Button } from "@maple/ui/components/ui/button"
@@ -15,9 +14,10 @@ import { GuidedSetup } from "@/components/ingest/guided-setup"
 import { SendTestEventStrip } from "@/components/ingest/connection-status"
 import { useIngestConnection } from "@/components/ingest/use-ingest-connection"
 import { useQuickStart } from "@/hooks/use-quick-start"
+import { useActiveOrgId } from "@/lib/collections/org-collections"
 
 export function SetupChecklist() {
-	const { orgId } = useAuth()
+	const orgId = useActiveOrgId()
 	const { checklistDismissed } = useQuickStart(orgId)
 
 	// Render nothing — and stop polling — once the checklist is dismissed.
@@ -27,7 +27,7 @@ export function SetupChecklist() {
 }
 
 function SetupChecklistCard() {
-	const { orgId } = useAuth()
+	const orgId = useActiveOrgId()
 	const { dismissChecklist, checklistExpanded, setChecklistExpanded, demoDataRequested } =
 		useQuickStart(orgId)
 

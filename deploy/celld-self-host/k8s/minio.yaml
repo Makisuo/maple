@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: maple-minio
+  namespace: maple
+type: Opaque
+stringData:
+  MINIO_ROOT_USER: maplecelld
+  MINIO_ROOT_PASSWORD: maplecelld-secret
+  AWS_ACCESS_KEY_ID: maplecelld
+  AWS_SECRET_ACCESS_KEY: maplecelld-secret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maple-minio
+  namespace: maple
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: maple-minio
+  template:
+    metadata:
+      labels:
+        app: maple-minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+          args: ["server", "/data", "--console-address", ":9001"]
+          envFrom:
+            - secretRef:
+                name: maple-minio
+          ports:
+            - containerPort: 9000
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: maple-minio
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: maple-minio
+  namespace: maple
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: maple
+spec:
+  selector:
+    app: maple-minio
+  ports:
+    - port: 9000
+      targetPort: 9000
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: maple-minio-init
+  namespace: maple
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:RELEASE.2024-11-17T19-35-25Z
+          env:
+            - name: S3_ENDPOINT
+              value: http://minio:9000
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: maple-minio
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: maple-minio
+                  key: MINIO_ROOT_PASSWORD
+            - name: CELLD_S3_BUCKET
+              value: maple-celld
+          command: ["/bin/sh", "-c"]
+          args:
+            - mc alias set local "$S3_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" && mc mb -p "local/$CELLD_S3_BUCKET"

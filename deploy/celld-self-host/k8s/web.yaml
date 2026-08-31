@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maple-web
+  namespace: maple
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: maple-web
+  template:
+    metadata:
+      labels:
+        app: maple-web
+    spec:
+      containers:
+        - name: nginx
+          image: maple-web:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: maple
+spec:
+  selector:
+    app: maple-web
+  ports:
+    - port: 80
+      targetPort: 80

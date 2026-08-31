@@ -8,6 +8,11 @@ target
 **/target
 apps/api/.data
 apps/api/.data/**
+apps/ios
+apps/web/dist
+**/.celld
+**/.wrangler
+**/.turbo
 .env
 .env.*
 **/.env

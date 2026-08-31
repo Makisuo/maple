@@ -14,6 +14,8 @@
 		"test": "vitest run --passWithNoTests",
 		"db:generate": "drizzle-kit generate --config ./drizzle.config.ts",
 		"db:migrate": "drizzle-kit migrate --config ./drizzle.config.ts",
+		"db:migrate:pg": "bun scripts/migrate-pg.ts",
+		"db:ensure-electric-publication": "bun scripts/ensure-electric-publication.ts",
 		"db:push": "drizzle-kit push --config ./drizzle.config.ts",
 		"db:studio": "drizzle-kit studio --config ./drizzle.config.ts",
 		"db:ensure-privileges": "bun scripts/ensure-privileges.ts",
@@ -26,6 +28,7 @@
 	"dependencies": {
 		"@electric-sql/pglite": "^0.5.2",
 		"@maple/domain": "workspace:*",
+		"@neondatabase/serverless": "^1.1.0",
 		"drizzle-orm": "^0.45.1",
 		"effect": "catalog:effect",
 		"postgres": "^3.4.9"

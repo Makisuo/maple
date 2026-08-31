@@ -1,13 +1,13 @@
-import { useAuth } from "@clerk/clerk-react"
 import { useNavigate } from "@tanstack/react-router"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { Card, CardContent } from "@maple/ui/components/ui/card"
 import { Button } from "@maple/ui/components/ui/button"
 import { ChartLineIcon, RocketIcon, XmarkIcon } from "@/components/icons"
 import { useQuickStart } from "@/hooks/use-quick-start"
+import { useActiveOrgId } from "@/lib/collections/org-collections"
 
 export function FirstActionHint() {
-	const { orgId } = useAuth()
+	const orgId = useActiveOrgId()
 	const navigate = useNavigate()
 	const reduceMotion = useReducedMotion()
 	const { demoDataRequested, firstActionHintDismissed, dismissFirstActionHint } = useQuickStart(orgId)

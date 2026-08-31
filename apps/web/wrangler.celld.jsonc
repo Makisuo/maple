@@ -1,0 +1,12 @@
+{
+	// Asset-only celld config. Slice-1 serves the UI with Vite against the
+	// celld API (`bun --filter=@maple/web dev:app`). Do not `celld deploy` this
+	// onto the same local fleet as maple-api — last deploy owns deploy/current.json.
+	"name": "maple-web",
+	"compatibility_date": "2025-06-01",
+	"main": "./src/worker.ts",
+	"assets": {
+		"not_found_handling": "single-page-application",
+		"directory": "./dist"
+	}
+}

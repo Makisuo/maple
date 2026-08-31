@@ -56,4 +56,81 @@ describe("resolveDbConnectionSource", () => {
 
 		expect(source._tag).toBe("Unavailable")
 	})
+
+	it("synthesizes a connection from MAPLE_PG_URL without leaking credentials", () => {
+		const source = resolveDbConnectionSource({
+			MAPLE_PG_URL: "postgres://maple:s3cret@127.0.0.1:5499/maple",
+		})
+
+		expect(source).toStrictEqual({
+			_tag: "Available",
+			connectionString: "postgres://maple:s3cret@127.0.0.1:5499/maple",
+			attributes: {
+				"db.namespace": "maple",
+				"server.address": "127.0.0.1",
+				"server.port": 5499,
+			},
+		})
+		const serialized = JSON.stringify(source._tag === "Available" ? source.attributes : {})
+		expect(serialized).not.toContain("s3cret")
+	})
+
+	it("attaches MAPLE_PG_WS_PROXY only on the MAPLE_PG_URL path", () => {
+		const source = resolveDbConnectionSource({
+			MAPLE_PG_URL: "postgres://maple:maple@127.0.0.1:5499/maple",
+			MAPLE_PG_WS_PROXY: "ws://127.0.0.1:5498",
+		})
+
+		expect(source._tag).toBe("Available")
+		expect(source._tag === "Available" && source.wsProxyUrl).toBe("ws://127.0.0.1:5498")
+	})
+
+	it("ignores MAPLE_PG_WS_PROXY that is not a websocket URL", () => {
+		const source = resolveDbConnectionSource({
+			MAPLE_PG_URL: "postgres://maple:maple@127.0.0.1:5499/maple",
+			MAPLE_PG_WS_PROXY: "http://127.0.0.1:5498",
+		})
+
+		expect(source._tag).toBe("Available")
+		expect(source._tag === "Available" && source.wsProxyUrl).toBeUndefined()
+	})
+
+	it("ignores MAPLE_PG_URL when a Hyperdrive binding is present", () => {
+		const source = resolveDbConnectionSource({
+			[HYPERDRIVE_BINDING]: hyperdriveBinding,
+			MAPLE_PG_URL: "postgres://maple:maple@127.0.0.1:5499/maple",
+			MAPLE_PG_WS_PROXY: "ws://127.0.0.1:5498",
+		})
+
+		expect(source).toStrictEqual({
+			_tag: "Available",
+			connectionString: hyperdriveBinding.connectionString,
+			attributes: {
+				"db.namespace": hyperdriveBinding.database,
+				"server.address": hyperdriveBinding.host,
+				"server.port": hyperdriveBinding.port,
+			},
+		})
+	})
+
+	it("falls through to MAPLE_PG_URL when MAPLE_DB is a string rather than a Hyperdrive object", () => {
+		const source = resolveDbConnectionSource({
+			[HYPERDRIVE_BINDING]: "postgres://maple:maple@127.0.0.1:5499/maple",
+			MAPLE_PG_URL: "postgres://maple:maple@127.0.0.1:5499/maple",
+		})
+
+		expect(source._tag).toBe("Available")
+		expect(source._tag === "Available" && source.connectionString).toBe(
+			"postgres://maple:maple@127.0.0.1:5499/maple",
+		)
+	})
+
+	it.each(["not-a-url", "http://127.0.0.1:5499/maple", "postgres://"])(
+		"reports unavailable when MAPLE_PG_URL is %s",
+		(pgUrl) => {
+			const source = resolveDbConnectionSource({ MAPLE_PG_URL: pgUrl })
+
+			expect(source._tag).toBe("Unavailable")
+		},
+	)
 })

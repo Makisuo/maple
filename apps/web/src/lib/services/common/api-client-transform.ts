@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import { HttpClient, type HttpClientRequest } from "effect/unstable/http"
-import { apiBaseUrl } from "./api-base-url"
+import { isMapleApiRequestUrl } from "./api-base-url"
 import { hasCachedMapleAuthToken, invalidateMapleAuthToken } from "./auth-headers"
 import { withMapleRetryPolicy } from "./retry-policy"
 
@@ -26,7 +26,7 @@ export const transformMapleApiClient = <E, R>(
 	client.pipe(
 		(self) =>
 			HttpClient.transform(self, (effect, request) =>
-				request.url.startsWith(apiBaseUrl)
+				isMapleApiRequestUrl(request.url)
 					? Effect.annotateSpans(effect, "peer.service", "maple-api")
 					: effect,
 			),
