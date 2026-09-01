@@ -6,6 +6,7 @@ import { formatPercent } from "@maple/ui/lib/format"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 
 import { severityLevel } from "@/components/infra/format"
+import type { TimeRangeSearch } from "@/components/time-range-picker/search"
 import { BAR_VALUE_TONE } from "@/components/infra/severity-tokens"
 
 /**
@@ -35,7 +36,7 @@ interface ServiceLensRailProps {
 	unlinkedCount?: number
 	loading?: boolean
 	waiting?: boolean
-	timeSearch: Record<string, unknown>
+	timeSearch: TimeRangeSearch
 }
 
 export function ServiceLensRail({
@@ -98,7 +99,7 @@ function RailRow({
 }: {
 	service: RailService
 	active: boolean
-	timeSearch: Record<string, unknown>
+	timeSearch: TimeRangeSearch
 }) {
 	const utilization = service.avgCpuLimitUtilization
 	// `severityLevel` expects a fraction and returns the tone the pod table

@@ -277,8 +277,8 @@ function NavRow({
 	// children's own glyphs say it without spending four rows. Only drawn when
 	// every child has a mark — a partial run reads as a broken list — and
 	// dropped once the section opens and the real rows are on screen. Repeated
-	// marks collapse to one: Infrastructure's three k8s pages share a glyph, and
-	// drawing it three times both crowds the label and overstates the variety.
+	// marks collapse to one: two children sharing a glyph would both crowd the
+	// label and overstate the variety.
 	//
 	// Drawn from *every* child, not the pruned `shown` list: the preview says
 	// what the section covers, and an org running only hosts should still see
@@ -335,15 +335,9 @@ function NavRow({
 								<DropdownMenuSeparator />
 								<DropdownMenuGroup>
 									{hidden.map((sub) => (
-										<DropdownMenuItem
-											key={sub.title}
-											render={<Link to={sub.href} />}
-										>
+										<DropdownMenuItem key={sub.title} render={<Link to={sub.href} />}>
 											{sub.icon ? (
-												<sub.icon
-													size={16}
-													style={{ color: sub.iconColor }}
-												/>
+												<sub.icon size={16} style={{ color: sub.iconColor }} />
 											) : null}
 											{sub.title}
 										</DropdownMenuItem>
@@ -472,12 +466,7 @@ function NavGroupSection({
 			<SidebarGroupContent>
 				<SidebarMenu>
 					{group.items.map((item) => (
-						<NavRow
-							currentPath={currentPath}
-							item={item}
-							key={item.title}
-							surfaces={surfaces}
-						/>
+						<NavRow currentPath={currentPath} item={item} key={item.title} surfaces={surfaces} />
 					))}
 				</SidebarMenu>
 			</SidebarGroupContent>
