@@ -68,6 +68,7 @@ import { MultiSelectCombobox } from "@maple/ui/components/multi-select-combobox"
 import { cn } from "@maple/ui/lib/utils"
 import { useOrganization } from "@clerk/clerk-react"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
+import { currentReturnPath } from "@/components/integrations/integration-connect"
 
 interface DestinationDialogProps {
 	open: boolean
@@ -371,7 +372,7 @@ function HazelOAuthFields({
 		const popup = window.open("", "maple-hazel-connect", "popup,width=520,height=640")
 		setBusy(true)
 		const result = await startConnect({
-			payload: new HazelStartConnectRequest({ returnTo: window.location.href }),
+			payload: new HazelStartConnectRequest({ returnTo: currentReturnPath() }),
 			reactivityKeys: ["hazelIntegrationStatus"],
 		})
 		setBusy(false)

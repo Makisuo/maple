@@ -40,6 +40,7 @@ import {
 	VCS_PULL_REQUESTS_DEFAULT_LIMIT,
 	VcsCommitDetailsResponse,
 	VcsPullRequestsResponse,
+	validateIntegrationReturnPath,
 } from "@maple/domain/http"
 import { cloudflareAnalyticsState } from "@maple/db"
 import { EdgeCacheService } from "@maple/cache"
@@ -654,7 +655,8 @@ const resolveDashboardTargetOrigin = (appBaseUrl: string): string =>
 		onSome: (parsed) => parsed.origin,
 	})
 
-const renderCallbackPage = (params: {
+/** Exported for the callback-page sink tests (`integrations-callback-page.test.ts`). */
+export const renderCallbackPage = (params: {
 	status: "success" | "error"
 	message: string
 	returnTo: string | null
@@ -664,7 +666,16 @@ const renderCallbackPage = (params: {
 	targetOrigin: string
 }) => {
 	const safeMessage = escapeHtml(params.message)
-	const safeReturn = params.returnTo ? escapeHtml(params.returnTo) : null
+	// The stored return value is a dashboard-relative path, but this page is served
+	// from the API origin — resolve it against the dashboard origin so the link works,
+	// and drop it entirely when it is not a plain relative path (a `javascript:` URL
+	// survives HTML escaping and would run here) or when the origin is unknown.
+	const returnPath = validateIntegrationReturnPath(params.returnTo)
+	const safeReturn =
+		returnPath !== null && params.targetOrigin !== "*"
+			? escapeHtml(`${params.targetOrigin}${returnPath}`)
+			: null
+	const blockedReturn = safeReturn === null && (params.returnTo ?? "").length > 0
 	const payload = escapeJsonInHtml(
 		JSON.stringify({
 			type: params.messageType,
@@ -776,7 +787,13 @@ const renderCallbackPage = (params: {
       <h1>${isSuccess ? `${params.label} connected` : `${params.label} connection failed`}</h1>
       <p>${safeMessage}</p>
       ${isSuccess ? "" : `<p class="hint">Close this window and try connecting again from Maple.</p>`}
-      ${safeReturn ? `<a class="button" href="${safeReturn}">Return to Maple</a>` : ""}
+      ${
+			safeReturn
+				? `<a class="button" href="${safeReturn}">Return to Maple</a>`
+				: blockedReturn
+					? `<p class="hint" title="The return link was not a Maple dashboard path and was blocked.">Return link blocked — close this window and go back to Maple.</p>`
+					: ""
+		}
       <div class="wordmark">Maple</div>
     </main>
     <script>
