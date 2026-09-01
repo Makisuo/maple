@@ -33,12 +33,14 @@
  * migration that DROPped its grants. The sweep below is kept only to heal
  * objects that predate this — it is idempotent and cheap.
  *
- * Default privileges are keyed to the CREATING role, so this pins the session to
- * `postgres` first (see `pinSessionRoleToPostgres` in planetscale-connection.ts,
- * which does the same for the brokered prod connection). Where that is not
- * permitted we fall back to keying them to the session's own role, which is
- * correct for stg / PR previews — there the migrate role and the runtime role
- * are the same identity.
+ * Default privileges are keyed to the CREATING role, and the standalone path
+ * cannot know which identity a later `drizzle-kit migrate` process will create
+ * objects as — its own `SET ROLE postgres` is session-scoped, and only the
+ * brokered prod connection persists the pin (`pinSessionRoleToPostgres` in
+ * planetscale-connection.ts). So defaults are keyed to BOTH candidates: the
+ * login role (while the session still is it), then `postgres` where membership
+ * allows the switch. Whichever one migrate's connections end up creating as,
+ * its defaults fire.
  */
 import * as Predicate from "effect/Predicate"
 import postgres from "postgres"
@@ -63,18 +65,29 @@ const quoteIdent = (role: string): string => {
  * Statements are ordered: schema usage, then the default privileges that make
  * FUTURE objects correct, then the backfill sweep for existing ones.
  *
+ * Defaults are keyed to EVERY role migrations might create objects as, not
+ * just one: this script's `SET ROLE postgres` lasts only for its own session,
+ * and `drizzle-kit migrate` runs later as a separate process whose connections
+ * authenticate as the login role. Unless that login carries a persisted
+ * `role=postgres` (the brokered prod path's `ALTER ROLE … SET role`, see
+ * planetscale-connection.ts — the standalone stg path has no such guarantee),
+ * its objects are created by the login role and postgres-keyed defaults never
+ * fire — recreating exactly the owner-only-table outage this script prevents.
+ *
  * PUBLIC is a keyword, not an identifier — it must never be quoted.
  */
-const statements = (owner: string): readonly string[] => {
+export const defaultPrivilegeStatements = (owner: string): readonly string[] => {
 	const ident = quoteIdent(owner)
 	return [
-		"GRANT USAGE ON SCHEMA public TO PUBLIC",
 		`ALTER DEFAULT PRIVILEGES FOR ROLE ${ident} IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO PUBLIC`,
 		`ALTER DEFAULT PRIVILEGES FOR ROLE ${ident} IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO PUBLIC`,
-		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO PUBLIC",
-		"GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO PUBLIC",
 	]
 }
+
+export const sweepStatements: readonly string[] = [
+	"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO PUBLIC",
+	"GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO PUBLIC",
+]
 
 /** Ask the server — a PlanetScale URL username carries a routing suffix that is
  * stripped before the server sees it, so it is not a usable role name. */
@@ -94,20 +107,35 @@ const currentUser = async (sql: postgres.Sql): Promise<string> => {
 export const ensureRuntimePrivileges = async (connectionUrl: string): Promise<void> => {
 	const sql = postgres(connectionUrl, { max: 1, fetch_types: false })
 	try {
-		// Own the objects as `postgres` where membership allows it, so the default
-		// privileges are keyed to the role that will actually create prod's tables.
+		const runStatements = async (batch: readonly string[]): Promise<void> => {
+			for (const statement of batch) {
+				console.log(`  → ${statement}`)
+				await sql.unsafe(statement)
+			}
+		}
+
+		await runStatements(["GRANT USAGE ON SCHEMA public TO PUBLIC"])
+		// Key defaults to the LOGIN role first, while the session still is it:
+		// `ALTER DEFAULT PRIVILEGES FOR ROLE x` needs membership in x, and
+		// `postgres` is not a member of its own members.
+		const loginRole = await currentUser(sql)
+		console.log(`→ Ensuring PUBLIC privileges for objects created by "${loginRole}"`)
+		await runStatements(defaultPrivilegeStatements(loginRole))
+		// Then as `postgres` where membership allows it, so the defaults are also
+		// keyed to the role that creates prod's tables (the brokered path pins
+		// migrations to run as postgres — see planetscale-connection.ts).
 		try {
 			await sql.unsafe("SET ROLE postgres")
 		} catch {
-			console.log("→ SET ROLE postgres not permitted — keying defaults to the session role")
+			console.log("→ SET ROLE postgres not permitted — defaults keyed to the session role only")
 		}
 		const owner = await currentUser(sql)
-		console.log(`→ Ensuring PUBLIC privileges (objects created by "${owner}")\n`)
-		for (const statement of statements(owner)) {
-			console.log(`  → ${statement}`)
-			await sql.unsafe(statement)
+		if (owner !== loginRole) {
+			console.log(`→ Ensuring PUBLIC privileges for objects created by "${owner}"`)
+			await runStatements(defaultPrivilegeStatements(owner))
 		}
-		console.log(`\n✓ Privileges ensured — future tables owned by "${owner}" are granted to PUBLIC`)
+		await runStatements(sweepStatements)
+		console.log(`\n✓ Privileges ensured — future tables are granted to PUBLIC at creation`)
 	} finally {
 		await sql.end()
 	}

@@ -109,10 +109,14 @@ stop_server() {
 }
 
 insert_markers() {
-	# Insert enough rows per signal (>= 2*SAMPLE_ROWS=10, so 30 each) so
-	# calibration has a disjoint held-out window AND a representative set.
+	# Calibration splits rows [0, SAMPLE_ROWS) for training and
+	# [SAMPLE_ROWS, SAMPLE_ROWS * (1 + HELD_OUT_SAMPLE_MULTIPLIER)) for held-out
+	# validation, so with --sample-rows 10 and a multiplier of 2 it needs 30 rows
+	# per signal, not the 20 an earlier comment here claimed. Seeding exactly 30
+	# left no margin: any row the split could not place failed every candidate at
+	# once, reported as "insufficient for a complete six-signal held-out split".
 	local i
-	for i in $(seq 0 29); do
+	for i in $(seq 0 44); do
 		local sec min t
 		sec=$(printf '%02d' $((i % 60)))
 		min=$(printf '%02d' $((i / 60)))

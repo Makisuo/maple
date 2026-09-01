@@ -192,3 +192,20 @@ describe("autoLayoutPerContainer", () => {
 		expect(autoLayoutPerContainer(widgets, sections).map((w) => w.id)).toEqual(["root", "grouped"])
 	})
 })
+
+describe("autoLayoutPerContainer with duplicate widget ids", () => {
+	it("keeps both widgets distinct instead of collapsing onto the last one", () => {
+		// Stored widget ids are not validated unique — an imported or API-written
+		// board can carry duplicates. An id-keyed map used to persist one widget's
+		// config twice and silently lose the other's.
+		const sections = [section("s1", ["t1"])]
+		const root = widget("dup", { x: 3, y: 3, w: 6, h: 4 })
+		const grouped = widget("dup", { x: 5, y: 5, w: 4, h: 2 }, { sectionId: "s1", tabId: "t1" })
+		const relaid = autoLayoutPerContainer([root, grouped], sections)
+
+		expect(relaid).toHaveLength(2)
+		const layouts = relaid.map((w) => ({ ...w.layout, sectionId: w.sectionId }))
+		expect(layouts).toContainEqual({ x: 0, y: 0, w: 6, h: 4, sectionId: undefined })
+		expect(layouts).toContainEqual({ x: 0, y: 0, w: 4, h: 2, sectionId: "s1" })
+	})
+})

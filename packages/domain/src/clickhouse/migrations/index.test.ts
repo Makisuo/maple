@@ -1,3 +1,4 @@
+import { String as Str } from "effect"
 import { describe, expect, it } from "vitest"
 import { type BackfillSpec, isBackfill, renderStatementFull } from "../backfill"
 import { migration_0004_service_namespace_projections } from "./0004_service_namespace_projections"
@@ -385,6 +386,72 @@ describe("ClickHouse migrations", () => {
 		expect(serviceOverviewHourlyBackfill.tsColumn).toBe("Timestamp")
 		expect(serviceOperationsHourlyBackfill.from).toBe("service_operations_minutely")
 		expect(serviceOperationsHourlyBackfill.tsColumn).toBe("Minute")
+	})
+
+	it("orders 0009 so a re-apply converges instead of doubling the annual rollups", () => {
+		// The targets are additive AggregatingMergeTrees retained a year: replaying
+		// the backfills after a partial failure (chunk N fails, admin re-runs the
+		// apply) would double every sum until TTL. DROP → TRUNCATE → backfill →
+		// CREATE MV is the 0015 cutover shape, restated as invariants.
+		const kinds = migration_0009_one_year_service_history.statements.map((stmt) =>
+			// Str.split returns a NonEmptyArray, so the head index is statically safe.
+			isBackfill(stmt) ? `backfill:${stmt.target}` : Str.split(stmt, "\n")[0].trim(),
+		)
+		const at = (needle: string) => {
+			const index = kinds.findIndex((kind) => kind.startsWith(needle))
+			expect(index, needle).toBeGreaterThanOrEqual(0)
+			return index
+		}
+
+		// Both live writers are detached before either target is truncated.
+		expect(at("DROP VIEW IF EXISTS service_overview_hourly_mv")).toBeLessThan(
+			at("TRUNCATE TABLE IF EXISTS service_overview_hourly"),
+		)
+		expect(at("DROP VIEW IF EXISTS service_operations_hourly_mv")).toBeLessThan(
+			at("TRUNCATE TABLE IF EXISTS service_operations_hourly"),
+		)
+		// Each target is emptied before its backfill, and its view reattaches after.
+		expect(at("TRUNCATE TABLE IF EXISTS service_overview_hourly")).toBeLessThan(
+			at("backfill:service_overview_hourly"),
+		)
+		expect(at("backfill:service_overview_hourly")).toBeLessThan(
+			at("CREATE MATERIALIZED VIEW IF NOT EXISTS service_overview_hourly_mv"),
+		)
+		expect(at("TRUNCATE TABLE IF EXISTS service_operations_hourly")).toBeLessThan(
+			at("backfill:service_operations_hourly"),
+		)
+		expect(at("backfill:service_operations_hourly")).toBeLessThan(
+			at("CREATE MATERIALIZED VIEW IF NOT EXISTS service_operations_hourly_mv"),
+		)
+	})
+
+	it("keeps every backfill convergent on re-apply: target emptied or rebuilt first", () => {
+		// A migration is recorded only after every statement succeeds, so a failure
+		// anywhere replays the WHOLE migration — including backfills that already
+		// inserted. Every backfill target must therefore be emptied of the rows the
+		// backfill writes earlier in the same migration: truncated, rebuilt from
+		// scratch (DROP TABLE IF EXISTS <fresh> + rename swap), or scoped-deleted
+		// for a dual-fed target (0021). An additive INSERT…SELECT into a surviving
+		// table doubles on the rerun and nothing downstream can detect it.
+		// identity_links is exempt because a replay is a merge no-op: its only
+		// aggregate is SimpleAggregateFunction(min) keyed by the full sorting key,
+		// so re-inserted rows collapse to the values already stored.
+		const mergeIdempotentTargets = new Set(["identity_links"])
+		for (const migration of migrations) {
+			migration.statements.forEach((stmt, index) => {
+				if (!isBackfill(stmt) || mergeIdempotentTargets.has(stmt.target)) return
+				const before = migration.statements
+					.slice(0, index)
+					.filter((s): s is string => typeof s === "string")
+				const emptied = before.some(
+					(s) =>
+						s.startsWith(`TRUNCATE TABLE IF EXISTS ${stmt.target}`) ||
+						s.startsWith(`DROP TABLE IF EXISTS ${stmt.target}`) ||
+						s.startsWith(`DELETE FROM ${stmt.target} `),
+				)
+				expect(emptied, `m${migration.version} backfill:${stmt.target}`).toBe(true)
+			})
+		}
 	})
 
 	it("adds the service-operation rollup and exposes a coordinated chunkable backfill", () => {

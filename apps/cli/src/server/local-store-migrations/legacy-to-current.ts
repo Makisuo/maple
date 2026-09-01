@@ -528,6 +528,34 @@ const duplicateGroupCount = async (
 	return rows[0] === undefined ? 0 : Number(rows[0].rowCount)
 }
 
+/**
+ * Replay SELECTs re-enable quoted 64-bit JSON output for THIS query only. The
+ * shared connection pins `output_format_json_quote_64bit_integers=0`, under
+ * which raw UInt64 data columns (trace Duration, histogram counts and
+ * Array(UInt64) buckets) decode as lossy JS numbers above 2^53 — the copy
+ * would then reinsert a silently different integer. Quoted output round-trips
+ * exactly: JSONEachRow input accepts quoted 64-bit integers, arrays included.
+ */
+const EXACT_INT64_SETTINGS = "SETTINGS output_format_json_quote_64bit_integers = 1"
+
+/** First fetch of a table is capped small: the byte budget is applied only
+ * AFTER a batch is materialized and decoded, so `batchRows` full rows land in
+ * memory first. With multi-megabyte log bodies that is gigabytes; seed
+ * conservatively and let the observed average row size grow the limit. */
+const INITIAL_FETCH_ROWS = 128
+
+export const nextFetchRowLimit = (
+	table: Pick<LegacyRawTable, "batchRows" | "batchBytes">,
+	fetchedRows: number,
+	fetchedBytes: number,
+): number => {
+	if (fetchedRows === 0 || fetchedBytes <= 0) return INITIAL_FETCH_ROWS
+	const averageRowBytes = fetchedBytes / fetchedRows
+	// Aim slightly past the byte budget so a typical batch still fills it.
+	const target = Math.ceil((table.batchBytes * 1.25) / averageRowBytes)
+	return Math.max(1, Math.min(table.batchRows, target))
+}
+
 const copyTable = async (
 	context: MigrationModuleContext,
 	table: LegacyRawTable,
@@ -536,6 +564,7 @@ const copyTable = async (
 ): Promise<RawReplayProgress> => {
 	let current = initial
 	let progress = copyProgressFor(current, table.name)
+	let fetchRows = Math.min(table.batchRows, INITIAL_FETCH_ROWS)
 	const columnList = columns.map((column) => identifier(column.name)).join(", ")
 	const hashExpression = `cityHash64(toString(tuple(${columnList})))`
 	const tieBreakExpression = `sipHash64(toString(tuple(${columnList})))`
@@ -563,9 +592,10 @@ const copyTable = async (
 		const offset = continuation.offset === 0 ? "" : ` OFFSET ${continuation.offset}`
 		const output = await querySource(
 			context,
-			`SELECT ${columnList}, toString(${timeNs}) AS __maple_timestamp, toString(${hashExpression}) AS __maple_hash, toString(${tieBreakExpression}) AS __maple_tie_break FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(retentionStartAt(context.cutoffAt, table.retentionDays))} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(context.cutoffAt)} ${cursor} ORDER BY ${timeNs}, ${hashExpression}, ${tieBreakExpression} LIMIT ${table.batchRows}${offset}`,
+			`SELECT ${columnList}, toString(${timeNs}) AS __maple_timestamp, toString(${hashExpression}) AS __maple_hash, toString(${tieBreakExpression}) AS __maple_tie_break FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(retentionStartAt(context.cutoffAt, table.retentionDays))} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(context.cutoffAt)} ${cursor} ORDER BY ${timeNs}, ${hashExpression}, ${tieBreakExpression} LIMIT ${fetchRows}${offset} ${EXACT_INT64_SETTINGS}`,
 		)
 		const rawRows = decodeJsonObjectRows(output)
+		fetchRows = nextFetchRowLimit(table, rawRows.length, Buffer.byteLength(output))
 		let rows = rawRows
 		if (rows.length === 0) break
 		const candidates = rows.map((row) => {
@@ -662,7 +692,10 @@ const recoverPendingBatch = async (
 		const inserted = decodeJsonObjectRows(
 			await queryTarget(
 				context,
-				`SELECT ${columnList}, toString(${timeNs}) AS __maple_timestamp, toString(${hashExpression}) AS __maple_hash, toString(${tieBreakExpression}) AS __maple_tie_break FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(retentionStartAt(context.cutoffAt, table.retentionDays))} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(context.cutoffAt)} ${cursor} ORDER BY ${timeNs}, ${hashExpression}, ${tieBreakExpression} LIMIT ${pending.rowCount}${offset}`,
+				// Same quoted-64-bit output as the source SELECT: the recovered batch
+				// signature is computed over the re-encoded rows and must match byte
+				// for byte.
+				`SELECT ${columnList}, toString(${timeNs}) AS __maple_timestamp, toString(${hashExpression}) AS __maple_hash, toString(${tieBreakExpression}) AS __maple_tie_break FROM ${identifier(table.name)} WHERE ${identifier(table.timeColumn)} >= ${timestampLiteral(retentionStartAt(context.cutoffAt, table.retentionDays))} AND ${identifier(table.timeColumn)} <= ${timestampLiteral(context.cutoffAt)} ${cursor} ORDER BY ${timeNs}, ${hashExpression}, ${tieBreakExpression} LIMIT ${pending.rowCount}${offset} ${EXACT_INT64_SETTINGS}`,
 			),
 		)
 		if (inserted.length !== pending.rowCount)
@@ -928,3 +961,6 @@ export const legacyToCurrentModule: LocalStoreMigrationModule<LegacyModuleState,
 	verify: legacyVerify,
 	recover: legacyRecover,
 }
+
+/** Internal seams exported for regression tests only. */
+export const __testables = { copyTable }

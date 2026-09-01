@@ -1169,3 +1169,107 @@ function seedGcOpWithEvidence(
 	)
 	return { opId, opDir }
 }
+
+describe("durably aborted operation recovery", () => {
+	const seedAbortedOperation = (
+		archiveDir: string,
+		dataDir: string,
+		scratchRoot: string,
+		opts: { pinPresent: boolean; scratchPresent: boolean; phase?: string },
+	) => {
+		const opId = randomUUID()
+		const gid = randomUUID()
+		const pinId = randomUUID()
+		const checkpointId = randomUUID()
+		const opDir = join(archiveDir, "operations", "active", `archive-${opId}`)
+		mkdirSync(opDir, { recursive: true })
+		if (opts.pinPresent) {
+			const pinDir = join(dataDir, "backups", "pins", checkpointId)
+			mkdirSync(pinDir, { recursive: true })
+			writeFileSync(
+				join(pinDir, `${pinId}.json`),
+				JSON.stringify({
+					formatVersion: 1,
+					pinId,
+					checkpointId,
+					purpose: `archive:${gid}`,
+					createdAt: "2026-06-01T00:00:00.000Z",
+				}),
+			)
+		}
+		const scratchSubdir = `archive-${opId}`
+		if (opts.scratchPresent) mkdirSync(join(scratchRoot, scratchSubdir), { recursive: true })
+		writeFileSync(
+			join(opDir, "intent.json"),
+			JSON.stringify({
+				formatVersion: 3,
+				kind: "create",
+				operationId: opId,
+				generationId: gid,
+				signal: "traces",
+				rangeStart: "2026-06-01",
+				checkpointId,
+				archiveDir,
+				dataDir,
+				scratchRoot,
+				pinId,
+				pinPurpose: `archive:${gid}`,
+				scratchSubdir,
+				manifestSha256: null,
+				baseActiveGenerationId: null,
+				phase: opts.phase ?? "aborted",
+				createdAt: "2026-06-01T00:00:00.000Z",
+				updatedAt: "2026-06-01T00:00:00.000Z",
+			}),
+		)
+		return { opId, opDir, pinPath: join(dataDir, "backups", "pins", checkpointId, `${pinId}.json`) }
+	}
+
+	it("finishes an aborted journal left in active/ (crash between abort write and cleanup)", async () => {
+		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
+			const seeded = seedAbortedOperation(archiveDir, dataDir, scratchRoot, {
+				pinPresent: true,
+				scratchPresent: true,
+			})
+			await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false })
+			strictEqual(existsSync(seeded.opDir), false, "aborted journal archived out of active/")
+			ok(
+				existsSync(join(archiveDir, "operations", "completed", `archive-${seeded.opId}`)),
+				"aborted journal retained under completed/",
+			)
+			strictEqual(existsSync(seeded.pinPath), false, "owned pin released")
+			strictEqual(
+				existsSync(join(scratchRoot, `archive-${seeded.opId}`)),
+				false,
+				"owned scratch removed",
+			)
+		})
+	})
+
+	it("finishes an aborted journal whose pin and scratch were already cleaned", async () => {
+		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
+			const seeded = seedAbortedOperation(archiveDir, dataDir, scratchRoot, {
+				pinPresent: false,
+				scratchPresent: false,
+			})
+			await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false })
+			strictEqual(existsSync(seeded.opDir), false, "aborted journal archived out of active/")
+		})
+	})
+
+	it("still fails closed when a mid-flight phase has lost its pin", async () => {
+		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
+			// Pin absent at a phase where release was never authorized: this is NOT
+			// the abort crash state and must stay FailClosed.
+			seedAbortedOperation(archiveDir, dataDir, scratchRoot, {
+				pinPresent: false,
+				scratchPresent: false,
+				phase: "shards-written",
+			})
+			await rejects(
+				runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false }),
+				/pin is missing before release was authorized/,
+			)
+		})
+	})
+})

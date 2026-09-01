@@ -1822,6 +1822,83 @@ describe("SlackIntegrationService", () => {
 				assert.strictEqual(again.revoked, false)
 			}).pipe(Effect.provide(withFetch(testDb, neverFetch)))
 		})
+
+		it.effect("loses gracefully to a concurrent reinstall instead of revoking it", () => {
+			const testDb = createTestDb(trackedDbs)
+			const FRESH_KEY_ID = "99999999-8888-4777-8666-555555555555"
+			const arm = { active: false }
+			// Interpose on Database so the very next execute after arming — the
+			// revoke's snapshot SELECT — is immediately followed by a "concurrent
+			// completeInstall" landing fresh secrets and a new API key on the row.
+			const racingDb = Layer.effect(
+				Database,
+				Effect.gen(function* () {
+					const real = yield* Database
+					return {
+						execute: (fn) =>
+							real.execute(fn).pipe(
+								Effect.tap(() => {
+									if (!arm.active) return Effect.void
+									arm.active = false
+									return Effect.promise(() =>
+										executeSql(
+											testDb,
+											`UPDATE slack_workspaces
+											 SET updated_at = updated_at + interval '1 second',
+											     api_key_id = $2,
+											     bot_token_ciphertext = 'fresh-bot-ciphertext'
+											 WHERE team_id = $1`,
+											["T-RACE", FRESH_KEY_ID],
+										),
+									)
+								}),
+							),
+					}
+				}),
+			).pipe(Layer.provide(testDb.layer))
+			const serviceLayer = SlackIntegrationService.layer.pipe(
+				Layer.provide(Layer.mergeAll(ApiKeysService.layer, OAuthStateRepository.layer)),
+				Layer.provide(racingDb),
+				Layer.provide(Env.layer),
+				Layer.provide(makeConfig(true)),
+			)
+			return Effect.gen(function* () {
+				yield* Effect.promise(() =>
+					insertWorkspace(testDb, {
+						id: "sw_race",
+						orgId: "org_race",
+						teamId: "T-RACE",
+						teamName: "RaceOrg",
+						botToken: "xoxb-race",
+						apiKey: "maple_ak_race",
+					}),
+				)
+				const slack = yield* SlackIntegrationService
+				arm.active = true
+				const result = yield* slack.revokeByTeamId("T-RACE", "tokens_revoked")
+				// The stale revocation must NOT clobber the reinstall: it reports the
+				// lost race and leaves the fresh row active with its secrets intact.
+				assert.strictEqual(result.revoked, false)
+
+				const row = yield* Effect.promise(() =>
+					queryFirstRow<{
+						revoked_at: string | null
+						api_key_id: string | null
+						bot_token_ciphertext: string | null
+					}>(
+						testDb,
+						"SELECT revoked_at, api_key_id, bot_token_ciphertext FROM slack_workspaces WHERE team_id = 'T-RACE'",
+					),
+				)
+				assert.isNull(row?.revoked_at)
+				assert.strictEqual(row?.api_key_id, FRESH_KEY_ID)
+				assert.strictEqual(row?.bot_token_ciphertext, "fresh-bot-ciphertext")
+			}).pipe(
+				Effect.provide(
+					Layer.mergeAll(serviceLayer, Layer.succeed(FetchHttpClient.Fetch, neverFetch)),
+				),
+			)
+		})
 	})
 
 	describe("reconcileWorkspaces", () => {

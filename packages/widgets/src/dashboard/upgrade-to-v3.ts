@@ -204,6 +204,14 @@ export const upgradeDocumentToV3 = (document: unknown): unknown => {
  * `upgradeDocumentToV3` — and by then nothing calls it.
  */
 export const upgradeStoredDocument = (payload: unknown): unknown => {
+	// A document declaring a NEWER version than this build knows comes back from
+	// `migrateToLatest` untouched — but the v3 rewrite and the unconditional
+	// restamp below would then erase its version marker and mangle any data
+	// source shape v3 cannot know. Pass it through unchanged instead.
+	if (isRecord(payload)) {
+		const declared = payload.schemaVersion
+		if (typeof declared === "number" && declared > CURRENT_DASHBOARD_SCHEMA_VERSION) return payload
+	}
 	const upgraded = upgradeDocumentToV3(migrateToLatest(payload))
 	// Restamp here, not in `migrateToLatest`. That function stamps the version it
 	// actually REACHED — which is 2, since the chain stops there — and it is right

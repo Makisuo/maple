@@ -1,5 +1,5 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Fiber, Layer, Schema } from "effect"
+import { ConfigProvider, Effect, Fiber, Layer, Predicate, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OrgId, UserId } from "@maple/domain/http"
@@ -1000,5 +1000,147 @@ describe("deployRequestTimelineRows", () => {
 	it("ignores unparseable timestamps rather than emitting an epoch-0 marker", () => {
 		const rows = deployRequestTimelineRows({ number: 10, created_at: "not-a-date" })
 		assert.deepStrictEqual(rows, [])
+	})
+})
+
+describe("PlanetScaleService pagination truncation", () => {
+	/**
+	 * Serve `total` synthetic items 100 per page so `fetchAllPages` sees ten
+	 * FULL pages and stops at its ceiling with no short page — a truncated
+	 * listing. Everything else behaves like `stubApi`.
+	 */
+	const stubTruncated = (options: {
+		totalDatabases?: number
+		deployRequestsTotalFor?: string
+		deployRequestUpdatedAt?: string
+	}) => {
+		const base = stubApi({ databases: [], branchesByDatabase: {} })
+		const pageOf = (url: string) => {
+			const match = url.match(/[?&]page=(\d+)/)
+			return match ? Number(match[1]) : 1
+		}
+		const stub = (async (input: string | URL | Request, init?: RequestInit) => {
+			const url =
+				typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+			const json = (body: unknown) =>
+				new Response(JSON.stringify(body), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				})
+			if (
+				Predicate.isNotUndefined(options.deployRequestsTotalFor) &&
+				url.includes("/deploy-requests")
+			) {
+				const page = pageOf(url)
+				const start = (page - 1) * 100
+				return json({
+					data: Array.from({ length: 100 }, (_, index) => ({
+						id: `dr_${start + index}`,
+						number: start + index,
+						state: "closed",
+						deployment_state: "complete",
+						created_at: options.deployRequestUpdatedAt,
+						updated_at: options.deployRequestUpdatedAt,
+						closed_at: options.deployRequestUpdatedAt,
+					})),
+				})
+			}
+			if (
+				Predicate.isNotUndefined(options.totalDatabases) &&
+				/\/databases(\?|$)/.test(url.split("#")[0] ?? url)
+			) {
+				const page = pageOf(url)
+				const start = (page - 1) * 100
+				const count = Math.min(100, Math.max(0, options.totalDatabases - start))
+				return json({
+					data: Array.from({ length: count }, (_, index) => ({
+						id: `db_${start + index}`,
+						name: `db-${start + index}`,
+					})),
+				})
+			}
+			return base(input, init)
+		}) as typeof fetch
+		globalThis.fetch = stub
+		return stub
+	}
+
+	it.effect(
+		"does not soft-delete stored databases when the inventory listing is truncated",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			// Ten full pages: the upstream org has MORE than 1,000 databases, and
+			// the stored one may simply live beyond the pagination ceiling.
+			const stub = stubTruncated({ totalDatabases: 1000 })
+			return Effect.gen(function* () {
+				yield* connect("org_1")
+				yield* Effect.promise(() =>
+					executeSql(
+						testDb,
+						`INSERT INTO planetscale_databases (id, org_id, database_id, name, kind, created_at, updated_at)
+						 VALUES ('row_beyond', 'org_1', 'db_beyond_cap', 'beyond-cap', 'mysql', now(), now())`,
+					),
+				)
+				const service = yield* PlanetScaleService
+				const summary = yield* service.pollAllOrgs()
+				assert.strictEqual(summary.refreshed, 1)
+
+				const kept = yield* Effect.promise(() =>
+					queryFirstRow<{ deleted_at: string | null }>(
+						testDb,
+						"SELECT deleted_at FROM planetscale_databases WHERE database_id = 'db_beyond_cap'",
+					),
+				)
+				assert.isNull(kept?.deleted_at)
+			}).pipe(
+				Effect.provideService(FetchHttpClient.Fetch, stub),
+				Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+			)
+		},
+		60_000,
+	)
+
+	it.effect("does not advance the deploy-request watermark past a truncated listing", () => {
+		const testDb = createTestDb(trackedDbs)
+		// All requests sit past the 30-day floor so no timeline rows are written;
+		// the only observable effect is the watermark decision.
+		const stub = stubTruncated({
+			deployRequestsTotalFor: "main-db",
+			deployRequestUpdatedAt: "2026-01-01T00:00:00.000Z",
+		})
+		return Effect.gen(function* () {
+			yield* connect("org_1")
+			yield* Effect.promise(() =>
+				executeSql(
+					testDb,
+					`INSERT INTO planetscale_databases (id, org_id, database_id, name, kind, created_at, updated_at)
+					 VALUES ('row_main', 'org_1', 'db_main', 'main-db', 'mysql', now(), now())`,
+				),
+			)
+			const service = yield* PlanetScaleService
+			// Move the TestClock well past the fixture timestamps so they parse as
+			// real past instants that sit beyond the 30-day backfill floor (no
+			// timeline rows, but a positive newest-update candidate).
+			yield* TestClock.adjust("500000 hours")
+			const summary = yield* service.pollAllOrgs()
+			// The poll itself succeeded — a decode failure would also leave the
+			// watermark null and make this test vacuous.
+			assert.strictEqual(summary.failures, 0)
+
+			// Ten full pages of deploy requests were read and the ceiling hit:
+			// requests beyond it were never observed, so the watermark must not
+			// claim them as done.
+			const state = yield* Effect.promise(() =>
+				queryFirstRow<{ watermark_at: string | null }>(
+					testDb,
+					`SELECT watermark_at FROM planetscale_poll_state
+					 WHERE org_id = 'org_1' AND dataset = 'deploy_requests' AND database_id = 'db_main'`,
+				),
+			)
+			assert.isNull(state?.watermark_at)
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
 	})
 })

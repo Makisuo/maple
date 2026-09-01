@@ -463,7 +463,8 @@ const localQueryError = (status: number, detail: string, cause = detail): LocalQ
 export const checkpointQueryUrl = (host: string, port: number): string =>
 	`${serverUrl(host, port)}/local/query`
 
-const postCheckpointBackup = (
+/** Exported for the timeout regression test only. */
+export const postCheckpointBackup = (
 	host: string,
 	port: number,
 	dataDir: string,
@@ -494,12 +495,13 @@ const postCheckpointBackup = (
 			try: () => JSON.parse(responseText) as unknown,
 			catch: (error) => localQueryError(response.status, errorMessage(error), errorCause(error)),
 		})
-	}).pipe(
-		Effect.timeout("30 seconds"),
-		Effect.catchTag("TimeoutError", () =>
-			Effect.fail(localQueryError(0, "local checkpoint backup timed out after 30 seconds")),
-		),
-	)
+	})
+	// Deliberately NO client-side timeout. The server runs BACKUP through a
+	// synchronous db.exec that cannot observe cancellation, so a timeout here
+	// unwound checkpoint creation and released the maintenance lock while chDB
+	// was still writing the snapshot — a retry would then quarantine/rename the
+	// directory a live BACKUP was writing into. A large store legitimately backs
+	// up for minutes; a dead server surfaces as a connection error instead.
 }
 
 export const isMissingBackupConfigurationError = (error: unknown): boolean => {

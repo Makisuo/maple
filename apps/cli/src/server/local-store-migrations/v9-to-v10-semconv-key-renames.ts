@@ -1,7 +1,7 @@
 // SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
-import { cp, mkdir, rm } from "node:fs/promises"
-import { dirname, resolve } from "node:path"
+import { resolve } from "node:path"
 import {
+	cloneStoreForStaging,
 	decodeInstalledProgress,
 	makeRawRowsState,
 	type InstalledProgress,
@@ -88,9 +88,7 @@ const prepareTarget = async (context: MigrationModuleContext, state: V9ToV10Stat
 	const source = resolve(context.sourceDataDir)
 	const target = resolve(context.targetDataDir)
 	if (source !== target) {
-		await rm(target, { recursive: true, force: true })
-		await mkdir(dirname(target), { recursive: true, mode: 0o700 })
-		await cp(source, target, { recursive: true, preserveTimestamps: true })
+		await cloneStoreForStaging(source, target)
 	}
 	return state
 }

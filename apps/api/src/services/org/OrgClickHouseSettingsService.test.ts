@@ -8,6 +8,7 @@ import {
 	OrgClickHouseSettingsValidationError,
 	OrgId,
 	RoleName,
+	UserId,
 } from "@maple/domain/http"
 import {
 	EdgeCacheService,
@@ -21,9 +22,11 @@ import { FetchHttpClient } from "effect/unstable/http"
 import type { TableDiffEntry } from "@maple/domain/clickhouse"
 import { Env } from "@/platform/Env"
 import { encryptAes256Gcm } from "@/platform/Crypto"
-import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
+import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import {
 	type ClickHouseExecConfig,
+	decodeSkippedEntries,
 	execClickHouse,
 	invalidateOrgRuntimeConfigMemo,
 	isRetryableUpstream,
@@ -137,6 +140,30 @@ describe("shouldHealSchemaVersion", () => {
 
 	it("does not heal off an empty diff (degenerate / failed schema fetch)", () => {
 		expect(shouldHealSchemaVersion([], STALE, REV)).toBe(false)
+	})
+})
+
+describe("decodeSkippedEntries", () => {
+	it("surfaces the workflow's skipped-migration entries from the run row", () => {
+		// A non-gating migration that fails after its DROP VIEW leaves the view
+		// absent while the run still reports "succeeded" — the skipped list is the
+		// only operator-visible trace, so the status endpoint must carry it.
+		expect(
+			decodeSkippedEntries([
+				{ id: "migration_20", reason: "ClickHouse 241: quota exceeded" },
+				{ id: "feature_reconciliation", reason: "version probe failed" },
+			]),
+		).toEqual([
+			{ id: "migration_20", reason: "ClickHouse 241: quota exceeded" },
+			{ id: "feature_reconciliation", reason: "version probe failed" },
+		])
+	})
+
+	it("reads unrecognised or absent jsonb shapes as no skips", () => {
+		expect(decodeSkippedEntries(null)).toEqual([])
+		expect(decodeSkippedEntries(undefined)).toEqual([])
+		expect(decodeSkippedEntries("oops")).toEqual([])
+		expect(decodeSkippedEntries([{ name: "legacy-shape", reason: "x" }])).toEqual([])
 	})
 })
 
@@ -872,5 +899,151 @@ describe("resolveRuntimeConfig caching", () => {
 			]).pipe(Effect.exit)
 			expect(getError(exit)).toBeInstanceOf(OrgClickHouseSettingsEncryptionError)
 		}).pipe(Effect.provide(buildLayer(testDb)))
+	})
+})
+
+describe("applySchema claim lifecycle", () => {
+	const applyTrackedDbs: TestDb[] = []
+	afterEach(() => cleanupTestDbs(applyTrackedDbs))
+
+	const asOrgId = Schema.decodeUnknownSync(OrgId)
+	const asRole = Schema.decodeUnknownSync(RoleName)
+	const asUserIdApply = Schema.decodeUnknownSync(UserId)
+	const ADMIN = [asRole("org:admin")]
+
+	const applyConfigLive = ConfigProvider.layer(
+		ConfigProvider.fromUnknown({
+			PORT: "3472",
+			TINYBIRD_HOST: "https://maple-managed.tinybird.co",
+			TINYBIRD_TOKEN: "managed-token",
+			MAPLE_AUTH_MODE: "self_hosted",
+			MAPLE_ROOT_PASSWORD: "test-root-password",
+			MAPLE_DEFAULT_ORG_ID: "default",
+			MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 5).toString("base64"),
+			MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "lookup-key",
+			MAPLE_INGEST_PUBLIC_URL: "http://127.0.0.1:3474",
+			MAPLE_APP_BASE_URL: "http://127.0.0.1:3471",
+		}),
+	)
+
+	const missBackend: EdgeCacheBackend = {
+		name: "memory",
+		get: () => Promise.resolve(undefined),
+		put: () => Promise.resolve(),
+		delete: () => Promise.resolve(),
+	}
+
+	const buildApplyLayer = (testDb: TestDb, workerEnv: Record<string, unknown>) => {
+		const envLive = Env.layer.pipe(Layer.provide(applyConfigLive))
+		const edgeCacheLive = Layer.succeed(EdgeCacheService)(makeEdgeCacheService(missBackend))
+		return OrgClickHouseSettingsService.layer.pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					envLive,
+					testDb.layer,
+					edgeCacheLive,
+					Layer.succeed(WorkerEnvironment)(workerEnv),
+				),
+			),
+		)
+	}
+
+	const seedSettings = (testDb: TestDb, orgId: string) =>
+		executeSql(
+			testDb,
+			`INSERT INTO org_clickhouse_settings
+				(org_id, ch_url, ch_user, ch_database, sync_status, created_at, updated_at, created_by, updated_by)
+			 VALUES ($1, 'https://clickhouse.example.test', 'default', 'maple', 'connected', NOW(), NOW(), 'u', 'u')`,
+			[orgId],
+		)
+
+	const runStatus = (testDb: TestDb, orgId: string) =>
+		queryFirstRow<{ status: string }>(
+			testDb,
+			"SELECT status FROM org_clickhouse_schema_apply_runs WHERE org_id = $1",
+			[orgId],
+		)
+
+	it.effect("a workflow-creation failure releases the claim instead of wedging on already_running", () => {
+		const testDb = createTestDb(applyTrackedDbs)
+		const orgId = "org_apply_create_fails"
+		let attempts = 0
+		const binding = {
+			create: () => {
+				attempts += 1
+				return attempts === 1
+					? Promise.reject(new Error("workflow backend unavailable"))
+					: Promise.resolve({ id: "wf-1" })
+			},
+		}
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedSettings(testDb, orgId))
+			const service = yield* OrgClickHouseSettingsService
+
+			const first = yield* service
+				.applySchema(asOrgId(orgId), asUserIdApply("user_a"), ADMIN)
+				.pipe(Effect.exit)
+			expect(Exit.isFailure(first)).toBe(true)
+			// The claim was released — failed, not queued.
+			expect((yield* Effect.promise(() => runStatus(testDb, orgId)))?.status).toBe("failed")
+
+			// A retry is possible without manual database repair.
+			const second = yield* service.applySchema(asOrgId(orgId), asUserIdApply("user_a"), ADMIN)
+			expect(second.status).toBe("started")
+			expect(attempts).toBe(2)
+		}).pipe(Effect.provide(buildApplyLayer(testDb, { CLICKHOUSE_SCHEMA_APPLY_WORKFLOW: binding })))
+	})
+
+	it.effect("a missing workflow binding fails before any claim is written", () => {
+		const testDb = createTestDb(applyTrackedDbs)
+		const orgId = "org_apply_no_binding"
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedSettings(testDb, orgId))
+			const service = yield* OrgClickHouseSettingsService
+			const exit = yield* service
+				.applySchema(asOrgId(orgId), asUserIdApply("user_a"), ADMIN)
+				.pipe(Effect.exit)
+			expect(Exit.isFailure(exit)).toBe(true)
+			// No leftover queued row — the next attempt starts from idle.
+			expect(yield* Effect.promise(() => runStatus(testDb, orgId))).toBeUndefined()
+		}).pipe(Effect.provide(buildApplyLayer(testDb, {})))
+	})
+
+	it.effect("an active claim blocks a second start, and a stale one is reclaimed", () => {
+		const testDb = createTestDb(applyTrackedDbs)
+		const orgId = "org_apply_stale"
+		let creates = 0
+		const binding = {
+			create: () => {
+				creates += 1
+				return Promise.resolve({ id: `wf-${creates}` })
+			},
+		}
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedSettings(testDb, orgId))
+			const service = yield* OrgClickHouseSettingsService
+
+			const first = yield* service.applySchema(asOrgId(orgId), asUserIdApply("user_a"), ADMIN)
+			expect(first.status).toBe("started")
+
+			// The row is queued and fresh: the claim is exclusive.
+			const second = yield* service.applySchema(asOrgId(orgId), asUserIdApply("user_a"), ADMIN)
+			expect(second.status).toBe("already_running")
+			expect(creates).toBe(1)
+
+			// A queued row abandoned for over 30 minutes (workflow died without
+			// reaching its catch) must not block schema application forever.
+			yield* Effect.promise(() =>
+				executeSql(
+					testDb,
+					// Relative to the TestClock (which sits at the epoch), not wall time.
+					"UPDATE org_clickhouse_schema_apply_runs SET updated_at = to_timestamp(0) - interval '31 minutes' WHERE org_id = $1",
+					[orgId],
+				),
+			)
+			const third = yield* service.applySchema(asOrgId(orgId), asUserIdApply("user_a"), ADMIN)
+			expect(third.status).toBe("started")
+			expect(creates).toBe(2)
+		}).pipe(Effect.provide(buildApplyLayer(testDb, { CLICKHOUSE_SCHEMA_APPLY_WORKFLOW: binding })))
 	})
 })

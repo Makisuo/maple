@@ -12,6 +12,8 @@
 // `Schema.decodeUnknownEffect` is a one-line swap if that runner ever moves
 // into Effect.
 import { Schema } from "effect"
+import { cp, mkdir, rm } from "node:fs/promises"
+import { dirname, join, sep } from "node:path"
 import { RAW_TELEMETRY_TTL_COLUMNS, type Chdb } from "../chdb"
 import { decodeTableRowCounts } from "../chdb-rows"
 import { withRawTelemetryRetentionFloor, type LocalSchemaManifest } from "../schema-manifest"
@@ -120,3 +122,23 @@ export const expectedManifest = (
 	retentionDays === undefined
 		? manifest
 		: withRawTelemetryRetentionFloor(manifest, RAW_TABLES_INTERNAL, retentionDays)
+
+/**
+ * Clone a clean, stopped store into a staged migration target — WITHOUT its
+ * checkpoint registry. `<dataDir>/backups` belongs to the retained source: its
+ * manifests pin the source's schema fingerprint, so a copied registry fails
+ * every post-promotion resolution against the new fingerprint, classifying the
+ * registry "unusable" and blocking the fresh checkpoint the migration tells
+ * the user to create. Checkpoints stay with the rollback source, as the stated
+ * preservation envelope already promises.
+ */
+export const cloneStoreForStaging = async (source: string, target: string): Promise<void> => {
+	await rm(target, { recursive: true, force: true })
+	await mkdir(dirname(target), { recursive: true, mode: 0o700 })
+	const checkpointRoot = join(source, "backups")
+	await cp(source, target, {
+		recursive: true,
+		preserveTimestamps: true,
+		filter: (src) => src !== checkpointRoot && !src.startsWith(`${checkpointRoot}${sep}`),
+	})
+}

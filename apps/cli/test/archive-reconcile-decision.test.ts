@@ -225,9 +225,20 @@ describe("decideReconciliation — CREATE impossible-topology FailClosed gates",
 		strictEqual(d.kind, "FailClosed")
 	})
 
-	it("aborted in active/ → FailClosed", () => {
+	it("aborted in active/ (not promoted) → resume the idempotent abort finish", () => {
+		// A durably aborted journal in active/ is the LEGITIMATE crash state
+		// between the abort path's phase write and its archival — it must resume,
+		// not strand every later archive operation behind FailClosed.
 		const intent = createIntent("aborted")
 		const d = decideReconciliation(valid(createSnapshot(intent, { promoted: false })))
+		strictEqual(d.kind, "CreateAbortPrepublication")
+	})
+
+	it("aborted in active/ with a published generation → FailClosed", () => {
+		const intent = createIntent("aborted")
+		const d = decideReconciliation(
+			valid(createSnapshot(intent, { promoted: true, manifestAtFinal: true })),
+		)
 		strictEqual(d.kind, "FailClosed")
 	})
 })

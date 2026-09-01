@@ -29,6 +29,22 @@ export const isUnsupportedDirectorySyncError = (error: unknown): boolean =>
 	unsupportedDirectorySyncCodes.has(String((error as NodeJS.ErrnoException).code))
 
 export const ensurePrivateDirectory = async (path: string): Promise<void> => {
+	await ensureRealDirectory(path)
+	await chmod(path, 0o700)
+}
+
+/** Like {@link ensurePrivateDirectory}, but an already-existing directory keeps
+ * its mode. `durableWrite` targets sit beside caller-chosen paths (markers and
+ * journals next to an arbitrary `--data-dir`), so hardening the parent would
+ * chmod e.g. `/var/lib` to 0700 and break every other service under it. Only
+ * a directory this call creates gets 0700. */
+export const ensureParentDirectory = async (path: string): Promise<void> => {
+	const existed = await ensureRealDirectory(path)
+	if (!existed) await chmod(path, 0o700)
+}
+
+/** Returns whether the directory already existed. */
+const ensureRealDirectory = async (path: string): Promise<boolean> => {
 	const before = await lstat(path).catch((error: NodeJS.ErrnoException) => {
 		if (error.code === "ENOENT") return null
 		throw error
@@ -40,7 +56,7 @@ export const ensurePrivateDirectory = async (path: string): Promise<void> => {
 	if (after.isSymbolicLink() || !after.isDirectory()) {
 		throw new Error(`private directory is not a real directory: ${path}`)
 	}
-	await chmod(path, 0o700)
+	return before !== null
 }
 
 export const syncDirectory = async (path: string, faults: DurabilityFaults = {}): Promise<void> => {
@@ -62,7 +78,7 @@ export const durableWrite = async (
 	faults: DurabilityFaults = {},
 ): Promise<void> => {
 	const parent = dirname(path)
-	await ensurePrivateDirectory(parent)
+	await ensureParentDirectory(parent)
 	const temporary = join(parent, `.${randomUUID()}.tmp`)
 	const handle = await open(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
 	try {

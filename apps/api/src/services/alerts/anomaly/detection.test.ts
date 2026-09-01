@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+	capBusiestLogSeries,
 	evaluateErrorSpike,
 	evaluateGoldenSignals,
 	evaluateLogVolume,
@@ -321,5 +322,33 @@ describe("evaluateErrorSpike", () => {
 	it("skips when no baseline row exists", () => {
 		const e = evaluateErrorSpike(observation(100), undefined, spikeConfig)
 		expect(e.status).toBe("skipped")
+	})
+})
+
+describe("capBusiestLogSeries", () => {
+	const series = (serviceName: string, errorLogCount: number, baselineHours: number) => ({
+		serviceName,
+		deploymentEnv: "production",
+		current: { errorLogCount },
+		baseline: Array.from({ length: baselineHours }, () => ({ errorLogCount: 5 })),
+	})
+
+	it("keeps the busiest series regardless of input order", () => {
+		// ClickHouse GROUP BY order is arbitrary; an unsorted slice could drop
+		// the busy (or already-anomalous) series and let the no-data sweep
+		// falsely resolve their open incidents.
+		const quiet = Array.from({ length: 5 }, (_, i) => series(`quiet-${i}`, 1, 0))
+		const busy = series("busy", 5000, 21)
+		const capped = capBusiestLogSeries([...quiet, busy], 3)
+		expect(capped[0]?.serviceName).toBe("busy")
+		expect(capped).toHaveLength(3)
+	})
+
+	it("ranks a series with baseline history but no current traffic as busy", () => {
+		// A series that went dark is exactly the one the detector must evaluate.
+		const dark = series("dark", 0, 21)
+		const chatty = series("chatty", 2, 0)
+		const capped = capBusiestLogSeries([chatty, dark], 1)
+		expect(capped[0]?.serviceName).toBe("dark")
 	})
 })

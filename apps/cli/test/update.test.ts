@@ -6,7 +6,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Duration, Effect } from "effect"
+import { Duration, Effect, Exit } from "effect"
 import { FileSystem } from "effect/FileSystem"
 import { FetchHttpClient } from "effect/unstable/http"
 import {
@@ -251,4 +251,54 @@ describe("mapFsError", () => {
 	it("passes other failures through with their own message", () => {
 		strictEqual(__testables.mapFsError(new Error("disk on fire"), "/tmp/x").message, "disk on fire")
 	})
+})
+
+describe("swapBundlePair", () => {
+	const layout = async () => {
+		const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises")
+		const { tmpdir } = await import("node:os")
+		const root = await mkdtemp(join(tmpdir(), "maple-update-swap-"))
+		const installDir = join(root, "install")
+		const srcDir = join(root, "src")
+		const tmpDir = join(root, "tmp")
+		await mkdir(installDir, { recursive: true })
+		await mkdir(srcDir, { recursive: true })
+		await mkdir(tmpDir, { recursive: true })
+		await writeFile(join(installDir, "maple"), "old-maple")
+		await writeFile(join(installDir, "libchdb.so"), "old-lib")
+		return { root, installDir, srcDir, tmpDir }
+	}
+
+	// Plain `it` + `Effect.runPromise` (see archive-candidate-child.test.ts):
+	// `it.effect` hangs on real fs work under bun test.
+	it("installs both files together", () =>
+		Effect.runPromise(
+			Effect.gen(function* () {
+				const { root, installDir, srcDir, tmpDir } = yield* Effect.promise(layout)
+				const fs = yield* FileSystem
+				yield* fs.writeFileString(join(srcDir, "maple"), "new-maple")
+				yield* fs.writeFileString(join(srcDir, "libchdb.so"), "new-lib")
+				yield* __testables.swapBundlePair(srcDir, installDir, tmpDir)
+				strictEqual(yield* fs.readFileString(join(installDir, "maple")), "new-maple")
+				strictEqual(yield* fs.readFileString(join(installDir, "libchdb.so")), "new-lib")
+				yield* fs.remove(root, { recursive: true, force: true })
+			}).pipe(Effect.provide(BunServices.layer)),
+		))
+
+	it("restores the matched old pair when the second rename fails", () =>
+		Effect.runPromise(
+			Effect.gen(function* () {
+				const { root, installDir, srcDir, tmpDir } = yield* Effect.promise(layout)
+				const fs = yield* FileSystem
+				// Only the executable extracted — the library rename will fail after
+				// the maple swap already happened. The old code left new-maple beside
+				// old-lib; the swap must put the matched old pair back instead.
+				yield* fs.writeFileString(join(srcDir, "maple"), "new-maple")
+				const exit = yield* __testables.swapBundlePair(srcDir, installDir, tmpDir).pipe(Effect.exit)
+				ok(Exit.isFailure(exit), "swap must report the failure")
+				strictEqual(yield* fs.readFileString(join(installDir, "maple")), "old-maple")
+				strictEqual(yield* fs.readFileString(join(installDir, "libchdb.so")), "old-lib")
+				yield* fs.remove(root, { recursive: true, force: true })
+			}).pipe(Effect.provide(BunServices.layer)),
+		))
 })

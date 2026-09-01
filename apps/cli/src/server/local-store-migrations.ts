@@ -33,7 +33,7 @@ import {
 	type StoreMarker,
 	type StoreMarkerV2,
 } from "./store-version"
-import { durableJson, durableRename, ensurePrivateDirectory } from "./durable-files"
+import { durableJson, durableRename, ensurePrivateDirectory, syncTree } from "./durable-files"
 import { MAPLE_VERSION } from "../version"
 import { decodeMigrationJournal, type MigrationJournalSchema } from "./local-store-migrations/journal-schema"
 import { legacyToCurrentModule } from "./local-store-migrations/legacy-to-current"
@@ -893,6 +893,13 @@ export const promoteLocalStoreMigration = async (
 	await assertRealDirectory(targetData, "migration target")
 	const marker = validateTargetMarker(readMarker(journal.targetDataDir), "staging")
 	await assertRealFile(stagedMarker, "staged target marker")
+	// Cloned target contents were written with plain `fs.cp` and never fsynced;
+	// durableRename below only makes the DIRECTORY ENTRIES durable. Without this,
+	// a power loss after cutover can leave a durable active pointer naming a
+	// store whose file contents never reached stable storage. Runs before the
+	// renames so a crash-and-resume repeats it. Store trees carry
+	// engine-managed symlinks, hence allowSymlinks.
+	await syncTree(targetData, { allowSymlinks: true })
 
 	if (!sourceExists) {
 		await assertRealDirectory(activeData, "source data")
@@ -1409,23 +1416,6 @@ export const runLocalStoreMigration = async (
 	if (isStoreDirty(dataDir))
 		throw new Error("source store was not cleanly closed; preserve it and retry after inspection")
 
-	if (journal === null) {
-		if (!plan || plan.chain.length === 0) throw new Error("store already has the current schema")
-		journal = createJournal(dataDir, plan, markerState!)
-		await ensurePrivateDirectory(migrationRootPath(dataDir, journal.migrationId))
-		await ensurePrivateDirectory(join(migrationRootPath(dataDir, journal.migrationId), "target"))
-		if (existsSync(journal.targetDataDir))
-			throw new Error(
-				"migration target directory already exists without a journal; refusing to reuse it",
-			)
-		await writeMigrationJournal(dataDir, journal)
-	} else {
-		assertJournalPaths(dataDir, journal)
-		journalModules(journal, localStoreMigrations)
-		if (markerState?.formatVersion === 2 && markerState.storeId !== journal.sourceStoreId)
-			throw new Error("unfinished local migration source store id does not match the active marker")
-	}
-
 	const operationId = randomUUID()
 	return withMigrationMaintenanceLock(dataDir, operationId, async () => {
 		assertNoLiveServer(dataDir)
@@ -1433,7 +1423,33 @@ export const runLocalStoreMigration = async (
 			throw new Error(
 				"source store became dirty before the migration lock was acquired; refusing to continue",
 			)
-		let current = (await readMigrationJournal(dataDir)) ?? journal!
+		// The canonical journal is created, validated, and written only UNDER the
+		// maintenance lock. The unlocked read above informed planning only: two
+		// concurrent `schema migrate --yes` runs would otherwise both observe "no
+		// journal", write competing journals with different migration ids, and
+		// leave one executing a transaction the other's journal describes.
+		let current = await readMigrationJournal(dataDir)
+		if (current === null) {
+			if (!plan || plan.chain.length === 0) throw new Error("store already has the current schema")
+			if (markerState === null)
+				throw new Error(
+					"the source store has no readable marker; unknown stores fail closed and cannot be migrated",
+				)
+			const created = createJournal(dataDir, plan, markerState)
+			await ensurePrivateDirectory(migrationRootPath(dataDir, created.migrationId))
+			await ensurePrivateDirectory(join(migrationRootPath(dataDir, created.migrationId), "target"))
+			if (existsSync(created.targetDataDir))
+				throw new Error(
+					"migration target directory already exists without a journal; refusing to reuse it",
+				)
+			await writeMigrationJournal(dataDir, created)
+			current = created
+		} else {
+			assertJournalPaths(dataDir, current)
+			journalModules(current, localStoreMigrations)
+			if (markerState?.formatVersion === 2 && markerState.storeId !== current.sourceStoreId)
+				throw new Error("unfinished local migration source store id does not match the active marker")
+		}
 		try {
 			const modules = journalModules(current, localStoreMigrations)
 			current = await executeMigrationChain(dataDir, current, modules, options.onProgress)

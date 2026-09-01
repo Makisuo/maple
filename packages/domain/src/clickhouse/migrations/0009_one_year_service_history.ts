@@ -140,9 +140,15 @@ ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(Hour)
 ORDER BY (OrgId, ServiceName, DeploymentEnv, Hour, SpanName)
 TTL toDate(Hour) + INTERVAL 365 DAY`,
-		serviceOverviewHourlyBackfill,
-		serviceOperationsHourlyBackfill,
+		// DROP → TRUNCATE → backfill → CREATE MV, the 0015 cutover shape. The
+		// truncates make a re-apply of a partially failed run converge instead of
+		// doubling the additive sum aggregates; safe only because both views are
+		// detached first, so nothing writes the targets during the backfills.
 		"DROP VIEW IF EXISTS service_overview_hourly_mv",
+		"DROP VIEW IF EXISTS service_operations_hourly_mv",
+		"TRUNCATE TABLE IF EXISTS service_overview_hourly",
+		"TRUNCATE TABLE IF EXISTS service_operations_hourly",
+		serviceOverviewHourlyBackfill,
 		`CREATE MATERIALIZED VIEW IF NOT EXISTS service_overview_hourly_mv TO service_overview_hourly AS
 SELECT
   OrgId,
@@ -163,7 +169,7 @@ SELECT
 FROM traces
 WHERE SpanKind IN ('Server', 'Consumer') OR ParentSpanId = ''
 GROUP BY OrgId, Hour, ServiceName, DeploymentEnv, ServiceNamespace, CommitSha`,
-		"DROP VIEW IF EXISTS service_operations_hourly_mv",
+		serviceOperationsHourlyBackfill,
 		`CREATE MATERIALIZED VIEW IF NOT EXISTS service_operations_hourly_mv TO service_operations_hourly AS
 SELECT
   OrgId,

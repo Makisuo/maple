@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Exit, Layer, Redacted } from "effect"
+import { Effect, Exit, Fiber, Layer, Redacted } from "effect"
+import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OtlpIngest } from "./OtlpIngest"
 import { ScraperEnv, type ScraperEnvConfig } from "./Env"
@@ -169,6 +170,29 @@ describe("OtlpIngest", () => {
 			assert.isTrue(Exit.isFailure(spans[0]!.exit))
 		}).pipe(Effect.provide(TestLayer)),
 	)
+	// A gateway that accepts the connection but never answers must not pin the
+	// scrape (and its global concurrency permit) forever — the send times out
+	// as a retryable typed error.
+	it.effect("times out a stalled gateway request as a typed error", () =>
+		Effect.gen(function* () {
+			const otlp = yield* OtlpIngest
+			// Bun's `fetch` type carries `preconnect`; nothing under test calls it.
+			const stalled: typeof globalThis.fetch = Object.assign(() => new Promise<Response>(() => {}), {
+				preconnect: () => Promise.resolve(),
+			})
+			const fiber = yield* Effect.forkChild(
+				otlp
+					.send("maple_pk_test_key", SAMPLE_REQUEST)
+					.pipe(Effect.provideService(FetchHttpClient.Fetch, stalled), Effect.flip),
+				{ startImmediately: true },
+			)
+			yield* TestClock.adjust("31 seconds")
+			const error = yield* Fiber.join(fiber)
+			assert.strictEqual(error._tag, "@maple/scraper/OtlpIngestError")
+			assert.strictEqual(error.status, null)
+		}).pipe(Effect.provide(TestLayer)),
+	)
+
 	describe("chunked delivery", () => {
 		/** Budget of 2 data points per POST, so a 5-point export needs 3 requests. */
 		const ChunkedLayer = OtlpIngest.layer.pipe(
