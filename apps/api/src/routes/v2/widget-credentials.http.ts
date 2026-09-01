@@ -19,7 +19,7 @@ import { ApiKeysService } from "@/services/org/ApiKeysService"
  */
 const WIDGET_CREDENTIAL_TTL_SECONDS = 60 * 60 * 24 * 30
 /**
- * The fence. `requiredScopeForRequest` derives an API key's required scope from
+ * The fence. `requiredScopeForRoute` derives an API key's required scope from
  * the first path segment, so this reaches `/v2/widget_summary` and nothing
  * else. Composed from the endpoints that summary is built out of, the same
  * credential would need `error_issues:read` + `services:read` + `traces:read` —
