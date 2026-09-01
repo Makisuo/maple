@@ -1113,3 +1113,57 @@ describe("runChatTurn closing submit", () => {
 		}),
 	)
 })
+
+describe("runChatTurn duplicate completion calls", () => {
+	it.live("dispatches only the first of duplicate completion calls in an ordinary step", () =>
+		Effect.gen(function* () {
+			// The completion is an exactly-once output channel: a response that
+			// carries it twice must not execute two competing submits.
+			const record: Array<unknown> = []
+			const result = yield* collect(
+				[
+					[
+						toolCall("c1", SUBMIT, { claim: "first" }),
+						toolCall("c2", SUBMIT, { claim: "second" }),
+						finish("tool-calls"),
+					],
+				],
+				{ completion: submitCompletion(record) },
+			)
+
+			assert.deepEqual(record, [{ claim: "first" }])
+			const submitEvents = result.events.filter(
+				(event) => event.type === "tool-call" && event.name === SUBMIT,
+			)
+			assert.lengthOf(submitEvents, 1)
+			const end = terminal(result.events)[0]
+			assert.equal(end?.type === "turn-end" ? end.reason : undefined, "stop")
+		}),
+	)
+
+	it.live("dispatches only the first duplicate on the forced closing step", () =>
+		Effect.gen(function* () {
+			const record: Array<unknown> = []
+			// Prose first step forces the submit closing step; the model then
+			// ignores "exactly one call" and emits the completion twice.
+			const result = yield* collect(
+				[
+					[textDelta("thinking..."), finish()],
+					[
+						toolCall("c1", SUBMIT, { claim: "first" }),
+						toolCall("c2", SUBMIT, { claim: "second" }),
+						finish("tool-calls"),
+					],
+				],
+				{ completion: submitCompletion(record) },
+			)
+
+			assert.deepEqual(record, [{ claim: "first" }])
+			const submitEvents = result.events.filter(
+				(event) => event.type === "tool-call" && event.name === SUBMIT,
+			)
+			assert.lengthOf(submitEvents, 1)
+			assert.lengthOf(terminal(result.events), 1)
+		}),
+	)
+})

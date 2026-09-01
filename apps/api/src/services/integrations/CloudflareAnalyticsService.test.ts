@@ -18,7 +18,7 @@ import { eq } from "drizzle-orm"
 import { encryptAes256Gcm, parseBase64Aes256GcmKey } from "@/platform/Crypto"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import {
 	WarehouseQueryService,
 	type WarehouseQueryServiceApi,
@@ -205,6 +205,10 @@ interface FetchOptions {
 	/** Live Worker scripts the REST enumeration returns (default: my-worker). */
 	readonly workerScripts?: ReadonlyArray<{ id: string }>
 	/** Hyperdrive configs the REST enumeration returns (default: none). Mutable so a test can change the upstream set between polls. */
+	/** Serve this many synthetic active zones with real pagination (50/page). */
+	zonesTotal?: number
+	/** Awaited before answering each GraphQL call — lets a test interleave a concurrent write. */
+	onGraphql?: () => Promise<void>
 	hyperdriveConfigs?: ReadonlyArray<HyperdriveConfigFixture>
 	/** HTTP status for the hyperdrive listing (default 200). Mutable for per-poll failure injection. */
 	hyperdriveStatus?: number
@@ -255,6 +259,7 @@ const mockCloudflareFetch =
 			return jsonResponse({}, options.metricsStatus ?? 200)
 		}
 		if (url.includes("/graphql")) {
+			await options.onGraphql?.()
 			const body = JSON.parse(await readRequestBody(input, init)) as { query: string }
 			options.graphqlQueries?.push(body.query)
 			if (options.graphqlErrors) {
@@ -308,6 +313,23 @@ const mockCloudflareFetch =
 				)
 			}
 			const page = Number(new URL(url).searchParams.get("page") ?? "1")
+			if (options.zonesTotal != null) {
+				const perPage = 50
+				const start = (page - 1) * perPage
+				const count = Math.min(perPage, Math.max(0, options.zonesTotal - start))
+				const synthetic = Array.from({ length: count }, (_, index) => ({
+					...zoneFixture,
+					id: `zone-${start + index}`,
+					name: `z${start + index}.example.com`,
+				}))
+				return jsonResponse({
+					success: true,
+					errors: [],
+					messages: [],
+					result: synthetic,
+					result_info: { count, page, per_page: perPage, total_count: options.zonesTotal },
+				})
+			}
 			const forAccount =
 				options.zonesByAccount == null
 					? null
@@ -894,6 +916,31 @@ describe("CloudflareAnalyticsService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, captured)))
 	})
 
+	it.effect("pollOrg does NOT disable unseen zones when the zone listing is truncated", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			// A zone the account still owns, but which fell past the 200-zone
+			// discovery cap of a 201-zone listing: unseen, not removed.
+			yield* seedStateRow({
+				dataset: "http_requests",
+				zoneId: "beyond-cap-zone",
+				zoneName: "beyond.example.com",
+				watermarkAt: new Date(T0 - 20 * MIN),
+				settingsFetchedAt: new Date(T0 - 5 * MIN),
+			})
+			const service = yield* CloudflareAnalyticsService
+			yield* service.pollOrg(ORG)
+			const rows = yield* loadStateRows
+			const beyond = rows.find((row) => row.zoneId === "beyond-cap-zone")
+			assert.isDefined(beyond)
+			assert.isTrue(beyond!.enabled)
+			assert.notInclude(beyond!.lastError ?? "", "no longer present")
+		}).pipe(Effect.provide(makeLayer(testDb, captured, { zonesTotal: 201 })))
+	})
+
 	it.effect("pollOrg skips when another tick holds the lease", () => {
 		const testDb = createTestDb(trackedDbs)
 		const captured: CapturedIngest[] = []
@@ -906,6 +953,50 @@ describe("CloudflareAnalyticsService", () => {
 			assert.strictEqual(summary.skipped, "lease held by another tick")
 			assert.strictEqual(captured.length, 0)
 		}).pipe(Effect.provide(makeLayer(testDb, captured)))
+	})
+
+	it.effect("a tick that lost its lease does not clear the successor's on release", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		// Simulate the overlap: while this tick is mid-poll (first GraphQL call),
+		// a successor claims the anchor lease — as happens when a tick outlives
+		// LEASE_MS. The finishing tick's release must be a compare-and-set on the
+		// lease value it wrote, so the successor's live lease survives.
+		const SUCCESSOR_LEASE = new Date(T0 + 3 * MIN)
+		let injected = false
+		const onGraphql = async () => {
+			if (injected) return
+			injected = true
+			await executeSql(
+				testDb,
+				`UPDATE cloudflare_analytics_state SET lease_until = $1
+				 WHERE dataset = 'workers_invocations' AND zone_id = ''`,
+				[SUCCESSOR_LEASE],
+			)
+		}
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			yield* seedStateRow({
+				dataset: "workers_invocations",
+				zoneId: "",
+				discoveredAt: new Date(T0 - 5 * MIN),
+				settingsFetchedAt: new Date(T0 - 5 * MIN),
+			})
+			const service = yield* CloudflareAnalyticsService
+			yield* service.pollOrg(ORG)
+
+			const anchor = yield* Effect.promise(() =>
+				queryFirstRow<{ lease_until: Date | string | null }>(
+					testDb,
+					`SELECT lease_until FROM cloudflare_analytics_state
+					 WHERE dataset = 'workers_invocations' AND zone_id = ''`,
+				),
+			)
+			// Pre-CAS this was nulled by the stale tick's unconditional release,
+			// letting a third tick overlap the successor.
+			assert.strictEqual(new Date(anchor?.lease_until ?? 0).getTime(), SUCCESSOR_LEASE.getTime())
+		}).pipe(Effect.provide(makeLayer(testDb, captured, { onGraphql })))
 	})
 
 	it.effect("pollOrg reclaims a far-future (corrupt) lease instead of skipping forever", () => {

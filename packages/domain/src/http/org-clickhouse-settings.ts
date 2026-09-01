@@ -174,6 +174,18 @@ export class OrgClickHouseApplySchemaStatus extends Schema.Class<OrgClickHouseAp
 	stepsTotal: Schema.NullOr(Schema.Number),
 	stepsDone: Schema.NullOr(Schema.Number),
 	appliedVersions: Schema.Array(Schema.Number),
+	/**
+	 * Non-gating (performance) migrations and optional features the run could
+	 * not apply. A "succeeded" run with entries here left work undone — e.g. a
+	 * dropped materialized view whose CREATE failed — and needs a re-apply, so
+	 * the status must say so rather than reporting an unqualified success.
+	 */
+	skipped: Schema.Array(
+		Schema.Struct({
+			id: Schema.String,
+			reason: Schema.String,
+		}),
+	),
 	errorMessage: Schema.NullOr(Schema.String),
 	startedAt: Schema.NullOr(Schema.Number),
 	finishedAt: Schema.NullOr(Schema.Number),

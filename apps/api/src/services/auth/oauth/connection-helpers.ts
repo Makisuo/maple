@@ -16,7 +16,7 @@ import {
 } from "@maple/domain/http"
 import { oauthAuthStates, oauthConnections, type OAuthAuthStateRow, type OAuthConnectionRow } from "@maple/db"
 import { and, eq, isNull, lt } from "drizzle-orm"
-import { Clock, Effect, Redacted, Schema, Semaphore } from "effect"
+import { Clock, Effect, Option, Redacted, Schedule, Schema, Semaphore } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import {
 	decryptAes256Gcm,
@@ -62,6 +62,23 @@ export const OAuthTokenResponseSchema = Schema.Struct({
 export type OAuthTokenResponse = typeof OAuthTokenResponseSchema.Type
 
 const decodeTokenResponse = Schema.decodeUnknownEffect(OAuthTokenResponseSchema)
+
+/**
+ * RFC 6749 §5.2 error body. Token endpoints answer 400/401 for many reasons —
+ * `invalid_client` (rotated/misconfigured client secret), `invalid_request`,
+ * `invalid_scope` — and only `invalid_grant` means the grant itself is dead.
+ * Classifying any other 400/401 as revoked would let one bad Maple client
+ * secret stamp every tenant connection revoked at once.
+ */
+const decodeOAuthErrorCode = Schema.decodeUnknownOption(
+	Schema.fromJsonString(Schema.Struct({ error: Schema.String })),
+)
+
+const oauthErrorCodeOf = (text: string): string | null =>
+	Option.match(decodeOAuthErrorCode(text), {
+		onNone: () => null,
+		onSome: (body) => body.error,
+	})
 
 export const toUpstreamError = (message: string, status?: number, cause?: unknown) =>
 	new IntegrationsUpstreamError({
@@ -346,9 +363,11 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 		)
 
 		/**
-		 * Refresh-grant call with the shared classification rule: a 400/401 means
-		 * the grant itself is gone (revoked / rotated away), not a transient
-		 * upstream failure.
+		 * Refresh-grant call with the shared classification rule: only a 400/401
+		 * whose RFC 6749 error body says `invalid_grant` means the grant itself is
+		 * gone (revoked / rotated away). Every other failure — `invalid_client`
+		 * from a rotated Maple secret, a bodyless 400, 429s, 5xx — is a
+		 * non-mutating upstream failure and must not stamp the connection revoked.
 		 */
 		const refreshAccessToken = Effect.fn("OAuthConnectionHelpers.refreshAccessToken")(function* (
 			config: OAuthTokenEndpointConfig,
@@ -361,10 +380,19 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 				...(config.clientSecret ? { client_secret: Redacted.value(config.clientSecret) } : undefined),
 			})
 			if (status === 400 || status === 401) {
+				const errorCode = oauthErrorCodeOf(text)
+				if (errorCode === "invalid_grant") {
+					return yield* Effect.fail(
+						new IntegrationsRevokedError({
+							message: `${providerLabel} connection no longer authorized — reconnect required`,
+						}),
+					)
+				}
 				return yield* Effect.fail(
-					new IntegrationsRevokedError({
-						message: `${providerLabel} connection no longer authorized — reconnect required`,
-					}),
+					toUpstreamError(
+						`Token refresh failed with ${status}${errorCode === null ? "" : ` (${errorCode})`}`,
+						status,
+					),
 				)
 			}
 			if (status < 200 || status >= 300) {
@@ -398,6 +426,11 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 						updatedAt: new Date(currentTime),
 					})
 					.where(eq(oauthConnections.id, row.id)),
+			).pipe(
+				// The provider already rotated the refresh token, so this write holds the
+				// only usable copy — losing it to a transient Postgres blip turns into a
+				// permanent disconnect on the next refresh. Retry hard before giving up.
+				Effect.retry({ times: 3, schedule: Schedule.exponential("100 millis") }),
 			)
 			return tokenResponse.access_token
 		})

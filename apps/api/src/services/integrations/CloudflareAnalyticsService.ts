@@ -21,8 +21,10 @@
  * `settings` (Cloudflare's per-plan limits), a lease column as the tick-overlap guard, and
  * last success/error for the integration UI. The
  * poll loop is resumable by construction — a budget-exhausted backfill simply continues from
- * its watermark on the next tick. Metrics rows are written exactly once because a window is
- * only ever ingested before its watermark advances, and windows never overlap.
+ * its watermark on the next tick. Metrics delivery is at-least-once: a window is only ever
+ * ingested before its watermark advances and windows never overlap, so steady state writes each
+ * row once — but a crash between the gateway accepting a batch and the frontier write landing
+ * replays that window next tick (the warehouse has no dedupe key to absorb it).
  */
 import { randomUUID } from "node:crypto"
 import {
@@ -1275,8 +1277,18 @@ export class CloudflareAnalyticsService extends Context.Service<
 		 * Release the tick lease. `holdUntilMs` keeps it held instead of clearing it, which is how a
 		 * rate-limited org sits out the next tick(s) — `claimLease` already refuses a live lease, and
 		 * a hold under `2 * LEASE_MS` stays inside its corrupt-lease escape hatch.
+		 *
+		 * Compare-and-set on `claimedUntil` (the value this tick's claim wrote): a tick that
+		 * outlived its own lease must not clear the successor's — releasing the successor's live
+		 * lease would let a third tick overlap it and replay the same windows into the gateway.
 		 */
-		const releaseLease = (orgId: OrgId, accountId: string, now: number, holdUntilMs?: number) =>
+		const releaseLease = (
+			orgId: OrgId,
+			accountId: string,
+			now: number,
+			claimedUntil: Date | null,
+			holdUntilMs?: number,
+		) =>
 			dbExecute((db) =>
 				db
 					.update(cloudflareAnalyticsState)
@@ -1290,6 +1302,9 @@ export class CloudflareAnalyticsService extends Context.Service<
 							eq(cloudflareAnalyticsState.accountId, accountId),
 							eq(cloudflareAnalyticsState.dataset, WORKERS_DATASET),
 							eq(cloudflareAnalyticsState.zoneId, ""),
+							claimedUntil == null
+								? isNull(cloudflareAnalyticsState.leaseUntil)
+								: eq(cloudflareAnalyticsState.leaseUntil, claimedUntil),
 						),
 					),
 			)
@@ -1304,6 +1319,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			zones: ReadonlyArray<CloudflareZone>,
 			anchorId: string,
 			now: number,
+			zonesTruncated: boolean,
 		) {
 			const rows = yield* loadStateRows(orgId, accountId)
 			// Every zone-scoped dataset gets one state row per discovered zone — reconcile them all.
@@ -1357,11 +1373,17 @@ export class CloudflareAnalyticsService extends Context.Service<
 
 			// `rows` is already scoped to this connection's account, so a zone that moved to a
 			// sibling account is disabled here and freshly discovered by that account's tick.
+			// Never off a truncated listing: a zone past the discovery cap was unseen, not
+			// removed, and disabling it would silently stop its telemetry.
 			const seen = new Set(zones.map((zone) => zone.id))
-			const vanished = rows.filter(
-				(row) =>
-					DATASET_BY_ID.get(row.dataset)?.scope === "zone" && row.enabled && !seen.has(row.zoneId),
-			)
+			const vanished = zonesTruncated
+				? []
+				: rows.filter(
+						(row) =>
+							DATASET_BY_ID.get(row.dataset)?.scope === "zone" &&
+							row.enabled &&
+							!seen.has(row.zoneId),
+					)
 			yield* updateRows(
 				vanished.map((row) => row.id),
 				{
@@ -1784,6 +1806,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 				accountId: string,
 				configs: ReadonlyArray<CloudflareHyperdriveConfig>,
 				now: number,
+				configsTruncated: boolean,
 			) {
 				yield* Effect.annotateCurrentSpan({
 					orgId,
@@ -1837,9 +1860,11 @@ export class CloudflareAnalyticsService extends Context.Service<
 				// Soft-delete only THIS account's vanished configs — a sibling account's inventory
 				// is invisible to this listing and must not be reaped by it. Pre-multi-account rows
 				// (null accountId) are adopted by whichever account's reconcile still sees them.
+				// Never off a truncated listing: a config past the cap was unseen, not removed.
 				yield* Effect.forEach(
 					existingRows.filter(
 						(row) =>
+							!configsTruncated &&
 							!upstreamIds.has(row.configId) &&
 							row.deletedAt === null &&
 							(row.accountId == null || row.accountId === accountId),
@@ -1977,7 +2002,14 @@ export class CloudflareAnalyticsService extends Context.Service<
 					// Newly-registered account datasets get their rows on the discovery cadence —
 					// before reconcileZones, whose loadStateRows picks them up for this tick.
 					yield* ensureAccountRows(orgId, accountId, now)
-					rows = yield* reconcileZones(orgId, accountId, zonesResult.success, anchor.id, now)
+					rows = yield* reconcileZones(
+						orgId,
+						accountId,
+						zonesResult.success.items,
+						anchor.id,
+						now,
+						zonesResult.success.truncated,
+					)
 					// Script enumeration rides the same discovery TTL. It filters deleted scripts out of
 					// the workers dataset; a failure (typically a pre-workers-scripts.read grant) degrades
 					// open — emit everything rather than wedge the org, and keep the last known set.
@@ -1990,10 +2022,21 @@ export class CloudflareAnalyticsService extends Context.Service<
 							errorTag: scriptsResult.failure._tag,
 							error: scriptsResult.failure.message,
 						})
+					} else if (scriptsResult.success.truncated) {
+						// More live scripts exist than the enumeration cap. An incomplete
+						// membership set would silently drop valid Worker metrics, so
+						// degrade open: no filter, and clear the persisted set so later
+						// ticks don't filter on a stale one either.
+						yield* Effect.logWarning("cloudflare-analytics script enumeration truncated", {
+							orgId,
+							scriptCount: scriptsResult.success.items.length,
+						})
+						liveScripts = null
+						yield* updateRows([anchor.id], { liveScriptsJson: null, updatedAt: msToDate(now) })
 					} else {
-						liveScripts = new Set(scriptsResult.success)
+						liveScripts = new Set(scriptsResult.success.items)
 						yield* updateRows([anchor.id], {
-							liveScriptsJson: JSON.stringify(scriptsResult.success),
+							liveScriptsJson: JSON.stringify(scriptsResult.success.items),
 							updatedAt: msToDate(now),
 						})
 					}
@@ -2011,7 +2054,13 @@ export class CloudflareAnalyticsService extends Context.Service<
 							error: hyperdriveResult.failure.message,
 						})
 					} else {
-						yield* reconcileHyperdriveConfigs(orgId, accountId, hyperdriveResult.success, now)
+						yield* reconcileHyperdriveConfigs(
+							orgId,
+							accountId,
+							hyperdriveResult.success.items,
+							now,
+							hyperdriveResult.success.truncated,
+						)
 					}
 				} else {
 					rows = yield* loadStateRows(orgId, accountId)
@@ -2210,6 +2259,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 								orgId,
 								accountId,
 								end,
+								anchor.leaseUntil,
 								rateLimited ? end + RATE_LIMIT_BACKOFF_MS : undefined,
 							).pipe(
 								// The ensuring must never fail (that would mask whatever this tick actually

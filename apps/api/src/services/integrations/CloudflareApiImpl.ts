@@ -146,6 +146,29 @@ export interface CloudflareZone {
 const MAX_ZONES = 200
 
 /**
+ * A bounded listing. `truncated` means the cap was hit and more items exist
+ * upstream — callers must not treat `items` as a complete inventory (no
+ * disabling/deleting/filtering of resources that merely fell past the cap).
+ */
+export interface BoundedListing<T> {
+	readonly items: ReadonlyArray<T>
+	readonly truncated: boolean
+}
+
+/** Collect up to `max` items, peeking one past the cap so truncation is observable. */
+const collectBounded = <T, E, R>(stream: Stream.Stream<T, E, R>, max: number) =>
+	stream.pipe(
+		Stream.take(max + 1),
+		Stream.runCollect,
+		Effect.map(
+			(collected): BoundedListing<T> => ({
+				items: collected.slice(0, max),
+				truncated: collected.length > max,
+			}),
+		),
+	)
+
+/**
  * List the account's active zones. Used by the analytics poller for zone discovery — each active
  * zone gets a poll-state row (and thus edge metrics under `cloudflare/{zoneName}`).
  */
@@ -153,23 +176,28 @@ export const listZones: (
 	accessToken: string,
 	accountId: string,
 	apiBaseUrl?: string,
-) => Effect.Effect<ReadonlyArray<CloudflareZone>, CloudflareApiError, never> = Effect.fn(
+) => Effect.Effect<BoundedListing<CloudflareZone>, CloudflareApiError, never> = Effect.fn(
 	"CloudflareApi.listZones",
 )(function* (accessToken: string, accountId: string, apiBaseUrl?: string) {
 	yield* Effect.annotateCurrentSpan("maple.cloudflare.account_id", accountId)
 	const zones = yield* runMapped(
 		accessToken,
-		Zones.listZones
-			.items({ account: { id: accountId }, status: "active", perPage: 50 })
-			.pipe(Stream.take(MAX_ZONES), Stream.runCollect),
+		collectBounded(
+			Zones.listZones.items({ account: { id: accountId }, status: "active", perPage: 50 }),
+			MAX_ZONES,
+		),
 		apiBaseUrl,
 	)
-	yield* Effect.annotateCurrentSpan("maple.cloudflare.zone_count", zones.length)
-	return zones.map((zone) => ({
-		id: zone.id,
-		name: zone.name,
-		status: zone.status ?? null,
-	}))
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.zone_count", zones.items.length)
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.zone_listing_truncated", zones.truncated)
+	return {
+		items: zones.items.map((zone) => ({
+			id: zone.id,
+			name: zone.name,
+			status: zone.status ?? null,
+		})),
+		truncated: zones.truncated,
+	}
 })
 
 // Script enumeration is bounded like zone discovery: the poller only needs a membership set to
@@ -185,17 +213,21 @@ export const listWorkerScripts: (
 	accessToken: string,
 	accountId: string,
 	apiBaseUrl?: string,
-) => Effect.Effect<ReadonlyArray<string>, CloudflareApiError, never> = Effect.fn(
+) => Effect.Effect<BoundedListing<string>, CloudflareApiError, never> = Effect.fn(
 	"CloudflareApi.listWorkerScripts",
 )(function* (accessToken: string, accountId: string, apiBaseUrl?: string) {
 	yield* Effect.annotateCurrentSpan("maple.cloudflare.account_id", accountId)
 	const scripts = yield* runMapped(
 		accessToken,
-		Workers.listScripts.items({ accountId }).pipe(Stream.take(MAX_SCRIPTS), Stream.runCollect),
+		collectBounded(Workers.listScripts.items({ accountId }), MAX_SCRIPTS),
 		apiBaseUrl,
 	)
-	yield* Effect.annotateCurrentSpan("maple.cloudflare.script_count", scripts.length)
-	return scripts.flatMap((script) => (script.id == null || script.id === "" ? [] : [script.id]))
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.script_count", scripts.items.length)
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.script_listing_truncated", scripts.truncated)
+	return {
+		items: scripts.items.flatMap((script) => (script.id == null || script.id === "" ? [] : [script.id])),
+		truncated: scripts.truncated,
+	}
 })
 
 export interface CloudflareHyperdriveConfig {
@@ -226,29 +258,31 @@ export const listHyperdriveConfigs: (
 	accessToken: string,
 	accountId: string,
 	apiBaseUrl?: string,
-) => Effect.Effect<ReadonlyArray<CloudflareHyperdriveConfig>, CloudflareApiError, never> = Effect.fn(
+) => Effect.Effect<BoundedListing<CloudflareHyperdriveConfig>, CloudflareApiError, never> = Effect.fn(
 	"CloudflareApi.listHyperdriveConfigs",
 )(function* (accessToken: string, accountId: string, apiBaseUrl?: string) {
 	yield* Effect.annotateCurrentSpan("maple.cloudflare.account_id", accountId)
 	const configs = yield* runMapped(
 		accessToken,
-		Hyperdrive.listConfigs
-			.items({ accountId })
-			.pipe(Stream.take(MAX_HYPERDRIVE_CONFIGS), Stream.runCollect),
+		collectBounded(Hyperdrive.listConfigs.items({ accountId }), MAX_HYPERDRIVE_CONFIGS),
 		apiBaseUrl,
 	)
-	yield* Effect.annotateCurrentSpan("maple.cloudflare.hyperdrive_config_count", configs.length)
-	return configs.map((config) => ({
-		id: config.id,
-		name: config.name,
-		origin: {
-			host: "host" in config.origin ? config.origin.host : null,
-			port: "port" in config.origin ? config.origin.port : null,
-			database: config.origin.database,
-			scheme: config.origin.scheme,
-			user: config.origin.user ?? null,
-		},
-	}))
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.hyperdrive_config_count", configs.items.length)
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.hyperdrive_listing_truncated", configs.truncated)
+	return {
+		items: configs.items.map((config) => ({
+			id: config.id,
+			name: config.name,
+			origin: {
+				host: "host" in config.origin ? config.origin.host : null,
+				port: "port" in config.origin ? config.origin.port : null,
+				database: config.origin.database,
+				scheme: config.origin.scheme,
+				user: config.origin.user ?? null,
+			},
+		})),
+		truncated: configs.truncated,
+	}
 })
 
 // GraphQL Analytics (the raw escape hatch the module doc-comment anticipates)

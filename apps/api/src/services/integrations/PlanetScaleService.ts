@@ -365,12 +365,19 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 				)
 			})
 
-			/** Fetch all pages of a list endpoint (bounded by MAX_PAGES). */
+			/**
+			 * Fetch all pages of a list endpoint, bounded by MAX_PAGES. `complete`
+			 * is false when the bound was hit with a full final page — the listing
+			 * was truncated, and callers must not treat the items as an exhaustive
+			 * inventory (no reconciling deletions, no advancing watermarks past
+			 * data that was never observed).
+			 */
 			const fetchAllPages = Effect.fn("PlanetScaleService.fetchAllPages")(function* <
 				S extends Schema.Top,
 			>(basePath: string, authorization: string, itemSchema: S) {
 				const decodePage = Schema.decodeUnknownEffect(Schema.fromJsonString(PageSchema(itemSchema)))
 				const items: Array<S["Type"]> = []
+				let complete = false
 				for (let page = 1; page <= MAX_PAGES; page++) {
 					const separator = basePath.includes("?") ? "&" : "?"
 					const response = yield* apiGetJson(
@@ -405,9 +412,19 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 						),
 					)
 					items.push(...decoded.data)
-					if (decoded.data.length < PAGE_SIZE) break
+					if (decoded.data.length < PAGE_SIZE) {
+						complete = true
+						break
+					}
 				}
-				return items
+				if (!complete) {
+					yield* Effect.annotateCurrentSpan("maple.planetscale.listing_truncated", true)
+					yield* Effect.logWarning("PlanetScale listing truncated at the pagination ceiling", {
+						basePath,
+						maxItems: MAX_PAGES * PAGE_SIZE,
+					})
+				}
+				return { items, complete }
 			})
 
 			/**
@@ -660,7 +677,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 				const authorization = yield* authorizationFor(connection)
 				const org = encodeURIComponent(connection.psOrganization)
 
-				const upstreamDatabases = yield* fetchAllPages(
+				const { items: upstreamDatabases, complete: inventoryComplete } = yield* fetchAllPages(
 					`/v1/organizations/${org}/databases`,
 					authorization,
 					DatabaseSchema,
@@ -670,7 +687,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 					upstreamDatabases,
 					(db) =>
 						Effect.gen(function* () {
-							const branches = yield* fetchAllPages(
+							const { items: branches } = yield* fetchAllPages(
 								`/v1/organizations/${org}/databases/${encodeURIComponent(db.name)}/branches`,
 								authorization,
 								BranchSchema,
@@ -735,9 +752,13 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 				)
 
 				// Soft-delete rows whose database disappeared upstream, so identity is
-				// kept if it re-appears.
+				// kept if it re-appears. Never off a truncated listing — a database
+				// beyond the pagination ceiling is unseen, not deleted.
 				yield* Effect.forEach(
-					existingRows.filter((row) => !upstreamIds.has(row.databaseId) && row.deletedAt === null),
+					existingRows.filter(
+						(row) =>
+							inventoryComplete && !upstreamIds.has(row.databaseId) && row.deletedAt === null,
+					),
 					(row) =>
 						database
 							.execute((client) =>
@@ -789,7 +810,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 					const floor = Math.max(state?.watermarkAt?.getTime() ?? 0, now - DEPLOY_REQUESTS_FLOOR_MS)
 
 					const org = encodeURIComponent(connection.psOrganization)
-					const requests = yield* fetchAllPages(
+					const { items: requests, complete: requestsComplete } = yield* fetchAllPages(
 						`/v1/organizations/${org}/databases/${encodeURIComponent(database_.name)}/deploy-requests`,
 						authorization,
 						DeployRequestSchema,
@@ -833,12 +854,20 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 						}
 					}
 
+					// A truncated listing has unobserved requests beyond the ceiling:
+					// advancing the watermark past them would skip them forever. Keep the
+					// old watermark — inserts are idempotent, so re-scanning is safe.
+					const watermark = requestsComplete
+						? newestUpdate > 0
+							? new Date(newestUpdate)
+							: null
+						: (state?.watermarkAt ?? null)
 					yield* recordPollResult(
 						connection.orgId,
 						DEPLOY_REQUESTS_DATASET,
 						database_.databaseId,
 						null,
-						newestUpdate > 0 ? new Date(newestUpdate) : null,
+						watermark,
 					)
 					yield* Effect.annotateCurrentSpan({
 						"maple.planetscale.deploy_requests.seen": requests.length,

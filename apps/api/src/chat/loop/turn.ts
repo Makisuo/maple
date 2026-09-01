@@ -477,9 +477,20 @@ const runStep = (
 					})
 				}
 
+				// The completion is an exactly-once output channel: a response carrying
+				// duplicate completion calls must not run it twice (competing submits
+				// would leave the report reflecting one payload and its side effects
+				// another). Keep the first and drop the rest before any dispatch.
+				let completionSeen = false
 				const calls = response.events
 					.filter(LLMEvent.is.toolCall)
 					.filter((call) => !call.providerExecuted)
+					.filter((call) => {
+						if (call.name !== input.completion?.name) return true
+						if (completionSeen) return false
+						completionSeen = true
+						return true
+					})
 				const finishReason = response.finishReason?.normalized
 				const providerFailure = response.events.find(LLMEvent.is.providerError)
 
