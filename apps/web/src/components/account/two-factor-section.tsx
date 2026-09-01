@@ -32,6 +32,7 @@ import { toastAccountError } from "@/components/account/account-errors"
 import { AccountSectionSkeleton } from "@/components/account/account-section-skeleton"
 import { CodeField } from "@/components/account/code-field"
 import { QrCode } from "@/components/account/qr-code"
+import { REPLAY_BLOCK_CLASS } from "@/components/common/replay-privacy"
 
 /**
  * Enrollment is a three-step dialog. `uri`/`secret` come back from `createTOTP()` and are only
@@ -205,7 +206,9 @@ export function TwoFactorSection() {
 					if (!open) setEnroll({ step: "closed" })
 				}}
 			>
-				<DialogContent>
+				{/* Every step of enrollment shows a secret in plain text (QR, setup key, backup
+				    codes), and the dashboard records itself with rrweb — block the whole dialog. */}
+				<DialogContent className={REPLAY_BLOCK_CLASS}>
 					{enroll.step === "scan" && (
 						<>
 							<DialogHeader>

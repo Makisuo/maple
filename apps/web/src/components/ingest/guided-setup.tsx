@@ -3,6 +3,7 @@ import { useAuth } from "@clerk/clerk-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
 import { cn } from "@maple/ui/lib/utils"
 import { CodeBlock } from "@/components/quick-start/code-block"
+import { REPLAY_BLOCK_CLASS } from "@/components/common/replay-privacy"
 import { PackageManagerCodeBlock } from "@/components/quick-start/package-manager-code-block"
 import {
 	EffectIcon,
@@ -168,9 +169,12 @@ export function ConnectInstructions({
 				</TabsContent>
 
 				<TabsContent value="instrument" className={cn("overflow-auto mt-0", contentPadding)}>
+					{/* The snippet carries the org's ingest key in plain text and the dashboard
+					    records itself with rrweb — block the block, not just the key. */}
 					<CodeBlock
 						code={interpolate(snippet.instrument)}
 						language={snippet.label.toLowerCase()}
+						className={REPLAY_BLOCK_CLASS}
 					/>
 				</TabsContent>
 
@@ -187,6 +191,7 @@ export function ConnectInstructions({
 					<CodeBlock
 						code={`Install Maple in this repo using the maple-onboard skill.\nMy ingest key is ${apiKey || "<your-api-key>"}.`}
 						language="shell"
+						className={REPLAY_BLOCK_CLASS}
 					/>
 				</TabsContent>
 			</Tabs>
