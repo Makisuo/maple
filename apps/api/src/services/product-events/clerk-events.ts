@@ -29,6 +29,29 @@ export const ClerkUserCreatedData = Schema.Struct({
 	created_at: Schema.optionalKey(Schema.Number),
 })
 
+/**
+ * `organizationMembership.deleted` / `.updated`.
+ *
+ * `role` is the member's role *after* the change. It is trusted only to answer
+ * "did this member just stop being an admin" — a question whose safe direction
+ * is to revoke — never to grant anything. Everything a request is authorized
+ * with is still re-read from Clerk.
+ */
+export const ClerkOrganizationMembershipData = Schema.Struct({
+	organization: Schema.Struct({ id: Schema.String }),
+	public_user_data: Schema.Struct({ user_id: Schema.String }),
+	role: Schema.optionalKey(Schema.String),
+})
+
+/**
+ * `user.deleted`. Clerk's `DeletedObjectJSON` declares `id` optional, so a
+ * compliant delivery may carry no id at all — the schema has to say so, or the
+ * one event whose entire purpose is "must not be dropped" fails to decode.
+ */
+export const ClerkUserDeletedData = Schema.Struct({
+	id: Schema.optionalKey(Schema.String),
+})
+
 export const ClerkWebhookEnvelope = Schema.Struct({
 	type: Schema.String,
 	data: Schema.Unknown,
@@ -39,6 +62,8 @@ export type ClerkWebhookEnvelope = Schema.Schema.Type<typeof ClerkWebhookEnvelop
 
 export const decodeClerkEnvelope = Schema.decodeUnknownEffect(Schema.fromJsonString(ClerkWebhookEnvelope))
 export const decodeClerkUserCreated = Schema.decodeUnknownEffect(ClerkUserCreatedData)
+export const decodeClerkOrganizationMembership = Schema.decodeUnknownEffect(ClerkOrganizationMembershipData)
+export const decodeClerkUserDeleted = Schema.decodeUnknownEffect(ClerkUserDeletedData)
 type ClerkUserCreatedData = Schema.Schema.Type<typeof ClerkUserCreatedData>
 
 const emailDomain = (data: ClerkUserCreatedData): string | undefined => {

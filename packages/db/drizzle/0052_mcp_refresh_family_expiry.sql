@@ -1,0 +1,1 @@
+ALTER TABLE "mcp_oauth_refresh_tokens" ADD COLUMN "family_expires_at" timestamp with time zone;
