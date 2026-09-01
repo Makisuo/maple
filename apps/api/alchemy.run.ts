@@ -7,7 +7,7 @@ import type { Rpc } from "alchemy/Rpc"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import type { MapleApiRpcContract } from "@maple/domain/internal-rpc"
-import { devServer } from "@maple/infra/dev-urls"
+import * as Portless from "@maple/alchemy-portless"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
@@ -42,6 +42,8 @@ export interface CreateMapleApiOptions {
 	replayBlobs: Cloudflare.R2.Bucket
 	/** The managed application database from `createManagedMapleDb`; undefined on ref stages (stg/prd) and PR previews. */
 	mapleDb: Cloudflare.Hyperdrive.Connection | undefined
+	/** Local dev-server block from `Portless.workerDev` under `bun dev`; undefined on a deploy. */
+	dev?: Portless.WorkerDev | undefined
 }
 
 /** R2 credentials for the ingest gateway, when this stage writes replay blobs. */
@@ -272,7 +274,7 @@ export const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleSta
 	})
 })
 
-export const createMapleApi = ({ stage, domains, replayBlobs, mapleDb }: CreateMapleApiOptions) =>
+export const createMapleApi = ({ stage, domains, replayBlobs, mapleDb, dev }: CreateMapleApiOptions) =>
 	Effect.gen(function* () {
 		// MAPLE_DB Hyperdrive comes in two flavors:
 		//
@@ -343,9 +345,9 @@ export const createMapleApi = ({ stage, domains, replayBlobs, mapleDb }: CreateM
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
-			// Port comes from `bun run dev:workers`, which reserved it and pointed a
-			// portless route at it; undefined outside that (alchemy picks one).
-			dev: devServer("api"),
+			// Under `bun dev`: a sticky local port the app's portless route follows; undefined
+			// outside the dev server (and under a bare `alchemy dev`, where alchemy picks one).
+			dev,
 			workersDev: true,
 			// alchemy ≥ beta.70 sets rolldown `strictExecutionOrder: true`, which wraps
 			// ~every chunk in a lazy `__esmMin` initializer. The DB module graph (drizzle

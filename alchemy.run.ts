@@ -27,7 +27,8 @@ import {
 	resolveDatabaseMode,
 	resolveMapleDomains,
 } from "@maple/infra/cloudflare"
-import { devEndpoint, selectedDevApps, type DevApp } from "@maple/infra/dev-urls"
+import * as Portless from "@maple/alchemy-portless"
+import { selectedDevApps, type DevApp } from "@maple/infra/dev-urls"
 import { requiredPlain } from "@maple/infra/env"
 import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
 import { createManagedMapleDb, createMapleApi, createReplayBlobStore } from "./apps/api/alchemy.run.ts"
@@ -87,22 +88,44 @@ const devApps = isDevServer ? selectedDevApps() : undefined
 const wanted = (app: DevApp): boolean => devApps === undefined || devApps.has(app)
 
 /**
- * A non-Worker app under the dev server: its own `dev` script, started by
- * `Command.Dev` on the port `bun dev` reserved for it (and told its portless
- * name through PORTLESS_URL, which the vite/astro configs use to find their
- * siblings). Alchemy keeps the child alive across stack restarts and stops it
- * with the stack. `Command.Dev` is a no-op on a deploy, so this is dev-only
- * by construction — the deploy shapes of web/landing/local-ui stay in their
- * own factories.
+ * The portless route an app answers at under the dev server
+ * (`https://[<worktree>.]<app>.localhost`). A `Portless.Route` registers the
+ * route and removes it when the session ends. Two orders, one resource:
+ *
+ * - A child process is handed the route's port: the route picks a sticky free
+ *   port first, and `createDevProcess` passes it on as `PORT`.
+ * - A Worker's port must be known at plan time (alchemy binds it in
+ *   `precreate`, before any Output resolves), so the Worker gets
+ *   `Portless.workerDev(app)` — the same kind of sticky port, not strict —
+ *   and the route follows whatever it actually bound (`workerPort`).
  */
-const createDevProcess = (app: DevApp) => {
-	const endpoint = devEndpoint(app)
-	return Command.Dev(`${app}-dev`, {
+const createDevRoute = (app: DevApp) => Portless.Route(`${app}-route`, { name: app })
+
+const createWorkerRoute = (app: DevApp, worker: Cloudflare.Worker) =>
+	Portless.Route(`${app}-route`, { name: app, port: Portless.workerPort(worker.url) })
+
+/** The Worker's `dev` block under `bun dev`; undefined on a deploy. */
+const workerDev = (app: DevApp) => (devApps ? Portless.workerDev(app) : undefined)
+
+/**
+ * A non-Worker app under the dev server: its own `dev` script, started by
+ * `Command.Dev` on the route's port (and told its portless name through
+ * PORTLESS_URL, which the vite/astro configs use to find their siblings).
+ * Alchemy keeps the child alive across stack restarts and stops it with the
+ * stack. `Command.Dev` is a no-op on a deploy, so this is dev-only by
+ * construction — the deploy shapes of web/landing/local-ui stay in their own
+ * factories.
+ */
+const createDevProcess = (app: DevApp, route: Portless.Route) =>
+	Command.Dev(`${app}-dev`, {
 		command: "bun run dev",
 		cwd: path.join(import.meta.dirname, "apps", app),
-		env: endpoint ? { PORT: String(endpoint.port), HOST: "127.0.0.1", PORTLESS_URL: endpoint.url } : {},
+		env: {
+			PORT: Output.map(Output.asOutput(route.port), String),
+			HOST: "127.0.0.1",
+			PORTLESS_URL: Portless.routeUrl(app),
+		},
 	})
-}
 
 /** Everything `bun dev` runs that is not a Worker. */
 const DEV_PROCESS_APPS: ReadonlyArray<DevApp> = ["web", "landing", "local-ui", "ingest", "scraper"]
@@ -148,6 +171,7 @@ const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStag
 type StackProviderServices =
 	| Layer.Services<ReturnType<typeof Cloudflare.providers>>
 	| Layer.Services<ReturnType<typeof AWS.providers>>
+	| Layer.Services<ReturnType<typeof Portless.providers>>
 
 /**
  * Both clouds, unconditionally.
@@ -159,7 +183,11 @@ type StackProviderServices =
  * `stageDeploysIngest`, below.
  */
 const providers: Layer.Layer<StackProviderServices, never, Alchemy.StackServices> =
-	Cloudflare.providers().pipe(Layer.provideMerge(AWS.providers()))
+	Cloudflare.providers().pipe(
+		Layer.provideMerge(AWS.providers()),
+		// Dev only in effect (a no-op on deploys): the `*.localhost` routes.
+		Layer.provideMerge(Portless.providers()),
+	)
 
 export default Alchemy.Stack(
 	"maple",
@@ -184,6 +212,13 @@ export default Alchemy.Stack(
 		const stage = parseMapleStage(yield* Alchemy.Stage)
 		const domains = resolveMapleDomains(stage)
 		const shared = yield* createProductionSharedResources(stage)
+
+		// Routes for the child processes this dev run serves; nothing on a deploy.
+		// The Workers' routes are created after each Worker, below.
+		const routes = new Map<DevApp, Portless.Route>()
+		for (const app of DEV_PROCESS_APPS) {
+			if (devApps?.has(app)) routes.set(app, yield* createDevRoute(app))
+		}
 
 		const apiUrl = resolveUrl(domains.api, "MAPLE_API_BASE_URL")
 		const electricSyncUrl = resolveUrl(domains.sync, "MAPLE_ELECTRIC_SYNC_URL")
@@ -240,8 +275,15 @@ export default Alchemy.Stack(
 		// so there is no separate chat worker to sequence against any more.
 		const api =
 			wanted("api") && replayBlobStore
-				? yield* createMapleApi({ stage, domains, mapleDb, replayBlobs: replayBlobStore.bucket })
+				? yield* createMapleApi({
+						stage,
+						domains,
+						mapleDb,
+						replayBlobs: replayBlobStore.bucket,
+						dev: workerDev("api"),
+					})
 				: undefined
+		if (api && devApps) yield* createWorkerRoute("api", api)
 
 		// Self-hosted ElectricSQL on ECS Fargate (prd/stg — dev stages use the
 		// docker `electric` service, and PR previews have no database to replicate
@@ -261,8 +303,9 @@ export default Alchemy.Stack(
 		// Standalone ElectricSQL shape-proxy worker (DB-free); its public origin is
 		// baked into the web build (VITE_ELECTRIC_SYNC_URL).
 		const electricSync = wanted("electric-sync")
-			? yield* createElectricSyncWorker({ stage, domains })
+			? yield* createElectricSyncWorker({ stage, domains, dev: workerDev("electric-sync") })
 			: undefined
+		if (electricSync && devApps) yield* createWorkerRoute("electric-sync", electricSync)
 
 		// See `isDevServer`: each of these three is gated on a production
 		// `Command.Build`, so including them would make `alchemy dev` build the
@@ -298,13 +341,15 @@ export default Alchemy.Stack(
 				})
 
 		const alerting = wanted("alerting")
-			? yield* createAlertingWorker({ stage, domains, mapleDb })
+			? yield* createAlertingWorker({ stage, domains, mapleDb, dev: workerDev("alerting") })
 			: undefined
+		if (alerting && devApps) yield* createWorkerRoute("alerting", alerting)
 
 		// Dev only (`devApps` is undefined on a deploy): the vite/astro dev
 		// servers, `cargo run` for the ingest gateway, and the scraper.
 		for (const app of DEV_PROCESS_APPS) {
-			if (devApps?.has(app)) yield* createDevProcess(app)
+			const route = routes.get(app)
+			if (route) yield* createDevProcess(app, route)
 		}
 
 		const summary = {

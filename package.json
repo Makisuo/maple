@@ -54,6 +54,7 @@
 		"@effect/platform-node": "4.0.0-rc.111",
 		"@effect/tsgo": "0.36.4",
 		"@effect/vitest": "catalog:effect",
+		"@maple/alchemy-portless": "workspace:*",
 		"@maple/infra": "workspace:*",
 		"@oxlint/plugins": "1.77.0",
 		"@tinybirdco/sdk": "catalog:tinybird",

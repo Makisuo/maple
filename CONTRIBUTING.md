@@ -178,7 +178,8 @@ bun dev api alerting electric-sync
 The three Cloudflare Workers are served by alchemy's local runtime from the same
 `alchemy.run.ts` that deploys them, reachable at `https://api.localhost`,
 `https://alerting.localhost` and `https://electric-sync.localhost` through the portless
-proxy (branch-prefixed in a linked worktree). Ports are ephemeral; `bun dev` prints them.
+proxy (branch-prefixed in a linked worktree). Ports are sticky per app and never need
+writing down; `bun dev` prints them.
 The variables below are the API's:
 
 | Variable                                                          | Required              | Notes                                                                                                |

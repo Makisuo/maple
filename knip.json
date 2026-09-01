@@ -61,6 +61,10 @@
 		"lib/effect-cloudflare": {
 			"ignoreDependencies": ["cloudflare"]
 		},
+		"lib/alchemy-portless": {
+			// The dev-sidecar entry alchemy loads by URL (`import.meta.resolve`), not by import.
+			"entry": ["src/Local.ts"]
+		},
 		"packages/query-engine": {
 			"entry": ["src/drain/index.ts"]
 		},

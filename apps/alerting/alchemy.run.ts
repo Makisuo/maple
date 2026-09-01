@@ -1,7 +1,7 @@
 import path from "node:path"
 import * as Cloudflare from "alchemy/Cloudflare"
 import * as Effect from "effect/Effect"
-import { devServer } from "@maple/infra/dev-urls"
+import * as Portless from "@maple/alchemy-portless"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
@@ -25,8 +25,10 @@ import {
 export interface CreateAlertingWorkerOptions {
 	stage: MapleStage
 	domains: MapleDomains
-	/** Managed per-branch Hyperdrive from the api factory; undefined on ref stages (stg/prd). */
+	/** The managed application database from the root (`createManagedMapleDb`); undefined on ref stages (stg/prd). */
 	mapleDb: Cloudflare.Hyperdrive.Connection | undefined
+	/** Local dev-server block from `Portless.workerDev` under `bun dev`; undefined on a deploy. */
+	dev?: Portless.WorkerDev | undefined
 }
 
 /**
@@ -62,7 +64,7 @@ const alertingConfiguredEnv = (stage: MapleStage) =>
 		planetScaleOAuthEnv,
 	)
 
-export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOptions) =>
+export const createAlertingWorker = ({ stage, mapleDb, dev }: CreateAlertingWorkerOptions) =>
 	Effect.gen(function* () {
 		const configuredEnv = yield* alertingConfiguredEnv(stage)
 		// `alerting` binds its own Hyperdrive config on prd — it issues ~97% of the
@@ -89,9 +91,9 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
-			// Port comes from `bun run dev:workers`, which reserved it and pointed a
-			// portless route at it; undefined outside that (alchemy picks one).
-			dev: devServer("alerting"),
+			// Under `bun dev`: a sticky local port the app's portless route follows; undefined
+			// outside the dev server (and under a bare `alchemy dev`, where alchemy picks one).
+			dev,
 			workersDev: false,
 			// `0 9 * * *` (the onboarding drip) was retired when that sequence moved to
 			// maple-portal's campaign system. Removing it here is what stops the two
