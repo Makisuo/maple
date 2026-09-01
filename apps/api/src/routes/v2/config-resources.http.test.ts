@@ -156,6 +156,17 @@ const makeHarness = () => {
 				return yield* service.create(ORG, USER, { name: "config-test", scopes })
 			}),
 		)
+	/** A key whose pinned roles make it a plain member rather than `root`. */
+	const bootstrapMemberKey = () =>
+		runtime.runPromise(
+			Effect.gen(function* () {
+				const service = yield* ApiKeysService
+				return yield* service.create(ORG, USER, {
+					name: "config-test-member",
+					metadataJson: { source: "maple_cli", roles: ["org:member"], deviceName: "laptop" },
+				})
+			}),
+		)
 	const seedScrapeChecks = (publicId: string, count: number) => {
 		const internalId = decodePublicId("scrp", publicId)
 		if (internalId === null) throw new Error(`Invalid scrape target public ID: ${publicId}`)
@@ -188,6 +199,7 @@ const makeHarness = () => {
 	return {
 		request,
 		bootstrapKey,
+		bootstrapMemberKey,
 		seedScrapeChecks,
 		corruptScrapeDiscoveryConfig,
 		dispose: async () => {
@@ -272,6 +284,54 @@ describe("v2 attribute_mappings over HTTP", () => {
 		expect(missing.status).toBe(404)
 		expect(missing.body.error.type).toBe("not_found_error")
 		expect(missing.body.error.code).toBe("attribute_mapping_not_found")
+		await harness.dispose()
+	})
+	// Mappings rewrite every ingested span org-wide, so the writes are admin-only.
+	it("refuses attribute_mapping writes from a non-admin member", async () => {
+		const harness = makeHarness()
+		const admin = await harness.bootstrapKey()
+		const member = await harness.bootstrapMemberKey()
+
+		const created = await harness.request("POST", "/v2/attribute_mappings", {
+			token: admin.secret,
+			body: {
+				name: "Promote team label",
+				source_context: "resource",
+				source_key: "labels.team",
+				target_key: "team",
+				operation: "copy",
+			},
+		})
+		expect(created.status).toBe(200)
+
+		const denied = await harness.request("POST", "/v2/attribute_mappings", {
+			token: member.secret,
+			body: {
+				name: "Member mapping",
+				source_context: "resource",
+				source_key: "labels.other",
+				target_key: "other",
+				operation: "copy",
+			},
+		})
+		expect(denied.status).toBe(403)
+		expect(denied.body.error.code).toBe("attribute_mapping_forbidden")
+
+		const patched = await harness.request("PATCH", `/v2/attribute_mappings/${created.body.id}`, {
+			token: member.secret,
+			body: { enabled: false },
+		})
+		expect(patched.status).toBe(403)
+
+		const deleted = await harness.request("DELETE", `/v2/attribute_mappings/${created.body.id}`, {
+			token: member.secret,
+		})
+		expect(deleted.status).toBe(403)
+
+		// Reads stay open to any member.
+		const list = await harness.request("GET", "/v2/attribute_mappings", { token: member.secret })
+		expect(list.status).toBe(200)
+		expect(list.body.data).toHaveLength(1)
 		await harness.dispose()
 	})
 })
