@@ -68,6 +68,11 @@ export const describeUpstreamFailure = (error: unknown): string => {
  *
  * Exported so the omission is asserted directly, not inferred from a span.
  */
+// `shape` is Electric's own domain term — a shape is its unit of subscription — not a structural
+// placeholder, and the value is written to the `maple.electric.shape` span attribute under that
+// exact name. Renaming it to satisfy the heuristic would make the code describe Electric less
+// accurately, so the rule is suppressed across the function body instead.
+/* oxlint-disable anti-slop/no-shape-in-symbol-names */
 export const sanitizedUpstreamAttributes = (upstreamUrl: string, shape: string): Record<string, string> => {
 	const url = new URL(upstreamUrl)
 	return {
@@ -79,6 +84,7 @@ export const sanitizedUpstreamAttributes = (upstreamUrl: string, shape: string):
 		"maple.electric.shape": shape,
 	}
 }
+/* oxlint-enable anti-slop/no-shape-in-symbol-names */
 
 const isLiveRequest = (clientParams: URLSearchParams): boolean => {
 	const live = clientParams.get("live")
