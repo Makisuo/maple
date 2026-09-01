@@ -206,38 +206,79 @@ describe("partitionInfraSubItems", () => {
 	const present = (...surfaces: NavSurface[]) => new Set<NavSurface>(surfaces)
 
 	it("shows every child while the org's surfaces are unknown", () => {
-		const { shown, hidden } = partitionInfraSubItems(subItems(), null, "/infra")
+		const { shown, suggested, hidden } = partitionInfraSubItems(subItems(), null, "/infra")
 		expect(shown).toHaveLength(5)
+		expect(suggested).toEqual([])
 		expect(hidden).toEqual([])
 	})
 
-	it("shows only the surfaces the org reports", () => {
-		const { shown, hidden } = partitionInfraSubItems(subItems(), present("hosts", "containers"), "/infra")
+	it("shows the surfaces the org reports first, then pads to four", () => {
+		const { shown, suggested, hidden } = partitionInfraSubItems(
+			subItems(),
+			present("hosts", "containers"),
+			"/infra",
+		)
 		expect(titles(shown)).toEqual(["Hosts", "Containers"])
-		expect(titles(hidden)).toEqual(["Kubernetes", "Cloudflare", "PlanetScale"])
+		expect(titles(suggested)).toEqual(["Kubernetes", "Cloudflare"])
+		expect(titles(hidden)).toEqual(["PlanetScale"])
 	})
 
-	it("keeps the connected integration pages", () => {
-		const { shown } = partitionInfraSubItems(subItems(), present("hosts", "planetscale"), "/infra")
+	// The floor is a floor, not a cap: five reporting sources are five rows.
+	it("never pads a section that already has four rows", () => {
+		const { shown, suggested, hidden } = partitionInfraSubItems(
+			subItems(),
+			present("hosts", "containers", "k8sPods", "cloudflare"),
+			"/infra",
+		)
+		expect(titles(shown)).toEqual(["Hosts", "Containers", "Kubernetes", "Cloudflare"])
+		expect(suggested).toEqual([])
+		expect(titles(hidden)).toEqual(["PlanetScale"])
+
+		const all = partitionInfraSubItems(
+			subItems(),
+			present("hosts", "containers", "k8sPods", "cloudflare", "planetscale"),
+			"/infra",
+		)
+		expect(all.shown).toHaveLength(5)
+		expect(all.suggested).toEqual([])
+		expect(all.hidden).toEqual([])
+	})
+
+	it("keeps the connected integration pages ahead of the suggestions", () => {
+		const { shown, suggested } = partitionInfraSubItems(
+			subItems(),
+			present("hosts", "planetscale"),
+			"/infra",
+		)
 		expect(titles(shown)).toEqual(["Hosts", "PlanetScale"])
+		expect(titles(suggested)).toEqual(["Containers", "Kubernetes"])
 	})
 
 	// Landing on a page whose row the gate would hide has to leave the section
-	// pointing at where you are, not at nothing.
+	// pointing at where you are, not at nothing — and as a row you have, not a
+	// suggestion.
 	it("always shows the row for the current route", () => {
-		const { shown, hidden } = partitionInfraSubItems(
+		const { shown, suggested, hidden } = partitionInfraSubItems(
 			subItems(),
 			present("hosts"),
 			"/infra/kubernetes/nodes",
 		)
 		expect(titles(shown)).toEqual(["Hosts", "Kubernetes"])
-		expect(titles(hidden)).not.toContain("Kubernetes")
+		expect(titles(suggested)).toEqual(["Containers", "Cloudflare"])
+		expect(titles(hidden)).toEqual(["PlanetScale"])
 	})
 
-	it("falls back to three starters when the org reports nothing", () => {
-		const { shown, hidden } = partitionInfraSubItems(subItems(), present(), "/infra")
-		expect(titles(shown)).toEqual(["Hosts", "Containers", "Kubernetes"])
-		expect(hidden).toHaveLength(2)
+	// Off the section (say, on /services) nothing is the current route, so all
+	// four rows are offers. On /infra the Hosts row is where you are.
+	it("offers four starters when the org reports nothing", () => {
+		const away = partitionInfraSubItems(subItems(), present(), "/services")
+		expect(away.shown).toEqual([])
+		expect(titles(away.suggested)).toEqual(["Hosts", "Containers", "Kubernetes", "Cloudflare"])
+		expect(titles(away.hidden)).toEqual(["PlanetScale"])
+
+		const home = partitionInfraSubItems(subItems(), present(), "/infra")
+		expect(titles(home.shown)).toEqual(["Hosts"])
+		expect(titles(home.suggested)).toEqual(["Containers", "Kubernetes", "Cloudflare"])
 	})
 
 	// A cluster that only ships node metrics is still a cluster: the row gates on
@@ -251,10 +292,13 @@ describe("partitionInfraSubItems", () => {
 
 	// Every child stays reachable — the split shortens the default list, it does
 	// not remove pages.
-	it("loses nothing between the two halves", () => {
+	it("loses nothing between the three parts", () => {
 		for (const surfaces of [null, present(), present("hosts"), present("k8sPods", "cloudflare")]) {
-			const { shown, hidden } = partitionInfraSubItems(subItems(), surfaces, "/infra")
-			expect([...titles(shown), ...titles(hidden)].sort()).toEqual(titles(subItems()).sort())
+			const { shown, suggested, hidden } = partitionInfraSubItems(subItems(), surfaces, "/infra")
+			expect([...titles(shown), ...titles(suggested), ...titles(hidden)].sort()).toEqual(
+				titles(subItems()).sort(),
+			)
+			expect(shown.length + suggested.length).toBeGreaterThanOrEqual(4)
 		}
 	})
 
@@ -262,8 +306,9 @@ describe("partitionInfraSubItems", () => {
 	// function runs over all of them, not just Infrastructure.
 	it("leaves ungated sections whole", () => {
 		const explore = findItem("Explore").subItems ?? []
-		const { shown, hidden } = partitionInfraSubItems(explore, present(), "/traces")
+		const { shown, suggested, hidden } = partitionInfraSubItems(explore, present(), "/traces")
 		expect(shown).toEqual([...explore])
+		expect(suggested).toEqual([])
 		expect(hidden).toEqual([])
 	})
 })

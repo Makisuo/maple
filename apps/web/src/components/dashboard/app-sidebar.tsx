@@ -239,14 +239,21 @@ function NavRow({
 	// Applied to every section, not just Infrastructure: a section whose children
 	// carry no `surface` comes back whole, so there is nothing to special-case.
 	const discoverTo = item.discoverTo
-	const { shown, hidden } = useMemo(
+	const { shown, suggested, hidden } = useMemo(
 		() =>
 			item.subItems
 				? partitionInfraSubItems(item.subItems, surfaces, currentPath)
-				: { shown: [], hidden: [] },
+				: { shown: [], suggested: [], hidden: [] },
 		[item.subItems, surfaces, currentPath],
 	)
-	const subItems = item.subItems ? shown : undefined
+	// Suggestions are rows like any other for activity and layout; only their
+	// ink differs, so the split is a Set the renderer consults rather than a
+	// second list it has to keep in step.
+	const subItems = useMemo(
+		() => (item.subItems ? [...shown, ...suggested] : undefined),
+		[item.subItems, shown, suggested],
+	)
+	const isSuggested = useMemo(() => new Set(suggested), [suggested])
 
 	// Longest match wins: Infrastructure's Hosts child is `/infra`, which
 	// prefixes every one of its siblings, so a plain match would light up two
@@ -317,7 +324,11 @@ function NavRow({
 						<DropdownMenuGroup>
 							<DropdownMenuLabel>{item.title}</DropdownMenuLabel>
 							{subItems.map((sub) => (
-								<DropdownMenuItem key={sub.title} render={<Link to={sub.href} />}>
+								<DropdownMenuItem
+									className={isSuggested.has(sub) ? "text-muted-foreground" : undefined}
+									key={sub.title}
+									render={<Link to={sub.href} />}
+								>
 									{sub.icon ? (
 										<sub.icon size={16} style={{ color: sub.iconColor }} />
 									) : null}
@@ -406,8 +417,17 @@ function NavRow({
 							}
 							key={sub.title}
 						>
+							{/* A suggested row wears the same muted ink as "Discover more"
+							    below it: it is an offer, not a page that has data, and
+							    the two kinds of row must not read as one list of things
+							    you have. Brand marks keep their own color either way —
+							    a greyed Kubernetes wheel is not a recognisable one. */}
 							<SidebarMenuSubButton
-								className="translate-x-0 data-[active=true]:text-sidebar-primary [&>svg]:text-current"
+								className={
+									isSuggested.has(sub)
+										? "translate-x-0 text-muted-foreground data-[active=true]:text-sidebar-primary hover:text-foreground [&>svg]:text-current"
+										: "translate-x-0 data-[active=true]:text-sidebar-primary [&>svg]:text-current"
+								}
 								isActive={sub.href === activeSubHref}
 								render={<Link to={sub.href} />}
 							>

@@ -140,58 +140,66 @@ const infrastructureItem: NavItem = {
 }
 
 /**
- * Shown when the org reports none of them. Not a ranking of the section — a
- * first-run answer to "what would you plug in?", so it's the three broadest
- * collector targets rather than the two that need an OAuth handshake first.
+ * The section never renders fewer rows than this. An org reporting one source
+ * gets its row plus three suggestions; the padding is what turns "you have
+ * hosts" into "you have hosts, and here is what else you could plug in".
  */
-const INFRA_FALLBACK: ReadonlyArray<NavSurface> = ["hosts", "containers", "k8sPods"]
+export const INFRA_MIN_ROWS = 4
 
 export interface InfraSubItemSplit {
-	/** Rendered directly under the section. */
+	/** What the org has — rendered directly under the section. */
 	readonly shown: NavSubItem[]
+	/**
+	 * Padding up to `INFRA_MIN_ROWS`: sources the org doesn't report yet, offered
+	 * as rows to explore. Rendered after `shown`, muted, so they read as an
+	 * invitation rather than a claim.
+	 */
+	readonly suggested: NavSubItem[]
 	/** Behind the section's reveal — reachable, just not by default. */
 	readonly hidden: NavSubItem[]
 }
 
 /**
- * Splits Infrastructure's children into what an org has and what it doesn't.
+ * Splits Infrastructure's children into what an org has, what it's offered,
+ * and what it isn't shown.
  *
  * Five rows is the whole section, and almost nobody runs all five — a Docker
  * shop scrolls past Kubernetes every time. So the ones reporting telemetry (or
- * connected, for the two integration pages) render, and the rest wait behind
- * the reveal.
+ * connected, for the two integration pages) render first, and the rest wait
+ * behind the reveal.
  *
- * Three rules keep that from ever costing someone a page:
+ * But a section with one row under it looks like a product with one feature.
+ * So the list is padded to `INFRA_MIN_ROWS` with `suggested` rows — the
+ * sources the org doesn't have, in the order they appear in the section, which
+ * runs from the broadest collector targets to the two that need an OAuth
+ * handshake first. Suggestions are still real links: each lands on the page's
+ * own empty state, which is where the install instructions live.
+ *
+ * Two rules keep that from ever costing someone a page:
  *
  *  - `present: null` means the probe hasn't answered or has failed. Everything
  *    shows. A nav that hides rows because a query 500'd is worse than one
  *    listing a page you don't use.
  *  - The route you're on always shows, gate or no gate. Otherwise you land on
  *    /infra/kubernetes/pods and the section has no row for where you are.
- *  - An org reporting nothing gets `INFRA_FALLBACK` rather than an empty
- *    section — "you have no infrastructure" is not a useful thing for a nav to
- *    say, and the reveal still holds the other two.
  */
 export function partitionInfraSubItems(
 	subItems: ReadonlyArray<NavSubItem>,
 	present: ReadonlySet<NavSurface> | null,
 	currentPath: string,
 ): InfraSubItemSplit {
-	if (present === null) return { shown: [...subItems], hidden: [] }
+	if (present === null) return { shown: [...subItems], suggested: [], hidden: [] }
 
 	const reports = (sub: NavSubItem) => sub.surfaces?.some((surface) => present.has(surface)) ?? false
-	const anyPresent = subItems.some(reports)
-	const keep = (sub: NavSubItem): boolean => {
-		if (isPathActive(currentPath, sub.href)) return true
-		if (!sub.surfaces) return true
-		if (anyPresent) return reports(sub)
-		return sub.surfaces.some((surface) => INFRA_FALLBACK.includes(surface))
-	}
+	const keep = (sub: NavSubItem): boolean =>
+		isPathActive(currentPath, sub.href) || !sub.surfaces || reports(sub)
 
 	const shown: NavSubItem[] = []
-	const hidden: NavSubItem[] = []
-	for (const sub of subItems) (keep(sub) ? shown : hidden).push(sub)
-	return { shown, hidden }
+	const rest: NavSubItem[] = []
+	for (const sub of subItems) (keep(sub) ? shown : rest).push(sub)
+
+	const room = Math.max(0, INFRA_MIN_ROWS - shown.length)
+	return { shown, suggested: rest.slice(0, room), hidden: rest.slice(room) }
 }
 
 /**
