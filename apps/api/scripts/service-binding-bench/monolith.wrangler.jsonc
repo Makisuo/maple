@@ -1,0 +1,7 @@
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"name": "maple-api-route-monolith-bench",
+	"main": "./monolith-probe.worker.ts",
+	"compatibility_date": "2026-04-08",
+	"compatibility_flags": ["nodejs_compat"],
+}

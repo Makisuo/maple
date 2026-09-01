@@ -26,7 +26,8 @@
 		"bench:run": "bun run scripts/bench-queries.ts run",
 		"bench:inspect": "bun run scripts/bench-queries.ts inspect",
 		"bench:compare": "bun run scripts/bench-queries.ts compare",
-		"bench:startup-cpu": "bun run scripts/bench-startup-cpu.ts"
+		"bench:startup-cpu": "bun run scripts/bench-startup-cpu.ts",
+		"bench:service-bindings": "bun run scripts/bench-service-bindings.ts"
 	},
 	"dependencies": {
 		"@clerk/backend": "^3.16.12",
