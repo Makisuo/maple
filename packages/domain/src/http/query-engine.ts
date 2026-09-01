@@ -42,6 +42,31 @@ const BucketSeconds = Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0
 	}),
 )
 
+/**
+ * A `LIMIT` a client is allowed to ask for.
+ *
+ * The builder INLINES a limit into the SQL text (`raw(String(Math.round(v)))`)
+ * rather than binding it, so an unchecked `Schema.Number` here is the
+ * `bucket_seconds: 1.5` mistake in a second costume: `limit: -1` and
+ * `limit: 1e21` (which stringifies as `1e+21`) both reach ClickHouse as a
+ * syntax error and surface as a 500, and `limit: 1e9` is an unbounded scan
+ * bounded only by the profile's own settings.
+ *
+ * The ceiling is the part that has to be here rather than in the caller: the
+ * web client's own input schema checks positivity but has no upper bound, and
+ * the internal API is reachable by any authenticated client regardless.
+ */
+const RowLimit = Schema.Number.check(
+	Schema.isInt(),
+	Schema.isGreaterThan(0),
+	Schema.isLessThanOrEqualTo(1000),
+).pipe(
+	Schema.annotate({
+		identifier: "RowLimit",
+		description: "Maximum rows to return: a whole number between 1 and 1000.",
+	}),
+)
+
 // Dedicated endpoint schemas
 
 /** Shared primitives for filtered list/facet endpoints. */
@@ -1746,9 +1771,11 @@ export class ProductEventNamesResponse extends Schema.Class<ProductEventNamesRes
  * The product events one trace produced — the trace view's side of the link a
  * `maple.product_event.name` span attribute creates.
  *
- * `traceId` is the branded `TraceId`, not a bare string: it reaches a
- * `param.string` in `productEventsForTraceQuery`, so constraining it here is
- * what makes a malformed id a 400 rather than a warehouse 500.
+ * `traceId` is the branded `TraceId`, not a bare string. The brand checks
+ * non-empty-and-trimmed rather than 32 hex chars, so it does not reject every
+ * malformed id — but it does reject the one that matters: `traceId: ""` would
+ * otherwise match every row in the table whose `TraceId` is empty, i.e. every
+ * browser and `/v1/events` product event in the window.
  */
 export class ProductEventsForTraceRequest extends Schema.Class<ProductEventsForTraceRequest>(
 	"ProductEventsForTraceRequest",
@@ -1756,8 +1783,8 @@ export class ProductEventsForTraceRequest extends Schema.Class<ProductEventsForT
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
 	traceId: TraceId,
-	/** Default 50. */
-	limit: Schema.optional(Schema.Number),
+	/** Default 50, max 1000. */
+	limit: Schema.optional(RowLimit),
 }) {}
 
 export class ProductEventsForTraceResponse extends Schema.Class<ProductEventsForTraceResponse>(
@@ -1787,8 +1814,8 @@ export class ProductEventTraceSamplesRequest extends Schema.Class<ProductEventTr
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
 	eventName: Schema.String,
-	/** Default 20. */
-	limit: Schema.optional(Schema.Number),
+	/** Default 20, max 1000. */
+	limit: Schema.optional(RowLimit),
 }) {}
 
 export class ProductEventTraceSamplesResponse extends Schema.Class<ProductEventTraceSamplesResponse>(

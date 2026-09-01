@@ -213,17 +213,6 @@ const coerceStatusCode = (value: string): StatusCode =>
 // point at fresh traces). Probing the last 48h first prunes to ~2 daily
 // partitions; only older traces fall back to the unbounded every-partition
 // probe.
-/**
- * A ClickHouse `Map(String, String)` as the wire hands it over. Non-string
- * values are stringified rather than dropped: the column's own type guarantees
- * strings, so anything else means a driver quirk, and losing the key silently
- * would be worse than showing its coerced value.
- */
-const toStringRecord = (value: unknown): Record<string, string> => {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) return {}
-	return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, String(entry)]))
-}
-
 const PROBE_RECENT_WINDOW_MS = 48 * 3_600_000
 
 const toServicePlatformRow = (row: CH.ServicePlatformsOutput) => {
@@ -2079,10 +2068,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 						})
 					}),
 				)
-				// Both directions of the trace ↔ product-event link. `Attributes` is
-				// the one field that is not a scalar: the warehouse hands back a
-				// Map as an object, and a row that somehow arrives without one
-				// degrades to `{}` rather than failing the whole panel.
+				// Both directions of the trace ↔ product-event link.
 				.handle("productEventsForTrace", ({ payload }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
@@ -2097,7 +2083,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								groupId: String(row.groupId),
 								visitorId: String(row.visitorId),
 								sessionId: String(row.sessionId),
-								attributes: toStringRecord(row.attributes),
+								// Already decoded as Record<string, string> by the derived row
+								// schema — a non-string value fails that decode long before it
+								// reaches here, so there is nothing left to coerce.
+								attributes: row.attributes,
 							})),
 						})
 					}),

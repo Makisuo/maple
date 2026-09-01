@@ -2212,10 +2212,20 @@ export const productEvents = defineDatasource("product_events", {
 		 * filter on it, and a `Map` lookup on this table reads the whole map per
 		 * row — the cost `product_events` was split out of `session_events` to
 		 * avoid. Last in the schema because `ALTER TABLE … ADD COLUMN` appends.
+		 *
+		 * NO `jsonPath`, deliberately, and load-bearing: these two are written
+		 * only by `product_events_traces_mv` and its backfill, never by an
+		 * ingested NDJSON line. `scripts/generate-clickhouse-insert-mappings.ts`
+		 * skips columns whose path is null, so the Rust gateway's
+		 * `INSERT INTO product_events (…)` does not name them — which is what lets
+		 * migration 0024 stay `requiredForIngest: false`. Give them a path and the
+		 * gateway starts naming columns that a BYO cluster stamped below 24 does
+		 * not have, and every `/v1/events` batch for those orgs is rejected and
+		 * dropped. Same shape as `service_usage`, whose columns are MV-only too.
 		 */
-		TraceId: column(t.string().default(""), { jsonPath: "$.trace_id" }),
+		TraceId: t.string().default(""),
 		/** The annotated span within {@link TraceId}. `''` on non-trace rows. */
-		SpanId: column(t.string().default(""), { jsonPath: "$.span_id" }),
+		SpanId: t.string().default(""),
 	},
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",

@@ -710,18 +710,26 @@ export function productEventNamesQuery(
 // `idx_trace_id` bloom filter — a `Map` read would take the whole map per row on
 // the one table that exists to avoid exactly that.
 
-export const productEventForTraceRowSchema = Schema.Struct({
-	timestamp: Schema.String,
-	eventName: Schema.String,
-	spanId: Schema.String,
-	serviceName: Schema.String,
-	userId: Schema.String,
-	groupId: Schema.String,
-	visitorId: Schema.String,
-	sessionId: Schema.String,
-	attributes: Schema.Record(Schema.String, Schema.String),
-})
-export type ProductEventForTraceOutput = typeof productEventForTraceRowSchema.Type
+// No declared `rowSchema` on either query below. Every projected column is a
+// plain String or the `Map(String, String)` the builder already derives as
+// `Schema.Record(Schema.String, Schema.String)`, so a declared copy would be
+// byte-identical to the derived one — which is exactly the class of schema the
+// 2026-08 sweep deleted 22 of. A declared schema earns its place only when it
+// NARROWS (a literal union, a null-collapsing transform) or when derivation is
+// wrong (LEFT-JOIN nullability). Neither applies here, and an exported copy
+// nothing passes to `compile` is a contract that silently drifts.
+
+export interface ProductEventForTraceOutput {
+	readonly timestamp: string
+	readonly eventName: string
+	readonly spanId: string
+	readonly serviceName: string
+	readonly userId: string
+	readonly groupId: string
+	readonly visitorId: string
+	readonly sessionId: string
+	readonly attributes: Record<string, string>
+}
 
 export interface ProductEventsForTraceOpts {
 	/** Default 50 — a single trace producing more than this is pathological. */
@@ -769,15 +777,14 @@ export function productEventsForTraceQuery(
 		.format("JSON")
 }
 
-export const productEventTraceSampleRowSchema = Schema.Struct({
-	traceId: Schema.String,
-	spanId: Schema.String,
-	timestamp: Schema.String,
-	serviceName: Schema.String,
-	userId: Schema.String,
-	visitorId: Schema.String,
-})
-export type ProductEventTraceSampleOutput = typeof productEventTraceSampleRowSchema.Type
+export interface ProductEventTraceSampleOutput {
+	readonly traceId: string
+	readonly spanId: string
+	readonly timestamp: string
+	readonly serviceName: string
+	readonly userId: string
+	readonly visitorId: string
+}
 
 export interface ProductEventTraceSamplesOpts {
 	/** Default 20. */

@@ -391,9 +391,28 @@ lookup.
    adds the two columns, then an explicit `tb` populate from `traces` (bounded by its 30-day TTL).
    Blocked on the same manual step the rest of this document's checklist is — see
    `project_product_events_tinybird_rollout_pending`.
-2. **BYO ClickHouse**: migration 0024, `requiredForIngest: false` — the gateway writes neither new
-   column, so ingest routing is not un-readied. Backfills the trace half from `traces` itself.
+
+   **The populate is one-shot and overlap-prone.** Unlike BYO and local, the managed surface has no
+   `DELETE WHERE Source = 'trace'` step, so running it twice double-inserts, and running it after
+   the MV is already live double-counts every annotated span ingested between MV creation and the
+   populate's own snapshot. BYO risks a gap; managed risks duplicates. Same caveat 0014 and 0021
+   accepted — but on a table feeding customer-visible funnels, a double-counted conversion is worse
+   than a missing one. Populate once, immediately after deploy, and if it fails partway prefer
+   deleting the trace rows by hand over re-running it blind.
+2. **BYO ClickHouse**: migration 0024, `requiredForIngest: false`. That is safe for one reason
+   worth knowing before anyone touches `datasources.ts`: `TraceId`/`SpanId` are declared with **no
+   `jsonPath`**, so the insert-mapping generator omits them and the Rust gateway's
+   `INSERT INTO product_events (…)` never names them — a cluster stamped below 24 still accepts
+   every row it sends. Give those columns a `jsonPath` and the flag becomes a data-loss bug: the
+   readiness gate still says 21, so unmigrated BYO orgs keep routing to their own cluster, where
+   the INSERT fails on the unknown column, retries, trips the breaker and drops the batch.
+   Backfills the trace half from `traces` itself.
 3. **Local CLI**: local schema v13 → v14, same backfill.
+
+Both BYO and local scope their idempotency `DELETE` to `Timestamp >= (SELECT min(Timestamp) FROM
+traces)` rather than deleting all trace rows. `product_events` keeps 365 days and `traces` 30, so an
+unbounded delete on a *late* re-apply would clear a year of funnel history and rebuild only a month
+of it.
 
 ### Not in this cut
 

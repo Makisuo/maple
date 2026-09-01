@@ -15,6 +15,12 @@ import { ChartBarTrendUpIcon } from "@/components/icons"
  * a finding about the event, it just means the event was not emitted from a
  * span, and saying so on every browser event would be noise on the majority of
  * them.
+ *
+ * A FAILURE is not silent, though, unlike the trace-page panel. This one mounts
+ * because the user explicitly filtered to an event and asked for it, and empty
+ * is a meaningful answer here — so swallowing an error would answer their
+ * question wrongly ("this event has no traces") with no way to tell and no way
+ * to retry.
  */
 export function ProductEventTraceSamples({
 	eventName,
@@ -34,14 +40,16 @@ export function ProductEventTraceSamples({
 		.onSuccess((response) => {
 			if (response.data.length === 0) return null
 			return (
-				<section className="rounded-md border">
+				<section className="rounded-md border bg-card">
 					<header className="flex items-center gap-2 border-b px-3 py-2">
 						<ChartBarTrendUpIcon className="size-3.5 text-muted-foreground" />
 						<h2 className="text-xs font-medium">Traces behind “{eventName}”</h2>
 					</header>
 					<ul className="divide-y">
-						{response.data.map((sample) => (
-							<li key={`${sample.traceId}:${sample.spanId}`}>
+						{/* Index included: at-least-once ingest can duplicate a row, and
+						    one trace can fire the event from several spans. */}
+						{response.data.map((sample, index) => (
+							<li key={`${index}:${sample.traceId}:${sample.spanId}`}>
 								<Link
 									to="/traces/$traceId"
 									params={{ traceId: sample.traceId }}
@@ -49,7 +57,7 @@ export function ProductEventTraceSamples({
 									// `t` narrows the partition scan to a ±1h window — without it
 									// the hierarchy query reads every retained daily partition.
 									search={{ spanId: sample.spanId, t: sample.timestamp }}
-									className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted"
+									className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
 								>
 									<span className="font-mono text-muted-foreground">
 										{sample.traceId.slice(0, 8)}
@@ -72,6 +80,17 @@ export function ProductEventTraceSamples({
 				</section>
 			)
 		})
-		.onError(() => null)
+		.onError(() => (
+			<section className="rounded-md border bg-card">
+				<header className="flex items-center gap-2 border-b px-3 py-2">
+					<ChartBarTrendUpIcon className="size-3.5 text-muted-foreground" />
+					<h2 className="text-xs font-medium">Traces behind “{eventName}”</h2>
+				</header>
+				<p className="px-3 py-2 text-xs text-muted-foreground">
+					Could not load traces for this event. This is a query failure, not an empty result —
+					reload to try again.
+				</p>
+			</section>
+		))
 		.orElse(() => null)
 }

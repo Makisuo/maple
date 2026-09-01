@@ -308,7 +308,15 @@ const apply = async (context: MigrationModuleContext): Promise<V13ToV14Progress>
 	)
 	return context.openTarget(
 		(db) => {
-			db.exec("DELETE FROM product_events WHERE Source = 'trace'")
+			// Scoped to the backfill's own source window, matching migration 0024:
+			// `traces` keeps 30 days and `product_events` 365, so an unbounded
+			// delete would destroy trace rows a late re-run can no longer rebuild.
+			// A v13 store has no trace rows at all — the source did not exist — so
+			// this is a no-op on the edge it actually runs on, and correct on any
+			// resume or re-apply that finds some.
+			db.exec(
+				"DELETE FROM product_events WHERE Source = 'trace' AND Timestamp >= (SELECT min(Timestamp) FROM traces)",
+			)
 			db.exec(
 				`INSERT INTO product_events (${PRODUCT_EVENTS_TRACE_COLUMNS}) SELECT ${PRODUCT_EVENTS_TRACE_PROJECTION_SQL} FROM traces WHERE ${PRODUCT_EVENTS_TRACE_FILTER}`,
 			)
@@ -412,7 +420,7 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 		classification: "derived",
 		disposition: "preserve-exact",
 		guarantee:
-			"Two columns are added as metadata-only defaults, no part is rewritten, and the count of rows whose Source is not 'trace' is verified byte-identical after the backfill.",
+			"Two columns are added as metadata-only defaults, no part is rewritten, and the count of rows whose Source is not 'trace' is verified unchanged after the backfill. Counts, not contents: the byte-level claim rests on ADD COLUMN being metadata-only, which this edge does not independently verify.",
 	},
 	{
 		// Fully rebuilt within the raw window, then accrued: unlike the last two
@@ -424,6 +432,9 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 		guarantee:
 			"Every annotated span still inside raw traces retention is re-projected, and the resulting row count is verified to equal the count of matching spans. Annotated spans older than that window are gone from traces and cannot be rebuilt; the table accrues them from the migration forward.",
 		preservationInterval: "the raw traces retention window",
+		// The schema default. A store running a custom raw-telemetry floor (see
+		// `readRawTelemetryRetentionDays`) keeps more or less than this, and the
+		// backfill follows the store rather than this number.
 		sourceRetentionDays: 30,
 		targetRetentionDays: 365,
 	},
