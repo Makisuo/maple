@@ -1,10 +1,11 @@
 import { createContext, use, useEffectEvent, useRef, useState } from "react"
 import type React from "react"
-import { Exit } from "effect"
+import { Exit, Result, Schema } from "effect"
 import {
 	CloudflareStartConnectRequest,
 	GithubStartConnectRequest,
 	HazelStartConnectRequest,
+	IntegrationReturnPath,
 } from "@maple/domain/http"
 import { toastManager } from "@maple/ui/components/ui/toast"
 
@@ -15,6 +16,17 @@ import { MapleApiV2AtomClient, retainedQueryV2 } from "@/lib/services/common/v2-
 import { showErrorToast } from "@/lib/error-toast"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 import type { IntegrationId } from "./integration-catalog"
+
+// The callback page is served from the API origin and only accepts a
+// dashboard-relative path, so send the path rather than `location.href`.
+const decodeReturnPath = Schema.decodeUnknownResult(IntegrationReturnPath)
+const RETURN_PATH_ROOT = Schema.decodeUnknownSync(IntegrationReturnPath)("/")
+
+export const currentReturnPath = (): IntegrationReturnPath =>
+	Result.getOrElse(
+		decodeReturnPath(`${window.location.pathname}${window.location.search}`),
+		() => RETURN_PATH_ROOT,
+	)
 
 export interface IntegrationConnect {
 	readonly connect: () => void
@@ -251,7 +263,7 @@ function CloudflareConnectBoundary({ children }: { children: React.ReactNode }) 
 		start: () => {
 			primedRef.current = false
 			return startConnect({
-				payload: new CloudflareStartConnectRequest({ returnTo: window.location.href }),
+				payload: new CloudflareStartConnectRequest({ returnTo: currentReturnPath() }),
 				reactivityKeys: ["cloudflareIntegrationStatus"],
 			})
 		},
@@ -297,7 +309,7 @@ function HazelConnectBoundary({ children }: { children: React.ReactNode }) {
 		windowFeatures: "popup,width=520,height=640",
 		start: () =>
 			startConnect({
-				payload: new HazelStartConnectRequest({ returnTo: window.location.href }),
+				payload: new HazelStartConnectRequest({ returnTo: currentReturnPath() }),
 				reactivityKeys: ["hazelIntegrationStatus"],
 			}),
 		startErrorTitle: "Failed to start Hazel connect flow",
@@ -332,7 +344,7 @@ function GithubConnectBoundary({ children }: { children: React.ReactNode }) {
 		windowFeatures: "popup,width=600,height=720",
 		start: () =>
 			startConnect({
-				payload: new GithubStartConnectRequest({ returnTo: window.location.href }),
+				payload: new GithubStartConnectRequest({ returnTo: currentReturnPath() }),
 				reactivityKeys: ["githubIntegrationStatus"],
 			}),
 		startErrorTitle: "Failed to start GitHub connect flow",
@@ -368,7 +380,7 @@ function PlanetscaleConnectBoundary({ children }: { children: React.ReactNode })
 		windowFeatures: "popup,width=520,height=680",
 		start: () =>
 			startConnect({
-				payload: { return_to: window.location.href },
+				payload: { return_to: currentReturnPath() },
 				reactivityKeys: ["planetscaleIntegration"],
 			}).then(Exit.map(({ redirect_url }) => ({ redirectUrl: redirect_url }))),
 		startErrorTitle: "Failed to start PlanetScale connect flow",
