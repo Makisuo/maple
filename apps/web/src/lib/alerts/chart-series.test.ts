@@ -1,3 +1,4 @@
+import { Array as Arr } from "effect"
 import { describe, expect, it } from "vitest"
 import {
 	AlertRulePreviewPoint,
@@ -309,7 +310,8 @@ describe("downsample", () => {
 		// First and last rows always survive, and time order is preserved.
 		expect(out[0]?.t).toBe(rows[0]?.t)
 		expect(out[out.length - 1]?.t).toBe(rows[rows.length - 1]?.t)
-		expect(out.every((row, index) => index === 0 || row.t > out[index - 1]!.t)).toBe(true)
+		// Pairing each row with its successor makes the ordering check total.
+		expect(Arr.zip(out, Arr.drop(out, 1)).every(([previous, next]) => next.t > previous.t)).toBe(true)
 	})
 
 	it("keeps a spike carried by a secondary series key", () => {

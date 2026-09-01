@@ -119,12 +119,16 @@ const probeServiceWindow = (
 	endMs: number,
 ): Effect.Effect<ServiceWindowTotals | null, never> =>
 	Effect.gen(function* () {
+		const scopedEnv = Option.fromNullOr(deploymentEnv)
 		const compiled = CH.compile(
-			CH.serviceLivenessQuery(deploymentEnv !== null ? { scopeToEnvironment: true } : {}),
+			CH.serviceLivenessQuery(Option.isSome(scopedEnv) ? { scopeToEnvironment: true } : {}),
 			{
 				orgId: tenant.orgId,
 				serviceName,
-				...(deploymentEnv !== null ? { deploymentEnv } : undefined),
+				...Option.match(scopedEnv, {
+					onNone: () => ({}),
+					onSome: (deploymentEnv) => ({ deploymentEnv }),
+				}),
 				startTime: formatWarehouseDateTime(startMs),
 				endTime: formatWarehouseDateTime(endMs),
 			},

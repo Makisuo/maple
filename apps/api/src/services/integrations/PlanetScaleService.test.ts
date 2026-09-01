@@ -1,5 +1,5 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Fiber, Layer, Schema } from "effect"
+import { ConfigProvider, Effect, Fiber, Layer, Predicate, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OrgId, UserId } from "@maple/domain/http"
@@ -1027,7 +1027,10 @@ describe("PlanetScaleService pagination truncation", () => {
 					status: 200,
 					headers: { "content-type": "application/json" },
 				})
-			if (options.deployRequestsTotalFor !== undefined && url.includes("/deploy-requests")) {
+			if (
+				Predicate.isNotUndefined(options.deployRequestsTotalFor) &&
+				url.includes("/deploy-requests")
+			) {
 				const page = pageOf(url)
 				const start = (page - 1) * 100
 				return json({
@@ -1042,7 +1045,10 @@ describe("PlanetScaleService pagination truncation", () => {
 					})),
 				})
 			}
-			if (options.totalDatabases !== undefined && /\/databases(\?|$)/.test(url.split("#")[0] ?? url)) {
+			if (
+				Predicate.isNotUndefined(options.totalDatabases) &&
+				/\/databases(\?|$)/.test(url.split("#")[0] ?? url)
+			) {
 				const page = pageOf(url)
 				const start = (page - 1) * 100
 				const count = Math.min(100, Math.max(0, options.totalDatabases - start))

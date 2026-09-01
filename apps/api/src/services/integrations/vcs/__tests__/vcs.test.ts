@@ -13,7 +13,7 @@ import {
 	VcsWebhookParseError,
 	VcsWebhookSignatureError,
 } from "@maple/domain/http"
-import { Clock, Effect, Exit, Layer, Option, Schema } from "effect"
+import { Array as Arr, Clock, Effect, Exit, Layer, Option, Schema } from "effect"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import {
 	COMMIT_PAGES_PER_INVOCATION,
@@ -3016,7 +3016,8 @@ describe("VcsSyncService orchestrator", () => {
 			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(backfillJob))
 			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
 			const stored = yield* reposOfInstallation(repo, "42", "all")
-			assert.strictEqual(stored[0]!.syncStatus, "pending") // untouched — not "ready"
+			const head = Option.getOrThrow(Arr.head(stored))
+			assert.strictEqual(head.syncStatus, "pending") // untouched — not "ready"
 		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent, commits: [commit(SHA_A, 1)] })))
 	})
 
@@ -3034,7 +3035,8 @@ describe("VcsSyncService orchestrator", () => {
 			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(backfillJob))
 			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
 			const stored = yield* reposOfInstallation(repo, "42", "all")
-			assert.notStrictEqual(stored[0]!.syncStatus, "ready")
+			const head = Option.getOrThrow(Arr.head(stored))
+			assert.notStrictEqual(head.syncStatus, "ready")
 		}).pipe(
 			Effect.provide(
 				orchestratorLayer(testDb, {
@@ -3064,8 +3066,9 @@ describe("VcsSyncService orchestrator", () => {
 			// The exhausted job walked the OLD branch; the new backfill is untouched.
 			yield* svc.recordExhaustedFailure(Schema.encodeSync(VcsSyncJob)(backfillJob))
 			const stored = yield* reposOfInstallation(repo, "42", "all")
-			assert.strictEqual(stored[0]!.syncStatus, "pending")
-			assert.strictEqual(stored[0]!.lastSyncError, null)
+			const head = Option.getOrThrow(Arr.head(stored))
+			assert.strictEqual(head.syncStatus, "pending")
+			assert.strictEqual(head.lastSyncError, null)
 		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent })))
 	})
 

@@ -2,6 +2,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { Array as Arr, Option } from "effect"
 import type postgres from "postgres"
 import { describe, expect, it } from "vitest"
 import {
@@ -97,7 +98,8 @@ describe("openJournal", () => {
 		// The line is on disk NOW — not at process exit.
 		const written = readFileSync(path, "utf8").trim().split("\n")
 		expect(written).toHaveLength(1)
-		expect(JSON.parse(written[0]!)).toMatchObject({ table: "dashboards", org_id: "o1", id: "d1" })
+		const firstLine = Option.getOrThrow(Arr.head(written))
+		expect(JSON.parse(firstLine)).toMatchObject({ table: "dashboards", org_id: "o1", id: "d1" })
 		journal.close()
 	})
 })

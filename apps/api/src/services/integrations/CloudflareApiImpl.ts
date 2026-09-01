@@ -22,7 +22,7 @@ import * as Hyperdrive from "@distilled.cloud/cloudflare/hyperdrive"
 import * as Workers from "@distilled.cloud/cloudflare/workers"
 import * as Zones from "@distilled.cloud/cloudflare/zones"
 import { IntegrationsRevokedError, IntegrationsUpstreamError } from "@maple/domain/http"
-import { Effect, Layer, Schema, Stream } from "effect"
+import { Effect, Layer, Match, Schema, Stream } from "effect"
 import { FetchHttpClient, type HttpClient } from "effect/unstable/http"
 
 /** The Effect context a distilled operation requires: resolved credentials + an HTTP client. */
@@ -254,6 +254,26 @@ const MAX_HYPERDRIVE_CONFIGS = 200
  * database — e.g. a PlanetScale database). The `origin` union (standard / Access-client / VPC
  * service) is normalized to nullable host/port.
  */
+// The SDK's origin union has no discriminant, so each arm matches its variant's
+// distinguishing field: only a public origin carries `port`, an Access origin a
+// client id, a VPC origin only a service id. `Match.exhaustive` makes a fourth
+// variant a compile error instead of a silently null host/port.
+const normalizeHyperdriveOrigin = (
+	origin: Hyperdrive.ConfigsListResultItemOrigin,
+): { readonly host: string | null; readonly port: number | null } =>
+	Match.value(origin).pipe(
+		Match.when({ port: Match.number }, (publicOrigin) => ({
+			host: publicOrigin.host,
+			port: publicOrigin.port,
+		})),
+		Match.when({ accessClientId: Match.string }, (accessOrigin) => ({
+			host: accessOrigin.host,
+			port: null,
+		})),
+		Match.when({ serviceId: Match.string }, () => ({ host: null, port: null })),
+		Match.exhaustive,
+	)
+
 export const listHyperdriveConfigs: (
 	accessToken: string,
 	accountId: string,
@@ -274,8 +294,7 @@ export const listHyperdriveConfigs: (
 			id: config.id,
 			name: config.name,
 			origin: {
-				host: "host" in config.origin ? config.origin.host : null,
-				port: "port" in config.origin ? config.origin.port : null,
+				...normalizeHyperdriveOrigin(config.origin),
 				database: config.origin.database,
 				scheme: config.origin.scheme,
 				user: config.origin.user ?? null,

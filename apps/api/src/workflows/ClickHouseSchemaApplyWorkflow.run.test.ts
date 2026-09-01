@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import type { PgConnectionScopeApi } from "@/platform/pg-connection-scope"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
@@ -64,8 +64,12 @@ describe("runWithDb failure bookkeeping", () => {
 			callback?: () => Promise<T>,
 		): Promise<T> => {
 			if (typeof configOrCallback === "function") return configOrCallback()
-			if (callback === undefined) return Promise.reject(new Error("missing step callback"))
-			return callback()
+			// The overload's trailing callback is absence, not a value to compare:
+			// a config with no callback is a malformed `step.do` call.
+			return Option.match(Option.fromUndefinedOr(callback), {
+				onNone: () => Promise.reject(new Error("missing step callback")),
+				onSome: (run) => run(),
+			})
 		},
 	}
 

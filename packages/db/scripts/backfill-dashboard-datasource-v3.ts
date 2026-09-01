@@ -162,6 +162,22 @@ export interface JournalLine {
 	readonly upgraded_json: unknown
 }
 
+/**
+ * Wire schema for a journal line read back at restore time. `upgraded_json` is
+ * a REQUIRED key: a line without it predates payload-verified restore, and the
+ * decode failure is what refuses to apply it.
+ */
+const JournalLineSchema = Schema.Struct({
+	table: Schema.Literals(["dashboards", "dashboard_versions"]),
+	org_id: Schema.String,
+	id: Schema.String,
+	version: Schema.optionalKey(Schema.Number),
+	payload_json: Schema.optionalKey(Schema.Unknown),
+	snapshot_json: Schema.optionalKey(Schema.Unknown),
+	upgraded_json: Schema.Unknown,
+})
+const decodeJournalLine = Schema.decodeUnknownOption(JournalLineSchema)
+
 export interface RecoveryJournal {
 	readonly append: (line: JournalLine) => void
 	/** Persist (write + fsync) everything appended so far. */
@@ -388,12 +404,11 @@ export const restore = async (sql: postgres.Sql, path: string): Promise<void> =>
 	let restored = 0
 	let skipped = 0
 	for (const line of text.split("\n").filter((l) => l.trim().length > 0)) {
-		const row = JSON.parse(line) as JournalLine
-		if (row.upgraded_json === undefined) {
+		const row = Option.getOrElse(decodeJournalLine(JSON.parse(line)), () =>
 			fail(
-				"Journal line lacks upgraded_json — this dump predates payload-verified restore and cannot be applied safely.",
-			)
-		}
+				"Journal line lacks upgraded_json (or is malformed) — this dump predates payload-verified restore and cannot be applied safely.",
+			),
+		)
 		if (row.table === "dashboard_versions") {
 			const result = await sql`
 				UPDATE dashboard_versions SET snapshot_json = ${sql.json(row.snapshot_json as never)}
@@ -474,13 +489,13 @@ const run = async (connectionUrl: string, args: Args): Promise<void> => {
 // CLI entry (skipped when the exports above are imported by tests).
 if (import.meta.main) {
 	const args = parseArgs(process.argv.slice(2))
-	if (args.url === undefined && args.branch === undefined) {
-		fail("Pass --branch <name> (PlanetScale) or --url <dsn> (local rehearsal).")
-	}
-
-	if (args.url !== undefined) {
-		await run(args.url, args)
+	const url = Option.fromUndefinedOr(args.url)
+	const branch = Option.fromUndefinedOr(args.branch)
+	if (Option.isSome(url)) {
+		await run(url.value, args)
+	} else if (Option.isSome(branch)) {
+		await withBranchConnection(branch.value, (connectionUrl) => run(connectionUrl, args))
 	} else {
-		await withBranchConnection(args.branch!, (url) => run(url, args))
+		fail("Pass --branch <name> (PlanetScale) or --url <dsn> (local rehearsal).")
 	}
 }

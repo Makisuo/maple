@@ -934,10 +934,13 @@ describe("CloudflareAnalyticsService", () => {
 			const service = yield* CloudflareAnalyticsService
 			yield* service.pollOrg(ORG)
 			const rows = yield* loadStateRows
-			const beyond = rows.find((row) => row.zoneId === "beyond-cap-zone")
-			assert.isDefined(beyond)
-			assert.isTrue(beyond!.enabled)
-			assert.notInclude(beyond!.lastError ?? "", "no longer present")
+			// A vanished row fails the test through the error channel, so the
+			// assertions below get a narrowed row instead of a `!`.
+			const beyond = yield* Effect.fromOption(
+				Arr.findFirst(rows, (row) => row.zoneId === "beyond-cap-zone"),
+			)
+			assert.isTrue(beyond.enabled)
+			assert.notInclude(beyond.lastError ?? "", "no longer present")
 		}).pipe(Effect.provide(makeLayer(testDb, captured, { zonesTotal: 201 })))
 	})
 

@@ -1,3 +1,4 @@
+import { String as Str } from "effect"
 import { describe, expect, it } from "vitest"
 import { type BackfillSpec, isBackfill, renderStatementFull } from "../backfill"
 import { migration_0004_service_namespace_projections } from "./0004_service_namespace_projections"
@@ -393,7 +394,8 @@ describe("ClickHouse migrations", () => {
 		// apply) would double every sum until TTL. DROP → TRUNCATE → backfill →
 		// CREATE MV is the 0015 cutover shape, restated as invariants.
 		const kinds = migration_0009_one_year_service_history.statements.map((stmt) =>
-			isBackfill(stmt) ? `backfill:${stmt.target}` : stmt.split("\n")[0]!.trim(),
+			// Str.split returns a NonEmptyArray, so the head index is statically safe.
+			isBackfill(stmt) ? `backfill:${stmt.target}` : Str.split(stmt, "\n")[0].trim(),
 		)
 		const at = (needle: string) => {
 			const index = kinds.findIndex((kind) => kind.startsWith(needle))

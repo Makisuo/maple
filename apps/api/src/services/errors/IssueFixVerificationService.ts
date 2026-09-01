@@ -38,7 +38,7 @@ import {
 	type ErrorIssueVerificationRow,
 } from "@maple/db"
 import { and, desc, eq, inArray, lte, ne } from "drizzle-orm"
-import { Cause, Clock, Context, Effect, Layer, Option, Schema } from "effect"
+import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { summarizeCause } from "@/platform/describe-cause"
 import { Env } from "@/platform/Env"
@@ -777,7 +777,7 @@ const make: Effect.Effect<
 					)
 					.limit(1),
 			)
-			if (open[0] !== undefined) return false
+			if (Arr.isArrayNonEmpty(open)) return false
 
 			const issueRows = yield* dbExecute((db) =>
 				db
@@ -786,8 +786,8 @@ const make: Effect.Effect<
 					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, link.issueId)))
 					.limit(1),
 			)
-			const issue = issueRows[0]
-			if (issue === undefined) return false
+			const issue = Arr.head(issueRows)
+			if (Option.isNone(issue)) return false
 
 			yield* workflow.recordEvent(orgId, link.issueId, systemActor.id, "pr_merged", {
 				payload: {
@@ -803,7 +803,7 @@ const make: Effect.Effect<
 
 			yield* openVerification({
 				orgId,
-				issue,
+				issue: issue.value,
 				link: { ...link, mergedAt: msToDate(mergedAtMs), mergeCommitSha },
 				mergedAtMs,
 				nowMs,
@@ -1148,27 +1148,28 @@ const make: Effect.Effect<
 				.where(and(eq(errorIssues.orgId, row.orgId), eq(errorIssues.id, row.issueId)))
 				.limit(1),
 		)
-		const issue = issueRows[0]
+		const issue = Arr.head(issueRows)
 
 		const autoCloses =
-			issue !== undefined &&
+			Option.isSome(issue) &&
 			verdict === "verified" &&
-			verificationVerdictAutoCloses(issue.severity ?? null)
+			verificationVerdictAutoCloses(issue.value.severity ?? null)
 
-		const verdictEvent =
-			issue === undefined
-				? null
-				: workflow.buildEvent(row.orgId, row.issueId, systemActor.id, "verification_verdict", nowMs, {
-						payload: {
-							verificationId: row.id,
-							verdict,
-							note,
-							autoClosed: autoCloses,
-							severity: issue.severity ?? null,
-							postMergeOccurrenceCount: row.postMergeOccurrenceCount,
-							investigationId: row.investigationId,
-						},
-					})
+		// A vanished issue still gets its verdict on the verification row; there is
+		// just no timeline to write the event to.
+		const verdictEvent = Option.map(issue, (issue) =>
+			workflow.buildEvent(row.orgId, row.issueId, systemActor.id, "verification_verdict", nowMs, {
+				payload: {
+					verificationId: row.id,
+					verdict,
+					note,
+					autoClosed: autoCloses,
+					severity: issue.severity ?? null,
+					postMergeOccurrenceCount: row.postMergeOccurrenceCount,
+					investigationId: row.investigationId,
+				},
+			}),
+		)
 
 		const landed = yield* dbExecute((db) =>
 			db.transaction(async (tx) => {
@@ -1183,7 +1184,7 @@ const make: Effect.Effect<
 					.where(guard())
 					.returning({ id: errorIssueVerifications.id })
 				if (updated.length === 0) return false
-				if (verdictEvent !== null) await tx.insert(errorIssueEvents).values(verdictEvent)
+				if (Option.isSome(verdictEvent)) await tx.insert(errorIssueEvents).values(verdictEvent.value)
 				return true
 			}),
 		)
@@ -1191,7 +1192,7 @@ const make: Effect.Effect<
 			yield* lostRace
 			return
 		}
-		if (issue === undefined) return
+		if (Option.isNone(issue)) return
 
 		// `verified` on a high/critical issue deliberately transitions nothing: the
 		// verdict and its evidence are on the timeline, and a human closes it. See
@@ -1207,7 +1208,7 @@ const make: Effect.Effect<
 		if (target === null) return
 
 		yield* workflow
-			.applyTransition(row.orgId, systemActor.id, issue, target, {
+			.applyTransition(row.orgId, systemActor.id, issue.value, target, {
 				payload: { viaVerification: row.id, verdict },
 				timestamp: nowMs,
 			})
@@ -1217,7 +1218,7 @@ const make: Effect.Effect<
 						Effect.logInfo("[FixVerification] verdict could not move the issue").pipe(
 							Effect.annotateLogs({
 								issueId: row.issueId,
-								from: issue.workflowState,
+								from: issue.value.workflowState,
 								to: target,
 								reason: error.message,
 							}),

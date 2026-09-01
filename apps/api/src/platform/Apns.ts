@@ -210,22 +210,29 @@ export const makeSingleFlightTokenCache = <E, R>(
 	ttlMs: number,
 	mint: Effect.Effect<string, E, R>,
 ): Effect.Effect<Effect.Effect<string, E, R>> =>
-	Ref.make<{ readonly value: string; readonly mintedAtMs: number } | null>(null).pipe(
+	Ref.make(Option.none<{ readonly value: string; readonly mintedAtMs: number }>()).pipe(
 		Effect.map((cached) => {
 			const lock = Semaphore.makeUnsafe(1)
+			// A cached token counts only while younger than the TTL; expiry is
+			// absence, not a null to compare against.
+			const freshValue = (nowMs: number) =>
+				Ref.get(cached).pipe(
+					Effect.map(Option.filter((entry) => nowMs - entry.mintedAtMs < ttlMs)),
+					Effect.map(Option.map((entry) => entry.value)),
+				)
 			return Effect.gen(function* () {
 				const nowMs = yield* Clock.currentTimeMillis
-				const entry = yield* Ref.get(cached)
-				if (entry !== null && nowMs - entry.mintedAtMs < ttlMs) return entry.value
+				const entry = yield* freshValue(nowMs)
+				if (Option.isSome(entry)) return entry.value
 				return yield* lock.withPermits(1)(
 					Effect.gen(function* () {
 						// Double-checked: a fiber that waited here usually finds the
 						// winner's fresh token and must not mint another.
 						const innerNowMs = yield* Clock.currentTimeMillis
-						const latest = yield* Ref.get(cached)
-						if (latest !== null && innerNowMs - latest.mintedAtMs < ttlMs) return latest.value
+						const latest = yield* freshValue(innerNowMs)
+						if (Option.isSome(latest)) return latest.value
 						const value = yield* mint
-						yield* Ref.set(cached, { value, mintedAtMs: innerNowMs })
+						yield* Ref.set(cached, Option.some({ value, mintedAtMs: innerNowMs }))
 						return value
 					}),
 				)

@@ -176,7 +176,7 @@ export const getMapleAuthHeaders = async (): Promise<MapleAuthHeaders> => {
 		// under a real org, fail closed: its URL and payload belong to the tenant
 		// the user just left, and re-signing it with the new identity's bearer
 		// would dispatch it against the wrong org.
-		if (orgAtStart !== null) {
+		if (Predicate.isNotNull(orgAtStart)) {
 			throw new MapleAuthIdentityChangedError({
 				message: "The active organization changed while this request was being authorized.",
 			})

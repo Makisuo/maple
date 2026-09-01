@@ -74,11 +74,8 @@ const decodeOAuthErrorCode = Schema.decodeUnknownOption(
 	Schema.fromJsonString(Schema.Struct({ error: Schema.String })),
 )
 
-const oauthErrorCodeOf = (text: string): string | null =>
-	Option.match(decodeOAuthErrorCode(text), {
-		onNone: () => null,
-		onSome: (body) => body.error,
-	})
+const oauthErrorCodeOf = (text: string): Option.Option<string> =>
+	Option.map(decodeOAuthErrorCode(text), (body) => body.error)
 
 export const toUpstreamError = (message: string, status?: number, cause?: unknown) =>
 	new IntegrationsUpstreamError({
@@ -381,7 +378,9 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 			})
 			if (status === 400 || status === 401) {
 				const errorCode = oauthErrorCodeOf(text)
-				if (errorCode === "invalid_grant") {
+				// Only a decoded `invalid_grant` means revoked: a None (bodyless or
+				// undecodable 400/401) stays a transient upstream failure below.
+				if (Option.contains(errorCode, "invalid_grant")) {
 					return yield* Effect.fail(
 						new IntegrationsRevokedError({
 							message: `${providerLabel} connection no longer authorized — reconnect required`,
@@ -390,7 +389,10 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 				}
 				return yield* Effect.fail(
 					toUpstreamError(
-						`Token refresh failed with ${status}${errorCode === null ? "" : ` (${errorCode})`}`,
+						`Token refresh failed with ${status}${Option.match(errorCode, {
+							onNone: () => "",
+							onSome: (code) => ` (${code})`,
+						})}`,
 						status,
 					),
 				)

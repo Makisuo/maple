@@ -714,7 +714,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
 		})
 
-		/** The outbox row a severity change owes, or null when the change does not escalate. */
+		/** The outbox row a severity change owes, or none when the change does not escalate. */
 		const severityEscalationInsert = (
 			orgId: OrgId,
 			issueId: ErrorIssueId,
@@ -722,10 +722,8 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 			to: IssueSeverity,
 			source: "ai" | "manual",
 			timestamp: number,
-		): typeof issueEscalations.$inferInsert | null => {
-			const reason = escalationReasonFor(from, to)
-			if (reason === null) return null
-			return {
+		): Option.Option<typeof issueEscalations.$inferInsert> =>
+			Option.map(Option.fromNullOr(escalationReasonFor(from, to)), (reason) => ({
 				id: newIssueEscalationId(),
 				orgId,
 				issueId,
@@ -742,8 +740,7 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 				error: null,
 				createdAt: msToDate(timestamp),
 				processedAt: null,
-			}
-		}
+			}))
 
 		const setSeverity: ErrorIssueWorkflowServiceApi["setSeverity"] = Effect.fn(
 			"ErrorsService.setSeverity",
@@ -770,12 +767,16 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 				: { from: current.severity, to: severity, source }
 			const eventInsert =
 				current.severity !== severity
-					? buildEventInsert(orgId, issueId, actorId, "severity_change", timestamp, { payload })
-					: null
-			const escalationInsert =
-				severity !== null
-					? severityEscalationInsert(orgId, issueId, current.severity, severity, source, timestamp)
-					: null
+					? Option.some(
+							buildEventInsert(orgId, issueId, actorId, "severity_change", timestamp, {
+								payload,
+							}),
+						)
+					: Option.none()
+			// Clearing the severity (null) never escalates; a set severity may.
+			const escalationInsert = Option.flatMap(Option.fromNullOr(severity), (next) =>
+				severityEscalationInsert(orgId, issueId, current.severity, next, source, timestamp),
+			)
 			// One transaction: a severity that committed without its escalation row
 			// could never page anyone — a retry sees the severity already stored and
 			// returns before reaching the outbox insert.
@@ -790,9 +791,10 @@ const make: Effect.Effect<ErrorIssueWorkflowServiceApi, never, Database | ErrorA
 						})
 						.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId)))
 						.returning(txidColumn)
-					if (eventInsert !== null) await tx.insert(errorIssueEvents).values(eventInsert)
-					if (escalationInsert !== null) {
-						await tx.insert(issueEscalations).values(escalationInsert).onConflictDoNothing()
+					if (Option.isSome(eventInsert))
+						await tx.insert(errorIssueEvents).values(eventInsert.value)
+					if (Option.isSome(escalationInsert)) {
+						await tx.insert(issueEscalations).values(escalationInsert.value).onConflictDoNothing()
 					}
 					return rows
 				}),

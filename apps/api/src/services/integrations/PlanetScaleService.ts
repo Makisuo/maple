@@ -21,7 +21,7 @@ import {
 	type PlanetScaleEventRow,
 } from "@maple/db"
 import { and, desc, eq, gte, inArray, isNull, lt, lte, or } from "drizzle-orm"
-import { Cause, Clock, Context, Duration, Effect, Layer, Schedule, Schema } from "effect"
+import { Cause, Clock, Context, Duration, Effect, Layer, Predicate, Schedule, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
@@ -757,7 +757,9 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 				yield* Effect.forEach(
 					existingRows.filter(
 						(row) =>
-							inventoryComplete && !upstreamIds.has(row.databaseId) && row.deletedAt === null,
+							inventoryComplete &&
+							!upstreamIds.has(row.databaseId) &&
+							Predicate.isNull(row.deletedAt),
 					),
 					(row) =>
 						database

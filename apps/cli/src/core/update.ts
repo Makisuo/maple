@@ -372,8 +372,7 @@ export const performUpdate = (
 				if (!entry.startsWith(".maple-update-tmp")) continue
 				const path = join(installDir, entry)
 				const info = yield* fs.stat(path)
-				const mtime = Option.getOrUndefined(info.mtime)
-				if (mtime !== undefined && mtime.getTime() < cutoff) {
+				if (Option.exists(info.mtime, (mtime) => mtime.getTime() < cutoff)) {
 					yield* fs.remove(path, { recursive: true, force: true })
 				}
 			}

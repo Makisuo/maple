@@ -1468,9 +1468,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 							}),
 					)
 
-					const after = counted[0]
-					if (after === undefined || after.enabled) return
-					const streak = after.consecutiveFailures
+					// None: the `enabled = true` predicate matched no row (already
+					// disabled elsewhere) or the update left the destination enabled.
+					const disabled = Option.filter(Arr.head(counted), (row) => !row.enabled)
+					if (Option.isNone(disabled)) return
+					const streak = disabled.value.consecutiveFailures
 
 					// The in-product signal is the setup audit: a disabled destination
 					// makes every rule that selects it fail CFG-ALERT-03 ("will evaluate

@@ -4,6 +4,7 @@ import type {
 	AlertRulePreviewResponse,
 	AlertRulePreviewPoint,
 } from "@maple/domain/http"
+import { Array as Arr, Option } from "effect"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 /**
@@ -71,19 +72,20 @@ const MAX_PLOTTED_POINTS = 720
  * chart exists to show — could vanish once the series exceeded the budget.
  */
 export function downsample(rows: ReadonlyArray<ChartPoint>): ChartPoint[] {
-	if (rows.length <= MAX_PLOTTED_POINTS) return [...rows]
+	// The guard proves non-emptiness once, so head/last below are total.
+	if (!Arr.isReadonlyArrayNonEmpty(rows) || rows.length <= MAX_PLOTTED_POINTS) return [...rows]
 	// Two survivors per bucket keeps the output within the point budget.
 	const bucketCount = Math.floor(MAX_PLOTTED_POINTS / 2)
 	const out: ChartPoint[] = []
 	const push = (row: ChartPoint) => {
 		if (out[out.length - 1] !== row) out.push(row)
 	}
-	push(rows[0]!)
+	push(Arr.headNonEmpty(rows))
 	for (let bucket = 0; bucket < bucketCount; bucket += 1) {
 		const start = Math.floor((bucket * rows.length) / bucketCount)
 		const end = Math.floor(((bucket + 1) * rows.length) / bucketCount)
-		let minRow: ChartPoint | undefined
-		let maxRow: ChartPoint | undefined
+		let minRow: Option.Option<ChartPoint> = Option.none()
+		let maxRow: Option.Option<ChartPoint> = Option.none()
 		let min = Number.POSITIVE_INFINITY
 		let max = Number.NEGATIVE_INFINITY
 		for (let i = start; i < end; i += 1) {
@@ -94,29 +96,29 @@ export function downsample(rows: ReadonlyArray<ChartPoint>): ChartPoint[] {
 				if (typeof value !== "number") continue
 				if (value < min) {
 					min = value
-					minRow = row
+					minRow = Option.some(row)
 				}
 				if (value > max) {
 					max = value
-					maxRow = row
+					maxRow = Option.some(row)
 				}
 			}
 		}
-		if (minRow === undefined || maxRow === undefined) {
+		if (Option.isNone(minRow) || Option.isNone(maxRow)) {
 			// Entirely valueless bucket — keep one row so the gap still renders.
-			if (end > start) push(rows[start]!)
+			if (end > start) Option.match(Arr.get(rows, start), { onNone: () => undefined, onSome: push })
 			continue
 		}
-		if (minRow === maxRow) push(minRow)
-		else if (minRow.t <= maxRow.t) {
-			push(minRow)
-			push(maxRow)
+		if (minRow.value === maxRow.value) push(minRow.value)
+		else if (minRow.value.t <= maxRow.value.t) {
+			push(minRow.value)
+			push(maxRow.value)
 		} else {
-			push(maxRow)
-			push(minRow)
+			push(maxRow.value)
+			push(minRow.value)
 		}
 	}
-	push(rows[rows.length - 1]!)
+	push(Arr.lastNonEmpty(rows))
 	return out
 }
 
