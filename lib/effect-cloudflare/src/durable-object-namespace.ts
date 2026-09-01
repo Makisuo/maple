@@ -170,6 +170,9 @@ export const namespaceOf = Effect.fn("namespaceOf")(function* <Definition = unkn
 	const name = typeof classOrName === "string" ? classOrName : classOrName.name
 	const binding = env[name] as cf.DurableObjectNamespace | undefined
 	if (!binding || typeof binding.getByName !== "function") {
+		// Bindings are declared in `wrangler.jsonc` at deploy time, so a missing one
+		// is a deployment that should not have shipped rather than a runtime state.
+		// oxlint-disable-next-line maple/no-effect-die
 		return yield* Effect.die(
 			new MissingWorkerBindingError({
 				binding: name,

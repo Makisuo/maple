@@ -166,7 +166,8 @@ class MissingWriteTxidError extends Schema.TaggedError<MissingWriteTxidError>()(
 // case (never observed for dashboards) instead of silently producing NaN.
 const requireTxid = (txid: string | undefined): Effect.Effect<number> =>
 	txid === undefined
-		? Effect.die(
+		? // oxlint-disable-next-line maple/no-effect-die
+			Effect.die(
 				new MissingWriteTxidError({
 					message: "Dashboard write succeeded but the server returned no txid",
 				}),

@@ -120,6 +120,9 @@ class MissingAgentError extends Schema.TaggedError<MissingAgentError>()(
 export const runValidatorAgent = Effect.fn("investigation.validator")(function* (input: ValidatorAgentInput) {
 	const agent = AGENTS["investigation-validator"]
 	if (!agent) {
+		// `AGENTS` is a module constant, so an absent entry is a build that shipped
+		// without it — nothing a run could recover from.
+		// oxlint-disable-next-line maple/no-effect-die
 		return yield* Effect.die(
 			new MissingAgentError({
 				agentName: "investigation-validator",

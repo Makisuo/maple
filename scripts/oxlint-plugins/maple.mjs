@@ -12,6 +12,11 @@
  * `no-try-catch` is the syntax half of the repo's Effect-errors convention: oxlint
  * has no `no-restricted-syntax`, so banning a statement kind takes a plugin rule.
  *
+ * `no-effect-die` is the other half of that convention: the try/catch ban keeps
+ * failures out of exceptions, and this keeps them out of defects. Every one of
+ * the 26 production sites at the time it landed was a legitimate defect, so it
+ * cleans nothing up — it exists so the next one has to argue for itself.
+ *
  * `no-record-string-any` exists as its own rule (rather than leaning on
  * `typescript/no-explicit-any`, which flags the inner `any` anyway) so the worst
  * offender — an open key set whose values are also unchecked — can sit at `error`
@@ -223,9 +228,44 @@ const noTryCatch = {
 	},
 }
 
+const NO_EFFECT_DIE_MESSAGE =
+	"Do not `Effect.die`. Killing a typed failure discards the distinction the tagged-error convention exists to preserve, and the caller loses the branch it could have handled. Keep it in the error channel — `Effect.mapError` into a failure the contract declares, or narrow the producer's channel so the impossible case is not in it. If the value genuinely is a defect (a boot-time config error, a platform binding the deploy omitted, a broken internal invariant), say so with `// oxlint-disable-next-line maple/no-effect-die` and a reason, and raise a namespaced `Schema.TaggedError` rather than a bare `Error`."
+
+/**
+ * `Effect.die` in any position.
+ *
+ * Reported on the member expression rather than the call, so the value form
+ * (`Effect.catch(Effect.die)`) is caught alongside `Effect.die(x)` — a call's
+ * callee IS that member expression, so each occurrence is still reported once.
+ *
+ * A bare `die(…)` from `import { die } from "effect/Effect"` is out of scope:
+ * the plugin API has no scope analysis, and `die` is also the name test
+ * harnesses give their own not-implemented stub.
+ */
+const noEffectDie = {
+	meta: {
+		type: "problem",
+		docs: {
+			description: "Disallow `Effect.die`, which converts a typed failure into a defect.",
+		},
+		messages: { noEffectDie: NO_EFFECT_DIE_MESSAGE },
+	},
+	create(context) {
+		return {
+			MemberExpression(node) {
+				if (node.computed) return
+				if (node.object.type !== "Identifier" || node.object.name !== "Effect") return
+				if (node.property.type !== "Identifier" || node.property.name !== "die") return
+				context.report({ node, messageId: "noEffectDie" })
+			},
+		}
+	},
+}
+
 export default {
 	meta: { name: "maple" },
 	rules: {
+		"no-effect-die": noEffectDie,
 		"no-ordie-compiled-query": noOrDieCompiledQuery,
 		"no-react-use-effect": noReactUseEffect,
 		"no-record-string-any": noRecordStringAny,

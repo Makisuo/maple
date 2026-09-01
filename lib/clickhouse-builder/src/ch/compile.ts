@@ -435,6 +435,10 @@ const asEffect = <A>(compile: () => A): Effect.Effect<A, QueryBuilderError> =>
 		try: compile,
 		catch: (cause): QueryBuilderError | UnexpectedCompileFailure =>
 			cause instanceof QueryBuilderError ? cause : { _tag: "UnexpectedCompileFailure" as const, cause },
+		// `UnexpectedCompileFailure` is this builder's own "cannot happen" tag: a query
+		// is built from typed definitions, so a compile that throws is a bug in this
+		// file rather than a failure a call site could handle.
+		// oxlint-disable-next-line maple/no-effect-die
 	}).pipe(Effect.catchTag("UnexpectedCompileFailure", ({ cause }) => Effect.die(cause)))
 
 /**

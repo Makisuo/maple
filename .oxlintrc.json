@@ -35,6 +35,7 @@
 			"error",
 			{ "check": "unsafe", "allowFileSafetyComment": true }
 		],
+		"maple/no-effect-die": "error",
 		"maple/no-ordie-compiled-query": "error",
 		"maple/no-react-use-effect": "warn",
 		"maple/no-record-string-any": "error",
@@ -67,9 +68,11 @@
 				"**/*.spec.tsx",
 				"**/test/**",
 				"**/tests/**",
-				"**/__tests__/**"
+				"**/__tests__/**",
+				"**/*test-support*"
 			],
 			"rules": {
+				"maple/no-effect-die": "off",
 				"maple/no-try-catch": "off",
 				"typescript/no-non-null-assertion": "off"
 			}

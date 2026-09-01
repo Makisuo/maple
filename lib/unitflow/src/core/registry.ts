@@ -248,8 +248,11 @@ export class Registry extends Context.Service<Registry, RegistryService>()("@uni
 				lookup: (key: InstanceKey) =>
 					Effect.suspend(() => {
 						const construct = constructors.get(key.model)
+						// Constructors register at layer build, so a missing one is a model
+						// that was never wired up rather than a lookup that could retry.
 						return construct === undefined
-							? Effect.die(
+							? // oxlint-disable-next-line maple/no-effect-die
+								Effect.die(
 									new UnitflowMisuseError({
 										id: key.model,
 										message: `Unitflow has no constructor for model "${key.model}".`,

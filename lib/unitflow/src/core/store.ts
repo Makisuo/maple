@@ -133,6 +133,9 @@ export const ref = <A>(
 	store: Source<A> | Sink<A>,
 ): Effect.Effect<SubscriptionRef.SubscriptionRef<A>, never, Registry> => {
 	if (isCombined(store)) {
+		// The shape is fixed when the model is declared, so a program that asks this
+		// once asks it every time — a misuse to fix, not a failure to handle.
+		// oxlint-disable-next-line maple/no-effect-die
 		return Effect.die(
 			new UnitflowMisuseError({
 				id: store.id,
@@ -141,6 +144,9 @@ export const ref = <A>(
 		)
 	}
 	if (isFlatten(store)) {
+		// The shape is fixed when the model is declared, so a program that asks this
+		// once asks it every time — a misuse to fix, not a failure to handle.
+		// oxlint-disable-next-line maple/no-effect-die
 		return Effect.die(
 			new UnitflowMisuseError({
 				id: store.id,

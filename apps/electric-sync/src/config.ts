@@ -1,3 +1,6 @@
+// oxlint-disable maple/no-effect-die -- Startup configuration validation, same
+// contract as the API's `platform/Env.ts`: read once at layer build, no caller to
+// recover, tagged `SyncConfigInvalidError` naming the variable.
 import type { AuthEnv } from "@maple/auth"
 import { optionalRedacted, optionalString, stringWithDefault } from "@maple/effect-cloudflare/config-helpers"
 import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect"

@@ -272,6 +272,7 @@ export const validateFunnelDefinition = (
 				? Effect.fail(
 						new QueryEngineValidationError({ message: error.message, details: [error.reason] }),
 					)
-				: Effect.die(error),
+				: // oxlint-disable-next-line maple/no-effect-die
+					Effect.die(error),
 		),
 	)

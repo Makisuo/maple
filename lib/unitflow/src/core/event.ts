@@ -138,6 +138,9 @@ export const pubsub = Effect.fnUntraced(function* <A>(
 	event: Source<A> | Sink<A>,
 ): Generator<Effect.Effect<unknown, never, Registry>, PubSub.PubSub<A>, never> {
 	if (isCombined(event)) {
+		// The shape is fixed when the model is declared, so a program that asks this
+		// once asks it every time — a misuse to fix, not a failure to handle.
+		// oxlint-disable-next-line maple/no-effect-die
 		return yield* Effect.die(
 			new UnitflowMisuseError({
 				id: event.id,
@@ -146,6 +149,9 @@ export const pubsub = Effect.fnUntraced(function* <A>(
 		)
 	}
 	if (isSetter(event)) {
+		// The shape is fixed when the model is declared, so a program that asks this
+		// once asks it every time — a misuse to fix, not a failure to handle.
+		// oxlint-disable-next-line maple/no-effect-die
 		return yield* Effect.die(
 			new UnitflowMisuseError({
 				id: event.id,
