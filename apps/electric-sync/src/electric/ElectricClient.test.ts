@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Fiber, Layer, Option, Redacted } from "effect"
+import { Duration, Effect, Fiber, Layer, Option, Redacted, Tracer } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { type RecordedRequest, stubFetch, syncConfigLayer } from "../test-support"
@@ -10,6 +10,7 @@ import {
 	describeUpstreamFailure,
 	ElectricClient,
 	isElectricConfigCoherent,
+	sanitizedUpstreamAttributes,
 } from "./ElectricClient"
 
 const parse = (raw: string) => {
@@ -493,4 +494,108 @@ describe("ElectricClient.fetchShape", () => {
 			assert.strictEqual(response.status, 200)
 		}).pipe(Effect.provide(clientLayer())),
 	)
+})
+
+describe("Electric upstream span never carries the secret", () => {
+	const clientLayer = (config: Parameters<typeof syncConfigLayer>[0] = {}) =>
+		ElectricClient.layer.pipe(
+			Layer.provide(Layer.mergeAll(FetchHttpClient.layer, syncConfigLayer(config))),
+		)
+
+	// Electric has no header for `secret`, so it must stay in the query string —
+	// which makes the traced HTTP client's automatic `url.full` / `url.query` a
+	// telemetry sink for the credential. Maple traces itself, so a leak here is a
+	// leak into a queryable warehouse.
+	const secretLayer = clientLayer({ ELECTRIC_SECRET: Option.some(Redacted.make("sh_secret")) })
+
+	it.effect("records no url.full / url.query on any span of the request", () =>
+		Effect.gen(function* () {
+			const spans: Array<Tracer.NativeSpan> = []
+			const tracer = Tracer.make({
+				span(options) {
+					const span = new Tracer.NativeSpan(options)
+					spans.push(span)
+					return span
+				},
+			})
+			const recorded: Array<RecordedRequest> = []
+
+			const response = yield* (yield* ElectricClient)
+				.fetchShape(syncRequest("dashboards", { query: "offset=-1" }), "org_live")
+				.pipe(
+					Effect.provideService(
+						FetchHttpClient.Fetch,
+						stubFetch(recorded, () => Response.json([])),
+					),
+					Effect.provideService(Tracer.Tracer, tracer),
+				)
+
+			assert.strictEqual(response.status, 200)
+			// The secret really was sent — the span is what must not carry it.
+			assert.include(recorded[0]?.url ?? "", "secret=sh_secret")
+			assert.isAbove(spans.length, 0)
+			for (const span of spans) {
+				assert.isUndefined(span.attributes.get("url.full"))
+				assert.isUndefined(span.attributes.get("url.query"))
+				for (const value of span.attributes.values()) {
+					assert.notInclude(String(value), "sh_secret")
+				}
+			}
+			const client = spans.find((span) => span.name === "http.client GET")
+			assert.isDefined(client)
+			assert.strictEqual(client?.attributes.get("url.path"), "/v1/shape")
+			assert.strictEqual(client?.attributes.get("peer.service"), "electric")
+			assert.strictEqual(client?.attributes.get("http.response.status_code"), 200)
+		}).pipe(Effect.provide(secretLayer)),
+	)
+
+	it.effect("keeps the secret out of the span when the upstream is unreachable", () =>
+		Effect.gen(function* () {
+			const spans: Array<Tracer.NativeSpan> = []
+			const tracer = Tracer.make({
+				span(options) {
+					const span = new Tracer.NativeSpan(options)
+					spans.push(span)
+					return span
+				},
+			})
+
+			const error = yield* (yield* ElectricClient)
+				.fetchShape(syncRequest("dashboards"), "org_live")
+				.pipe(
+					Effect.provideService(FetchHttpClient.Fetch, () => {
+						throw new Error("ECONNREFUSED")
+					}),
+					Effect.provideService(Tracer.Tracer, tracer),
+					Effect.flip,
+				)
+
+			assert.notInclude(error.message, "sh_secret")
+			for (const span of spans) {
+				for (const value of span.attributes.values()) {
+					assert.notInclude(String(value), "sh_secret")
+				}
+				// The recorded exit is a sink too: an HttpClientError's own text is
+				// "Transport error (GET <full url>)".
+				assert.notInclude(
+					JSON.stringify(span.status, (_key, value) =>
+						typeof value === "bigint" ? value.toString() : value,
+					),
+					"sh_secret",
+				)
+			}
+		}).pipe(Effect.provide(secretLayer)),
+	)
+
+	it("omits the url.full / url.query attributes entirely", () => {
+		const attributes = sanitizedUpstreamAttributes(
+			"http://electric:3000/v1/shape?secret=sh_secret&table=dashboards",
+			"dashboards",
+		)
+		assert.isUndefined(attributes["url.full"])
+		assert.isUndefined(attributes["url.query"])
+		assert.strictEqual(attributes["url.path"], "/v1/shape")
+		assert.strictEqual(attributes["server.address"], "electric:3000")
+		for (const value of Object.values(attributes)) assert.notInclude(value, "sh_secret")
+	})
 })
