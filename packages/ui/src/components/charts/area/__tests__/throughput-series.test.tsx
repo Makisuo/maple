@@ -95,18 +95,16 @@ describe("throughput area chart: the error rate has its own axis", () => {
 		expect(labels.some((label) => label.endsWith("%"))).toBe(true)
 	})
 
-	it("scales the rate axis by the worst bucket, not by throughput", () => {
-		// `errorRateCeiling`: the worst bucket plus 20% headroom, capped at 100%.
-		// Every request failing tops the axis out at exactly 100% however large the
-		// throughput beside it is.
-		const total = render(<ThroughputAreaChart data={rows(() => ({ errorRate: 1 }))} />)
-		expect(topPercentTick(total.container)).toBe("100.0%")
-		total.unmount()
+	it("fixes the rate axis at 0–100% rather than fitting it to the worst bucket", () => {
+		// The height IS the severity, comparable across services and time windows
+		// without reading the axis. A fitted ceiling would draw a 0.1%–0.3% service
+		// and a 10%–30% one as the same mountain.
+		const busy = render(<ThroughputAreaChart data={rows(() => ({ errorRate: 1 }))} />)
+		expect(topPercentTick(busy.container)).toBe("100.0%")
+		busy.unmount()
 
-		// ...and the 1% floor keeps a near-perfect window from magnifying noise
-		// into a full-height line.
 		const quiet = render(<ThroughputAreaChart data={rows(() => ({ errorRate: 0.001 }))} />)
-		expect(topPercentTick(quiet.container)).toBe("1.0%")
+		expect(topPercentTick(quiet.container)).toBe("100.0%")
 	})
 
 	it("puts the rate dot at its own axis position, not at the throughput's", () => {

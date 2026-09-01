@@ -30,7 +30,6 @@ import {
 } from "../../plot"
 import type { ThroughputAreaChartProps } from "../_shared/chart-types"
 import { throughputTimeSeriesData } from "../_shared/sample-data"
-import { errorRateCeiling } from "./error-rate-area-chart"
 
 const THROUGHPUT_KEY = "throughput"
 /**
@@ -337,10 +336,26 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 					? {
 							channel: "y" as const,
 							side: "right" as const,
-							// The same ceiling the standalone error-rate chart uses: worst
-							// bucket plus headroom, floored at 1% so a near-perfect window
-							// still has a scale rather than magnifying noise.
-							scale: scaleLinear().domain([0, errorRateCeiling(rows)]),
+							/**
+							 * The FULL 0–100% range, fixed, not a ceiling fitted to the worst
+							 * bucket.
+							 *
+							 * A fitted ceiling reads the wrong way round on a chart whose
+							 * subject is throughput: it magnifies the quiet windows, so a
+							 * service moving between 0.1% and 0.3% draws the same alarming
+							 * mountain as one moving between 10% and 30%, and the shape only
+							 * means anything once you have read the axis. Against a fixed
+							 * range the height IS the severity, and it is comparable across
+							 * services and across time windows without reading anything.
+							 *
+							 * The cost is real and accepted: a sub-1% rate sits on the
+							 * baseline. That is the honest picture — at 0.26% almost nothing
+							 * is failing — and the tooltip carries the number for anyone who
+							 * needs the exact value. `ErrorRateAreaChart` is the chart to
+							 * reach for when the rate itself is the subject; it keeps the
+							 * fitted ceiling because there the shape is the whole point.
+							 */
+							scale: scaleLinear().domain([0, 1]),
 							grid: false,
 							axis: {
 								line: false,
