@@ -1,22 +1,40 @@
 import { assert, describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
-import { safeFetch, UrlValidationError, validateExternalUrl, validateExternalUrlSync } from "./url-validator"
+import { Effect, Result } from "effect"
+import {
+	safeFetch,
+	UrlValidationError,
+	validateExternalUrl,
+	validateExternalUrlResult,
+} from "./url-validator"
 
-describe("validateExternalUrlSync", () => {
+/** Rejected, and rejected as the tagged error rather than by throwing. */
+const rejects = (raw: string): void => {
+	const result = validateExternalUrlResult(raw)
+	assert.isTrue(Result.isFailure(result), `expected ${raw} to be rejected`)
+	if (Result.isFailure(result)) expect(result.failure).toBeInstanceOf(UrlValidationError)
+}
+
+const accepts = (raw: string): URL => {
+	const result = validateExternalUrlResult(raw)
+	assert.isTrue(Result.isSuccess(result), `expected ${raw} to be accepted`)
+	return Result.isSuccess(result) ? result.success : new URL("https://unreachable.invalid")
+}
+
+describe("validateExternalUrlResult", () => {
 	it("accepts public https URLs", () => {
-		const url = validateExternalUrlSync("https://api.example.com/probe")
+		const url = accepts("https://api.example.com/probe")
 		expect(url.hostname).toBe("api.example.com")
 	})
 
 	it("accepts public http URLs", () => {
-		const url = validateExternalUrlSync("http://prom.public.dev:9090/metrics")
+		const url = accepts("http://prom.public.dev:9090/metrics")
 		expect(url.hostname).toBe("prom.public.dev")
 	})
 
 	it.each(["javascript:alert(1)", "file:///etc/passwd", "ftp://example.com", "data:text/html,<script>"])(
 		"rejects non-http(s) scheme: %s",
 		(raw) => {
-			expect(() => validateExternalUrlSync(raw)).toThrow(UrlValidationError)
+			rejects(raw)
 		},
 	)
 
@@ -66,7 +84,7 @@ describe("validateExternalUrlSync", () => {
 		"http://239.255.255.250/",
 		"http://240.0.0.1/",
 	])("rejects private/loopback host: %s", (raw) => {
-		expect(() => validateExternalUrlSync(raw)).toThrow(UrlValidationError)
+		rejects(raw)
 	})
 
 	// The parser's host here is `internal`, not `real.example.com` — the credentials
@@ -74,7 +92,7 @@ describe("validateExternalUrlSync", () => {
 	it.each(["https://real.example.com@localhost/", "https://user:pw@api.example.com/"])(
 		"rejects embedded credentials: %s",
 		(raw) => {
-			expect(() => validateExternalUrlSync(raw)).toThrow(UrlValidationError)
+			rejects(raw)
 		},
 	)
 
@@ -97,16 +115,16 @@ describe("validateExternalUrlSync", () => {
 		"https://127.acme.io/hook",
 		"https://192.168.example.com/hook",
 	])("accepts public host: %s", (raw) => {
-		expect(() => validateExternalUrlSync(raw)).not.toThrow()
+		accepts(raw)
 	})
 
 	it("rejects empty string", () => {
-		expect(() => validateExternalUrlSync("")).toThrow(UrlValidationError)
-		expect(() => validateExternalUrlSync("   ")).toThrow(UrlValidationError)
+		rejects("")
+		rejects("   ")
 	})
 
 	it("rejects malformed input", () => {
-		expect(() => validateExternalUrlSync("not a url")).toThrow(UrlValidationError)
+		rejects("not a url")
 	})
 })
 
@@ -161,6 +179,17 @@ describe("safeFetch", () => {
 			UrlValidationError,
 		)
 		expect(calls).toBe(1)
+	})
+
+	// The far end controls `Location`. Resolving it with a bare
+	// `new URL(location, validated)` threw a raw TypeError out of the guard, which
+	// is neither a rejection callers can handle nor a response.
+	it("rejects a redirect whose Location is not a URL", async () => {
+		const fakeFetch: typeof fetch = async () =>
+			new Response(null, { status: 302, headers: { location: "http://" } })
+		await expect(
+			safeFetch("https://api.example.com/x", { fetchFn: fakeFetch }),
+		).rejects.toBeInstanceOf(UrlValidationError)
 	})
 
 	it("follows a redirect to another public URL", async () => {

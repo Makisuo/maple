@@ -9,6 +9,9 @@
  *                        env-level self-hosted read endpoint
  * - `chdb`             — the embedded chDB engine behind the local `maple` binary
  */
+import { Option } from "effect"
+import { parseUrl } from "@maple/domain/url"
+
 export type WarehouseBackendKind = "tinybird" | "tinybird-gateway" | "clickhouse" | "chdb"
 
 export interface TinybirdBackendConfig {
@@ -54,11 +57,10 @@ export interface WarehouseTargetIdentity {
 const hostOf = (urlOrHost: string): string => {
 	const trimmed = urlOrHost.trim()
 	if (trimmed === "") return ""
-	try {
-		return new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`).host
-	} catch {
-		return trimmed
-	}
+	return Option.match(parseUrl(trimmed.includes("://") ? trimmed : `https://${trimmed}`), {
+		onNone: () => trimmed,
+		onSome: (url) => url.host,
+	})
 }
 
 export const warehouseTargetIdentity = (config: ResolvedWarehouseConfig): WarehouseTargetIdentity =>

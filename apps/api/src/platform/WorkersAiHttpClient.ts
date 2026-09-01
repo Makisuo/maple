@@ -25,6 +25,7 @@
  */
 import { Effect, Layer, Predicate } from "effect"
 import { HttpClient, HttpClientError, HttpClientResponse, type HttpClientRequest } from "effect/unstable/http"
+import { urlPathname } from "@maple/domain/url"
 
 /** The subset of the Cloudflare `Ai` binding this shim uses. */
 export interface WorkersAiBinding {
@@ -52,15 +53,11 @@ export const isWorkersAiBinding = (value: unknown): value is WorkersAiBinding =>
  * `.../accounts/{id}/ai/v1/chat/completions` form and an AI Gateway `.../compat/chat/completions`.
  */
 const isWorkersAiChatUrl = (url: string): boolean => {
-	try {
-		const { pathname } = new URL(url)
-		return (
-			pathname.endsWith("/chat/completions") &&
-			(pathname.includes("/ai/v1/") || pathname.includes("/compat/"))
-		)
-	} catch {
-		return false
-	}
+	const pathname = urlPathname(url)
+	return (
+		pathname.endsWith("/chat/completions") &&
+		(pathname.includes("/ai/v1/") || pathname.includes("/compat/"))
+	)
 }
 
 const encodeError = (request: HttpClientRequest.HttpClientRequest, cause: unknown) =>
