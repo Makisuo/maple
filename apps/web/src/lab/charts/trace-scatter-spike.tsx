@@ -216,36 +216,38 @@ export const TraceScatterSpike = memo(function TraceScatterSpike({
 					strokeWidth: 0,
 				}),
 			],
-			x: {
-				// Pinned instance, not the `scaleLinear` factory: `resolveScaleInput`
-				// applies `includeZero` when it infers, which on epoch milliseconds
-				// would stretch the domain back to 1970 and collapse the plot.
-				scale: scaleLinear([timeDomain[0], timeDomain[1]], [0, 1]),
-				grid: false,
-				axis: {
-					ticks: {
-						count: 6,
-						format: (value: number) =>
-							new Date(value).toLocaleTimeString(undefined, {
-								hour: "2-digit",
-								minute: "2-digit",
-							}),
+			scales: {
+				x: {
+					// Pinned instance, not the `scaleLinear` factory: `resolveScaleInput`
+					// applies `includeZero` when it infers, which on epoch milliseconds
+					// would stretch the domain back to 1970 and collapse the plot.
+					scale: scaleLinear([timeDomain[0], timeDomain[1]], [0, 1]),
+					grid: false,
+					axis: {
+						ticks: {
+							count: 6,
+							format: (value: number) =>
+								new Date(value).toLocaleTimeString(undefined, {
+									hour: "2-digit",
+									minute: "2-digit",
+								}),
+						},
 					},
 				},
-			},
-			y: {
-				// d3's `scaleLog` (see `box-plot-spike.tsx` for the factory-vs-instance
-				// note). `hexbin` bins in pixels and inverts each bin centre back into
-				// data space — it throws `"hexbin: x and y scales must support
-				// inversion"` otherwise — and d3 supplies `invert` along with proper
-				// log `ticks`/`tickFormat`, which is the whole reason not to hand-roll.
-				scale: scaleLog().domain([...DURATION_DOMAIN]),
-				grid: true,
-				// `clip` bounds the hexes to the plot rect, but the rect butts straight
-				// up against the tick labels, so a clipped edge hex still sits ~3px
-				// into them. Tick padding is what buys the gap. `format` is left unset
-				// so the scale's own `tickFormat` keeps producing "300.0ms"/"3.00s".
-				axis: { line: false, ticks: { padding: 10, format: formatDuration } },
+				y: {
+					// d3's `scaleLog` (see `box-plot-spike.tsx` for the factory-vs-instance
+					// note). `hexbin` bins in pixels and inverts each bin centre back into
+					// data space — it throws `"hexbin: x and y scales must support
+					// inversion"` otherwise — and d3 supplies `invert` along with proper
+					// log `ticks`/`tickFormat`, which is the whole reason not to hand-roll.
+					scale: scaleLog().domain([...DURATION_DOMAIN]),
+					grid: true,
+					// `clip` bounds the hexes to the plot rect, but the rect butts straight
+					// up against the tick labels, so a clipped edge hex still sits ~3px
+					// into them. Tick padding is what buys the gap. `format` is left unset
+					// so the scale's own `tickFormat` keeps producing "300.0ms"/"3.00s".
+					axis: { line: false, ticks: { padding: 10, format: formatDuration } },
+				},
 			},
 			color: {
 				scale: colorScale,

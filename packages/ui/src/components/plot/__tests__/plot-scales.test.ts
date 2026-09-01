@@ -7,6 +7,7 @@ import {
 	linearYDomain,
 	logYDomain,
 	logYScale,
+	minBarLength,
 	niceLinearDomain,
 } from "../plot-scales"
 
@@ -194,5 +195,50 @@ describe("integerTickValues", () => {
 
 	it("terminates on a degenerate range instead of looping on a zero step", () => {
 		expect(integerTickValues([3, 3])).toEqual([3])
+	})
+})
+
+describe("minBarLength", () => {
+	// 1.5% of a 0–1000 domain.
+	const lift = minBarLength([0, 1000])
+
+	it("lifts a value too small to paint up to the floor", () => {
+		expect(lift(1)).toBe(15)
+		expect(lift(0.001)).toBe(15)
+	})
+
+	it("leaves a value that already clears the floor alone", () => {
+		expect(lift(15)).toBe(15)
+		expect(lift(400)).toBe(400)
+	})
+
+	it("keeps a null null — a bucket the source never reported paints nothing", () => {
+		// `barY` skips a null y, and the stacked histograms mask one lane with it.
+		// Lifting a null would invent a bar where there is no reading at all.
+		expect(lift(null)).toBeNull()
+	})
+
+	it("keeps a true zero flat — zero is a reading, not a rounding error", () => {
+		expect(lift(0)).toBe(0)
+	})
+
+	it("floors a negative value away from zero rather than across it", () => {
+		// A period-comparison delta runs below the axis; the lift has to make it
+		// visible on its own side.
+		expect(minBarLength([-1000, 1000])(-1)).toBe(-30)
+	})
+
+	it("is a no-op on a domain with no span, rather than dividing into one", () => {
+		expect(minBarLength([5, 5])(1)).toBe(1)
+		expect(minBarLength([0, Number.POSITIVE_INFINITY])(1)).toBe(1)
+	})
+
+	it("scales the floor with the domain, so it holds at any plot height", () => {
+		expect(minBarLength([0, 100])(0.5)).toBe(1.5)
+		expect(minBarLength([0, 10_000])(0.5)).toBe(150)
+	})
+
+	it("takes an explicit fraction for a chart that wants a different floor", () => {
+		expect(minBarLength([0, 1000], 0.05)(1)).toBe(50)
 	})
 })

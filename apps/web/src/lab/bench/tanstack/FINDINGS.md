@@ -25,6 +25,25 @@ Supersedes the 2026-08-05 spike, which ported the same three charts to 0.6.4 and
 >   `keyboard: false`, `focus: false`, or a free-mode cursor). The real gap is the per-datum
 >   accessibility tree, which the library does not offer at all.
 
+> **Bumped to 0.16.0 (2026-09-01).** Everything below was measured at 0.14.0 and is left as
+> written. What the bump changed, against the claims in this document:
+>
+> - **The spec's `x`/`y` moved into a required `scales` record**, and `polar`'s `angle`/`radius`
+>   with them. Every spec quoted below is in the old shape. `scales.x`/`scales.y` are required;
+>   `null` is how a chart says a dimension does not exist.
+> - **One y scale per chart is no longer true.** Named entries (`channel`, `side`) give a mark its
+>   own axis via `xScale`/`yScale`. `throughput-area-chart` uses it for the error rate, which
+>   deletes the `throughput × errorRate` derivation §9's overview note blames for the 100× bug.
+>   The §"usePlotScales" overlay discussion below still holds: named scales are axes, not layers,
+>   and the commit markers still have no in-scene home.
+> - **`ChartLayerRenderer` is not an overlay API** — it is per-mark SVG-vs-Canvas selection
+>   (`renderer: canvasChartRenderer` on one dense mark). Not adopted.
+> - Re-read of `dist` per the rule above: the grid paint (0.11), `lineY`'s hard-coded round cap,
+>   `inferBandwidth`'s min-gap × 0.8, `clip` defaulting to false, and `charts-scales` shipping
+>   band/linear/ordinal/point only ALL still hold; only line numbers moved, and the bandwidth
+>   fallback now floors its divisor at 2. Bug 2 (grouped focus returning one point) looks
+>   unchanged in `dist/focus.js` — the workaround stays.
+
 ## Migration log (2026-08-18)
 
 Four query-builder charts are now on TanStack: **line**, **histogram**, **area**, **bar**.

@@ -50,7 +50,7 @@ export function verticalGradient(
  * A dasharray that actually reads as dashes under a `lineY` mark.
  *
  * `lineY` hard-codes `lineCap: "round"` / `lineJoin: "round"` on every line node
- * it emits (`dist/line.js:123-124`) and `LineYOptions` exposes no `lineCap`, so
+ * it emits (`dist/line.js:126-127` at 0.16.0) and `LineYOptions` exposes no `lineCap`, so
  * a semicircular cap of radius `strokeWidth / 2` is added to BOTH ends of every
  * dash. A `"4 4"` that reads crisply under a butt cap paints `4 + strokeWidth`
  * of ink against a `4 - strokeWidth` gap here — at a 2.5px stroke that is 6.5px

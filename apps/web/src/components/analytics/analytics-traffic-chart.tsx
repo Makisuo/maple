@@ -253,33 +253,38 @@ export function AnalyticsTrafficChart({ metric, companion, source, syncId }: Ana
 				...painted.map((entry) => focusDot(data, at, valueOf(entry.key), entry.color, chromeColors)),
 				focusCrosshair(chromeColors),
 			],
-			x: {
-				scale: scalePoint,
-				axis: {
-					line: false,
-					ticks: perDay
-						? {
-								size: 0,
-								padding: 8,
-								values: dayTicks,
-								format: (bucket: string) =>
-									new Date(bucket).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-							}
-						: { size: 0, padding: 8, format: isoToLabel },
-					tickLabels: { thin: { minGap: 12 } },
+			scales: {
+				x: {
+					scale: scalePoint,
+					axis: {
+						line: false,
+						ticks: perDay
+							? {
+									size: 0,
+									padding: 8,
+									values: dayTicks,
+									format: (bucket: string) =>
+										new Date(bucket).toLocaleDateString("en-US", {
+											month: "short",
+											day: "numeric",
+										}),
+								}
+							: { size: 0, padding: 8, format: isoToLabel },
+						tickLabels: { thin: { minGap: 12 } },
+					},
 				},
-			},
-			y: {
-				scale: scaleLinear,
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 8,
-						// The metric formatters render a zero *headline* as "—" ("no
-						// session ended", not "0s"). On an axis that reading is wrong —
-						// the baseline is a real zero — so it is spelled out here.
-						format: (value: number) => (value === 0 ? "0" : metric.format(value)),
+				y: {
+					scale: scaleLinear,
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 8,
+							// The metric formatters render a zero *headline* as "—" ("no
+							// session ended", not "0s"). On an axis that reading is wrong —
+							// the baseline is a real zero — so it is spelled out here.
+							format: (value: number) => (value === 0 ? "0" : metric.format(value)),
+						},
 					},
 				},
 			},

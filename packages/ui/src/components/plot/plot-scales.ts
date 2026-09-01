@@ -45,7 +45,7 @@ export interface LinearYDomainOptions {
 	 * coherent if the soft pair yields to the data and the hard pair does not.
 	 * The Recharts predecessor paired its bound with `allowDataOverflow`, which
 	 * CLIPPED the overflowing part of the series; TanStack marks are not clipped
-	 * (`clip` defaults to false at 0.14.0), so porting the clamp literally would
+	 * (`clip` defaults to false at 0.16.0), so porting the clamp literally would
 	 * paint the out-of-range part of the series over the axis labels instead of
 	 * hiding it — the same defect as an unconditional zero floor.
 	 *
@@ -237,4 +237,52 @@ export function integerTickValues([min, max]: readonly [number, number], desired
 	const values: number[] = []
 	for (let value = lo; value <= hi; value += step) values.push(value)
 	return values
+}
+
+/**
+ * The share of the y domain a non-zero bar is guaranteed to paint.
+ *
+ * ~1.5% of a 200px plot is 3px — enough to see and to aim a pointer at, small
+ * enough that it cannot be mistaken for a readable quantity.
+ */
+const MIN_BAR_FRACTION = 0.015
+
+/**
+ * A y accessor that floors a bar's painted length so a tiny value stays visible.
+ *
+ * There is no library lever for this at any version: `BarYOptions` carries
+ * `inset`, `maxThickness` and `radius` — a maximum thickness, never a minimum
+ * length — and a bucket holding 1 against a domain topping out at 40,000 maps to
+ * a sub-pixel rect that paints as nothing. "No errors this hour" and "one error
+ * this hour" then look identical, which is the reading that matters most.
+ *
+ * Three rules make the lift honest:
+ *
+ * 1. **`null` stays `null`.** `barY` skips a null y, and the stacked histograms
+ *    rely on that to mask one lane while keeping both lanes' x channels
+ *    identical (see `query-builder-bar-chart`). Lifting a null would paint a bar
+ *    where the source reported nothing at all.
+ * 2. **A true `0` stays `0`.** Zero is a real reading, and a floor under it
+ *    would claim traffic that did not happen. Only a non-zero value that would
+ *    round away is lifted.
+ * 3. **The tooltip is unaffected.** This maps the CHANNEL, not the row: readers
+ *    still get the raw number. The floor is a painting concession, and it must
+ *    not survive into anything quoted back as data.
+ *
+ * Taken as a share of the domain rather than a pixel count so it composes with
+ * `linearYDomain`/`niceLinearDomain` and holds at any plot height, and signed so
+ * a negative series (a period-comparison delta) is floored away from zero rather
+ * than flipped across it.
+ */
+export function minBarLength(
+	[min, max]: readonly [number, number],
+	fraction = MIN_BAR_FRACTION,
+): (value: number | null) => number | null {
+	const span = max - min
+	const floor = Number.isFinite(span) && span > 0 ? span * fraction : 0
+	return (value) => {
+		if (value === null || !Number.isFinite(value) || value === 0 || floor === 0) return value
+		if (value > 0) return Math.max(value, floor)
+		return Math.min(value, -floor)
+	}
 }

@@ -67,8 +67,16 @@ export interface AnalyticsMetricDescriptor {
 	 *
 	 * Only ever a same-unit pairing — two counts share an axis, a count and a rate
 	 * do not — which is why this is a per-metric opt-in rather than something the
-	 * chart infers. Reciprocal by convention: if A names B, B names A, so the pair
-	 * looks the same whichever half you click.
+	 * chart infers.
+	 *
+	 * Same-unit is now a POLICY, not a limit: `@tanstack/charts` 0.16.0 added
+	 * named scales, so a rate could take a right-hand axis beside a count (see
+	 * `throughput-area-chart`). Pairing them here would still mean deciding which
+	 * of the two axes a reader is meant to trust at a glance, which is why the
+	 * allowlist stays an allowlist rather than becoming an axis assignment.
+	 *
+	 * Reciprocal by convention: if A names B, B names A, so the pair looks the
+	 * same whichever half you click.
 	 */
 	readonly companion?: AnalyticsMetricKey
 	/**

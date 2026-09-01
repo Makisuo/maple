@@ -36,6 +36,12 @@ const THROUGHPUT_TOKENS = {
  * in its `rateMode: "per_second"` configuration with the error-throughput overlay —
  * the shape the `/` overview actually renders. The per-second normalization and the
  * derived `errorThroughput` series are plain data work, identical in both arms.
+ *
+ * DELIBERATELY DIVERGED from production since 0.16.0: the real chart now plots the
+ * raw error rate against a named right-hand axis, which the Recharts arm this is
+ * measured against cannot draw. Both arms have to render the same marks and the
+ * same one axis pair for the comparison to mean anything, so the derived overlay
+ * stays here. Do not "fix" the divergence without re-baselining both arms.
  */
 export const TanstackThroughputAreaChart = memo(function TanstackThroughputAreaChart({
 	renderer,
@@ -139,32 +145,34 @@ export const TanstackThroughputAreaChart = memo(function TanstackThroughputAreaC
 				),
 				focusCrosshair(chromeColors),
 			],
-			x: {
-				scale: scalePoint,
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 8,
-						spacing: 72,
-						format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+			scales: {
+				x: {
+					scale: scalePoint,
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 8,
+							spacing: 72,
+							format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+						},
 					},
 				},
-			},
-			y: {
-				// Recharts anchors a numeric YAxis at 0 by default (production passes
-				// no `domain`, `throughput-area-chart.tsx:152`); TanStack's inferred
-				// linear domain starts at the data minimum, which floats the area off
-				// the axis. Same pin as `latency-line.tsx`.
-				scale: scaleLinear().domain([0, dataMax]),
-				nice: true,
-				grid: true,
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 6,
-						format: (value: number) => formatThroughput(value, rateLabel),
+				y: {
+					// Recharts anchors a numeric YAxis at 0 by default (production passes
+					// no `domain`, `throughput-area-chart.tsx:152`); TanStack's inferred
+					// linear domain starts at the data minimum, which floats the area off
+					// the axis. Same pin as `latency-line.tsx`.
+					scale: scaleLinear().domain([0, dataMax]),
+					nice: true,
+					grid: true,
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 6,
+							format: (value: number) => formatThroughput(value, rateLabel),
+						},
 					},
 				},
 			},

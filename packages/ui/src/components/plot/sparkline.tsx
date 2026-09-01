@@ -76,8 +76,10 @@ export function PlotSparkline({
 			// keeps its own empty configured domain and paints nothing — and `axis:
 			// false` hides the axis while keeping the scale, so a scale is still
 			// required on both.
-			x: { scale: scaleLinear, axis: false },
-			y: { scale: scaleLinear, axis: false },
+			scales: {
+				x: { scale: scaleLinear, axis: false },
+				y: { scale: scaleLinear, axis: false },
+			},
 			// A sparkline is a shape, not an instrument: nothing to hover, nothing to
 			// read off it. The number it annotates is always printed beside it.
 			tooltip: false,

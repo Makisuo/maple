@@ -139,8 +139,10 @@ export const LatencyLineChart = memo(function LatencyLineChart({
 				),
 				focusCrosshair(chromeColors),
 			],
-			x: timeseriesXAxis(axisContext),
-			y: timeseriesYAxis({ rows: plotRows, visibleKeys: VALUE_KEYS, format: formatLatency }).y,
+			scales: {
+				x: timeseriesXAxis(axisContext),
+				y: timeseriesYAxis({ rows: plotRows, visibleKeys: VALUE_KEYS, format: formatLatency }).y,
+			},
 			focus: "group-x",
 			focusRing: false,
 			tooltip: tooltip === "hidden" ? false : maybeTooltip(suppressed, focusStore.anchor),

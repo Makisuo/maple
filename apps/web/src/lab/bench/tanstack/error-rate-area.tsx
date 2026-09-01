@@ -97,24 +97,26 @@ export const TanstackErrorRateAreaChart = memo(function TanstackErrorRateAreaCha
 				),
 				focusCrosshair(chromeColors),
 			],
-			x: {
-				scale: scalePoint,
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 8,
-						spacing: 72,
-						format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+			scales: {
+				x: {
+					scale: scalePoint,
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 8,
+							spacing: 72,
+							format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+						},
 					},
 				},
-			},
-			y: {
-				scale: scaleLinear().domain([0, yMax]),
-				grid: true,
-				axis: {
-					line: false,
-					ticks: { size: 0, padding: 6, format: (value: number) => formatErrorRate(value) },
+				y: {
+					scale: scaleLinear().domain([0, yMax]),
+					grid: true,
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 6, format: (value: number) => formatErrorRate(value) },
+					},
 				},
 			},
 			focus: "group-x",

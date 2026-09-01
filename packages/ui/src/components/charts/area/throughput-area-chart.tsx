@@ -1,7 +1,8 @@
 import { areaY, defineChart, lineY } from "@tanstack/charts"
+import { scaleLinear } from "@tanstack/charts-scales/linear"
 import { memo, useMemo } from "react"
 
-import { bucketIntervalLabel, formatThroughput } from "../../../lib/format"
+import { bucketIntervalLabel, formatErrorRate, formatThroughput } from "../../../lib/format"
 import { cn } from "../../../lib/utils"
 import {
 	FixedMetricLegend,
@@ -29,10 +30,22 @@ import {
 } from "../../plot"
 import type { ThroughputAreaChartProps } from "../_shared/chart-types"
 import { throughputTimeSeriesData } from "../_shared/sample-data"
+import { errorRateCeiling } from "./error-rate-area-chart"
 
 const THROUGHPUT_KEY = "throughput"
-const ERROR_KEY = "errorThroughput"
+/**
+ * The RAW fraction the source reports, plotted against its own right-hand axis.
+ *
+ * It used to be a derived `errorThroughput = throughput × errorRate`, which
+ * existed only to force a rate onto the throughput axis. That multiplication was
+ * the chart's one shipped bug — an earlier revision also divided by 100 and drew
+ * the overlay two orders of magnitude too small on the overview.
+ */
+const ERROR_KEY = "errorRate"
 const TRACED_KEY = "tracedThroughput"
+
+/** The named right-hand scale the error rate is plotted against. */
+const ERROR_SCALE_ID = "errorRate"
 
 /** The in-flight split is decided by the primary series alone. */
 const PARTIAL_KEYS = [THROUGHPUT_KEY]
@@ -54,11 +67,15 @@ const THROUGHPUT_TOKENS = {
 } as const satisfies Record<string, readonly [PlotColorToken, string]>
 
 /**
- * One row with the rate conversion applied and the derived series attached.
+ * One row with the rate conversion applied.
  *
- * `errorThroughput` is `throughput × errorRate`, and `errorRate` is a FRACTION
- * (errors / requests), not a percentage — an earlier revision divided by 100 and
- * drew the error line two orders of magnitude too low.
+ * The error rate is passed through UNSCALED — it is a fraction (errors /
+ * requests) on its own axis, not a count. Only the two throughput series are
+ * divided into the requested rate unit.
+ *
+ * It is still nulled wherever throughput is: a bucket the source never reported
+ * has no rate to state, and a null keeps the line broken there rather than
+ * dropping it to the floor.
  */
 function deriveRows(rows: readonly TimeseriesRow[], divisor: number): TimeseriesRow[] {
 	return rows.map((row) => {
@@ -71,7 +88,7 @@ function deriveRows(rows: readonly TimeseriesRow[], divisor: number): Timeseries
 			...row,
 			[THROUGHPUT_KEY]: throughput,
 			[TRACED_KEY]: traced,
-			[ERROR_KEY]: throughput == null ? null : throughput * errorRate,
+			[ERROR_KEY]: throughput == null ? null : errorRate,
 		}
 	})
 }
@@ -144,7 +161,9 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 		if (hasErrors) {
 			entries.push({
 				key: ERROR_KEY,
-				label: rateLabel ? `Errors (${rateLabel})` : "Errors",
+				// No rate unit: the series is a percentage on its own axis now, and
+				// "Errors (/s)" described the derived count it used to be.
+				label: "Error rate",
 				color: colors.error,
 				dashed: true,
 			})
@@ -168,16 +187,16 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 		]
 		if (hasErrors) {
 			entries.push({
-				label: "Errors",
+				label: "Error rate",
 				color: colors.error,
 				dashed: true,
 				// A zero-error bucket prints no row at all: on a healthy service that
-				// is most of them, and "Errors 0" in every card is noise.
+				// is most of them, and "Error rate 0%" in every card is noise.
 				value: (row: TimeseriesRow) => {
 					const value = row[ERROR_KEY]
 					return typeof value === "number" && value > 0 ? value : null
 				},
-				format: withSuffix,
+				format: formatErrorRate,
 			})
 		}
 		if (hasTraced) {
@@ -248,9 +267,10 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 
 		const errorLine = (rowSlice: readonly TimeseriesRow[], partial: boolean) =>
 			lineY(rowSlice, {
-				id: partial ? "error-throughput-partial" : "error-throughput",
+				id: partial ? "error-rate-partial" : "error-rate",
 				x: at,
 				y: value(ERROR_KEY),
+				yScale: ERROR_SCALE_ID,
 				stroke: colors.error,
 				strokeWidth: ERROR_STROKE_WIDTH,
 				strokeDasharray: errorDash,
@@ -294,17 +314,41 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 				// focus dot over a bucket no band draws still feeds scale inference, and
 				// that is what kept the dropped in-flight slot on the axis and hoverable.
 				focusDot(rows, at, value(THROUGHPUT_KEY), colors.throughput, chromeColors),
-				...(hasErrors ? [focusDot(rows, at, value(ERROR_KEY), colors.error, chromeColors)] : []),
+				...(hasErrors
+					? [focusDot(rows, at, value(ERROR_KEY), colors.error, chromeColors, ERROR_SCALE_ID)]
+					: []),
 				focusCrosshair(chromeColors),
 			],
-			x: timeseriesXAxis(axisContext),
-			y: timeseriesYAxis({
-				rows,
-				// Every plotted series widens the axis, including the derived ones —
-				// a traced line above the sampled estimate must not run off the top.
-				visibleKeys: [THROUGHPUT_KEY, ERROR_KEY, TRACED_KEY],
-				format: (tick: number) => formatThroughput(tick, rateLabel),
-			}).y,
+			scales: {
+				x: timeseriesXAxis(axisContext),
+				y: timeseriesYAxis({
+					rows,
+					// Every plotted series widens the axis — but only the ones ON it. The
+					// error rate lives on `ERROR_SCALE_ID` and would otherwise pull this
+					// axis down to a fraction.
+					visibleKeys: [THROUGHPUT_KEY, TRACED_KEY],
+					format: (tick: number) => formatThroughput(tick, rateLabel),
+				}).y,
+				// `null`, not omitted, when nothing failed: every non-null scale draws an
+				// axis, so a live entry would paint an empty right-hand gutter on every
+				// healthy service. `null` is the library's own way to say the scale
+				// does not exist, and no mark binds it in that case either.
+				[ERROR_SCALE_ID]: hasErrors
+					? {
+							channel: "y" as const,
+							side: "right" as const,
+							// The same ceiling the standalone error-rate chart uses: worst
+							// bucket plus headroom, floored at 1% so a near-perfect window
+							// still has a scale rather than magnifying noise.
+							scale: scaleLinear().domain([0, errorRateCeiling(rows)]),
+							grid: false,
+							axis: {
+								line: false,
+								ticks: { size: 0, padding: 8, format: formatErrorRate },
+							},
+						}
+					: null,
+			},
 			focus: "group-x",
 			focusRing: false,
 			tooltip: tooltip === "hidden" ? false : maybeTooltip(suppressed, focusStore.anchor),

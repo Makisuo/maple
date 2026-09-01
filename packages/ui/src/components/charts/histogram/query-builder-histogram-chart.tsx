@@ -12,6 +12,7 @@ import {
 	dashedGridY,
 	integerTickValues,
 	logYScale,
+	minBarLength,
 	niceLinearDomain,
 	usePlotColors,
 	type PlotColorToken,
@@ -166,6 +167,10 @@ function useCountAxis(maxCount: number, useLogY: boolean) {
 		if (useLogY) {
 			return {
 				baseline: 1,
+				// No minimum bar length on a log axis: a share of the domain SPAN is
+				// not a share of the painted height there. A log axis is also already
+				// the answer to "the small bins vanish" — see `minBarLength`.
+				liftCount: (value: number) => value,
 				y: {
 					scale: logYScale(maxCount),
 					axis: { line: false, ticks: { size: 0, padding: 6, format: formatNumber } },
@@ -176,8 +181,12 @@ function useCountAxis(maxCount: number, useLogY: boolean) {
 		// values are supplied outright.
 		const domain = niceLinearDomain([0, Math.max(maxCount, 1)])
 		const ticks = integerTickValues(domain)
+		const lift = minBarLength(domain)
 		return {
 			baseline: 0,
+			// A bin holding one observation against a domain topping out in the
+			// thousands is the whole point of a distribution — see `minBarLength`.
+			liftCount: (value: number) => lift(value) ?? value,
 			y: {
 				scale: scaleLinear().domain(domain),
 				axis: {
@@ -236,14 +245,14 @@ function NumericHistogram({
 	className?: string
 }) {
 	const maxCount = bins.reduce((max, bin) => Math.max(max, bin.value), 0)
-	const { baseline, y } = useCountAxis(maxCount, useLogY)
+	const { baseline, liftCount, y } = useCountAxis(maxCount, useLogY)
 
 	const definition = React.useMemo(
 		() =>
 			defineChart({
 				marks: [
 					dashedGridY(),
-					// `rectY` does not exist at 0.14.0 — `@tanstack/charts/rect` exports
+					// `rectY` does not exist at 0.16.0 — `@tanstack/charts/rect` exports
 					// only `rect` and `cell` — so the baseline is an explicit `y1`
 					// channel rather than an implied zero. Not a downgrade here: a log
 					// axis needs a baseline of 1 anyway, and `rect` lets us say so.
@@ -251,7 +260,7 @@ function NumericHistogram({
 						x1: (bin: NumericBin) => bin.x1,
 						x2: (bin: NumericBin) => bin.x2,
 						y1: () => baseline,
-						y2: (bin: NumericBin) => Math.max(bin.value, baseline),
+						y2: (bin: NumericBin) => Math.max(liftCount(bin.value), baseline),
 						fill: color,
 						// OPAQUE, as Recharts painted it. The hover affordance is the
 						// inverse — every OTHER bin fades — so the bin under the pointer
@@ -267,23 +276,25 @@ function NumericHistogram({
 						],
 					}),
 				],
-				x: {
-					// The FACTORY, not an instance: it infers its domain from the
-					// materialized x1/x2 channels. `scaleLinear()` would keep its empty
-					// configured domain and silently draw axes with no bars at all.
-					scale: scaleLinear,
-					grid: false,
-					axis: {
-						line: false,
-						ticks: {
-							size: 0,
-							padding: 8,
-							spacing: 56,
-							format: (value: number) => formatBound(value, unit),
+				scales: {
+					x: {
+						// The FACTORY, not an instance: it infers its domain from the
+						// materialized x1/x2 channels. `scaleLinear()` would keep its empty
+						// configured domain and silently draw axes with no bars at all.
+						scale: scaleLinear,
+						grid: false,
+						axis: {
+							line: false,
+							ticks: {
+								size: 0,
+								padding: 8,
+								spacing: 56,
+								format: (value: number) => formatBound(value, unit),
+							},
 						},
 					},
+					y,
 				},
-				y,
 				// Resolved on HORIZONTAL distance, not 2-D proximity.
 				//
 				// `focus: "nearest"` reads well for a scatter and is wrong for a
@@ -347,7 +358,7 @@ function CategoricalHistogram({
 	className?: string
 }) {
 	const maxCount = bins.reduce((max, bin) => Math.max(max, bin.value), 0)
-	const { baseline, y } = useCountAxis(maxCount, useLogY)
+	const { baseline, liftCount, y } = useCountAxis(maxCount, useLogY)
 
 	const definition = React.useMemo(
 		() =>
@@ -362,7 +373,7 @@ function CategoricalHistogram({
 						// paints its axes with no bars at all, silently. `y1`/`y2` say
 						// where the bar starts, which is the domain floor either way.
 						y1: baseline,
-						y2: (bin: PrebucketedBin) => Math.max(bin.value, baseline),
+						y2: (bin: PrebucketedBin) => Math.max(liftCount(bin.value), baseline),
 						fill: color,
 						// Opaque, and the fade goes on the bins that are NOT hovered —
 						// see `NumericHistogram`.
@@ -373,32 +384,34 @@ function CategoricalHistogram({
 						],
 					}),
 				],
-				x: {
-					// The DOMAIN IS PINNED, and it has to be. `scaleBand` (the bare
-					// factory) infers its domain from the observed channel values, but
-					// `scaleBand()` is a configured INSTANCE that keeps its empty
-					// configured domain — and an empty band domain renders the axes with
-					// no bars at all, silently. Passing an instance is only correct when
-					// the domain comes with it.
-					//
-					// `paddingInner` is the band-scale equivalent of Recharts'
-					// `barCategoryGap={1}` — a hairline between adjacent bars — and it is
-					// only reachable on an instance, which is why this is pinned rather
-					// than inferred.
-					scale: scaleBand<string>(
-						bins.map((bin) => bin.name),
-						[0, 1],
-					).paddingInner(0.05),
-					grid: false,
-					axis: {
-						line: false,
-						ticks: { size: 0, padding: 8, format: binLowerBoundLabel },
-						// Collision-aware thinning that keeps the ends. Recharts got this
-						// from `interval="preserveStartEnd"` + `minTickGap={32}`.
-						tickLabels: { thin: { minGap: 32, priority: "ends" } },
+				scales: {
+					x: {
+						// The DOMAIN IS PINNED, and it has to be. `scaleBand` (the bare
+						// factory) infers its domain from the observed channel values, but
+						// `scaleBand()` is a configured INSTANCE that keeps its empty
+						// configured domain — and an empty band domain renders the axes with
+						// no bars at all, silently. Passing an instance is only correct when
+						// the domain comes with it.
+						//
+						// `paddingInner` is the band-scale equivalent of Recharts'
+						// `barCategoryGap={1}` — a hairline between adjacent bars — and it is
+						// only reachable on an instance, which is why this is pinned rather
+						// than inferred.
+						scale: scaleBand<string>(
+							bins.map((bin) => bin.name),
+							[0, 1],
+						).paddingInner(0.05),
+						grid: false,
+						axis: {
+							line: false,
+							ticks: { size: 0, padding: 8, format: binLowerBoundLabel },
+							// Collision-aware thinning that keeps the ends. Recharts got this
+							// from `interval="preserveStartEnd"` + `minTickGap={32}`.
+							tickLabels: { thin: { minGap: 32, priority: "ends" } },
+						},
 					},
+					y,
 				},
-				y,
 				// Horizontal distance over the whole plot — see `NumericHistogram`.
 				focus: "group-x",
 				maxFocusDistance: UNBOUNDED_FOCUS_DISTANCE,

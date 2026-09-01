@@ -322,8 +322,10 @@ export function QueryBuilderAreaChart({
 				),
 				focusCrosshair(chromeColors),
 			],
-			x: timeseriesXAxis(axisContext),
-			y: yAxis.y,
+			scales: {
+				x: timeseriesXAxis(axisContext),
+				y: yAxis.y,
+			},
 			focus: "group-x",
 			// Recharts snapped to the nearest bucket anywhere in the plot; the
 			// library stops looking 48px out, which blanks the tooltip, crosshair
