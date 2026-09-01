@@ -81,6 +81,22 @@ jobs:
             - name: Setup mise (toolchain)
               uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
 
+            # The single-file installer used by deploy-pr-preview.yml — branch
+            # commands live in the real `tb` CLI, not `bunx tinybird`. Runs BEFORE
+            # secrets are loaded so a compromised installer never sees the job's
+            # exported Infisical secrets. Unconditional (unlike the sweep step
+            # below) since the gate on TINYBIRD_TOKEN can't be evaluated yet.
+            #
+            # `continue-on-error` because this step is now FIRST: a tinybird.co
+            # outage would otherwise fail it, skip the `success()`-gated secrets
+            # step, blank every `env.X != ''` guard below, and silently skip ALL
+            # sweeps while orphaned previews keep billing. Only the Tinybird sweep
+            # needs `tb`, so only it is gated on this step's outcome.
+            - name: Install Tinybird CLI
+              id: install-tinybird-cli
+              continue-on-error: true
+              run: curl https://tinybird.co | sh
+
             - name: Load deployment secrets from Infisical
               uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
               with:
@@ -96,7 +112,7 @@ jobs:
 
             - name: Install PlanetScale CLI
               if: ${{ env.PLANETSCALE_SERVICE_TOKEN != '' }}
-              uses: planetscale/setup-pscale-action@v1
+              uses: planetscale/setup-pscale-action@b6a50ee45b4b24944e1d8de6e57b3a5f6476a1af # v1
 
             # Residual net: previews no longer create `pr-<n>` branches, so this
             # should find nothing. Gated on the service token, so it SKIPs cleanly
@@ -117,14 +133,8 @@ jobs:
                   GITHUB_TOKEN: ${{ github.token }}
               run: bun scripts/electric-pr-branch.ts sweep
 
-            # The single-file installer used by deploy-pr-preview.yml — branch
-            # commands live in the real `tb` CLI, not `bunx tinybird`.
-            - name: Install Tinybird CLI
-              if: ${{ !cancelled() && env.TINYBIRD_TOKEN != '' }}
-              run: curl https://tinybird.co | sh
-
             - name: Sweep orphaned Tinybird PR branches
-              if: ${{ !cancelled() && env.TINYBIRD_TOKEN != '' }}
+              if: ${{ !cancelled() && env.TINYBIRD_TOKEN != '' && steps.install-tinybird-cli.outcome == 'success' }}
               env:
                   GITHUB_TOKEN: ${{ github.token }}
               run: bun scripts/tinybird-pr-branch.ts sweep
