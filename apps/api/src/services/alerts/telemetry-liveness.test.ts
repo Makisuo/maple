@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest"
+import { Effect, Schema } from "effect"
+import { OrgId } from "@maple/domain/http"
+import { formatWarehouseDateTime } from "@maple/query-engine"
+import { compiledQueryOf } from "@maple/query-engine/execution"
+import { systemTenant } from "./system-tenant"
 import {
 	LIVENESS_MIN_VOLUME_RATIO,
+	probeLiveness,
 	verdictForOrgTotals,
 	verdictForServiceTotals,
+	type LivenessWarehouse,
 	type ServiceWindowPair,
 } from "./telemetry-liveness"
 
@@ -124,5 +131,61 @@ describe("verdictForOrgTotals", () => {
 		const v = verdictForOrgTotals(0, 0)
 		expect(v.dataFlowing).toBe(true)
 		expect(v.reason).toBe("no_baseline")
+	})
+})
+
+describe("probeLiveness environment scoping", () => {
+	// The probe must query the alert's own environments: without the scope,
+	// staging traffic for the same service satisfies liveness while production
+	// is dark — exactly the outage the probe exists to veto.
+	it("vetoes when the rule's environment went dark even though the service is loud elsewhere", async () => {
+		const tenant = systemTenant(Schema.decodeUnknownSync(OrgId)("org_liveness_env"))
+		const windowStartMs = Date.parse("2026-06-02T00:10:00.000Z")
+		const windowEndMs = Date.parse("2026-06-02T00:15:00.000Z")
+		const baselineStartMs = Date.parse("2026-06-01T23:55:00.000Z")
+		const baselineEndMs = Date.parse("2026-06-02T00:00:00.000Z")
+		const observedSql: string[] = []
+
+		const row = (spanCount: number) => ({
+			minutesWithData: spanCount > 0 ? 5 : 0,
+			spanCount,
+			estimatedSpanCount: spanCount,
+			errorCount: 0,
+			estimatedErrorCount: 0,
+			lastSeen: "2026-06-02 00:14:00",
+		})
+
+		const warehouse: LivenessWarehouse = {
+			warmRoute: () => Effect.void,
+			compiledQuery: () => Effect.die("org pulse must not run for a service-scoped probe"),
+			compiledQueryFirst: (_tenant, compiled) =>
+				Effect.gen(function* () {
+					const query = compiledQueryOf(compiled)
+					observedSql.push(query.sql)
+					const isBaseline = query.sql.includes(formatWarehouseDateTime(baselineStartMs))
+					const productionScoped = query.sql.includes("DeploymentEnv = 'production'")
+					// Production went dark in the verification window; staging keeps
+					// the UNSCOPED totals healthy in both windows.
+					const spanCount = productionScoped ? (isBaseline ? 1000 : 0) : isBaseline ? 2000 : 1800
+					return yield* query.decodeFirstRow([row(spanCount)]).pipe(Effect.orDie)
+				}),
+		}
+
+		const verdict = await Effect.runPromise(
+			probeLiveness({
+				warehouse,
+				tenant,
+				serviceNames: ["checkout"],
+				environments: ["production"],
+				windowStartMs,
+				windowEndMs,
+				baselineStartMs,
+				baselineEndMs,
+			}),
+		)
+
+		expect(observedSql.some((sql) => sql.includes("DeploymentEnv = 'production'"))).toBe(true)
+		expect(verdict.dataFlowing).toBe(false)
+		expect(verdict.reason).toBe("no_data")
 	})
 })

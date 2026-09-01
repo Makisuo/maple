@@ -87,6 +87,13 @@ export interface LivenessProbeInput {
 	readonly tenant: TenantContext
 	/** Services the subject is scoped to. Empty probes the org as a whole. */
 	readonly serviceNames: ReadonlyArray<string>
+	/**
+	 * Deployment environments the alert is scoped to. Empty means unscoped.
+	 * Only honoured on the per-service path: without it, staging traffic for
+	 * the same service satisfies the probe while production is dark — exactly
+	 * the gap the probe exists to veto.
+	 */
+	readonly environments: ReadonlyArray<string>
 	/** The quiet window being interpreted as recovery. */
 	readonly windowStartMs: number
 	readonly windowEndMs: number
@@ -107,16 +114,21 @@ const probeServiceWindow = (
 	warehouse: LivenessWarehouse,
 	tenant: TenantContext,
 	serviceName: string,
+	deploymentEnv: string | null,
 	startMs: number,
 	endMs: number,
 ): Effect.Effect<ServiceWindowTotals | null, never> =>
 	Effect.gen(function* () {
-		const compiled = CH.compile(CH.serviceLivenessQuery(), {
-			orgId: tenant.orgId,
-			serviceName,
-			startTime: formatWarehouseDateTime(startMs),
-			endTime: formatWarehouseDateTime(endMs),
-		})
+		const compiled = CH.compile(
+			CH.serviceLivenessQuery(deploymentEnv !== null ? { scopeToEnvironment: true } : {}),
+			{
+				orgId: tenant.orgId,
+				serviceName,
+				...(deploymentEnv !== null ? { deploymentEnv } : undefined),
+				startTime: formatWarehouseDateTime(startMs),
+				endTime: formatWarehouseDateTime(endMs),
+			},
+		)
 		const row = yield* warehouse.compiledQueryFirst(tenant, compiled, {
 			profile: "list",
 			context: "telemetryLiveness",
@@ -175,15 +187,33 @@ export const probeLiveness: (input: LivenessProbeInput) => Effect.Effect<Livenes
 					)),
 				)
 			: verdictForServiceTotals(
+					// One pair per (service, environment): `verdictForServiceTotals`
+					// already vetoes when ANY baseline-active pair goes dark, so an
+					// env-scoped rule cannot have a production gap papered over by
+					// staging traffic on the same service.
 					yield* Effect.forEach(
-						serviceNames,
-						(serviceName): Effect.Effect<ServiceWindowPair, never> =>
+						serviceNames.flatMap(
+							(
+								serviceName,
+							): ReadonlyArray<{
+								readonly serviceName: string
+								readonly deploymentEnv: string | null
+							}> =>
+								input.environments.length === 0
+									? [{ serviceName, deploymentEnv: null }]
+									: input.environments.map((deploymentEnv) => ({
+											serviceName,
+											deploymentEnv,
+										})),
+						),
+						({ serviceName, deploymentEnv }): Effect.Effect<ServiceWindowPair, never> =>
 							Effect.all(
 								[
 									probeServiceWindow(
 										warehouse,
 										tenant,
 										serviceName,
+										deploymentEnv,
 										windowStartMs,
 										windowEndMs,
 									),
@@ -191,6 +221,7 @@ export const probeLiveness: (input: LivenessProbeInput) => Effect.Effect<Livenes
 										warehouse,
 										tenant,
 										serviceName,
+										deploymentEnv,
 										baselineStartMs,
 										baselineEndMs,
 									),

@@ -89,7 +89,7 @@ import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { makeDbExecute } from "@/platform/db-execute"
-import { dateToMs, msToDate } from "@/platform/time"
+import { dateToMs, msToDate, msToSqlTimestamp } from "@/platform/time"
 import { makePersistenceError } from "./alert-persistence"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
@@ -485,6 +485,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					warehouse,
 					tenant: systemTenant(orgId),
 					serviceNames: livenessServicesFor(normalized),
+					environments: normalized.environments,
 					windowStartMs: timestamp - windowMs,
 					windowEndMs: timestamp,
 					baselineStartMs: incidentOpenedAtMs - windowMs,
@@ -1425,11 +1426,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 			 * Count a terminal (`retry: "never"`) failure against the destination and
 			 * disable it once the streak reaches the threshold.
 			 *
-			 * The increment and the disable are two statements on purpose: the
-			 * increment is conditional on the row still being enabled, which makes it
-			 * idempotent against two workers finishing failed deliveries at once —
+			 * One atomic statement on purpose. Conditioning on `enabled = true` makes
+			 * it idempotent against two workers finishing failed deliveries at once —
 			 * whoever crosses the threshold second finds `enabled = false` and counts
-			 * nothing.
+			 * nothing. Folding the disable into the same statement means a concurrent
+			 * success (which zeroes the streak) or an admin repair can never lose to
+			 * a stale disable decision taken from a streak that no longer exists.
 			 */
 			const noteTerminalDestinationFailure = Effect.fn("AlertsService.noteTerminalDestinationFailure")(
 				function* (
@@ -1438,6 +1440,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					currentTime: number,
 					failure: DeliveryAttemptFailure,
 				) {
+					const reason = failure.message.slice(0, DISABLED_REASON_MAX_LENGTH)
+					const crossesThreshold = sql`${alertDestinations.consecutiveFailures} + 1 >= ${DESTINATION_DISABLE_AFTER_FAILURES}`
 					const counted = yield* dbExecute((db) =>
 						db
 							.update(alertDestinations)
@@ -1445,6 +1449,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 								consecutiveFailures: sql`${alertDestinations.consecutiveFailures} + 1`,
 								lastFailureAt: msToDate(currentTime),
 								updatedAt: msToDate(currentTime),
+								enabled: sql`case when ${crossesThreshold} then false else ${alertDestinations.enabled} end`,
+								// The timestamp rides as an ISO string: a raw `sql` fragment has
+								// no column type behind it, so a Date param would be rejected by
+								// the deployed postgres.js driver — see `msToSqlTimestamp`.
+								disabledAt: sql`case when ${crossesThreshold} then ${msToSqlTimestamp(currentTime)}::timestamptz else ${alertDestinations.disabledAt} end`,
+								disabledReason: sql`case when ${crossesThreshold} then ${reason} else ${alertDestinations.disabledReason} end`,
 							})
 							.where(
 								and(
@@ -1452,24 +1462,15 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 									eq(alertDestinations.enabled, true),
 								),
 							)
-							.returning({ consecutiveFailures: alertDestinations.consecutiveFailures }),
+							.returning({
+								consecutiveFailures: alertDestinations.consecutiveFailures,
+								enabled: alertDestinations.enabled,
+							}),
 					)
 
-					const streak = counted[0]?.consecutiveFailures
-					if (streak === undefined || streak < DESTINATION_DISABLE_AFTER_FAILURES) return
-
-					const reason = failure.message.slice(0, DISABLED_REASON_MAX_LENGTH)
-					yield* dbExecute((db) =>
-						db
-							.update(alertDestinations)
-							.set({
-								enabled: false,
-								disabledAt: msToDate(currentTime),
-								disabledReason: reason,
-								updatedAt: msToDate(currentTime),
-							})
-							.where(eq(alertDestinations.id, row.destinationId)),
-					)
+					const after = counted[0]
+					if (after === undefined || after.enabled) return
+					const streak = after.consecutiveFailures
 
 					// The in-product signal is the setup audit: a disabled destination
 					// makes every rule that selects it fail CFG-ALERT-03 ("will evaluate
@@ -1552,7 +1553,13 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 				const processOneDelivery = Effect.fn("AlertsService.processOneDelivery")(function* (
 					row: AlertDeliveryEventRow,
 				) {
-					const claimed = yield* claimDeliveryEvent(row.id, currentTime)
+					// A fresh read, NOT the batch timestamp: rows run sequentially, so
+					// by the time a later row is reached the batch time can be older
+					// than DELIVERY_LEASE_TTL_MS — a lease dated from it would be born
+					// expired and an overlapping tick could reclaim and re-send the
+					// event while this worker is still delivering it.
+					const claimTime = yield* now
+					const claimed = yield* claimDeliveryEvent(row.id, claimTime)
 					if (claimed.length === 0) return
 
 					processedCount += 1
@@ -1570,7 +1577,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					if (!destinationRow) {
 						failureCount += 1
 						yield* Metric.update(AlertingMetrics.deliveriesFailedTotal, 1)
-						yield* recordDeliveryFailure(row, currentTime, {
+						yield* recordDeliveryFailure(row, claimTime, {
 							message: "Destination not found",
 							kind: "destination",
 							retryable: false,
@@ -1581,7 +1588,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					if (!destinationRow.enabled) {
 						failureCount += 1
 						yield* Metric.update(AlertingMetrics.deliveriesFailedTotal, 1)
-						yield* recordDeliveryFailure(row, currentTime, {
+						yield* recordDeliveryFailure(row, claimTime, {
 							message: "Destination disabled",
 							kind: "destination",
 							retryable: false,
@@ -1656,16 +1663,16 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					)
 					yield* Metric.update(AlertingMetrics.deliveriesSucceededTotal, 1)
 
-					yield* finalizeClaimedDelivery(row.id, currentTime, {
+					yield* finalizeClaimedDelivery(row.id, claimTime, {
 						status: "success",
-						attemptedAt: new Date(currentTime),
+						attemptedAt: new Date(claimTime),
 						providerMessage: result.providerMessage,
 						providerReference: result.providerReference,
 						responseCode: result.responseCode,
 						errorMessage: null,
 					})
 
-					yield* clearDestinationFailureStreak(row.destinationId, currentTime)
+					yield* clearDestinationFailureStreak(row.destinationId, claimTime)
 
 					if (row.incidentId) {
 						yield* dbExecute((db) =>
@@ -1673,8 +1680,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 								.update(alertIncidents)
 								.set({
 									lastDeliveredEventType: row.eventType,
-									lastNotifiedAt: new Date(currentTime),
-									updatedAt: new Date(currentTime),
+									lastNotifiedAt: new Date(claimTime),
+									updatedAt: new Date(claimTime),
 								})
 								.where(eq(alertIncidents.id, row.incidentId!)),
 						)
@@ -1701,11 +1708,15 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 						| AlertRuleStoredConfigInvalidError,
 				) {
 					const failure = toDeliveryAttemptFailure(error)
+					// Fresh for the same reason as the claim in `processOneDelivery`:
+					// retry scheduling from the batch timestamp would date the backoff
+					// from before this attempt even started.
+					const failedAt = yield* now
 					failureCount += 1
 					yield* Metric.update(AlertingMetrics.deliveriesFailedTotal, 1)
-					yield* finalizeClaimedDelivery(row.id, currentTime, {
+					yield* finalizeClaimedDelivery(row.id, failedAt, {
 						status: "failed",
-						attemptedAt: new Date(currentTime),
+						attemptedAt: new Date(failedAt),
 						errorMessage: failure.message,
 					})
 
@@ -1724,7 +1735,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 							row.destinationId,
 							decodeAlertEventTypeSync(row.eventType),
 							retryPayload,
-							currentTime + (yield* computeRetryDelayMs(row.attemptNumber)),
+							failedAt + (yield* computeRetryDelayMs(row.attemptNumber)),
 							row.deliveryKey,
 							row.attemptNumber + 1,
 						)
@@ -1737,7 +1748,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 						yield* noteTerminalDestinationFailure(
 							row,
 							destinationMap.get(row.destinationId)?.type ?? null,
-							currentTime,
+							failedAt,
 							failure,
 						)
 					}
@@ -1972,7 +1983,29 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 							updatedAt: new Date(timestamp),
 						}
 
-						yield* dbExecute((db) => db.insert(alertIncidents).values(incident))
+						// `alert_incidents_open_group_idx` allows one open incident per
+						// (org, rule, group). The scheduler claim already serializes rules
+						// in the common case; this is the backstop for an expired claim —
+						// a chunk that outran SCHEDULER_LOCK_TTL_MS being re-claimed by the
+						// next tick, both working from tick-head prefetch that saw no open
+						// incident. The loser lands here and must not notify.
+						const inserted = yield* dbExecute((db) =>
+							db.insert(alertIncidents).values(incident).onConflictDoNothing().returning({
+								id: alertIncidents.id,
+							}),
+						)
+						if (inserted.length === 0) {
+							yield* Effect.logWarning(
+								"Skipped duplicate incident open: another worker won the race",
+							).pipe(Effect.annotateLogs({ ruleId: row.id, groupKey }))
+							return {
+								transition: "none" as const,
+								incidentId: carriedIncidentId,
+								openedIncidentId: null,
+								consecutiveBreaches,
+								consecutiveHealthy,
+							}
+						}
 						if (flapSuppressedAt != null) {
 							yield* Effect.logInfo("Skipping trigger notification for flapping incident").pipe(
 								Effect.annotateLogs({

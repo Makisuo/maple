@@ -250,10 +250,29 @@ const make: Effect.Effect<
 							Effect.annotateLogs({ orgId, message: error.message }),
 						),
 					),
+					// A failed lookup must not masquerade as "these destinations do
+					// not exist": "missing" is terminal to every consumer (escalation
+					// outbox, error policies), while "failed" keeps their retry
+					// machinery in play for what is a transient database error.
 					Effect.catchTag("@maple/api/lib/DatabaseError", () =>
-						Effect.succeed<Array<AlertDestinationRow>>([]),
+						Effect.succeed<Array<AlertDestinationRow> | null>(null),
 					),
 				)
+
+			if (rows === null) {
+				return {
+					delivered: 0,
+					failed: destinationIds.length,
+					destinations: destinationIds.map(
+						(destinationId): NotificationDestinationResult => ({
+							destinationId,
+							destinationName: null,
+							status: "failed",
+							error: "destination_lookup_failed",
+						}),
+					),
+				}
+			}
 
 			const rowsById = new Map(rows.map((row) => [row.id, row]))
 			const results = yield* Effect.forEach(

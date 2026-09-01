@@ -1,6 +1,8 @@
 // BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 import {
+	AlertDeliveryAuthError,
 	AlertDeliveryError,
+	AlertDeliveryRejectedError,
 	AlertDeliveryTargetMissingError,
 	type AlertDeliveryFailure,
 	type OrgId,
@@ -38,6 +40,34 @@ const slackError = (message: string, providerErrorCode?: string) =>
 		destinationType: "slack-bot",
 		...(!(providerErrorCode === undefined) ? { providerErrorCode } : undefined),
 	})
+
+/**
+ * Slack reports every logical failure as HTTP 200 + an error code, so the
+ * status classifier in `runTransport` never sees them and the code has to be
+ * mapped here. Anything not listed stays retryable (`AlertDeliveryError`):
+ * mis-classifying a transient code as terminal costs a destination its
+ * enablement, while the reverse only costs a few wasted retries.
+ */
+const SLACK_AUTH_ERRORS = new Set([
+	"invalid_auth",
+	"not_authed",
+	"token_revoked",
+	"token_expired",
+	"account_inactive",
+	"no_permission",
+	"missing_scope",
+	"ekm_access_denied",
+])
+const SLACK_TARGET_MISSING_ERRORS = new Set(["not_in_channel", "channel_not_found", "is_archived"])
+const SLACK_REJECTED_ERRORS = new Set([
+	"invalid_blocks",
+	"invalid_blocks_format",
+	"invalid_arguments",
+	"msg_too_long",
+	"too_many_attachments",
+	"restricted_action",
+	"cannot_dm_bot",
+])
 
 /**
  * The bot token is not in the destination's secret config — it is resolved per
@@ -98,14 +128,31 @@ export const makeSlackTransport = (deps: SlackTransportDeps): HttpTransport<Conf
 		const payload = decoded.success
 		if (!payload.ok) {
 			const error = payload.error ?? "unknown_error"
-			// Slack reports channel problems as HTTP 200 + `ok:false`, so the status
-			// classifier never sees them. These are the dominant operational failure
-			// (a rename or a kick) and no amount of retrying fixes either — someone
-			// has to re-invite the bot or repoint the destination.
-			if (error === "not_in_channel" || error === "channel_not_found") {
+			// Channel problems are the dominant operational failure (a rename or a
+			// kick) and no amount of retrying fixes them — someone has to re-invite
+			// the bot or repoint the destination.
+			if (SLACK_TARGET_MISSING_ERRORS.has(error)) {
 				return Result.fail(
 					new AlertDeliveryTargetMissingError({
 						message: `Slack rejected the message (${error}) — invite the Maple bot to the channel and try again`,
+						destinationType: "slack-bot",
+						providerErrorCode: error,
+					}),
+				)
+			}
+			if (SLACK_AUTH_ERRORS.has(error)) {
+				return Result.fail(
+					new AlertDeliveryAuthError({
+						message: `Slack rejected the credentials (${error}) — reinstall the Maple Slack app`,
+						destinationType: "slack-bot",
+						providerErrorCode: error,
+					}),
+				)
+			}
+			if (SLACK_REJECTED_ERRORS.has(error)) {
+				return Result.fail(
+					new AlertDeliveryRejectedError({
+						message: `Slack rejected the message: ${error}`,
 						destinationType: "slack-bot",
 						providerErrorCode: error,
 					}),

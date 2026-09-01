@@ -152,7 +152,6 @@ export const makeAlertRulePersistence = (options: {
 		request: AlertRuleUpsertRequest,
 	) {
 		const normalized = yield* normalizeRule(orgId, request)
-		yield* requireDestinationIds(orgId, normalized.destinationIds)
 		const ruleId = existingId ?? normalized.id
 		const timestamp = yield* runtime.now
 		const ruleFields = {
@@ -191,6 +190,30 @@ export const makeAlertRulePersistence = (options: {
 		const writeResult = yield* dbExecute((db) =>
 			db.transaction(async (tx) => {
 				await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${orgId}))`)
+				// Destination existence is checked INSIDE the lock: destination
+				// deletion takes the same per-org advisory lock around its reference
+				// scan, so a rule can no longer commit a reference to a destination
+				// whose deletion validated "unreferenced" concurrently.
+				if (normalized.destinationIds.length > 0) {
+					const destinationRows = await tx
+						.select({ id: alertDestinations.id })
+						.from(alertDestinations)
+						.where(
+							and(
+								eq(alertDestinations.orgId, orgId),
+								inArray(alertDestinations.id, [...normalized.destinationIds]),
+							),
+						)
+					const existingIds = new Set(destinationRows.map((destination) => destination.id))
+					const missingDestinationId = normalized.destinationIds.find((id) => !existingIds.has(id))
+					if (missingDestinationId !== undefined) {
+						return {
+							limitExceeded: false as const,
+							missingDestinationId,
+							writeRows: [],
+						}
+					}
+				}
 				if (normalized.enabled) {
 					const activeRows = await tx
 						.select({ id: alertRules.id })
@@ -223,6 +246,14 @@ export const makeAlertRulePersistence = (options: {
 				return { limitExceeded: false as const, writeRows }
 			}),
 		)
+		if ("missingDestinationId" in writeResult && writeResult.missingDestinationId !== undefined) {
+			return yield* Effect.fail(
+				new AlertRuleDestinationNotFoundError({
+					message: "Alert rule references an unknown destination",
+					destinationId: writeResult.missingDestinationId,
+				}),
+			)
+		}
 		if (writeResult.limitExceeded) {
 			return yield* Effect.fail(
 				makeAlertValidationError(
