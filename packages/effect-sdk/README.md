@@ -77,15 +77,50 @@ When `MAPLE_INGEST_KEY` is unset, the SDK runs in no-op mode: buffers are draine
 
 ### Cloudflare-specific options
 
-| Option                        | Description                                                                                                 |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Option                        | Description                                                                                                                                                                                                                                                                           |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `anticipatedErrorIdentifiers` | Stable `_tag` / `Error.name` identifiers for expected 4xx failures; exported as `Ok` without an exception. A failure wrapped in an `{ error: … }` envelope is matched on the body's `_tag`, so an error decoded from an HTTP response classifies the same as the class that raised it |
-| `dropSpanNames`               | Span names whose prefix matches an entry are dropped before OTLP export (e.g. `"McpServer/Notifications."`) |
-| `excludeLogSpans`             | Skip Effect log spans in OTLP log attributes. Default `false`                                               |
-| `tracesPath`                  | OTLP traces path appended to `endpoint`. Default `/v1/traces`                                               |
-| `logsPath`                    | OTLP logs path appended to `endpoint`. Default `/v1/logs`                                                   |
+| `dropSpanNames`               | Span names whose prefix matches an entry are dropped before OTLP export (e.g. `"McpServer/Notifications."`)                                                                                                                                                                           |
+| `excludeLogSpans`             | Skip Effect log spans in OTLP log attributes. Default `false`                                                                                                                                                                                                                         |
+| `tracesPath`                  | OTLP traces path appended to `endpoint`. Default `/v1/traces`                                                                                                                                                                                                                         |
+| `logsPath`                    | OTLP logs path appended to `endpoint`. Default `/v1/logs`                                                                                                                                                                                                                             |
+| `tracer`                      | `"otlp"` (default) buffers spans for `flush(env)`; `"native"` mirrors them onto Cloudflare's own tracing — see [Native tracing](#native-tracing-experimental)                                                                                                                         |
 
 The same `MAPLE_ENDPOINT` / `MAPLE_INGEST_KEY` / `MAPLE_ENVIRONMENT` env vars apply, read from the Workers `env` binding.
+
+### Native tracing (experimental)
+
+`tracer: "native"` hands span export to Cloudflare instead of the OTLP buffer. Every Effect span is mirrored onto `tracing.startActiveSpan` from `cloudflare:workers`, so it lands in the same trace as Cloudflare's own fetch / KV / R2 / D1 spans, and the whole trace reaches Maple through the Worker's [ObservabilityDestination](https://developers.cloudflare.com/workers/observability/exporting-opentelemetry-data/). Nothing is buffered in the isolate, no ingest key is read, and it works from Durable Object and Workflow isolates, where a `ctx.waitUntil` flush is unreliable.
+
+```typescript
+const telemetry = MapleCloudflareSDK.make({ tracer: "native" })
+// Handler wiring is unchanged; `telemetry.flush(env)` resolves immediately in this mode.
+```
+
+Requirements: `compatibility_date >= 2026-07-28` (for `startActiveSpan`), the `nodejs_compat` compatibility flag (for `AsyncLocalStorage.snapshot`, which is how a span opened after a fiber yields still nests under its parent), `observability.traces.enabled = true`, and an ObservabilityDestination pointed at Maple's OTLP endpoint. When either runtime API is missing the layer logs one notice and keeps spans Effect-local — the Worker keeps running, nothing is exported. The layer builds asynchronously (it imports both modules on first build); `HttpRouter.toWebHandler` handles that.
+
+What is mirrored:
+
+| Effect                                                            | Cloudflare span                                                                           |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| span name, nesting                                                | span name, parent — including across `sleep`s, forks and other fiber yields               |
+| string / number / boolean attributes                              | forwarded as they are set                                                                 |
+| object / array / bigint attributes, events, links                 | Effect-local only                                                                         |
+| failed exit                                                       | `exception.type`, `exception.message`, `exception.stacktrace`, `error.type` (first error) |
+| interrupt                                                         | `status.interrupted = true`                                                               |
+| `anticipatedErrorIdentifiers` / `[ErrorReporter.ignore]` failures | no exception attributes                                                                   |
+| `dropSpanNames` match                                             | no Cloudflare span; its children attach to the nearest mirrored ancestor                  |
+| Cloudflare `isTraced = false`                                     | the span and its descendants are unsampled — no `startActiveSpan` calls at all            |
+
+Cloudflare spans carry no events, so a failure is recorded as attributes rather than as the OTLP `exception` event. Maple's error tracking reads both shapes.
+
+**Logs stay with Cloudflare.** Native mode installs no OTLP logger: Effect's default logger writes to `console`, which is Workers Logs, and the same ObservabilityDestination exports those next to the traces with Cloudflare's trace ids on them. Shipping Effect log records over OTLP would need exactly the flush and ingest key this mode removes, and every record would carry an Effect trace id that never matches the Cloudflare trace id on the exported spans. Metrics are likewise not exported in native mode.
+
+**Trace ids.** `Effect.currentSpan`'s `traceId` / `spanId` are independent of Cloudflare's; the ids in the exported trace are Cloudflare's. Trace context is not yet propagated to services outside Cloudflare — see Cloudflare's [known limitations](https://developers.cloudflare.com/workers/observability/traces/known-limitations/).
+
+**Async context.** A span runs its fibers inside the async context captured when it was opened. Two consequences: a root span opened after its fiber has already yielded (a forked background fiber with no parent span, say) attaches to whatever Cloudflare span is active at that moment, and code in the same continuation right after a span ends can still see that span as active. `HttpMiddleware.tracer` opens the request span synchronously inside the handler, which is the well-behaved case.
+
+Resource attributes (`serviceName`, `environment`, `attributes`) are not applied in native mode; the export carries Cloudflare's own resource attributes for the Worker.
 
 ## Client (Browser)
 

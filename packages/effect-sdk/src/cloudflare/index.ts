@@ -45,6 +45,7 @@ import { makeSpanBuffer, type SpanBuffer } from "../shared/flushable-tracer.js"
 import { makeNoOpNotice } from "../shared/no-op-notice.js"
 import { resolveResourceFromEnv } from "../server/resource.js"
 import { SDK_VERSION } from "../version.js"
+import { makeNativeTracerLayer } from "./native-tracer.js"
 
 export interface Config {
 	/**
@@ -101,6 +102,19 @@ export interface Config {
 	readonly logsPath?: string | undefined
 	/** OTLP metrics path appended to `endpoint`. Default `/v1/metrics`. */
 	readonly metricsPath?: string | undefined
+	/**
+	 * How spans leave the Worker.
+	 *
+	 * - `"otlp"` (default): spans, logs and metrics are buffered in the isolate
+	 *   and POSTed to Maple on `flush(env)`.
+	 * - `"native"` (experimental): every span is mirrored onto Cloudflare's
+	 *   `tracing.startActiveSpan`, so it is exported by the Worker's
+	 *   ObservabilityDestination in the same trace as Cloudflare's own
+	 *   fetch/KV/R2/D1 spans. No ingest key, `flush` is a no-op, and logs are
+	 *   left to Workers Logs. Needs `compatibility_date >= 2026-07-28` and the
+	 *   `nodejs_compat` flag; when either is missing, spans stay Effect-local.
+	 */
+	readonly tracer?: "otlp" | "native" | undefined
 }
 
 export interface Telemetry {
@@ -147,6 +161,16 @@ export const make = (config: Config = {}): Telemetry => {
 	]
 	const anticipatedIdentifiers =
 		anticipatedErrorIdentifiers.length > 0 ? new Set(anticipatedErrorIdentifiers) : undefined
+
+	if (config.tracer === "native") {
+		return {
+			layer: makeNativeTracerLayer({ dropSpan, anticipatedErrorIdentifiers: anticipatedIdentifiers }),
+			// Cloudflare exports the mirrored spans itself; `flush` stays so the
+			// handler wiring is the same in both modes.
+			flush: () => Promise.resolve(),
+		}
+	}
+
 	const spans: SpanBuffer = makeSpanBuffer({
 		dropSpan,
 		anticipatedErrorIdentifiers: anticipatedIdentifiers,
