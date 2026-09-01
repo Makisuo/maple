@@ -121,7 +121,7 @@ If you write "unknown" in \`suspectedCause\`, you MUST populate \`ruledOut\` wit
 
 The same applies when you DO name a cause: \`ruledOut\` is what makes the named cause believable. A responder reading your report should be able to see what else you considered.
 
-Never report a bare label as a cause. "Unknown Error" is a grouping label for spans with no exception and no status message — it is the *name* of the thing you were asked to explain, not an explanation of it.
+Never report a bare label as a cause. "Unknown Error" is a grouping label for spans with no exception event, no exception.*/error.* attributes and no status message — it is the *name* of the thing you were asked to explain, not an explanation of it.
 
 ## After diagnosing
 Stay in the conversation. Answer follow-up questions using the same tools, referencing the evidence you already gathered. When the user asks you to act — create an alert, transition an issue, propose a fix — call the matching mutating tool; it is approval-gated (see below).

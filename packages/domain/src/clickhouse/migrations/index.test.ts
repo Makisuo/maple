@@ -29,6 +29,7 @@ import { migration_0019_mv_sweep } from "./0019_mv_sweep"
 import { migration_0020_semconv_key_renames } from "./0020_semconv_key_renames"
 import { migration_0022_service_map_edge_quantiles } from "./0022_service_map_edge_quantiles"
 import { migration_0023_service_operations_discriminators } from "./0023_service_operations_discriminators"
+import { migration_0024_error_events_attribute_fallback } from "./0024_error_events_attribute_fallback"
 import { migration_0021_product_events } from "./0021_product_events"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
@@ -45,17 +46,18 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
 		expect(migrations.map((m) => m.version)).toEqual([
-			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
 		])
-		expect(migrations.at(-1)).toBe(migration_0023_service_operations_discriminators)
-		expect(latestMigrationVersion).toBe(23)
+		expect(migrations.at(-1)).toBe(migration_0024_error_events_attribute_fallback)
+		expect(latestMigrationVersion).toBe(24)
 		// 0010 and 0014-0020 are read-path only and skipped by the ingest-gating
 		// version; 0021 is not — the gateway writes `session_events`' new identity
 		// columns and `product_events` directly, so a BYO-CH org must apply it
 		// before ingest routes there again. 0022 is read-path only again: both
 		// tables it touches are MV-populated and the gateway writes neither, and
 		// 0023 is the same: it only adds counter columns to those MV-populated
-		// service-operations rollups.
+		// service-operations rollups, and 0024 only recreates the error-events
+		// MVs.
 		expect(clickHouseSchemaVersion).toBe("21")
 		expect(migration_0010_search_indexes.requiredForIngest).toBe(false)
 		expect(migration_0014_web_events.requiredForIngest).toBe(false)
@@ -67,6 +69,46 @@ describe("ClickHouse migrations", () => {
 		expect(migration_0020_semconv_key_renames.requiredForIngest).toBe(false)
 		expect(migration_0022_service_map_edge_quantiles.requiredForIngest).toBe(false)
 		expect(migration_0023_service_operations_discriminators.requiredForIngest).toBe(false)
+		expect(migration_0024_error_events_attribute_fallback.requiredForIngest).toBe(false)
+	})
+
+	it("recreates both error-events MVs with the span-attribute exception fallback", () => {
+		const statements: ReadonlyArray<string> =
+			migration_0024_error_events_attribute_fallback.statements.filter((stmt) => !isBackfill(stmt))
+		const sql = statements.join("\n")
+
+		// An MV's SELECT is frozen at creation, so both views are dropped before
+		// they are recreated; error_events_by_time_mv shares the projection
+		// byte-for-byte and must never disagree with error_events_mv on a label.
+		for (const view of ["error_events_mv", "error_events_by_time_mv"]) {
+			const dropAt = statements.findIndex((stmt) => stmt === `DROP VIEW IF EXISTS ${view}`)
+			const createAt = statements.findIndex((stmt) =>
+				stmt.startsWith(`CREATE MATERIALIZED VIEW IF NOT EXISTS ${view} `),
+			)
+			expect(dropAt).toBeGreaterThanOrEqual(0)
+			expect(createAt).toBeGreaterThan(dropAt)
+		}
+
+		// The event still wins outright; attributes are read only in its absence,
+		// exception.* ahead of error.*.
+		expect(sql).toContain("_ei > 0, EventsAttributes[_ei]['exception.type']")
+		expect(sql).toContain("SpanAttributes['exception.type']")
+		expect(sql).toContain("SpanAttributes['exception.message']")
+		expect(sql).toContain("SpanAttributes['exception.stacktrace']")
+		expect(sql).toContain("SpanAttributes['error.type']")
+		expect(sql).toContain("SpanAttributes['error.message']")
+		// The signature and label are cut from the resolved text, so an
+		// attribute-only span no longer degrades to 'Unknown Error'.
+		expect(sql).toContain("if(_ei > 0 OR StatusMessage != '', StatusMessage, _exMsg) AS _msgText")
+		expect(sql).toContain("_msgText = '', 'Unknown Error'")
+		// The 0016 guard survives: a 4xx client span whose only error.type is the
+		// status code is still not an error.
+		expect(sql).toContain("SpanAttributes['error.type'] = toString(_httpStatus)")
+
+		// Nothing is rewritten: error_events keeps no span attributes to re-derive
+		// from, and recomputing FingerprintHash would re-bucket every issue.
+		expect(sql).not.toContain("ALTER TABLE error_events")
+		expect(migration_0024_error_events_attribute_fallback.statements.some(isBackfill)).toBe(false)
 	})
 
 	it("recreates both error-events MVs with the 4xx guard and the widened frame redaction", () => {

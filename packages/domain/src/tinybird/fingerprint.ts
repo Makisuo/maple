@@ -284,6 +284,64 @@ function messageSignature(statusMessage: string): string {
 	)
 }
 
+/** The three `exception.*` keys, from a span event or from span attributes. */
+export interface ExceptionSource {
+	readonly type: string
+	readonly message: string
+	readonly stacktrace: string
+}
+
+/**
+ * What the MV's WITH clause resolves before hashing: `_exType`, `_exMsg`,
+ * `_exStack` and `_msgText`.
+ */
+export interface ErrorSource extends ExceptionSource {
+	/**
+	 * The text the message signature and the display label are cut from
+	 * (`_msgText`). StatusMessage whenever it is set or an exception event
+	 * exists; for an event-less span with an empty StatusMessage, the
+	 * attribute-carried message stands in.
+	 */
+	readonly messageText: string
+}
+
+/**
+ * Mirrors the MV's source resolution, in the same order: the first OTel
+ * `exception` span event, taken verbatim (empty values included) so a span
+ * that has one hashes exactly as it always did; then the same three keys as
+ * span attributes; then semconv `error.type` / `error.message`; then
+ * StatusMessage for the message alone. Cloudflare's native Workers tracing
+ * has no span events and no status description — a custom span can only
+ * `setAttribute()` — which is what the attribute tiers exist for.
+ */
+export function resolveErrorSource(args: {
+	readonly exceptionEvent: ExceptionSource | undefined
+	readonly spanAttributes: Readonly<Record<string, string>>
+	readonly statusMessage: string
+}): ErrorSource {
+	const attr = (key: string): string => args.spanAttributes[key] ?? ""
+	if (args.exceptionEvent !== undefined) {
+		return { ...args.exceptionEvent, messageText: args.statusMessage }
+	}
+	const type = attr("exception.type") !== "" ? attr("exception.type") : attr("error.type")
+	const message =
+		attr("exception.message") !== ""
+			? attr("exception.message")
+			: attr("error.message") !== ""
+				? attr("error.message")
+				: args.statusMessage
+	return {
+		type,
+		message,
+		stacktrace: attr("exception.stacktrace"),
+		messageText: args.statusMessage !== "" ? args.statusMessage : message,
+	}
+}
+
+/**
+ * `statusMessage` is the MV's `_msgText` — see {@link resolveErrorSource} —
+ * not necessarily the raw StatusMessage column.
+ */
 export function computeFingerprintInputs(args: {
 	readonly exceptionType: string
 	readonly exceptionStacktrace: string
