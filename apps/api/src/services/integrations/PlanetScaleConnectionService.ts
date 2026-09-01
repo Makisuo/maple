@@ -488,20 +488,27 @@ export class PlanetScaleConnectionService extends Context.Service<
 					// enabled only if the bearer probe passed.
 					const keepsToken =
 						adoptable.authType === "token" && adoptable.authCredentialsCiphertext !== null
-					yield* scrapeTargetsService.update(orgId, adoptable.id, {
-						...(!keepsToken ? { authType: "planetscale_oauth" } : undefined),
-						...(request.includeBranches !== undefined
-							? {
-									includeBranches: request.includeBranches,
-								}
-							: undefined),
-						...(request.excludeBranches !== undefined
-							? {
-									excludeBranches: request.excludeBranches,
-								}
-							: undefined),
-						enabled: keepsToken || permissions.readMetricsEndpoints,
-					})
+					yield* scrapeTargetsService.update(
+						orgId,
+						adoptable.id,
+						{
+							...(!keepsToken ? { authType: "planetscale_oauth" } : undefined),
+							...(request.includeBranches !== undefined
+								? {
+										includeBranches: request.includeBranches,
+									}
+								: undefined),
+							...(request.excludeBranches !== undefined
+								? {
+										excludeBranches: request.excludeBranches,
+									}
+								: undefined),
+							enabled: keepsToken || permissions.readMetricsEndpoints,
+						},
+						// The integration owns this row, so it writes past the
+						// managed-row guard the generic scrape API is held to.
+						{ allowManaged: true },
+					)
 					scrapeTargetId = adoptable.id
 				} else {
 					const created = yield* scrapeTargetsService.create(orgId, {
@@ -618,23 +625,25 @@ export class PlanetScaleConnectionService extends Context.Service<
 						Effect.mapError(toPersistenceError),
 						Effect.tapError(() =>
 							createdTarget
-								? scrapeTargetsService.delete(orgId, scrapeTargetId).pipe(
-										Effect.catchTag(
-											"@maple/http/errors/ScrapeTargetNotFoundError",
-											() => Effect.void,
-										),
-										Effect.catch((error) =>
-											Effect.logWarning(
-												"Failed to compensate newly created PlanetScale target after binding failure",
-											).pipe(
-												Effect.annotateLogs({
-													orgId,
-													scrapeTargetId,
-													error: String(error),
-												}),
+								? scrapeTargetsService
+										.delete(orgId, scrapeTargetId, { allowManaged: true })
+										.pipe(
+											Effect.catchTag(
+												"@maple/http/errors/ScrapeTargetNotFoundError",
+												() => Effect.void,
 											),
-										),
-									)
+											Effect.catch((error) =>
+												Effect.logWarning(
+													"Failed to compensate newly created PlanetScale target after binding failure",
+												).pipe(
+													Effect.annotateLogs({
+														orgId,
+														scrapeTargetId,
+														error: String(error),
+													}),
+												),
+											),
+										)
 								: Effect.void,
 						),
 					)
@@ -700,11 +709,16 @@ export class PlanetScaleConnectionService extends Context.Service<
 					}),
 				)
 			}
-			yield* scrapeTargetsService.update(orgId, target.id, {
-				authType: "token",
-				authCredentials: JSON.stringify({ tokenId, tokenSecret: request.tokenSecret }),
-				enabled: true,
-			})
+			yield* scrapeTargetsService.update(
+				orgId,
+				target.id,
+				{
+					authType: "token",
+					authCredentials: JSON.stringify({ tokenId, tokenSecret: request.tokenSecret }),
+					enabled: true,
+				},
+				{ allowManaged: true },
+			)
 
 			return yield* getStatus(orgId)
 		})
@@ -718,16 +732,16 @@ export class PlanetScaleConnectionService extends Context.Service<
 				// owns it (a user-created row adopted by a *different* connection stays).
 				const target = yield* selectManagedTarget(connection)
 				if (target !== null && target.managedBy === managedByForConnection(connection.id)) {
-					yield* scrapeTargetsService
-						.delete(orgId, target.id)
-						.pipe(
-							Effect.catchTag("@maple/http/errors/ScrapeTargetNotFoundError", () =>
-								Effect.annotateCurrentSpan(
-									"maple.planetscale.disconnect_target_missing",
-									true,
-								),
-							),
-						)
+					yield* scrapeTargetsService.delete(orgId, target.id, { allowManaged: true }).pipe(
+						Effect.catchTag("@maple/http/errors/ScrapeTargetNotFoundError", () =>
+							Effect.annotateCurrentSpan("maple.planetscale.disconnect_target_missing", true),
+						),
+						// `allowManaged` is the only thing delete validates, so this
+						// branch is unreachable — a reachable one is a bug, not a 400.
+						Effect.catchTag("@maple/http/errors/ScrapeTargetValidationError", (error) =>
+							Effect.die(error),
+						),
+					)
 				}
 
 				yield* database

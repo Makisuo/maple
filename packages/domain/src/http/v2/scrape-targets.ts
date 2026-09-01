@@ -18,7 +18,7 @@ import {
 } from "../scrape-targets"
 import { AuthorizationV2 } from "./auth"
 import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
-import { V2ParameterInvalid } from "./errors"
+import { V2InsufficientPermissions, V2ParameterInvalid } from "./errors"
 import { publicErrors } from "./public-error"
 import { PublicId, PublicIdPrefixes } from "./public-id"
 
@@ -393,13 +393,13 @@ export class V2ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")
 		HttpApiEndpoint.post("create", "/", {
 			payload: V2ScrapeTargetCreateParams,
 			success: V2ScrapeTarget,
-			error: [scrapeValidation, scrapePersistence, scrapeEncryption],
+			error: [V2InsufficientPermissions.schema, scrapeValidation, scrapePersistence, scrapeEncryption],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "createScrapeTarget",
 				summary: "Create a scrape target",
 				description:
-					"Creates a scrape target. `prometheus` targets need a `url`; `planetscale` targets need an `organization` (the URL is derived). Requires the `scrape_targets:write` scope.",
+					"Creates a scrape target. `prometheus` targets need a `url`; `planetscale` targets need an `organization` (the URL is derived). Requires the `scrape_targets:write` scope and an org-admin caller.",
 			}),
 		),
 	)
@@ -423,6 +423,7 @@ export class V2ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")
 			payload: V2ScrapeTargetUpdateParams,
 			success: V2ScrapeTarget,
 			error: [
+				V2InsufficientPermissions.schema,
 				scrapeNotFound,
 				scrapeValidation,
 				scrapePersistence,
@@ -434,7 +435,7 @@ export class V2ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")
 				identifier: "updateScrapeTarget",
 				summary: "Update a scrape target",
 				description:
-					"Updates a target's configuration; omitted fields are unchanged. Requires the `scrape_targets:write` scope.",
+					"Updates a target's configuration; omitted fields are unchanged. Changing the scheme, host, or port of a target that stores credentials requires re-supplying `auth_credentials` in the same request — stored credentials are never carried to a new origin. Targets owned by an integration (`managed_by` set) are edited through that integration. Requires the `scrape_targets:write` scope and an org-admin caller.",
 			}),
 		),
 	)
@@ -442,13 +443,13 @@ export class V2ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")
 		HttpApiEndpoint.delete("delete", "/:id", {
 			params: { id: ScrapeTargetPublicId },
 			success: V2ScrapeTargetDeleteResponse,
-			error: [scrapeNotFound, scrapePersistence],
+			error: [V2InsufficientPermissions.schema, scrapeNotFound, scrapeValidation, scrapePersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "deleteScrapeTarget",
 				summary: "Delete a scrape target",
 				description:
-					"Permanently deletes a scrape target and stops scraping it. Already-ingested metrics are unaffected. Requires the `scrape_targets:write` scope.",
+					"Permanently deletes a scrape target and stops scraping it. Already-ingested metrics are unaffected. Targets owned by an integration (`managed_by` set) are removed through that integration. Requires the `scrape_targets:write` scope and an org-admin caller.",
 			}),
 		),
 	)
@@ -456,13 +457,19 @@ export class V2ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")
 		HttpApiEndpoint.post("probe", "/:id/probe", {
 			params: { id: ScrapeTargetPublicId },
 			success: V2ScrapeTargetProbeResult,
-			error: [scrapeNotFound, scrapePersistence, scrapeEncryption, ...planetScaleAccessTokenErrors],
+			error: [
+				V2InsufficientPermissions.schema,
+				scrapeNotFound,
+				scrapePersistence,
+				scrapeEncryption,
+				...planetScaleAccessTokenErrors,
+			],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "probeScrapeTarget",
 				summary: "Probe a scrape target",
 				description:
-					"Runs an on-demand scrape against the target and reports the outcome without waiting for the schedule. Requires the `scrape_targets:write` scope.",
+					"Runs an on-demand scrape against the target and reports the outcome without waiting for the schedule. Requires the `scrape_targets:write` scope and an org-admin caller.",
 			}),
 		),
 	)

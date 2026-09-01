@@ -428,6 +428,48 @@ describe("v2 scrape_targets over HTTP", () => {
 		await harness.dispose()
 	})
 
+	it("refuses scrape-target writes from a non-admin member", async () => {
+		const harness = makeHarness()
+		const adminKey = await harness.bootstrapKey()
+		const memberKey = await harness.bootstrapMemberKey()
+
+		const created = await harness.request("POST", "/v2/scrape_targets", {
+			token: adminKey.secret,
+			body: {
+				name: "payments prometheus",
+				url: "https://example.com:1/metrics",
+				target_type: "prometheus",
+			},
+		})
+		expect(created.status).toBe(200)
+
+		// A member keeps the reads — the credential itself is never returned.
+		const listed = await harness.request("GET", "/v2/scrape_targets", { token: memberKey.secret })
+		expect(listed.status).toBe(200)
+
+		for (const [method, path, body] of [
+			["POST", "/v2/scrape_targets", { name: "member target", url: "https://example.com:1/m" }],
+			["PATCH", `/v2/scrape_targets/${created.body.id}`, { url: "https://evil.example.com/m" }],
+			["POST", `/v2/scrape_targets/${created.body.id}/probe`, undefined],
+			["DELETE", `/v2/scrape_targets/${created.body.id}`, undefined],
+		] as const) {
+			const denied = await harness.request(method, path, {
+				token: memberKey.secret,
+				...(body !== undefined ? { body } : undefined),
+			})
+			expect(denied.status).toBe(403)
+			expect(denied.body.error.type).toBe("permission_error")
+		}
+
+		// Still there, still untouched.
+		const after = await harness.request("GET", `/v2/scrape_targets/${created.body.id}`, {
+			token: adminKey.secret,
+		})
+		expect(after.status).toBe(200)
+		expect(after.body.url).toBe("https://example.com:1/metrics")
+		await harness.dispose()
+	})
+
 	it("paginates scrape checks beyond the former 200-row window", async () => {
 		const harness = makeHarness()
 		const key = await harness.bootstrapKey()
