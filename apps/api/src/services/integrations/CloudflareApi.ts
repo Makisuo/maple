@@ -15,7 +15,6 @@ import { Effect } from "effect"
 import type * as Impl from "./CloudflareApiImpl"
 
 export type {
-	BoundedListing,
 	CloudflareGraphqlError,
 	CloudflareHyperdriveConfig,
 	CloudflareZone,
