@@ -4,7 +4,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 
 import { REPLAY_BLOCK_CLASS } from "@/components/common/replay-privacy"
-import { ConnectInstructions } from "./guided-setup"
+import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
+import { ConnectInstructions, useGuidedFramework } from "./guided-setup"
 
 const API_KEY = "mpl_ingest_supersecretkey123"
 
@@ -35,5 +36,28 @@ describe("ConnectInstructions", () => {
 				!blocked.some((b) => b.contains(el)),
 		)
 		expect(leaked).toEqual([])
+	})
+})
+
+function FrameworkProbe() {
+	const { framework } = useGuidedFramework()
+	return <span data-testid="framework">{framework}</span>
+}
+
+/**
+ * Rendered with no `ClerkProvider`, which is what a self-hosted build is:
+ * `main.tsx` mounts one only when `isClerkAuthEnabled`. A Clerk hook called
+ * unconditionally in here threw, and self-hosted `/settings` opens on the
+ * ingestion tab that renders it.
+ */
+describe("useGuidedFramework", () => {
+	afterEach(cleanup)
+
+	it("renders self-hosted, outside a ClerkProvider", () => {
+		expect(isClerkAuthEnabled).toBe(false)
+
+		render(<FrameworkProbe />)
+
+		expect(screen.getByTestId("framework").textContent).toBe("nodejs")
 	})
 })

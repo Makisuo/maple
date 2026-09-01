@@ -15,6 +15,7 @@ import {
 } from "@/components/quick-start/framework-icons"
 import { sdkSnippets, type FrameworkId } from "@/components/quick-start/sdk-snippets"
 import { ingestUrl } from "@/lib/services/common/ingest-url"
+import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { useQuickStart } from "@/hooks/use-quick-start"
 import type { RoleOption } from "@/atoms/quick-start-atoms"
 import { CopyableField } from "@maple/ui/components/ui/copyable-field"
@@ -42,18 +43,42 @@ interface GuidedSetupProps {
 	showCredentials?: boolean
 }
 
-/**
- * Per-org framework selection for the guided ingestion flow, defaulting from the
- * quick-start qualify answers. Shared by `GuidedSetup` and the ingestion
- * settings page (which composes the picker into its own section header).
- */
-export function useGuidedFramework() {
-	const { orgId } = useAuth()
+interface GuidedFramework {
+	readonly framework: FrameworkId
+	readonly setFramework: (framework: FrameworkId) => void
+}
+
+const useGuidedFrameworkFor = (orgId: string | null | undefined): GuidedFramework => {
 	const { selectedFramework, setSelectedFramework, qualifyAnswers } = useQuickStart(orgId)
 
 	const roleDefault = qualifyAnswers.role ? ROLE_DEFAULT_FRAMEWORK[qualifyAnswers.role] : "nodejs"
 	return { framework: selectedFramework ?? roleDefault, setFramework: setSelectedFramework }
 }
+
+function useClerkGuidedFramework(): GuidedFramework {
+	const { orgId } = useAuth()
+	return useGuidedFrameworkFor(orgId)
+}
+
+/** Self-hosted: one org, so the selection lives under the default key. */
+function useSelfHostedGuidedFramework(): GuidedFramework {
+	return useGuidedFrameworkFor(null)
+}
+
+/**
+ * Per-org framework selection for the guided ingestion flow, defaulting from the
+ * quick-start qualify answers. Shared by `GuidedSetup` and the ingestion
+ * settings page (which composes the picker into its own section header).
+ *
+ * The variant is chosen at module scope off a build-time constant, the same
+ * shape as `useOrganizationFeatureFlags`: `main.tsx` mounts `ClerkProvider` only
+ * when `isClerkAuthEnabled`, and `useAuth()` throws without one — an early
+ * return inside the hook would come after it had already run. Self-hosted
+ * `/settings` opens on the ingestion tab, so this threw before rendering it.
+ */
+export const useGuidedFramework: () => GuidedFramework = isClerkAuthEnabled
+	? useClerkGuidedFramework
+	: useSelfHostedGuidedFramework
 
 /**
  * Framework picker + Install / Instrument / Claude Code tabs. The shared body of
