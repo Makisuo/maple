@@ -117,13 +117,20 @@ const isReadOnlyPost = (path: string): boolean =>
 /**
  * Mechanical scope derivation: the resource family is the first path segment
  * after `/v2/`. GET/HEAD and explicitly registered read-only POST queries require
- * read access; mutation methods require write access. Returns null for non-/v2 paths.
+ * read access; mutation methods require write access.
+ *
+ * `routePath` must be the router's **matched route template** (`/v2/api_keys`,
+ * `/v2/api_keys/:keyId`), never the raw request URL. The router matches
+ * case-insensitively, decodes percent-escapes, collapses duplicate slashes and
+ * strips `;`-suffixes, so a raw URL that reaches an endpoint (`/V2/api_keys`,
+ * `/v2/%61pi_keys`) can miss this pattern while the handler still runs. Null
+ * means "unclassifiable" and callers must fail closed, not skip the check.
  */
-export const requiredScopeForRequest = (method: string, path: string): RequiredScope | null => {
-	const match = /^\/v2\/([a-z][a-z0-9_]*)(?:\/|$)/.exec(path)
+export const requiredScopeForRoute = (method: string, routePath: string): RequiredScope | null => {
+	const match = /^\/v2\/([a-z][a-z0-9_]*)(?:\/|$)/.exec(routePath)
 	if (match === null) return null
 	const access =
-		method === "GET" || method === "HEAD" || (method === "POST" && isReadOnlyPost(path))
+		method === "GET" || method === "HEAD" || (method === "POST" && isReadOnlyPost(routePath))
 			? "read"
 			: "write"
 	return { family: match[1]!, access }
