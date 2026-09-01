@@ -23,6 +23,7 @@
 		"./recommendations": "./src/recommendations.ts",
 		"./setup-audit": "./src/setup-audit.ts",
 		"./system-agents": "./src/system-agents.ts",
+		"./url": "./src/url.ts",
 		"./tinybird-project-sync": "./src/tinybird/project-sync.ts",
 		"./warehouse-queries": "./src/warehouse-queries.ts",
 		"./tinybird": "./src/tinybird/index.ts",

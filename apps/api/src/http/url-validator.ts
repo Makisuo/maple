@@ -1,4 +1,5 @@
-import { Effect, Schema } from "effect"
+import { Effect, Option, Result, Schema } from "effect"
+import { parseUrl, parseUrlWithBase } from "@maple/domain/url"
 
 export class UrlValidationError extends Schema.TaggedError<UrlValidationError>()(
 	"@maple/api/lib/UrlValidationError",
@@ -137,55 +138,60 @@ const isPrivateHost = (hostname: string): boolean => {
 	return false
 }
 
-export const validateExternalUrlSync = (raw: string): URL => {
+/**
+ * The validation itself, as a value.
+ *
+ * Every rejection is a `UrlValidationError`, so the whole check reads as one
+ * `Result` rather than a throwing function wrapped in an `Effect.try` that has
+ * to re-recognise its own tagged error on the way back out. `parseUrl` is what
+ * keeps the parse total: `new URL(...)` in a `try` throws a `TypeError` the type
+ * system cannot see, and the `catch` answering it cannot tell "not a URL" from
+ * any other failure in the block.
+ */
+export const validateExternalUrlResult = (raw: string): Result.Result<URL, UrlValidationError> => {
 	const trimmed = raw.trim()
 	if (trimmed.length === 0) {
-		throw new UrlValidationError({ message: "URL is required" })
+		return Result.fail(new UrlValidationError({ message: "URL is required" }))
 	}
-	let parsed: URL
-	try {
-		parsed = new URL(trimmed)
-	} catch {
-		throw new UrlValidationError({ message: `Invalid URL: ${trimmed}`, url: trimmed })
+	const decoded = parseUrl(trimmed)
+	if (Option.isNone(decoded)) {
+		return Result.fail(new UrlValidationError({ message: `Invalid URL: ${trimmed}`, url: trimmed }))
 	}
+	const parsed = decoded.value
 	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-		throw new UrlValidationError({
-			message: `URL scheme '${parsed.protocol}' is not allowed; use http or https`,
-			url: trimmed,
-		})
+		return Result.fail(
+			new UrlValidationError({
+				message: `URL scheme '${parsed.protocol}' is not allowed; use http or https`,
+				url: trimmed,
+			}),
+		)
 	}
 	if (parsed.hostname.length === 0) {
-		throw new UrlValidationError({ message: "URL must include a hostname", url: trimmed })
+		return Result.fail(
+			new UrlValidationError({ message: "URL must include a hostname", url: trimmed }),
+		)
 	}
 	// Credentials in the URL are both a way to smuggle a second host past a
 	// reader (`https://real.example.com@internal/`, where the parser's host is
 	// `internal`) and a way to have Maple replay them at the destination.
 	if (parsed.username !== "" || parsed.password !== "") {
-		throw new UrlValidationError({
-			message: "URL must not embed credentials",
-			url: trimmed,
-		})
+		return Result.fail(
+			new UrlValidationError({ message: "URL must not embed credentials", url: trimmed }),
+		)
 	}
 	if (isPrivateHost(parsed.hostname)) {
-		throw new UrlValidationError({
-			message: `URL host '${parsed.hostname}' is not allowed (loopback, private, or metadata range)`,
-			url: trimmed,
-		})
+		return Result.fail(
+			new UrlValidationError({
+				message: `URL host '${parsed.hostname}' is not allowed (loopback, private, or metadata range)`,
+				url: trimmed,
+			}),
+		)
 	}
-	return parsed
+	return Result.succeed(parsed)
 }
 
 export const validateExternalUrl = (raw: string): Effect.Effect<URL, UrlValidationError> =>
-	Effect.try({
-		try: () => validateExternalUrlSync(raw),
-		catch: (error) =>
-			error instanceof UrlValidationError
-				? error
-				: new UrlValidationError({
-						message: error instanceof Error ? error.message : "URL validation failed",
-						url: raw,
-					}),
-	})
+	Effect.fromResult(validateExternalUrlResult(raw))
 
 const MAX_REDIRECTS = 5
 
@@ -213,7 +219,9 @@ export const safeFetch = async (initialUrl: string, init: SafeFetchOptions = {})
 	let headers = init.headers
 	let previousOrigin: string | null = null
 	for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-		const validated = validateExternalUrlSync(currentUrl)
+		const checked = validateExternalUrlResult(currentUrl)
+		if (Result.isFailure(checked)) throw checked.failure
+		const validated = checked.success
 		// A cross-origin hop drops the credentials for good: restoring them on a
 		// bounce back to the original origin would make the strip trivially
 		// bypassable by redirecting away and back again.
@@ -225,7 +233,18 @@ export const safeFetch = async (initialUrl: string, init: SafeFetchOptions = {})
 		if (response.status < 300 || response.status >= 400) return response
 		const location = response.headers.get("location")
 		if (!location) return response
-		currentUrl = new URL(location, validated).toString()
+		// `Location` is whatever the far end sent. Resolving it with a bare
+		// `new URL(location, validated)` threw a raw `TypeError` out of the SSRF
+		// guard on a malformed header — the one failure here that was neither a
+		// `UrlValidationError` nor a response.
+		const next = parseUrlWithBase(location, validated)
+		if (Option.isNone(next)) {
+			throw new UrlValidationError({
+				message: `Redirect target is not a URL: ${location}`,
+				url: validated.toString(),
+			})
+		}
+		currentUrl = next.value.toString()
 	}
 	throw new UrlValidationError({
 		message: `Too many redirects (>${MAX_REDIRECTS})`,

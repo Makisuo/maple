@@ -1,12 +1,5 @@
-import { Option, Schema } from "effect"
-
-/**
- * A string to a `URL`, or `Option.none` when it is not one — the same shape and
- * the same reasoning as `parsePullRequestUrl`: the schema reports the failure as
- * a value rather than a thrown exception, and `decodeUnknownOption` keeps this
- * synchronous and total, so it stays a plain function every caller can use.
- */
-const decodeUrl = Schema.decodeUnknownOption(Schema.URLFromString)
+import { Option } from "effect"
+import { parseUrl } from "@maple/domain/url"
 
 const PUBLIC_GITHUB_WEB = "https://github.com"
 
@@ -21,7 +14,7 @@ const PUBLIC_GITHUB_WEB = "https://github.com"
  * GitHub splits the two across `api.github.com` and `github.com`.
  */
 export const githubWebBaseUrl = (apiBaseUrl: string): string => {
-	const decoded = decodeUrl(apiBaseUrl.trim())
+	const decoded = parseUrl(apiBaseUrl.trim())
 	if (Option.isNone(decoded)) return PUBLIC_GITHUB_WEB
 	const url = decoded.value
 

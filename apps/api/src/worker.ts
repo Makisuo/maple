@@ -2,6 +2,7 @@
 import type { MessageBatch, ScheduledController } from "@cloudflare/workers-types"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
+import { urlPathname } from "@maple/domain/url"
 import { MCP_ANTICIPATED_ERROR_IDENTIFIERS } from "./mcp/expected-failures"
 import {
 	layerFromEnvRecord,
@@ -231,22 +232,12 @@ const runInternalRpc = async (
 	throw new Error("RPC method failed with an unexpected cause")
 }
 
-const isMcpPost = (request: Request): boolean => {
-	if (request.method !== "POST") return false
-	try {
-		return new URL(request.url).pathname === "/mcp"
-	} catch {
-		return false
-	}
-}
+const isMcpPost = (request: Request): boolean =>
+	request.method === "POST" && urlPathname(request.url) === "/mcp"
 
 const isV2Request = (request: Request): boolean => {
-	try {
-		const pathname = new URL(request.url).pathname
-		return pathname === "/v2" || pathname.startsWith("/v2/")
-	} catch {
-		return false
-	}
+	const pathname = urlPathname(request.url)
+	return pathname === "/v2" || pathname.startsWith("/v2/")
 }
 
 /**
@@ -255,14 +246,8 @@ const isV2Request = (request: Request): boolean => {
  * bootstrap-safe also lets a cold isolate report health when an unrelated
  * application binding is unavailable.
  */
-const isHealthRequest = (request: Request): boolean => {
-	if (request.method !== "GET") return false
-	try {
-		return new URL(request.url).pathname === "/health"
-	} catch {
-		return false
-	}
-}
+const isHealthRequest = (request: Request): boolean =>
+	request.method === "GET" && urlPathname(request.url) === "/health"
 
 const healthResponse = (): Response =>
 	new Response("OK", {

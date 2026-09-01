@@ -18,6 +18,7 @@ import {
 	VcsWebhookSignatureError,
 } from "@maple/domain/http"
 import { Clock, Context, Effect, Layer, Match, Option, Redacted, Schema } from "effect"
+import { parseUrlWithBase } from "@maple/domain/url"
 import { Env } from "@/platform/Env"
 import type { VcsProviderClient, VcsWebhookRequest } from "@/services/integrations/vcs/VcsProviderClient"
 import { QUEUE_MESSAGE_LIMIT_BYTES } from "@/services/integrations/vcs/VcsSyncQueue"
@@ -206,11 +207,10 @@ const finiteOrNull = (value: number) => (Number.isFinite(value) ? value : null)
 // dashboard renders with an initials fallback.
 const githubAvatarUrl = (htmlUrl: string, login: string | null): string | null => {
 	if (!login) return null
-	try {
-		return new URL(`/${encodeURIComponent(login)}.png?size=64`, htmlUrl).href
-	} catch {
-		return null
-	}
+	return Option.match(parseUrlWithBase(`/${encodeURIComponent(login)}.png?size=64`, htmlUrl), {
+		onNone: () => null,
+		onSome: (url) => url.href,
+	})
 }
 
 const installationReason = (action: string): VcsInstallationSyncReason | null => {
