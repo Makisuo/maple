@@ -208,14 +208,16 @@ export const fromCloudflareSocket = (cfSocket: cf.Socket): Socket.Socket => {
 		latch.whenOpen(
 			Effect.suspend(() => {
 				if (Socket.isCloseEvent(chunk)) {
-					return Deferred.fail(currentFiberSet!.deferred, closeError(chunk.code, chunk.reason))
+					// `latch.whenOpen` only admits a write while a run is in flight, and
+					// a run is exactly what sets `currentFiberSet`.
+					const fiberSet = currentFiberSet
+					if (fiberSet === undefined) return Effect.void
+					return Deferred.fail(fiberSet.deferred, closeError(chunk.code, chunk.reason))
 				}
-				if (!writerRef) {
-					writerRef = cfSocket.writable.getWriter()
-				}
+				const writer = (writerRef ??= cfSocket.writable.getWriter())
 				const data = typeof chunk === "string" ? encoder.encode(chunk) : chunk
 				return Effect.tryPromise({
-					try: () => writerRef!.write(data),
+					try: () => writer.write(data),
 					catch: (cause) =>
 						new Socket.SocketError({
 							reason: new Socket.SocketWriteError({ cause }),

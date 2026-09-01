@@ -409,7 +409,7 @@ export function collectPipeCatalog(): ReadonlyArray<CatalogEntry> {
 	const entries: Array<CatalogEntry> = []
 
 	for (const fixture of pipeFixtures) {
-		const variants = fixture.allCapabilities ? capabilityVariants : [capabilityVariants[0]!]
+		const variants = fixture.allCapabilities ? capabilityVariants : capabilityVariants.slice(0, 1)
 		for (const variant of variants) {
 			const params = {
 				org_id: ORG_ID,
@@ -930,7 +930,7 @@ export function collectQuerySpecCatalog(): ReadonlyArray<CatalogEntry> {
 	const tenant: QueryTenant = { orgId: OrgId.make(ORG_ID) }
 
 	for (const fixture of querySpecFixtures) {
-		const variants = fixture.allCapabilities ? capabilityVariants : [capabilityVariants[0]!]
+		const variants = fixture.allCapabilities ? capabilityVariants : capabilityVariants.slice(0, 1)
 		for (const variant of variants) {
 			const { warehouse, captured } = makeCapturingWarehouse(variant.capabilities)
 			const execute = makeQueryEngineExecute(warehouse)

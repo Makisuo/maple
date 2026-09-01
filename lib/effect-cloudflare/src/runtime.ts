@@ -1,5 +1,5 @@
-import type { Context, Effect } from "effect"
-import { Cause, ConfigProvider, Exit, Layer, ManagedRuntime } from "effect"
+import type { Context } from "effect"
+import { Cause, ConfigProvider, Effect, Exit, Layer, ManagedRuntime, Result } from "effect"
 
 /**
  * Minimal shape of CF `ExecutionContext.waitUntil`. Accept any structurally
@@ -49,10 +49,13 @@ export const buildRequestRuntime = <R>(
 	})
 	const flush = async () => {
 		await drainScheduler()
-		try {
-			await runtime.dispose()
-		} catch (err) {
-			console.error("[effect-cloudflare] runtime flush failed:", err)
+		// `flush` runs inside `ctx.waitUntil`, where a rejection surfaces as a
+		// Worker error caused purely by teardown.
+		const disposed = await Effect.runPromise(
+			Effect.result(Effect.tryPromise({ try: () => runtime.dispose(), catch: (cause) => cause })),
+		)
+		if (Result.isFailure(disposed)) {
+			console.error("[effect-cloudflare] runtime flush failed:", disposed.failure)
 		}
 	}
 	return { services, flush }
@@ -80,12 +83,12 @@ export const withRequestRuntime = <R, Env extends Record<string, unknown>, Ctx e
 		const response = handler(request, resolvedServices, env, ctx)
 		ctx.waitUntil(
 			(async () => {
-				try {
-					await response
-				} catch {
-					// Swallow handler errors — the handler's own error path is
-					// responsible for surfacing them.
-				}
+				// Wait for the response without adopting its rejection — the
+				// handler's own error path is responsible for surfacing that; here
+				// it only marks the point where the scope may close.
+				await Effect.runPromise(
+					Effect.ignore(Effect.tryPromise({ try: () => response, catch: (cause) => cause })),
+				)
 				await flush()
 			})(),
 		)

@@ -127,13 +127,13 @@ const isReadOnlyPost = (path: string): boolean =>
  * means "unclassifiable" and callers must fail closed, not skip the check.
  */
 export const requiredScopeForRoute = (method: string, routePath: string): RequiredScope | null => {
-	const match = /^\/v2\/([a-z][a-z0-9_]*)(?:\/|$)/.exec(routePath)
-	if (match === null) return null
+	const [, family] = /^\/v2\/([a-z][a-z0-9_]*)(?:\/|$)/.exec(routePath) ?? []
+	if (family === undefined) return null
 	const access =
 		method === "GET" || method === "HEAD" || (method === "POST" && isReadOnlyPost(routePath))
 			? "read"
 			: "write"
-	return { family: match[1]!, access }
+	return { family, access }
 }
 
 /**

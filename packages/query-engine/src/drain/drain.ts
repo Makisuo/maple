@@ -2,6 +2,19 @@ import { LogCluster } from "./log-cluster"
 import { LruCache } from "./lru-cache"
 import { Node } from "./node"
 
+/**
+ * The child node at `key`, created when absent. Replaces the `has`-then-`get!`
+ * pair the prefix-tree walk repeated nine times: the two calls could not tell
+ * the type system they were about the same key.
+ */
+const childAt = (node: Node, key: string): Node => {
+	const existing = node.keyToChildNode.get(key)
+	if (existing !== undefined) return existing
+	const created = new Node()
+	node.keyToChildNode.set(key, created)
+	return created
+}
+
 export class Drain {
 	logClusterDepth: number
 	private maxNodeDepth: number
@@ -13,8 +26,12 @@ export class Drain {
 	paramStr: string
 	parametrizeNumericTokens: boolean
 
-	private unlimitedStore: Map<number, LogCluster> | null
-	private limitedStore: LruCache<LogCluster> | null
+	/**
+	 * One store, not a nullable pair. `maxClusters` picks an LRU with eviction or
+	 * an unbounded Map at construction and never changes it, so a union field
+	 * says that where two mutually-exclusive nullable fields only implied it.
+	 */
+	private store: Map<number, LogCluster> | LruCache<LogCluster>
 	clustersCounter: number
 
 	constructor(
@@ -41,50 +58,43 @@ export class Drain {
 		this.parametrizeNumericTokens = parametrizeNumericTokens
 		this.clustersCounter = 0
 
-		if (maxClusters !== null) {
-			this.unlimitedStore = null
-			this.limitedStore = new LruCache<LogCluster>(maxClusters)
-		} else {
-			this.unlimitedStore = new Map<number, LogCluster>()
-			this.limitedStore = null
-		}
+		this.store =
+			maxClusters !== null ? new LruCache<LogCluster>(maxClusters) : new Map<number, LogCluster>()
 	}
 
 	get clusterCount(): number {
-		if (this.unlimitedStore) return this.unlimitedStore.size
-		return this.limitedStore!.size
+		return this.store.size
+	}
+
+	/** Every live cluster, in whatever order the store holds them. */
+	clusters(): LogCluster[] {
+		return this.store instanceof LruCache ? this.store.values() : [...this.store.values()]
 	}
 
 	getTotalClusterSize(): number {
 		let total = 0
-		if (this.unlimitedStore) {
-			for (const c of this.unlimitedStore.values()) total += c.size
-		} else {
-			for (const c of this.limitedStore!.values()) total += c.size
-		}
+		for (const cluster of this.clusters()) total += cluster.size
 		return total
 	}
 
+	/** Read without updating recency — only the LRU distinguishes the two. */
 	private clusterPeek(id: number): LogCluster | undefined {
-		if (this.unlimitedStore) return this.unlimitedStore.get(id)
-		return this.limitedStore!.peek(id)
+		return this.store instanceof LruCache ? this.store.peek(id) : this.store.get(id)
 	}
 
 	private clusterGet(id: number): LogCluster | undefined {
-		if (this.unlimitedStore) return this.unlimitedStore.get(id)
-		return this.limitedStore!.get(id)
+		return this.store.get(id)
 	}
 
 	private clusterContains(id: number): boolean {
-		if (this.unlimitedStore) return this.unlimitedStore.has(id)
-		return this.limitedStore!.has(id)
+		return this.store.has(id)
 	}
 
 	private clusterInsert(id: number, cluster: LogCluster): void {
-		if (this.unlimitedStore) {
-			this.unlimitedStore.set(id, cluster)
+		if (this.store instanceof LruCache) {
+			this.store.put(id, cluster)
 		} else {
-			this.limitedStore!.put(id, cluster)
+			this.store.set(id, cluster)
 		}
 	}
 
@@ -204,11 +214,7 @@ export class Drain {
 		const tokenCount = templateTokens.length
 		const tokenCountStr = String(tokenCount)
 
-		if (!this.rootNode.keyToChildNode.has(tokenCountStr)) {
-			this.rootNode.keyToChildNode.set(tokenCountStr, new Node())
-		}
-
-		let curNode = this.rootNode.keyToChildNode.get(tokenCountStr)!
+		let curNode = childAt(this.rootNode, tokenCountStr)
 
 		if (tokenCount === 0) {
 			curNode.clusterIds = [clusterId]
@@ -224,32 +230,21 @@ export class Drain {
 				break
 			}
 
-			if (!curNode.keyToChildNode.has(token)) {
-				if (this.parametrizeNumericTokens && Drain.hasNumbers(token)) {
-					if (!curNode.keyToChildNode.has(this.paramStr)) {
-						curNode.keyToChildNode.set(this.paramStr, new Node())
-					}
-					curNode = curNode.keyToChildNode.get(this.paramStr)!
-				} else if (curNode.keyToChildNode.has(this.paramStr)) {
-					if (curNode.keyToChildNode.size < this.maxChildren) {
-						curNode.keyToChildNode.set(token, new Node())
-						curNode = curNode.keyToChildNode.get(token)!
-					} else {
-						curNode = curNode.keyToChildNode.get(this.paramStr)!
-					}
-				} else {
-					if (curNode.keyToChildNode.size + 1 < this.maxChildren) {
-						curNode.keyToChildNode.set(token, new Node())
-						curNode = curNode.keyToChildNode.get(token)!
-					} else if (curNode.keyToChildNode.size + 1 === this.maxChildren) {
-						curNode.keyToChildNode.set(this.paramStr, new Node())
-						curNode = curNode.keyToChildNode.get(this.paramStr)!
-					} else {
-						curNode = curNode.keyToChildNode.get(this.paramStr)!
-					}
-				}
+			if (curNode.keyToChildNode.has(token)) {
+				curNode = childAt(curNode, token)
+			} else if (this.parametrizeNumericTokens && Drain.hasNumbers(token)) {
+				curNode = childAt(curNode, this.paramStr)
+			} else if (curNode.keyToChildNode.has(this.paramStr)) {
+				curNode =
+					curNode.keyToChildNode.size < this.maxChildren
+						? childAt(curNode, token)
+						: childAt(curNode, this.paramStr)
+			} else if (curNode.keyToChildNode.size + 1 < this.maxChildren) {
+				curNode = childAt(curNode, token)
 			} else {
-				curNode = curNode.keyToChildNode.get(token)!
+				// At the cap: the wildcard child is created here and absorbs every
+				// token that would have pushed the fan-out past `maxChildren`.
+				curNode = childAt(curNode, this.paramStr)
 			}
 			currentDepth++
 		}
@@ -258,8 +253,12 @@ export class Drain {
 	addLogMessage(content: string): [LogCluster, string] {
 		const contentTokens = this.getContentAsTokens(content)
 		const matchClusterId = this.treeSearch(contentTokens, this.simTh, false)
+		// `fastMatch` only returns ids whose cluster it just read, so an id that no
+		// longer resolves means the store was evicted from under a synchronous
+		// call. Both cases are "no cluster to grow" — start a new one.
+		const existingCluster = matchClusterId === null ? undefined : this.clusterPeek(matchClusterId)
 
-		if (matchClusterId === null) {
+		if (existingCluster === undefined) {
 			this.clustersCounter++
 			const clusterId = this.clustersCounter
 			const cluster = new LogCluster(contentTokens, clusterId)
@@ -268,7 +267,6 @@ export class Drain {
 			return [cluster, "cluster_created"]
 		}
 
-		const existingCluster = this.clusterPeek(matchClusterId)!
 		const newTemplateTokens = this.createTemplate(contentTokens, existingCluster.logTemplateTokens)
 
 		const updateType =
@@ -281,7 +279,7 @@ export class Drain {
 		existingCluster.size += 1
 
 		// Touch to update LRU ordering
-		this.clusterGet(matchClusterId)
+		this.clusterGet(existingCluster.clusterId)
 
 		return [existingCluster, updateType]
 	}

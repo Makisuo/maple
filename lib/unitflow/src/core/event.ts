@@ -8,6 +8,7 @@ import { type Pipeable, pipeArguments } from "effect/Pipeable"
 import * as PubSub from "effect/PubSub"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
+import { UnitflowMisuseError } from "./defects.js"
 import {
 	completeCounted,
 	isExpectedTermination,
@@ -137,11 +138,25 @@ export const pubsub = Effect.fnUntraced(function* <A>(
 	event: Source<A> | Sink<A>,
 ): Generator<Effect.Effect<unknown, never, Registry>, PubSub.PubSub<A>, never> {
 	if (isCombined(event)) {
-		return yield* Effect.die(new Error("Unitflow combined events are merged and have no backing pubsub."))
+		// The shape is fixed when the model is declared, so a program that asks this
+		// once asks it every time — a misuse to fix, not a failure to handle.
+		// oxlint-disable-next-line maple/no-effect-die
+		return yield* Effect.die(
+			new UnitflowMisuseError({
+				id: event.id,
+				message: "Unitflow combined events are merged and have no backing pubsub.",
+			}),
+		)
 	}
 	if (isSetter(event)) {
+		// The shape is fixed when the model is declared, so a program that asks this
+		// once asks it every time — a misuse to fix, not a failure to handle.
+		// oxlint-disable-next-line maple/no-effect-die
 		return yield* Effect.die(
-			new Error("Unitflow setter events are backed by their store and have no pubsub."),
+			new UnitflowMisuseError({
+				id: event.id,
+				message: "Unitflow setter events are backed by their store and have no pubsub.",
+			}),
 		)
 	}
 	const registry = yield* Registry

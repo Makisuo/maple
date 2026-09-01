@@ -14,7 +14,7 @@
  * *model* stream, while this is a *session* stream that also carries user turns, approval gates and
  * turn lifecycle. `apps/api/src/chat/events.ts` is the only place the two are mapped.
  */
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 import { ActorId, AuthMode, OrgId, RoleName, UserId } from "./primitives"
 
 // Session addressing
@@ -337,13 +337,10 @@ export const decodeChatEventOrThrow = Schema.decodeUnknownSync(Schema.fromJsonSt
  * unrecognised frame instead means adding a new `ChatEvent` member degrades old clients rather than
  * bricking them.
  */
-export const decodeChatEvent = (frame: string): ChatEvent | undefined => {
-	try {
-		return decodeChatEventOrThrow(frame)
-	} catch {
-		return undefined
-	}
-}
+const decodeChatEventOption = Schema.decodeUnknownOption(Schema.fromJsonString(ChatEvent))
+
+export const decodeChatEvent = (frame: string): ChatEvent | undefined =>
+	Option.getOrUndefined(decodeChatEventOption(frame))
 
 /**
  * Durable-storage codec for the event log.

@@ -16,7 +16,7 @@ import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { buildAttrFilterCondition } from "../../traces-shared"
 import type { AttributeIndexMode, LogBodySearchMode } from "../../capabilities"
 import { edgeCondition, interiorConditions } from "./rollup-splice"
-import { inclusionCondition, inclusionValues } from "./query-helpers"
+import { inclusionCondition, inclusionValues, soleValue } from "./query-helpers"
 
 // Shared options
 
@@ -126,9 +126,8 @@ function environmentCondition(
 ): CH.Condition | undefined {
 	if (!opts.environments?.length) return undefined
 	const envAttr = deploymentEnvExpr($.ResourceAttributes)
-	if (opts.matchModes?.deploymentEnv === "contains" && opts.environments.length === 1) {
-		return CH.positionCaseInsensitive(envAttr, CH.lit(opts.environments[0]!)).gt(0)
-	}
+	const needle = opts.matchModes?.deploymentEnv === "contains" ? soleValue(opts.environments) : undefined
+	if (needle !== undefined) return CH.positionCaseInsensitive(envAttr, CH.lit(needle)).gt(0)
 	return CH.inList(envAttr, opts.environments)
 }
 
@@ -138,9 +137,8 @@ function namespaceCondition(
 ): CH.Condition | undefined {
 	if (!opts.namespaces?.length) return undefined
 	const nsAttr = $.ResourceAttributes.get("service.namespace")
-	if (opts.matchModes?.serviceNamespace === "contains" && opts.namespaces.length === 1) {
-		return CH.positionCaseInsensitive(nsAttr, CH.lit(opts.namespaces[0]!)).gt(0)
-	}
+	const needle = opts.matchModes?.serviceNamespace === "contains" ? soleValue(opts.namespaces) : undefined
+	if (needle !== undefined) return CH.positionCaseInsensitive(nsAttr, CH.lit(needle)).gt(0)
 	return CH.inList(nsAttr, opts.namespaces)
 }
 
@@ -391,9 +389,8 @@ function buildLogsGroupNameExpr(
 	if (groupByService) parts.push(CH.toString_($.ServiceName))
 	if (groupBySeverity) parts.push(CH.toString_($.SeverityText))
 
-	if (parts.length === 1) {
-		return CH.coalesce(CH.nullIf(parts[0]!, ""), CH.lit("all"))
-	}
+	const onlyPart = soleValue(parts)
+	if (onlyPart !== undefined) return CH.coalesce(CH.nullIf(onlyPart, ""), CH.lit("all"))
 
 	// Multi-part: filter empty strings before joining with separator
 	const filtered = CH.arrayFilter("x -> x != ''", CH.arrayOf(...parts))

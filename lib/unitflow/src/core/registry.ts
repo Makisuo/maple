@@ -12,6 +12,7 @@ import * as RcMap from "effect/RcMap"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type * as SubscriptionRef from "effect/SubscriptionRef"
+import { UnitflowMisuseError } from "./defects.js"
 
 /**
  * A model instance's identity in the registry: the model's id plus its key,
@@ -247,8 +248,16 @@ export class Registry extends Context.Service<Registry, RegistryService>()("@uni
 				lookup: (key: InstanceKey) =>
 					Effect.suspend(() => {
 						const construct = constructors.get(key.model)
+						// Constructors register at layer build, so a missing one is a model
+						// that was never wired up rather than a lookup that could retry.
 						return construct === undefined
-							? Effect.die(new Error(`Unitflow has no constructor for model "${key.model}".`))
+							? // oxlint-disable-next-line maple/no-effect-die
+								Effect.die(
+									new UnitflowMisuseError({
+										id: key.model,
+										message: `Unitflow has no constructor for model "${key.model}".`,
+									}),
+								)
 							: construct(key)
 					}),
 				idleTimeToLive: (key) => lifetimes.get(key.model) ?? defaultIdleTimeToLive,

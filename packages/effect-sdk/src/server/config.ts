@@ -1,5 +1,7 @@
 import { Config, Effect, Option } from "effect"
 
+import { trySyncOrUndefined } from "../shared/try-sync.js"
+
 /**
  * Resolve the ingest endpoint.
  *
@@ -106,14 +108,9 @@ export const parseOtelResourceAttributes = (input: string): Record<string, strin
 		const key = pair.slice(0, eq).trim()
 		if (!key) continue
 		const raw = pair.slice(eq + 1).trim()
-		let value = raw
-		try {
-			value = decodeURIComponent(raw)
-		} catch {
-			// Spec allows URL-encoded values but doesn't require them; fall back to
-			// the raw string when decoding fails (e.g. literal `%` in the value).
-		}
-		result[key] = value
+		// The spec allows URL-encoded values but doesn't require them, so a literal
+		// `%` in the value is a decode failure and the raw string is the answer.
+		result[key] = trySyncOrUndefined(() => decodeURIComponent(raw)) ?? raw
 	}
 	return result
 }

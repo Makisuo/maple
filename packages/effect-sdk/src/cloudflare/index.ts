@@ -33,6 +33,7 @@ import { Layer } from "effect"
 import {
 	buildResolved,
 	fetchTransport,
+	guardFlush,
 	makeSerializedFlush,
 	type Resolved,
 	runFlush,
@@ -163,8 +164,8 @@ export const make = (config: Config = {}): Telemetry => {
 
 	// Never rejects: this runs inside `ctx.waitUntil`, where a rejection would
 	// surface as an unhandled Worker error caused purely by telemetry.
-	const flush = makeSerializedFlush(async (env: Record<string, unknown>): Promise<void> => {
-		try {
+	const flush = makeSerializedFlush(
+		guardFlush("[MapleCloudflareSDK]", async (env: Record<string, unknown>): Promise<void> => {
 			// Effect defers work onto the scheduler's next macrotask
 			// (`scheduleTask(task, 0)`) — including `HttpMiddleware.tracer`'s
 			// `span.end` and `withSpan` finalizers — while the drain below is
@@ -192,10 +193,8 @@ export const make = (config: Config = {}): Telemetry => {
 				logPrefix: "[MapleCloudflareSDK]",
 				onNoOp: noOpNotice,
 			})
-		} catch (err) {
-			console.error("[MapleCloudflareSDK] flush failed:", err)
-		}
-	})
+		}),
+	)
 
 	return { layer, flush }
 }

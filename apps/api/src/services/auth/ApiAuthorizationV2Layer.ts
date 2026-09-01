@@ -145,6 +145,11 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 						const { route } = yield* HttpRouter.RouteContext
 						const required = requiredScopeForRoute(request.method, route.path)
 						if (required === null) {
+							// Fail closed. Every scope-protected v2 route matches the family
+							// pattern, so reaching here means a route was registered outside the
+							// shape the scope check understands, and answering the request would
+							// mean skipping the check entirely.
+							// oxlint-disable-next-line maple/no-effect-die
 							return yield* Effect.die(
 								new V2UnclassifiableRoute({
 									message: "Cannot derive a scope family for a scope-protected v2 route.",

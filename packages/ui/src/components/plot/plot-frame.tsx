@@ -1,4 +1,7 @@
 /// <reference types="vite/client" />
+import { Option } from "effect"
+
+import { trySync } from "../../lib/try-sync"
 import { CanvasChart, Chart as SvgChart } from "@tanstack/charts/react/tooltip"
 import type { ChartTooltipBodyRenderContext } from "@tanstack/charts/react/tooltip"
 import type {
@@ -471,11 +474,11 @@ function supportsCanvas2d(): boolean {
 		// server output anyway.
 		return false
 	}
-	try {
-		canvasSupport = document.createElement("canvas").getContext("2d") != null
-	} catch {
-		canvasSupport = false
-	}
+	// A hardened browser throws from `getContext` rather than returning null.
+	canvasSupport = Option.getOrElse(
+		trySync(() => document.createElement("canvas").getContext("2d") != null),
+		() => false,
+	)
 	return canvasSupport
 }
 
