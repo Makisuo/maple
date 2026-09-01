@@ -13,6 +13,7 @@
 		"dev": "turbo dev",
 		"prepare": "effect-tsgo unpatch --no-typescript --oxlint && effect-tsgo patch --no-typescript --oxlint",
 		"dev:essentials": "turbo dev --filter=@maple/api --filter=@maple/alerting --filter=@maple/ingest --filter=@maple/web --filter=@maple/scraper --filter=@maple/electric-sync",
+		"dev:workers": "bun run ./scripts/dev-workers.ts",
 		"docker:build": "COMPOSE_PARALLEL_LIMIT=1 docker compose build",
 		"docker:up": "COMPOSE_PARALLEL_LIMIT=1 docker compose up --build",
 		"db:up": "docker compose up -d postgres electric",

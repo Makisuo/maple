@@ -29,6 +29,7 @@ Sign in at `https://web.localhost` with the Clerk test account `david+clerk_test
 
 ```bash
 bun dev                        # all apps via turbo → https://[<worktree>.]<app>.localhost
+bun run dev:workers            # api + alerting + electric-sync under ONE `alchemy dev`
 bun --filter=@maple/web dev:app # single app, raw port, no portless proxy
 bun run test                   # Vitest via turbo (NOT `bun test` — that's Bun's own runner)
 bun typecheck
