@@ -81,6 +81,12 @@ interface SessionWaterfallProps {
 	onToggleTurn: (turnId: string) => void
 	/** The one span open in the popover (`?span=`). */
 	selectedSpanId: string | undefined
+	/** A span sent here from another view's inspection panel: its row is scrolled
+	 *  to and marked, with no panel over it. */
+	revealedSpanId: string | undefined
+	/** A turn sent here from the Overview's session shape: its header row is
+	 *  scrolled to and marked, and the spans under it read as its content. */
+	revealedTurnId: string | undefined
 	/** Raised with a span id to open it, `undefined` to close. */
 	onSelectSpan: (spanId: string | undefined) => void
 	/** The popover's tab, shared with the other views. */
@@ -99,6 +105,8 @@ export function SessionWaterfall({
 	collapsedTurns,
 	onToggleTurn,
 	selectedSpanId,
+	revealedSpanId,
+	revealedTurnId,
 	onSelectSpan,
 	spanTab,
 	onSpanTabChange,
@@ -159,22 +167,79 @@ export function SessionWaterfall({
 		},
 	})
 
-	// A pasted `?span=` link lands on the exact span it names: the cursor starts
-	// there and the row is scrolled into view, so the row is waiting underneath
-	// when the reader closes the overlay. Once, on mount — after that the URL
-	// follows the reader rather than leading them.
+	// A pasted `?span=` link — or a span sent across from another view — lands on
+	// the exact row it names: the cursor starts there and the row is scrolled to
+	// the middle of the viewport, clear of both edges, so it reads with the rows
+	// around it rather than hard against the ruler or the fold. Once, on mount —
+	// after that the URL follows the reader rather than leading them.
+	//
+	// It aims twice. The first aim is the virtualizer's, and it is made against a
+	// number — this list's offset inside the page scroller — measured while the
+	// page was still settling into the view switch that brought the reader here.
+	// The second is the row's own: a frame later the row exists in the DOM, and
+	// an element can be asked where it is without anything having to have been
+	// measured correctly first.
+	const landingSpanId = revealedSpanId ?? selectedSpanId
 	const didInitialScroll = useRef(false)
+	// The correcting frame is held here and cancelled only on unmount: the effect
+	// below re-runs on every render (`getScrollElement` is a fresh closure each
+	// time), and a cleanup that cancelled per run would cancel the correction
+	// before the frame it is waiting for ever arrived.
+	const correctionFrame = useRef<number>(undefined)
+	useEffect(
+		() => () => {
+			if (correctionFrame.current !== undefined) cancelAnimationFrame(correctionFrame.current)
+		},
+		[],
+	)
 	useEffect(() => {
-		if (didInitialScroll.current || selectedSpanId === undefined) return
+		if (didInitialScroll.current) return
 		// Not before the scroller exists: the list element attaches in a layout
 		// effect, so on the render that mounts this view there is nothing to
 		// scroll and the link would silently land at the top.
 		if (getScrollElement() === null) return
+		// A revealed turn wins over a revealed span: it is the later of the two
+		// gestures, and its header is what the reader was sent to see.
+		if (revealedTurnId !== undefined) {
+			const turnIndex = rows.findIndex((row) => row.kind === "turn" && row.turn.id === revealedTurnId)
+			if (turnIndex === -1) return
+			didInitialScroll.current = true
+			virtualizer.scrollToIndex(turnIndex, { align: "center" })
+			correctionFrame.current = requestAnimationFrame(() => {
+				const header = [...document.querySelectorAll("[data-turn-row]")].find(
+					(candidate) => candidate.getAttribute("data-turn-row") === revealedTurnId,
+				)
+				header?.scrollIntoView({ block: "center" })
+			})
+			return
+		}
+		if (landingSpanId === undefined) return
+		// Nor before the row is in the list: a span the filter is hiding, or one
+		// inside a collapsed turn, has nowhere to land yet — leaving the landing
+		// unspent means it still happens if the reader clears the filter.
+		const index = spanRowIndexById.get(landingSpanId)
+		if (index === undefined) return
 		didInitialScroll.current = true
-		setFocusedId(selectedSpanId)
-		const index = spanRowIndexById.get(selectedSpanId)
-		if (index !== undefined) virtualizer.scrollToIndex(index, { align: "center" })
-	}, [selectedSpanId, spanRowIndexById, setFocusedId, virtualizer, getScrollElement])
+		setFocusedId(landingSpanId)
+		virtualizer.scrollToIndex(index, { align: "center" })
+		correctionFrame.current = requestAnimationFrame(() => {
+			// Read off the drawn rows rather than through a selector: a span id is
+			// warehouse data, not something to interpolate into one.
+			const row = [...document.querySelectorAll("[data-span-row]")].find(
+				(candidate) => candidate.getAttribute("data-span-row") === landingSpanId,
+			)
+			row?.scrollIntoView({ block: "center" })
+		})
+	}, [
+		landingSpanId,
+		revealedTurnId,
+		rows,
+		spanRowIndexById,
+		setFocusedId,
+		virtualizer,
+		getScrollElement,
+	])
+
 
 	return (
 		<div className="@container flex grow flex-col">
@@ -249,6 +314,7 @@ export function SessionWaterfall({
 											turns={turns}
 											axis={axis}
 											collapsed={collapsedTurns.has(row.turn.id)}
+											revealed={revealedTurnId === row.turn.id}
 											onToggle={() => onToggleTurn(row.turn.id)}
 										/>
 									)}
@@ -258,6 +324,7 @@ export function SessionWaterfall({
 											axis={axis}
 											spansById={spansById}
 											selected={selected}
+											revealed={revealedSpanId === row.span.spanId}
 											focused={focusedId === row.span.spanId}
 											onClick={() => {
 												setFocusedId(row.span.spanId)
@@ -393,6 +460,7 @@ function TurnHeader({
 	turns,
 	axis,
 	collapsed,
+	revealed,
 	onToggle,
 }: {
 	row: Extract<WaterfallRow, { kind: "turn" }>
@@ -400,6 +468,8 @@ function TurnHeader({
 	turns: readonly SessionTurn[]
 	axis: SessionAxis
 	collapsed: boolean
+	/** The turn the reader was sent here to see: marked until they move on. */
+	revealed: boolean
 	onToggle: () => void
 }) {
 	const { turn } = row
@@ -416,7 +486,18 @@ function TurnHeader({
 	const traceId = turn.traceIds[0]
 
 	return (
-		<div className="flex h-full w-full items-center rounded-md bg-card px-2.5 text-left text-xs hover:bg-accent/40">
+		<div
+			// The row the landing correction below scrolls to, a frame after the
+			// virtualizer drew it.
+			data-turn-row={turn.id}
+			// The mark is a background colour; this is how the page's tests — and
+			// anything else looking for it — find the turn wearing it.
+			data-revealed={revealed || undefined}
+			className={cn(
+				"flex h-full w-full items-center rounded-md bg-card px-2.5 text-left text-xs hover:bg-accent/40",
+				revealed && "border-l-2 border-l-primary bg-primary/12",
+			)}
+		>
 			<span className={COL_SPAN}>
 				<button
 					type="button"
@@ -497,6 +578,7 @@ function SpanRow({
 	axis,
 	spansById,
 	selected,
+	revealed,
 	focused,
 	onClick,
 }: {
@@ -504,6 +586,8 @@ function SpanRow({
 	axis: SessionAxis
 	spansById: ReadonlyMap<string, AiSessionSpan>
 	selected: boolean
+	/** The row the reader was sent here to see: marked until they move on. */
+	revealed: boolean
 	/** Under the keyboard's span cursor — distinct from `selected`, which means open. */
 	focused: boolean
 	onClick: () => void
@@ -524,6 +608,12 @@ function SpanRow({
 			type="button"
 			onClick={onClick}
 			aria-current={selected || undefined}
+			// How the landing above finds this row once it has been drawn, to
+			// correct its own aim against where the row actually is.
+			data-span-row={span.spanId}
+			// The mark is a background colour; this is how the page's tests — and
+			// anything else looking for it — find the row wearing it.
+			data-revealed={revealed || undefined}
 			aria-haspopup="dialog"
 			aria-expanded={selected}
 			className={cn(
@@ -531,6 +621,9 @@ function SpanRow({
 				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
 				errored && "bg-destructive/6",
 				focused && "bg-accent/60",
+				// Louder than the open row's mark on purpose: nothing is on screen
+				// saying which span the reader crossed views for except this row.
+				revealed && "border-l-2 border-l-primary bg-primary/12",
 				selected && "border-l-2 border-l-primary bg-primary/5",
 			)}
 		>

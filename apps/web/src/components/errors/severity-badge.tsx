@@ -72,13 +72,16 @@ export function SeverityBadge({
 	severity: IssueSeverity | null
 	className?: string
 }) {
+	// Blank, deliberately. This started as an em dash and then as the hollow ring
+	// the filter menu uses, and both were worse the more of them there were: a
+	// queue where half the fingerprints are unrated turned into a column of marks
+	// standing for the absence of information. An empty slot says the same thing
+	// and stops competing with the chips that do carry a rating. The width is
+	// kept so the lane still lines up.
 	if (severity === null) {
-		return (
-			<span className={cn("text-xs text-muted-foreground/60", className)} title="Severity not set">
-				—
-			</span>
-		)
+		return <span className={cn("inline-flex h-5", className)} title="Severity not set" />
 	}
+
 	return (
 		<Badge variant="outline" className={cn(SEVERITY_TONE[severity], className)}>
 			{SEVERITY_LABEL[severity]}

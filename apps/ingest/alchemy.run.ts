@@ -435,7 +435,10 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 		// Scoped to the one prefix the gateway uses. ListBucket is on the bucket
 		// itself (the others are on objects), which is why it is a separate
 		// statement — orphan claiming lists owners and segments.
-		const walSegmentsPolicy = yield* AWS.IAM.Policy("ingest-wal-segments", {
+		// Its own logical id: alchemy keys resources by id and silently hands back
+		// the FIRST registration for a repeat, so sharing the bucket's id returned
+		// the Bucket here and `policyArn` resolved to undefined at AttachRolePolicy.
+		const walSegmentsPolicy = yield* AWS.IAM.Policy("ingest-wal-segments-access", {
 			policyName: name("ingest-wal-segments"),
 			policyDocument: {
 				Version: "2012-10-17",
@@ -672,6 +675,14 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 
 		return {
 			serviceUrl: service.url,
+			// Shared with `apps/electric`, which runs in THIS VPC rather than one of
+			// its own. Two `AWS.EC2.Network`s in one stack fight over the internet
+			// gateway: under `--adopt` the second one's IGW resolves to this one's
+			// and tries to detach it, which AWS refuses because these tasks hold
+			// public IPs ("DependencyViolation: … has some mapped public
+			// address(es)"). The two want the same network anyway — public subnets,
+			// public IPs, no NAT.
+			network,
 			// `http://otel-collector.<namespace>:4318` — resolvable only inside the
 			// VPC; surfaced so a preview's logs say where the gateway is pointing.
 			collectorEndpoint,

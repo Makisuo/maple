@@ -18,9 +18,10 @@ brew install Makisuo/tap/maple
 
 Homebrew downloads the matching release bundle, verifies its checksum, installs
 `maple` and `libchdb.so` together in the Homebrew Cellar, and links `maple` onto
-your PATH. macOS Apple Silicon and Linux (x86_64 & arm64) are supported. If
-Homebrew asks you to trust the third-party tap, run `brew trust Makisuo/tap`
-once and retry the install.
+your PATH. If Homebrew asks you to trust the third-party tap, run
+`brew trust Makisuo/tap` once and retry the install. The tap lives in
+`Makisuo/homebrew-tap`, not this repo, so its platform coverage is set there —
+Intel macOS currently installs via the manual installer below.
 
 Manual installer:
 
@@ -35,7 +36,16 @@ curl -fsSL https://maple.dev/cli/install | sh
 The manual installer detects your OS/arch, downloads the matching bundle from
 the latest GitHub release, verifies its checksum, installs the two files into
 `~/.maple/bin`, clears the macOS Gatekeeper quarantine, and symlinks `maple`
-onto your PATH. Then:
+onto your PATH.
+
+Released targets: macOS (Apple Silicon & Intel) and Linux (x86_64 & arm64).
+Intel macOS builds on GitHub's `macos-15-intel` runner, which is the scarcest
+capacity in the pool — its tarball can land minutes after the others on a
+release. Each build job publishes independently, so the rest of the release is
+never held up. GitHub retires Intel macOS in Fall 2027; the target goes away
+with it.
+
+Then:
 
 ```bash
 maple start            # OTLP ingest + embedded ClickHouse on :4318; UI from local.maple.dev
@@ -260,6 +270,16 @@ current identity against the history tip, preserves the base branch's prior
 entries in CI, and requires every historical identity to reach the current one
 through registered migration edges. Changing a schema digest or manifest
 therefore requires a new versioned entry and executable edge together.
+
+Everything that pairing demands except the DDL is derived from the new version
+number, so `bun run local-schema:bump <slug>` writes it: the retained snapshot,
+the version constant, the `schema-identity.ts` edit sites, the history entry's
+hashes, the registry entry, and the identities pinned in
+`apps/cli/test/local-store-migrations.test.ts` and the native probe. It
+scaffolds the edge from the previous module and leaves `apply` to be written.
+When the gate fails because the schema moved without a bump, it names that
+command; when a hand-bump left the history behind, it prints the entry to
+append.
 
 The Linux native probe `apps/cli/test/native-local-store-migration.sh` uses a
 native chDB setup helper to create a stopped historical raw-table fixture,

@@ -10,7 +10,7 @@
  *
  * Consequences worth knowing before adding to this group:
  *
- *   - `requiredScopeForRequest` would derive the family `share` from the path,
+ *   - `requiredScopeForRoute` would derive the family `share` from the path,
  *     but it is only ever called by `ApiAuthorizationV2Layer`, which these
  *     routes do not run. There is no `share:read` scope and nothing issues one.
  *   - The operations publish `security: []`. That is derived from the absent

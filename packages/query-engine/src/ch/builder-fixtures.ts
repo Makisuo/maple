@@ -591,6 +591,30 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 			),
 	},
 	{
+		// routes/internal/query-engine.http.ts — service detail "API" tab. Same
+		// splice as the Operations fixture with the HTTP-endpoint predicate on
+		// every tier, so the sweep validates the filtered form separately.
+		module: "service-endpoints",
+		name: "serviceEndpointsSummaryQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(CH.serviceEndpointsSummaryQuery({ serviceName: "api", limit: 50 }), window),
+	},
+	{
+		module: "service-endpoints",
+		name: "serviceEndpointsSummaryQuery",
+		label: "envFiltered",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.serviceEndpointsSummaryQuery({
+					serviceName: "api",
+					environments: ["production"],
+					limit: 50,
+				}),
+				window,
+			),
+	},
+	{
 		module: "service-operations",
 		name: "serviceOperationsTimeseriesQuery",
 		label: "default",
@@ -626,6 +650,17 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 				}),
 				window,
 			),
+	},
+
+	{
+		// Sidebar presence gate — no params beyond the org + window, so one fixture
+		// covers it. What the catalog is watching here is that it stays free of
+		// aggregates: a `count()` would read the whole match set before LIMIT 1
+		// could trim its single output row.
+		module: "infra",
+		name: "infraPresenceQuery",
+		label: "default",
+		compile: () => CH.compileUnionUnsafe(CH.infraPresenceQuery(), window),
 	},
 
 	// Infra gauge timeseries and facet unions.

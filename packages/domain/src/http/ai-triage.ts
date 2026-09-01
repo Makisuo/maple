@@ -24,9 +24,28 @@ export class AiTriageEvidence extends Schema.Class<AiTriageEvidence>("AiTriageEv
 export class AiTriageResult extends Schema.Class<AiTriageResult>("AiTriageResult")({
 	summary: Schema.String,
 	suspectedCause: Schema.String,
-	// Shares the canonical IssueSeverity literal so the agent's assessment can
-	// be applied to issues verbatim without a mapping layer.
-	severityAssessment: IssueSeverity,
+	/**
+	 * Shares the canonical IssueSeverity literal so the agent's assessment can be
+	 * applied to issues verbatim without a mapping layer.
+	 *
+	 * `optionalKey` for the *partial* — a validator that promoted nothing has no
+	 * cause whose severity it could assess, and the four literals give it nothing
+	 * honest to send. Required, it forced a fabricated severity onto every "we
+	 * could not tell", and the submissions that instead sent `"unclassified"`
+	 * were rejected at the tool boundary at the end of a spent investigation
+	 * budget — losing the whole run to a field that path throws away
+	 * (`applyInconclusiveWrites` writes `severity: null` regardless).
+	 *
+	 * Widening {@link IssueSeverity} itself was the alternative and is worse: that
+	 * literal is the issues system's severity, read by the severity sort rank, the
+	 * escalation policy, the list cursor, the facets and the DB enum, none of
+	 * which would ever see the new member from anywhere but here.
+	 *
+	 * Absent on a *promoted* report is a defective submission rather than a
+	 * signal, and is handled the same way for the same reason: `applyTriageSeverity`
+	 * declines to re-rank a linked issue on a judgement the model did not make.
+	 */
+	severityAssessment: Schema.optionalKey(IssueSeverity),
 	affectedScope: Schema.String,
 	evidence: Schema.Array(AiTriageEvidence),
 	suggestedActions: Schema.Array(Schema.String),

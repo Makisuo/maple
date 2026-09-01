@@ -111,9 +111,17 @@ export function registerUpdateErrorNotificationPolicyTool(server: McpToolRegistr
 			)
 
 			const policy = yield* policies
-				.upsertNotificationPolicy(tenant.orgId, tenant.userId, decodedPatch)
+				.upsertNotificationPolicy(tenant.orgId, tenant.userId, tenant.roles, decodedPatch)
 				.pipe(
 					Effect.catchTags({
+						"@maple/http/errors/ErrorForbiddenError": (error) =>
+							Effect.fail(
+								new McpQueryError({
+									message: `${error._tag}: ${error.message}`,
+									pipeName: "update_error_notification_policy",
+									cause: error,
+								}),
+							),
 						"@maple/http/errors/ErrorPersistenceError": (error) =>
 							Effect.fail(
 								new McpQueryError({

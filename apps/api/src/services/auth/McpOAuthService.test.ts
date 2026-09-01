@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "@effect/vitest"
 import { OrgId, RoleName, UserId } from "@maple/domain/http"
 import { ConfigProvider, Effect, Layer, Option, Schema } from "effect"
 import { Env } from "@/platform/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "./AuthService"
 import { matchesMcpOAuthRedirectUri, McpOAuthService, validateMcpOAuthRedirectUri } from "./McpOAuthService"
@@ -40,6 +40,44 @@ const resource = "https://api.example.com/mcp"
 const redirectUri = "http://127.0.0.1:49152/callback"
 const verifier = "maple-mcp-oauth-verifier-that-is-long-enough-1234567890"
 const challenge = createHash("sha256").update(verifier).digest("base64url")
+
+/** Register → authorize → approve → exchange, the shortest path to a live grant. */
+const issueGrant = Effect.fnUntraced(function* (
+	oauth: McpOAuthService,
+	clientName: string,
+) {
+	const client = yield* oauth.register({ clientName, redirectUris: [redirectUri] }, "127.0.0.1")
+	const started = yield* oauth.startAuthorization(
+		{
+			clientId: client.client_id,
+			redirectUri,
+			responseType: "code",
+			codeChallenge: challenge,
+			codeChallengeMethod: "S256",
+			resource,
+			expectedResource: resource,
+		},
+		"127.0.0.1",
+	)
+	const requestId = new URL(started.consentUrl).searchParams.get("request_id")!
+	const approved = yield* oauth.approve(requestId, {
+		orgId,
+		userId,
+		roles: [memberRole],
+		userEmail: null,
+	})
+	const tokens = yield* oauth.exchangeAuthorizationCode(
+		{
+			code: new URL(approved.redirectUri).searchParams.get("code")!,
+			clientId: client.client_id,
+			redirectUri,
+			codeVerifier: verifier,
+			resource,
+		},
+		"127.0.0.1",
+	)
+	return { clientId: client.client_id, tokens }
+})
 
 describe("McpOAuthService", () => {
 	it("accepts HTTPS and loopback redirects while rejecting unsafe redirects", () => {
@@ -269,6 +307,95 @@ describe("McpOAuthService", () => {
 				expect(replay.error).toBe("invalid_grant")
 			}
 			expect(Option.isNone(yield* apiKeys.resolveByKey(second.access_token))).toBe(true)
+		}).pipe(Effect.provide(makeLayer(db)))
+	})
+
+	it.effect("stops refreshing once the visible MCP key is revoked in the API-keys UI", () => {
+		const db = createTestDb(createdDbs)
+		return Effect.gen(function* () {
+			const oauth = yield* McpOAuthService
+			const apiKeys = yield* ApiKeysService
+			const grant = yield* issueGrant(oauth, "Revoked Key Client")
+
+			// Revoking the key a member can actually see used to be a no-op: the
+			// next rotation minted a fresh one straight back.
+			const resolved = yield* apiKeys.resolveByKey(grant.tokens.access_token)
+			expect(Option.isSome(resolved)).toBe(true)
+			if (Option.isNone(resolved)) return
+			yield* apiKeys.revoke(orgId, resolved.value.keyId)
+
+			const failure = yield* oauth
+				.refresh(
+					{ refreshToken: grant.tokens.refresh_token, clientId: grant.clientId, resource },
+					"127.0.0.1",
+				)
+				.pipe(Effect.flip)
+			expect(failure._tag).toBe("@maple/api/errors/McpOAuthProtocolError")
+			if (failure._tag === "@maple/api/errors/McpOAuthProtocolError") {
+				expect(failure.error).toBe("invalid_grant")
+			}
+
+			const live = yield* Effect.promise(() =>
+				queryFirstRow<{ count: number }>(
+					db,
+					"select count(*)::int as count from mcp_oauth_refresh_tokens where revoked_at is null",
+				),
+			)
+			expect(Number(live?.count)).toBe(0)
+		}).pipe(Effect.provide(makeLayer(db)))
+	})
+
+	it.effect("ends the grant at the absolute family lifetime no matter how often it rotates", () => {
+		const db = createTestDb(createdDbs)
+		return Effect.gen(function* () {
+			const oauth = yield* McpOAuthService
+			const grant = yield* issueGrant(oauth, "Long Lived Client")
+
+			// The family anchor is 90 days out and is *carried* across rotations,
+			// unlike expires_at which each refresh resets to a fresh 30 days.
+			// `it.effect` runs on the test clock, so "past" is relative to epoch 0,
+			// not to wall time.
+			yield* Effect.promise(() =>
+				db.pglite.query(
+					"update mcp_oauth_refresh_tokens set family_expires_at = timestamptz '1969-12-31 00:00:00+00'",
+				),
+			)
+
+			const failure = yield* oauth
+				.refresh(
+					{ refreshToken: grant.tokens.refresh_token, clientId: grant.clientId, resource },
+					"127.0.0.1",
+				)
+				.pipe(Effect.flip)
+			expect(failure._tag).toBe("@maple/api/errors/McpOAuthProtocolError")
+			if (failure._tag === "@maple/api/errors/McpOAuthProtocolError") {
+				expect(failure.error).toBe("invalid_grant")
+			}
+		}).pipe(Effect.provide(makeLayer(db)))
+	})
+
+	it.effect("carries the family expiry across a rotation instead of resetting it", () => {
+		const db = createTestDb(createdDbs)
+		return Effect.gen(function* () {
+			const oauth = yield* McpOAuthService
+			const grant = yield* issueGrant(oauth, "Rotating Client")
+			const before = yield* Effect.promise(() =>
+				db.pglite.query<{ family_expires_at: Date }>(
+					"select family_expires_at from mcp_oauth_refresh_tokens",
+				),
+			)
+			yield* oauth.refresh(
+				{ refreshToken: grant.tokens.refresh_token, clientId: grant.clientId, resource },
+				"127.0.0.1",
+			)
+			const after = yield* Effect.promise(() =>
+				db.pglite.query<{ family_expires_at: Date }>(
+					"select family_expires_at from mcp_oauth_refresh_tokens order by created_at desc limit 1",
+				),
+			)
+			expect(new Date(after.rows[0]!.family_expires_at).getTime()).toBe(
+				new Date(before.rows[0]!.family_expires_at).getTime(),
+			)
 		}).pipe(Effect.provide(makeLayer(db)))
 	})
 

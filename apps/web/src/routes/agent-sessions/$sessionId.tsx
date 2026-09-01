@@ -7,7 +7,7 @@ import { formatWarehouseDateTime } from "@maple/query-engine"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatRelativeTimeOrDate } from "@maple/ui/lib/time-format"
 
-import { ChatBubbleSparkleIcon } from "@/components/icons"
+import { SquareSparkleIcon } from "@/components/icons"
 import { CopyableValue } from "@/components/attributes"
 import { Alert, AlertDescription } from "@maple/ui/components/ui/alert"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -329,7 +329,7 @@ function EmptySession({ sessionId, windowed }: { sessionId: string; windowed: bo
 		<Empty>
 			<EmptyHeader>
 				<EmptyMedia variant="icon">
-					<ChatBubbleSparkleIcon />
+					<SquareSparkleIcon />
 				</EmptyMedia>
 				<EmptyTitle>No spans for this session</EmptyTitle>
 				{/* Two genuinely different failures. With a window the read was

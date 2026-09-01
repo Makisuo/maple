@@ -398,7 +398,7 @@ Promoting nothing is **not** the same as returning nothing. Still submit a \`rep
 - \`ruledOut\` — one entry per cause the lanes eliminated, each naming the evidence that eliminated it. This is the part a responder acts on first.
 - \`unchecked\` — one entry per angle nobody could check, and **why**: no instrument emits it, the lane was cut short by the clock, two lanes disagreed. An angle that was never checked must never be silently indistinguishable from one nobody thought of.
 - \`suggestedActions\` — what would settle it. Which telemetry is missing, which hypothesis deserves a longer pass.
-- \`severityAssessment: "unclassified"\` — you have no cause to assess the severity of.
+- \`severityAssessment\` — **omit it**. You have no cause whose severity you could assess, and the field is optional for exactly this case. Do not send a level to fill it, and do not invent a value like "unclassified": the four levels are the only ones the field accepts, and a partial's severity is never the one displayed anyway — the row keeps the incident's own.
 
 ## Your output
 

@@ -30,6 +30,7 @@ import {
 	formatValueWithUnit,
 	transformRows,
 	UNNAMED_SERIES_KEY,
+	makeBucketLabeler,
 	type ChartUnit,
 	type TransformedPoint,
 } from "../chart-utils"
@@ -56,6 +57,16 @@ export interface InfraMetricChartProps {
 	showThreshold?: boolean
 	/** Joins the linked hover cursor. Omit to opt out. */
 	linkedChartId?: string
+	/**
+	 * An explicit x domain, as bucket ISO strings.
+	 *
+	 * Without it each chart domains over its OWN rows, so two charts stacked to
+	 * be read down a vertical line silently disagree about where a given minute
+	 * sits whenever one series is shorter or coarser than the other. Pass the
+	 * union of every sibling's buckets to make the shared axis real rather than
+	 * apparent. Buckets a series has no value for render as gaps.
+	 */
+	xDomain?: ReadonlyArray<string>
 	/**
 	 * The last-value summary above the plot.
 	 *
@@ -132,6 +143,7 @@ export function InfraMetricChart({
 	stacked = false,
 	showThreshold = false,
 	linkedChartId,
+	xDomain,
 	header,
 	waiting = false,
 	height,
@@ -149,7 +161,27 @@ export function InfraMetricChart({
 	const gradientPrefix = useChartId("infra")
 	const focusStore = useMemo(() => createTooltipFocusStore(), [])
 
-	const { data, series } = useMemo(() => transformRows(rows), [rows])
+	/**
+	 * One labeler for the rows and the domain alike.
+	 *
+	 * It is derived from the FULL bucket span — the shared domain when there is
+	 * one, the rows otherwise — because `makeBucketLabeler` switches to a dated
+	 * label past 24h. Labeling by bare time-of-day over a multi-day window makes
+	 * two different days' 2pm the same string, and `scalePoint` then collapses
+	 * them onto one x position: the line doubles back on itself and the chart
+	 * reads as a hairball. This is why the labeler cannot be per-chart.
+	 */
+	const labeler = useMemo(
+		() => makeBucketLabeler(xDomain ?? rows.map((row) => row.bucket)),
+		[xDomain, rows],
+	)
+
+	const { data, series } = useMemo(() => transformRows(rows, labeler), [rows, labeler])
+
+	const xScale = useMemo(
+		() => (xDomain ? scalePoint<string>().domain(xDomain.map(labeler)) : scalePoint),
+		[xDomain, labeler],
+	)
 
 	/**
 	 * Series names carry dots and slashes (container names, mount points), which
@@ -268,7 +300,7 @@ export function InfraMetricChart({
 			],
 			x: {
 				// Categorical: these charts plot bucket LABELS, not timestamps.
-				scale: scalePoint,
+				scale: xScale,
 				axis: {
 					line: false,
 					ticks: { size: 0, padding: 8 },
@@ -292,6 +324,7 @@ export function InfraMetricChart({
 	}, [
 		data,
 		series,
+		xScale,
 		stacked,
 		colors,
 		chromeColors,

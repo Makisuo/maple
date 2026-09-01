@@ -624,7 +624,7 @@ export class BillingApiGroup extends HttpApiGroup.make("billing")
 		HttpApiEndpoint.post("attach", "/attach", {
 			payload: AttachRequest,
 			success: AttachResult,
-			error: [...billingRequestErrors],
+			error: [BillingForbiddenError, ...billingRequestErrors],
 		}),
 	)
 	.add(
@@ -638,7 +638,7 @@ export class BillingApiGroup extends HttpApiGroup.make("billing")
 		HttpApiEndpoint.post("openCustomerPortal", "/portal", {
 			payload: CustomerPortalRequest,
 			success: CustomerPortalResult,
-			error: [...billingTransportErrors],
+			error: [BillingForbiddenError, ...billingTransportErrors],
 		}),
 	)
 	// Billing details live on the Stripe customer, read through Stripe directly.

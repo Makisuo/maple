@@ -15,6 +15,16 @@ import { recordExpectedMcpFailure } from "@/mcp/expected-failures"
 import { sessionStore } from "@/mcp/lib/session-store"
 
 const INTERNAL_SERVICE_PREFIX = "maple_svc_"
+
+/**
+ * The tenant plus the rate-limit identity of the credential that produced it,
+ * consumed by the MCP authorization middleware. Absent only for internal
+ * service auth: that is Maple's own traffic behind one shared token, so a
+ * single bucket would throttle every internal caller together.
+ */
+export interface McpAuthenticatedTenant extends McpTenantContext {
+	readonly rateLimitCredentialId?: string
+}
 const decodeOrgId = Schema.decodeUnknownEffect(OrgId)
 const decodeUserId = Schema.decodeUnknownEffect(UserId)
 const decodeActorIdOption = Schema.decodeUnknownOption(ActorId)
@@ -136,7 +146,7 @@ export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(
 					roles: [],
 					authMode: "self_hosted",
 					...(mcpClientName ? { mcpClientName } : undefined),
-				} as McpTenantContext
+				} as McpAuthenticatedTenant
 			}
 
 			return yield* new McpAuthInvalidError({
@@ -216,9 +226,10 @@ export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(
 				userId: validUserId,
 				roles: resolved.roles ?? apiKeyDefaultRoles,
 				authMode: "self_hosted",
+				rateLimitCredentialId: `key:${resolved.keyId}`,
 				...(actorId ? { actorId } : undefined),
 				...(mcpClientName ? { mcpClientName } : undefined),
-			} as McpTenantContext
+			} as McpAuthenticatedTenant
 		}
 
 		// Fall back to existing Clerk / self-hosted session auth
@@ -238,6 +249,7 @@ export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(
 			userId: tenant.userId,
 			roles: [...tenant.roles],
 			authMode: tenant.authMode,
+			rateLimitCredentialId: `user:${tenant.userId}`,
 			...(mcpClientName ? { mcpClientName } : undefined),
 		}
 	},

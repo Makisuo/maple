@@ -687,8 +687,48 @@ export const makeResolveTenant = (
 					? verifyOrgMembership
 					: undefined
 
-			const sessionOrgId = orgIdOverride ?? auth.orgId
-			if (!sessionOrgId) {
+			const sessionRoles: ReadonlyArray<RoleName> =
+				typeof auth.orgRole === "string"
+					? yield* Effect.map(
+							decodeRoleName(auth.orgRole, "Invalid role in Clerk session token"),
+							(role) => [role],
+						)
+					: []
+
+			if (orgIdOverride !== undefined) {
+				const pinnedOrgId = yield* decodeOrgId(orgIdOverride, "Invalid MAPLE_ORG_ID_OVERRIDE value")
+				// The pin replaces the organization, so it must replace the role with
+				// it — same invariant as `applyRequestedOrg`. Carrying `auth.orgRole`
+				// across made an admin of their own organization an admin of the
+				// pinned one. Naming your own organization is still free; anything
+				// else takes its role from a verified membership, and where there is
+				// no membership directory to ask, the pin grants no role at all.
+				if (auth.orgId === pinnedOrgId) {
+					return yield* applyRequestedOrg(
+						{ orgId: pinnedOrgId, userId, roles: sessionRoles, authMode: "clerk" },
+						headers,
+						selectable,
+					)
+				}
+				if (verifyOrgMembership) {
+					const membership = yield* verifyOrgMembership(userId, pinnedOrgId)
+					if (Option.isNone(membership)) {
+						return yield* Effect.fail(organizationAccessDenied(pinnedOrgId))
+					}
+					return yield* applyRequestedOrg(
+						{ orgId: pinnedOrgId, userId, roles: [membership.value.role], authMode: "clerk" },
+						headers,
+						selectable,
+					)
+				}
+				return yield* applyRequestedOrg(
+					{ orgId: pinnedOrgId, userId, roles: [], authMode: "clerk" },
+					headers,
+					selectable,
+				)
+			}
+
+			if (!auth.orgId) {
 				// No active organization in the session. A request that names one it
 				// can prove membership of is still serviceable — this is the widget
 				// publishing path, whose whole point is not to disturb whatever the
@@ -706,15 +746,9 @@ export const makeResolveTenant = (
 			}
 
 			const clerkTenant: TenantContext = {
-				orgId: yield* decodeOrgId(sessionOrgId, "Invalid organization in Clerk session token"),
+				orgId: yield* decodeOrgId(auth.orgId, "Invalid organization in Clerk session token"),
 				userId,
-				roles:
-					typeof auth.orgRole === "string"
-						? yield* Effect.map(
-								decodeRoleName(auth.orgRole, "Invalid role in Clerk session token"),
-								(role) => [role],
-							)
-						: [],
+				roles: sessionRoles,
 				authMode: "clerk",
 			}
 

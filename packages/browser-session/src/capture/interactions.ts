@@ -1,3 +1,4 @@
+import { isBlocked } from "../privacy-markers"
 import { type Emit, safeEmit } from "./shared"
 
 const MAX_TEXT = 120
@@ -6,7 +7,8 @@ const MAX_TEXT = 120
  * Capture clicks and input events as session events. Listens in the capture
  * phase so it sees interactions even when the host app calls
  * `stopPropagation()`. Input *values* are never recorded; only the target
- * element. Click target text is omitted when `maskAllText` is set.
+ * element. Click target text is omitted when `maskAllText` is set, and when the
+ * target sits inside a blocked (`.rr-block` / `data-rr-block`) subtree.
  */
 export function installInteractionCapture(emit: Emit, maskAllText: boolean): () => void {
 	const onClick = (event: Event): void => {
@@ -15,7 +17,7 @@ export function installInteractionCapture(emit: Emit, maskAllText: boolean): () 
 		safeEmit(emit, {
 			type: "click",
 			targetSelector: selectorOf(target),
-			targetText: maskAllText ? undefined : textOf(target),
+			targetText: maskAllText || isBlocked(target) ? undefined : textOf(target),
 		})
 	}
 

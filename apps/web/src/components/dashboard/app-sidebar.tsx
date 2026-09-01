@@ -9,6 +9,7 @@ import {
 	GridSquareCirclePlusIcon,
 	KeyboardIcon,
 	LogoutIcon,
+	CompassIcon,
 	MagnifierIcon,
 	UserIcon,
 } from "@/components/icons"
@@ -16,9 +17,11 @@ import {
 	isNavItemActive,
 	isPathActive,
 	navGroups,
+	partitionInfraSubItems,
 	type NavGroup,
 	type NavItem,
 	type NavSubItem,
+	type NavSurface,
 } from "@/components/dashboard/nav-items"
 import { openCommandPalette, showKeyboardShortcuts } from "@/components/command-palette/global-shortcuts"
 import { OrgSwitcher } from "@/components/dashboard/org-switcher"
@@ -58,6 +61,7 @@ import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-a
 import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
 import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
+import { useInfraSurfaces } from "@/hooks/use-infra-surfaces"
 
 /**
  * A 2px lane is reserved on every row so icons share one vertical line whether
@@ -218,23 +222,50 @@ function SearchRow() {
 	)
 }
 
-function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
+function NavRow({
+	item,
+	currentPath,
+	surfaces,
+}: {
+	item: NavItem
+	currentPath: string
+	/** What the org has; `null` until known. See `partitionInfraSubItems`. */
+	surfaces: ReadonlySet<NavSurface> | null
+}) {
 	const { state, isMobile } = useSidebar()
 	const isActive = isNavItemActive(currentPath, item)
-	const subItems = item.subItems
 	const collapsed = state === "collapsed" && !isMobile
+
+	// Applied to every section, not just Infrastructure: a section whose children
+	// carry no `surface` comes back whole, so there is nothing to special-case.
+	const discoverTo = item.discoverTo
+	const { shown, hidden } = useMemo(
+		() =>
+			item.subItems
+				? partitionInfraSubItems(item.subItems, surfaces, currentPath)
+				: { shown: [], hidden: [] },
+		[item.subItems, surfaces, currentPath],
+	)
+	const subItems = item.subItems ? shown : undefined
 
 	// Longest match wins: Infrastructure's Hosts child is `/infra`, which
 	// prefixes every one of its siblings, so a plain match would light up two
 	// rows on /infra/kubernetes/pods.
+	// The discover page lives under the section's own href, so it would otherwise
+	// light up the child that owns the section root — Hosts is `/infra`, and
+	// `/infra/discover` prefixes it. It's a sibling row here, not a child, so it
+	// takes the selection off them entirely.
+	const discoverActive = discoverTo ? isPathActive(currentPath, discoverTo) : false
+
 	const activeSubHref = useMemo(() => {
+		if (discoverActive) return undefined
 		let best: string | undefined
 		for (const sub of subItems ?? []) {
 			if (!isPathActive(currentPath, sub.href)) continue
 			if (best === undefined || sub.href.length > best.length) best = sub.href
 		}
 		return best
-	}, [subItems, currentPath])
+	}, [subItems, currentPath, discoverActive])
 
 	// While a section is open the rail belongs to the child you're actually on,
 	// not the parent — otherwise two amber bars compete and neither points at
@@ -248,11 +279,16 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 	// dropped once the section opens and the real rows are on screen. Repeated
 	// marks collapse to one: Infrastructure's three k8s pages share a glyph, and
 	// drawing it three times both crowds the label and overstates the variety.
+	//
+	// Drawn from *every* child, not the pruned `shown` list: the preview says
+	// what the section covers, and an org running only hosts should still see
+	// that Docker, Kubernetes, Cloudflare and PlanetScale live behind the row.
+	// The pruning is about how many rows you scroll past when it's open.
 	const preview = useMemo(() => {
-		if (isOpen || !subItems?.every((sub) => sub.icon)) return undefined
+		if (isOpen || !item.subItems?.every((sub) => sub.icon)) return undefined
 		const seen = new Set<NavSubItem["icon"]>()
 		const unique: NavSubItem[] = []
-		for (const sub of subItems) {
+		for (const sub of item.subItems) {
 			if (!sub.icon || seen.has(sub.icon)) continue
 			seen.add(sub.icon)
 			unique.push(sub)
@@ -262,7 +298,7 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 		// preview is all or nothing. Five fits both sections we ship (Explore
 		// with Agent Sessions on, Infrastructure) at the tightened gap below.
 		return unique.length > 5 ? undefined : unique
-	}, [isOpen, subItems])
+	}, [isOpen, item.subItems])
 
 	// The sub-list can't render at 48px, so the rail turns the row into a menu.
 	// Without this, every child route is stranded while the sidebar is collapsed
@@ -289,6 +325,38 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 								</DropdownMenuItem>
 							))}
 						</DropdownMenuGroup>
+						{/* The rail's menu is transient and costs no standing space, so
+						    everything the section owns is reachable here — the pruning
+						    exists to shorten a list you look at, not to lock pages away.
+						    This is also the only nav the collapsed rail has, so a source
+						    the probe got wrong must still be one click away. */}
+						{hidden.length > 0 ? (
+							<>
+								<DropdownMenuSeparator />
+								<DropdownMenuGroup>
+									{hidden.map((sub) => (
+										<DropdownMenuItem
+											key={sub.title}
+											render={<Link to={sub.href} />}
+										>
+											{sub.icon ? (
+												<sub.icon
+													size={16}
+													style={{ color: sub.iconColor }}
+												/>
+											) : null}
+											{sub.title}
+										</DropdownMenuItem>
+									))}
+									{discoverTo ? (
+										<DropdownMenuItem render={<Link to={discoverTo} />}>
+											<CompassIcon size={16} />
+											Discover more
+										</DropdownMenuItem>
+									) : null}
+								</DropdownMenuGroup>
+							</>
+						) : null}
 					</DropdownMenuContent>
 				</DropdownMenu>
 			</SidebarMenuItem>
@@ -356,13 +424,46 @@ function NavRow({ item, currentPath }: { item: NavItem; currentPath: string }) {
 							</SidebarMenuSubButton>
 						</SidebarMenuSubItem>
 					))}
+					{discoverTo && hidden.length > 0 ? (
+						<SidebarMenuSubItem
+							className={
+								discoverActive
+									? "border-sidebar-primary border-l-2 ps-2.5"
+									: "border-sidebar-border border-l-2 ps-2.5"
+							}
+						>
+							<SidebarMenuSubButton
+								className="translate-x-0 text-muted-foreground data-[active=true]:text-sidebar-primary hover:text-foreground"
+								isActive={discoverActive}
+								render={<Link to={discoverTo} />}
+							>
+								{/* One neutral mark in the same slot the sibling rows use,
+								    so the row sits on their rhythm instead of breaking it.
+								    A stack of the missing sources' own logos was the first
+								    idea and the wrong one: three brand marks at 14px collide
+								    into a smudge, and the column already carries one mark per
+								    child. A compass says "go look" where a plus says "add
+								    one" — the page behind this row is both. */}
+								<CompassIcon className="size-3.5" />
+								<span className="text-xs">Discover more</span>
+							</SidebarMenuSubButton>
+						</SidebarMenuSubItem>
+					) : null}
 				</SidebarMenuSub>
 			) : null}
 		</SidebarMenuItem>
 	)
 }
 
-function NavGroupSection({ group, currentPath }: { group: NavGroup; currentPath: string }) {
+function NavGroupSection({
+	group,
+	currentPath,
+	surfaces,
+}: {
+	group: NavGroup
+	currentPath: string
+	surfaces: ReadonlySet<NavSurface> | null
+}) {
 	return (
 		<SidebarGroup>
 			{group.label ? (
@@ -371,7 +472,12 @@ function NavGroupSection({ group, currentPath }: { group: NavGroup; currentPath:
 			<SidebarGroupContent>
 				<SidebarMenu>
 					{group.items.map((item) => (
-						<NavRow currentPath={currentPath} item={item} key={item.title} />
+						<NavRow
+							currentPath={currentPath}
+							item={item}
+							key={item.title}
+							surfaces={surfaces}
+						/>
 					))}
 				</SidebarMenu>
 			</SidebarGroupContent>
@@ -547,8 +653,14 @@ const SidebarNavGroups = memo(function SidebarNavGroups({ currentPath }: { curre
 	// Fails closed while Clerk loads, so a flagged row arrives a beat late rather
 	// than flashing and vanishing — the trade `navGroups` documents.
 	const { flags } = useOrganizationFeatureFlags()
+	// Lives here for the same reason the flag read does — one subscription for
+	// the whole nav rather than one per row, in the subtree that already redraws
+	// on navigation.
+	const surfaces = useInfraSurfaces()
 	const groups = navGroups(flags)
-	return groups.map((group) => <NavGroupSection currentPath={currentPath} group={group} key={group.id} />)
+	return groups.map((group) => (
+		<NavGroupSection currentPath={currentPath} group={group} key={group.id} surfaces={surfaces} />
+	))
 })
 
 // Memoized: DashboardLayout renders this inside every page, so without memo the

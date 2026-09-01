@@ -736,6 +736,112 @@ describe("ScrapeTargetsService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
+	it.effect("refuses to carry stored credentials to a new origin", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const service = yield* ScrapeTargetsService
+			const orgId = asOrgId("org_1")
+			const target = yield* service.create(
+				orgId,
+				new CreateScrapeTargetRequest({
+					name: "Node Exporter",
+					url: "https://metrics.example.com/metrics",
+					authType: "bearer",
+					authCredentials: JSON.stringify({ token: "stored-token" }),
+				}),
+			)
+			assert.isTrue(target.hasCredentials)
+
+			// Repointing at an attacker-controlled host without re-supplying the
+			// credential is exactly the exfiltration path: it must not persist.
+			const error = yield* service
+				.update(
+					orgId,
+					target.id,
+					new UpdateScrapeTargetRequest({ url: "https://attacker.example.com/metrics" }),
+				)
+				.pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/ScrapeTargetValidationError")
+			assert.include(error.message, "re-supplying authCredentials")
+
+			const unchanged = yield* service.get(orgId, target.id)
+			assert.strictEqual(unchanged.url, "https://metrics.example.com/metrics")
+			assert.isTrue(unchanged.hasCredentials)
+
+			// A port change is an origin change too.
+			const portError = yield* service
+				.update(
+					orgId,
+					target.id,
+					new UpdateScrapeTargetRequest({ url: "https://metrics.example.com:8443/metrics" }),
+				)
+				.pipe(Effect.flip)
+			assert.strictEqual(portError._tag, "@maple/http/errors/ScrapeTargetValidationError")
+
+			// Same origin, different path: nothing moves, so the credential stays.
+			const samePath = yield* service.update(
+				orgId,
+				target.id,
+				new UpdateScrapeTargetRequest({ url: "https://metrics.example.com/other" }),
+			)
+			assert.strictEqual(samePath.url, "https://metrics.example.com/other")
+			assert.isTrue(samePath.hasCredentials)
+
+			// Re-supplying the credential in the same request is the way across.
+			const moved = yield* service.update(
+				orgId,
+				target.id,
+				new UpdateScrapeTargetRequest({
+					url: "https://other.example.com/metrics",
+					authCredentials: JSON.stringify({ token: "fresh-token" }),
+				}),
+			)
+			assert.strictEqual(moved.url, "https://other.example.com/metrics")
+			assert.isTrue(moved.hasCredentials)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("refuses generic update/delete against an integration-managed target", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const service = yield* ScrapeTargetsService
+			const orgId = asOrgId("org_1")
+			const target = yield* service.create(
+				orgId,
+				new CreateScrapeTargetRequest({
+					name: "Managed target",
+					url: "https://metrics.example.com/metrics",
+				}),
+			)
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE scrape_targets SET managed_by = $1 WHERE id = $2", [
+					"planetscale:conn_1",
+					target.id,
+				]),
+			)
+
+			const updateError = yield* service
+				.update(orgId, target.id, new UpdateScrapeTargetRequest({ enabled: false }))
+				.pipe(Effect.flip)
+			assert.strictEqual(updateError._tag, "@maple/http/errors/ScrapeTargetValidationError")
+			assert.include(updateError.message, "managed by an integration")
+
+			const deleteError = yield* service.delete(orgId, target.id).pipe(Effect.flip)
+			assert.strictEqual(deleteError._tag, "@maple/http/errors/ScrapeTargetValidationError")
+
+			// The owning integration still writes through.
+			const disabled = yield* service.update(
+				orgId,
+				target.id,
+				new UpdateScrapeTargetRequest({ enabled: false }),
+				{ allowManaged: true },
+			)
+			assert.isFalse(disabled.enabled)
+			const deleted = yield* service.delete(orgId, target.id, { allowManaged: true })
+			assert.strictEqual(deleted.id, target.id)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
 	it.effect("prometheus targets reject the planetscale_oauth auth type", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {

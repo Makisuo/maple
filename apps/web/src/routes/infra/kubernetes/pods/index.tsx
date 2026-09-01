@@ -162,11 +162,11 @@ function PodsPage() {
 	)
 
 	const patchSearch = (patch: Partial<PodsSearchParams>) => {
-		navigate({ search: (prev) => ({ ...prev, ...patch }) })
+		void navigate({ search: (prev) => ({ ...prev, ...patch }) })
 	}
 
 	const onFilterChange = <K extends keyof PodFilters>(key: K, value: PodFilters[K]) => {
-		navigate({
+		void navigate({
 			search: (prev) => ({
 				...prev,
 				[key]:
@@ -176,7 +176,7 @@ function PodsPage() {
 	}
 
 	const onClearFilters = () => {
-		navigate({
+		void navigate({
 			search: {
 				startTime: search.startTime,
 				endTime: search.endTime,
@@ -199,7 +199,7 @@ function PodsPage() {
 		range: { startTime?: string; endTime?: string; presetValue?: string },
 		options?: { replace?: boolean },
 	) => {
-		navigate({
+		void navigate({
 			replace: options?.replace,
 			search: (prev) => ({ ...applyTimeRangeSearch(prev, range) }),
 		})
@@ -252,7 +252,7 @@ function PodsPage() {
 										values: chip.values,
 										negated: chip.negated,
 										onRemove: () =>
-											navigate({
+											void navigate({
 												search: (prev) => ({ ...prev, [chip.param]: undefined }),
 											}),
 									}))}

@@ -191,6 +191,36 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	},
 	{ pipe: "custom_traces_breakdown", label: "by-service", params: { group_by_service: "1" } },
 	{
+		// The digest's summary row: one row for the whole window, so the P95 is a
+		// real merged quantile rather than a mean of per-service quantiles.
+		pipe: "custom_traces_breakdown",
+		label: "all-root-only",
+		params: { group_by_all: "1", root_only: "1", limit: 1 },
+	},
+	{
+		// True namespace grain — service_overview's namespace column is a dominant
+		// argMax, so per-namespace totals cannot be summed out of it.
+		pipe: "custom_traces_breakdown",
+		label: "by-namespace",
+		params: { group_by_namespace: "1", root_only: "1", limit: 10 },
+	},
+	{
+		pipe: "custom_traces_breakdown",
+		label: "by-environment",
+		params: { group_by_environment: "1", root_only: "1", limit: 10 },
+	},
+	{
+		pipe: "custom_traces_breakdown",
+		label: "all-scoped",
+		params: {
+			group_by_all: "1",
+			root_only: "1",
+			limit: 1,
+			environments: "production",
+			namespaces: "commerce",
+		},
+	},
+	{
 		pipe: "custom_traces_breakdown",
 		label: "by-attribute",
 		params: { group_by_attribute: "http.route" },
@@ -216,6 +246,11 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 		params: { environments: "production,staging", commit_shas: "abc123,def456" },
 	},
 	{
+		pipe: "service_overview",
+		label: "namespace-scoped",
+		params: { environments: "production", namespaces: "commerce,edge" },
+	},
+	{
 		pipe: "service_overview_compare",
 		label: "default",
 		params: {
@@ -223,6 +258,18 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 			current_end_time: END_TIME,
 			previous_start_time: "2025-12-30 10:30:00",
 			previous_end_time: "2026-01-01 14:15:00",
+		},
+	},
+	{
+		pipe: "service_overview_compare",
+		label: "namespace-scoped",
+		params: {
+			current_start_time: START_TIME,
+			current_end_time: END_TIME,
+			previous_start_time: "2025-12-30 10:30:00",
+			previous_end_time: "2026-01-01 14:15:00",
+			environments: "production",
+			namespaces: "commerce",
 		},
 	},
 	{ pipe: "services_facets", label: "default", params: {} },
@@ -243,6 +290,24 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	},
 	{ pipe: "get_service_usage", label: "default", params: { service: "api" } },
 	{
+		// `service_usage` has no env/namespace column, so a scoped digest narrows
+		// it by the service membership it resolved from the overview rows.
+		pipe: "get_service_usage",
+		label: "by-services",
+		params: { services: "api,checkout" },
+	},
+	{
+		pipe: "get_service_usage_compare",
+		label: "by-services",
+		params: {
+			services: "api,checkout",
+			current_start_time: START_TIME,
+			current_end_time: END_TIME,
+			previous_start_time: "2025-12-30 10:30:00",
+			previous_end_time: "2026-01-01 14:15:00",
+		},
+	},
+	{
 		pipe: "get_service_usage_compare",
 		label: "default",
 		params: {
@@ -256,6 +321,11 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	{ pipe: "service_dependencies", label: "default", params: { deployment_env: "production" } },
 
 	{ pipe: "errors_by_type", label: "default", params: {} },
+	{
+		pipe: "errors_by_type",
+		label: "fingerprint-scoped",
+		params: { fingerprint_hashes: FINGERPRINT, deployment_envs: "production", limit: 1 },
+	},
 	{ pipe: "errors_timeseries", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 	{ pipe: "errors_facets", label: "default", params: {} },
 	{ pipe: "errors_summary", label: "default", params: {} },

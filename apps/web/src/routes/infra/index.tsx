@@ -18,6 +18,7 @@ import { QueryErrorState } from "@/components/common/query-error-state"
 import { FleetGrid } from "@/components/infra/fleet-grid"
 import { HostTable, HostTableLoading, type HostRow } from "@/components/infra/host-table"
 import { HostSummaryCards, HostSummaryCardsLoading } from "@/components/infra/host-summary-cards"
+import { InfraIntegrations } from "@/components/infra/infra-integrations"
 import { InstallHostModal } from "@/components/infra/install-modal"
 import { deriveHostStatus, type HostStatus } from "@/components/infra/format"
 import { PageHero } from "@/components/infra/primitives/page-hero"
@@ -122,6 +123,8 @@ function InfraPage() {
 									)
 								})
 								.render()}
+
+							<InfraIntegrations />
 						</div>
 
 						<InstallHostModal open={installOpen} onOpenChange={setInstallOpen} />

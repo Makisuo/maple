@@ -85,7 +85,7 @@ export interface FollowUpRelevanceDeps {
  * `agent/agent.ts` — keep them in sync.
  */
 function gateModelId(): string {
-	return process.env.OPENROUTER_GATE_MODEL ?? process.env.OPENROUTER_MODEL ?? "openai/gpt-5.6-luna"
+	return process.env.OPENROUTER_GATE_MODEL ?? process.env.OPENROUTER_MODEL ?? "z-ai/glm-5.3-flash:nitro"
 }
 
 /**

@@ -2,15 +2,14 @@ import { Link } from "@tanstack/react-router"
 
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
-import { cn } from "@maple/ui/lib/utils"
 
 import type { ListPodsResponse } from "@maple/domain/http"
 import type { PodSortKey, SortDirection } from "@/api/warehouse/infra"
 
 import { HostStatusBadge } from "./status-badge"
-import { ColumnHead, DataTable, MetaChip, ROW_LINK_CLASS } from "./primitives/data-table"
-import { severityLevel } from "./format"
-import { BAR_FILL, BAR_VALUE_TONE } from "./severity-tokens"
+import { ColumnHead, DataTable, ROW_LINK_CLASS } from "./primitives/data-table"
+import { MeterRows } from "./primitives/meter-rows"
+import { MetaLine } from "./primitives/meta-line"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 export type PodRow = ListPodsResponse["data"][number]
@@ -42,6 +41,19 @@ function workloadOf(pod: PodRow): { kind: string; name: string } | null {
 
 const formatPct = (fraction: number) => (Number.isFinite(fraction) ? `${Math.round(fraction * 100)}%` : "—")
 
+/** The meta line truncates to one line; this is what a hover recovers. */
+function metaTitle(pod: PodRow, workload: { kind: string; name: string } | null): string {
+	return [
+		pod.namespace && `ns ${pod.namespace}`,
+		workload && `${workload.kind} ${workload.name}`,
+		pod.nodeName && `node ${pod.nodeName}`,
+		pod.qosClass && `qos ${pod.qosClass}`,
+		pod.computeType === "fargate" && "fargate",
+	]
+		.filter(Boolean)
+		.join(" · ")
+}
+
 /** Cores read at very different magnitudes across a fleet; keep them comparable. */
 const formatCores = (cores: number) => {
 	if (!Number.isFinite(cores) || cores === 0) return "0"
@@ -58,27 +70,6 @@ function AvgPeak({ avg, peak, format }: { avg: number; peak: number; format: (n:
 			<span className="mx-1 text-foreground/30">→</span>
 			{format(peak)}
 		</span>
-	)
-}
-
-function MiniBar({ label, fraction }: { label: string; fraction: number }) {
-	const level = severityLevel(fraction)
-	const width = Math.min(Math.max(fraction, 0), 1) * 100
-	return (
-		<div className="flex items-center gap-1.5">
-			<span className="w-6 shrink-0 font-mono text-[9px] text-muted-foreground">{label}</span>
-			<div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
-				<div className={cn("h-full rounded-full", BAR_FILL[level])} style={{ width: `${width}%` }} />
-			</div>
-			<span
-				className={cn(
-					"w-8 shrink-0 text-right font-mono text-[10px] tabular-nums",
-					BAR_VALUE_TONE[level],
-				)}
-			>
-				{formatPct(fraction)}
-			</span>
-		</div>
 	)
 }
 
@@ -184,40 +175,36 @@ export function PodTable({
 								<span className="truncate font-mono text-[13px] font-medium text-foreground transition-colors group-hover:text-primary">
 									{pod.podName}
 								</span>
-								<HostStatusBadge lastSeen={pod.lastSeen} referenceTime={referenceTime} />
+								<HostStatusBadge
+									quiet
+									lastSeen={pod.lastSeen}
+									referenceTime={referenceTime}
+								/>
 							</div>
-							<div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-								{pod.namespace && <MetaChip>ns {pod.namespace}</MetaChip>}
-								{workload && (
-									<>
-										<span className="text-foreground/20">·</span>
-										<MetaChip>
-											{workload.kind} {workload.name}
-										</MetaChip>
-									</>
-								)}
-								{pod.nodeName && (
-									<>
-										<span className="text-foreground/20">·</span>
-										<MetaChip>node {pod.nodeName}</MetaChip>
-									</>
-								)}
-								{pod.qosClass && (
-									<>
-										<span className="text-foreground/20">·</span>
-										<MetaChip>qos {pod.qosClass}</MetaChip>
-									</>
-								)}
-								{pod.computeType === "fargate" && (
-									<span className="font-mono text-[10px] text-[var(--severity-warn)]">
-										fargate
-									</span>
-								)}
-							</div>
+							<MetaLine
+								title={metaTitle(pod, workload)}
+								items={[
+									pod.namespace && `ns ${pod.namespace}`,
+									workload && `${workload.kind} ${workload.name}`,
+									pod.nodeName && `node ${pod.nodeName}`,
+									pod.qosClass && `qos ${pod.qosClass}`,
+									pod.computeType === "fargate" && (
+										// Keyed because it sits in an array literal, even though
+										// `MetaLine` wraps each item in a keyed span of its own.
+										<span key="fargate" className="text-[var(--severity-warn)]">
+											fargate
+										</span>
+									),
+								]}
+							/>
 						</div>
-						<div className="hidden w-[176px] space-y-1 md:block">
-							<MiniBar label="CPU" fraction={pod.cpuLimitPctPeak} />
-							<MiniBar label="MEM" fraction={pod.memoryLimitPctPeak} />
+						<div className="hidden w-[176px] md:block">
+							<MeterRows
+								meters={[
+									{ label: "CPU", fraction: pod.cpuLimitPctPeak },
+									{ label: "MEM", fraction: pod.memoryLimitPctPeak },
+								]}
+							/>
 						</div>
 						<div className="hidden w-[132px] text-right lg:block">
 							<AvgPeak avg={pod.cpuUsage} peak={pod.cpuUsagePeak} format={formatCores} />

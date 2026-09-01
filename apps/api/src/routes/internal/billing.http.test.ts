@@ -1,7 +1,13 @@
 import { assert, describe, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Layer, Schema } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
-import { type EdgeCacheBackend, makeEdgeCacheService, makeMemoryBackend } from "@maple/cache"
+import { ConfigProvider, Context, Effect, Layer, Schema } from "effect"
+import { FetchHttpClient, HttpRouter } from "effect/unstable/http"
+import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
+import {
+	EdgeCacheService,
+	type EdgeCacheBackend,
+	makeEdgeCacheService,
+	makeMemoryBackend,
+} from "@maple/cache"
 import { Env } from "@/platform/Env"
 import {
 	CUSTOMER_CACHE_BUCKET,
@@ -16,13 +22,21 @@ import {
 } from "@/services/billing/autumn-client"
 import { AutumnClient, type AutumnResult } from "@/services/billing/autumn-http"
 import {
+	BillingApiGroup,
 	BillingConflictError,
 	BillingCustomer,
+	CurrentTenant,
+	V1SchemaErrors,
+	V1UnexpectedErrors,
 	UpdateBillingControlsRequest,
 	UpdateBillingSpendLimit,
 	UpdateBillingUsageAlert,
 } from "@maple/domain/http"
-import { decodeInvoices, resolveCycleWindow } from "./billing.http"
+import { DailySpendService } from "@/services/billing/DailySpendService"
+import { ProductEventsService } from "@/services/product-events/ProductEventsService"
+import { StripeClient } from "@/services/billing/stripe-http"
+import { decodeInvoices, HttpBillingLive, resolveCycleWindow } from "./billing.http"
+import { V1ErrorBoundaryLive } from "../v1/error-boundary"
 
 const ORG = "org_test_123"
 
@@ -507,5 +521,86 @@ describe("resolveAttachConflict", () => {
 			resolveAttachConflict(customerRead(trialing), "startup", conflict),
 		)
 		assert.deepStrictEqual(result, {})
+	})
+})
+
+// Changing the subscription and opening the Stripe portal are org-wide spend
+// decisions, gated like every other billing write in the group.
+describe("billing writes over HTTP", () => {
+	class BillingOnlyApi extends HttpApi.make("MapleInternalApi")
+		.add(BillingApiGroup)
+		.middleware(V1SchemaErrors)
+		.middleware(V1UnexpectedErrors) {}
+
+	const decodeTenant = Schema.decodeUnknownSync(CurrentTenant.TenantSchema)
+	const tenantWithRoles = (roles: ReadonlyArray<string>) =>
+		decodeTenant({ orgId: ORG, userId: "user_billing_test", roles, authMode: "self_hosted" })
+
+	const die = () => Effect.die(new Error("not reachable once the admin gate rejects"))
+
+	const makeHarness = (roles: ReadonlyArray<string>) => {
+		const routes = HttpApiBuilder.layer(BillingOnlyApi).pipe(
+			Layer.provide(HttpBillingLive),
+			Layer.provide(V1ErrorBoundaryLive),
+			Layer.provideMerge(
+				Layer.succeed(
+					CurrentTenant.SessionAuthorization,
+					CurrentTenant.SessionAuthorization.of({
+						bearer: (httpEffect) =>
+							Effect.provideService(httpEffect, CurrentTenant.Context, tenantWithRoles(roles)),
+					}),
+				),
+			),
+			Layer.provideMerge(Layer.succeed(EdgeCacheService, makeCache())),
+			Layer.provideMerge(Layer.succeed(DailySpendService, { get: die })),
+			Layer.provideMerge(Layer.succeed(ProductEventsService, { track: die, trackMany: die })),
+			Layer.provideMerge(Layer.succeed(StripeClient, { request: die })),
+			Layer.provideMerge(
+				Layer.succeed(AutumnClient, {
+					attach: die,
+					openCustomerPortal: die,
+				} as never),
+			),
+		)
+		const { handler, dispose } = HttpRouter.toWebHandler(routes as never, { disableLogger: true })
+
+		const post = async (path: string, body: unknown) => {
+			const response = await handler(
+				new Request(`http://maple.test${path}`, {
+					method: "POST",
+					headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+					body: JSON.stringify(body),
+				}),
+				Context.empty() as never,
+			)
+			const text = await response.text()
+			return { status: response.status, body: text.length === 0 ? null : JSON.parse(text) }
+		}
+
+		return { post, dispose }
+	}
+
+	it("refuses attach from a non-admin member", async () => {
+		const harness = makeHarness(["org:member"])
+		try {
+			const response = await harness.post("/internal/billing/attach", { planId: "startup" })
+			assert.strictEqual(response.status, 403)
+			assert.strictEqual(response.body._tag, "@maple/http/errors/BillingForbiddenError")
+		} finally {
+			await harness.dispose()
+		}
+	})
+
+	it("refuses the Stripe customer portal from a non-admin member", async () => {
+		const harness = makeHarness(["org:member"])
+		try {
+			const response = await harness.post("/internal/billing/portal", {
+				returnUrl: "https://maple.test/settings/billing",
+			})
+			assert.strictEqual(response.status, 403)
+			assert.strictEqual(response.body._tag, "@maple/http/errors/BillingForbiddenError")
+		} finally {
+			await harness.dispose()
+		}
 	})
 })

@@ -898,8 +898,38 @@ describe("per-model cost, tools and failure groups", () => {
 		])
 
 		expect(summary.tools).toEqual([
-			{ name: "read_file", calls: 2 },
-			{ name: "run_tests", calls: 1 },
+			{ name: "read_file", calls: 2, failed: 0 },
+			{ name: "run_tests", calls: 1, failed: 0 },
+		])
+	})
+
+	// The rail draws the failed share inside the tool's bar, so the count has to
+	// be per tool — a session-wide error count cannot say which tool broke.
+	it("counts the failed calls of each tool alongside its total", () => {
+		const summary = summarize([
+			agentSpan({ spanId: "a1", startMs: 0, durationMs: 10 * SECOND }),
+			toolSpan({ spanId: "t1", parentSpanId: "a1", startMs: 0, durationMs: 100 }),
+			toolSpan({
+				spanId: "t2",
+				parentSpanId: "a1",
+				startMs: 200,
+				durationMs: 100,
+				statusCode: "Error",
+			}),
+			// A tool the framework recorded as failed by attribute, on an Ok span.
+			toolSpan({
+				spanId: "t3",
+				parentSpanId: "a1",
+				startMs: 400,
+				durationMs: 100,
+				toolName: "run_tests",
+				genAi: { errorType: "timeout" },
+			}),
+		])
+
+		expect(summary.tools).toEqual([
+			{ name: "read_file", calls: 2, failed: 1 },
+			{ name: "run_tests", calls: 1, failed: 1 },
 		])
 	})
 
@@ -918,7 +948,7 @@ describe("per-model cost, tools and failure groups", () => {
 		])
 
 		expect(summary.tools).toEqual([
-			{ name: "read_file", calls: 2, description: "Read a file from the repository." },
+			{ name: "read_file", calls: 2, failed: 0, description: "Read a file from the repository." },
 		])
 	})
 

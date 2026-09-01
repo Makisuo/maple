@@ -254,7 +254,8 @@ const panels = [
 	/* ── Code frame ─────────────────────────────────────────── */
 	.icmp__codeframe {
 		border: 1px solid var(--border);
-		border-radius: 10px;
+		/* Square left corners so the accent border reads as a straight rule. */
+		border-radius: 0 10px 10px 0;
 		overflow: hidden;
 	}
 	.icmp__codeframe--bad {

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { isNavItemActive, isPathActive, navGroups, paletteNavItems, type NavItem } from "./nav-items"
+import {
+	isNavItemActive,
+	isPathActive,
+	navGroups,
+	paletteNavItems,
+	partitionInfraSubItems,
+	type NavItem,
+	type NavSurface,
+} from "./nav-items"
 import {
 	DISABLED_ORGANIZATION_FEATURE_FLAGS,
 	ENABLED_ORGANIZATION_FEATURE_FLAGS,
@@ -110,13 +118,14 @@ describe("navGroups", () => {
 		)
 	})
 
-	it("collapses the three k8s pages to one mark, leaving five unique glyphs", () => {
-		// The three k8s pages sharing one mark is deliberate — `NavRow` dedupes by
+	it("collapses the four k8s pages to one mark, leaving five unique glyphs", () => {
+		// The four k8s pages sharing one mark is deliberate — `NavRow` dedupes by
 		// icon identity. Five is exactly NavRow's all-or-nothing preview cap, so a
 		// sixth unique glyph here would drop the closed row's miniatures entirely
-		// rather than truncate them.
+		// rather than truncate them. Adding a k8s page is therefore free; adding a
+		// page with a new glyph is not.
 		const infra = findItem("Infrastructure")
-		expect(infra.subItems?.length).toBe(7)
+		expect(infra.subItems?.length).toBe(8)
 		expect(new Set(infra.subItems?.map((sub) => sub.icon)).size).toBe(5)
 	})
 })
@@ -150,5 +159,89 @@ describe("paletteNavItems", () => {
 	it("emits no duplicate ids", () => {
 		const ids = paletteNavItems().map((entry) => entry.id)
 		expect(new Set(ids).size).toBe(ids.length)
+	})
+})
+
+describe("partitionInfraSubItems", () => {
+	const subItems = () => findItem("Infrastructure").subItems ?? []
+	const titles = (items: ReadonlyArray<{ title: string }>) => items.map((item) => item.title)
+	const present = (...surfaces: NavSurface[]) => new Set<NavSurface>(surfaces)
+
+	it("shows every child while the org's surfaces are unknown", () => {
+		const { shown, hidden } = partitionInfraSubItems(subItems(), null, "/infra")
+		expect(shown).toHaveLength(8)
+		expect(hidden).toEqual([])
+	})
+
+	it("shows only the surfaces the org reports", () => {
+		const { shown, hidden } = partitionInfraSubItems(subItems(), present("hosts", "containers"), "/infra")
+		expect(titles(shown)).toEqual(["Hosts", "Containers"])
+		expect(titles(hidden)).toEqual([
+			"K8s Pods",
+			"K8s Nodes",
+			"K8s Workloads",
+			"K8s Services",
+			"Cloudflare",
+			"PlanetScale",
+		])
+	})
+
+	it("keeps the connected integration pages", () => {
+		const { shown } = partitionInfraSubItems(subItems(), present("hosts", "planetscale"), "/infra")
+		expect(titles(shown)).toEqual(["Hosts", "PlanetScale"])
+	})
+
+	// Landing on a page whose row the gate would hide has to leave the section
+	// pointing at where you are, not at nothing.
+	it("always shows the row for the current route", () => {
+		const { shown, hidden } = partitionInfraSubItems(
+			subItems(),
+			present("hosts"),
+			"/infra/kubernetes/nodes",
+		)
+		expect(titles(shown)).toEqual(["Hosts", "K8s Nodes"])
+		expect(titles(hidden)).not.toContain("K8s Nodes")
+	})
+
+	it("falls back to three starters when the org reports nothing", () => {
+		const { shown, hidden } = partitionInfraSubItems(subItems(), present(), "/infra")
+		expect(titles(shown)).toEqual(["Hosts", "Containers", "K8s Pods"])
+		expect(hidden).toHaveLength(5)
+	})
+
+	// "K8s Services" shares the k8sPods surface, so without the `starter` opt-out
+	// it would ride the fallback in and make the first-run list four rows — two of
+	// them Kubernetes. The fallback answers "what would you plug in?", and the
+	// lens is not something you plug in.
+	it("keeps a non-starter row out of the fallback even when its surface qualifies", () => {
+		const { shown, hidden } = partitionInfraSubItems(subItems(), present(), "/infra")
+		expect(titles(shown)).not.toContain("K8s Services")
+		expect(titles(hidden)).toContain("K8s Services")
+	})
+
+	it("shows a non-starter row once its surface actually reports", () => {
+		// "Hosts" rides along on every /infra/* path: its href is "/infra", and
+		// `isPathActive` treats that as a prefix. Pre-existing, and not what this
+		// test is about.
+		const { shown } = partitionInfraSubItems(subItems(), present("k8sPods"), "/infra/kubernetes/pods")
+		expect(titles(shown)).toEqual(["Hosts", "K8s Pods", "K8s Services"])
+	})
+
+	// Every child stays reachable — the split shortens the default list, it does
+	// not remove pages.
+	it("loses nothing between the two halves", () => {
+		for (const surfaces of [null, present(), present("hosts"), present("k8sPods", "cloudflare")]) {
+			const { shown, hidden } = partitionInfraSubItems(subItems(), surfaces, "/infra")
+			expect([...titles(shown), ...titles(hidden)].sort()).toEqual(titles(subItems()).sort())
+		}
+	})
+
+	// Sections whose children carry no gate must come back untouched — the
+	// function runs over all of them, not just Infrastructure.
+	it("leaves ungated sections whole", () => {
+		const explore = findItem("Explore").subItems ?? []
+		const { shown, hidden } = partitionInfraSubItems(explore, present(), "/traces")
+		expect(shown).toEqual([...explore])
+		expect(hidden).toEqual([])
 	})
 })

@@ -1,4 +1,3 @@
-import { useState } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
@@ -17,7 +16,8 @@ import { QueryErrorState } from "@/components/common/query-error-state"
 import { MagnifierIcon, ServerIcon, XmarkIcon } from "@/components/icons"
 import { PageHero } from "@/components/infra/primitives/page-hero"
 import { NodeTable, NodeTableLoading } from "@/components/infra/node-table"
-import { NodeHoneycomb } from "@/components/infra/node-honeycomb"
+import { NodeSummaryBand, type NodeStatusCounts } from "@/components/infra/node-summary-band"
+import { deriveHostStatus, type HostStatus } from "@/components/infra/format"
 import { NodesFilterSidebarView, type NodeFilters } from "@/components/infra/k8s-filter-sidebar"
 import { listNodesResultAtom, nodeFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
@@ -25,7 +25,13 @@ import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-r
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 
+const NodeStatusParam = Schema.optional(Schema.Literals(["active", "idle", "down"]))
+
 const nodesSearchSchema = Schema.Struct({
+	// In the URL rather than component state, so a filtered node list survives a
+	// reload and can be linked to — the same contract the pods route already has.
+	q: Schema.optional(Schema.String),
+	status: NodeStatusParam,
 	nodeNames: OptionalStringArrayParam,
 	clusters: OptionalStringArrayParam,
 	environments: OptionalStringArrayParam,
@@ -42,7 +48,12 @@ export const Route = createFileRoute("/infra/kubernetes/nodes/")({
 function NodesPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
-	const [searchText, setSearchText] = useState("")
+	const searchText = search.q ?? ""
+	const statusScope = search.status
+
+	const patchSearch = (patch: Partial<NodesSearchParams>) => {
+		void navigate({ search: (prev) => ({ ...prev, ...patch }) })
+	}
 
 	const { startTime, endTime } = useEffectiveTimeRange(
 		search.startTime,
@@ -76,7 +87,7 @@ function NodesPage() {
 	)
 
 	const onFilterChange = <K extends keyof NodeFilters>(key: K, value: NodeFilters[K]) => {
-		navigate({
+		void navigate({
 			search: (prev) => ({
 				...prev,
 				[key]:
@@ -86,8 +97,7 @@ function NodesPage() {
 	}
 
 	const onClearFilters = () => {
-		setSearchText("")
-		navigate({
+		void navigate({
 			search: {
 				startTime: search.startTime,
 				endTime: search.endTime,
@@ -100,7 +110,7 @@ function NodesPage() {
 		range: { startTime?: string; endTime?: string; presetValue?: string },
 		options?: { replace?: boolean },
 	) => {
-		navigate({
+		void navigate({
 			replace: options?.replace,
 			search: (prev) => ({ ...applyTimeRangeSearch(prev, range) }),
 		})
@@ -171,9 +181,18 @@ function NodesPage() {
 										}
 
 										const q = searchText.trim().toLowerCase()
-										const filtered = q
+										const named = q
 											? nodes.filter((n) => n.nodeName.toLowerCase().includes(q))
 											: nodes
+										// The band counts the whole scope, so it keeps saying what
+										// the search and the status cell just hid.
+										const counts = statusCounts(nodes, endTime)
+										const filtered = statusScope
+											? named.filter(
+													(n) =>
+														deriveHostStatus(n.lastSeen, endTime) === statusScope,
+												)
+											: named
 
 										return (
 											<div
@@ -181,9 +200,12 @@ function NodesPage() {
 													result.waiting ? "opacity-60" : ""
 												}`}
 											>
-												{filtered.length >= 4 && (
-													<NodeHoneycomb nodes={filtered} referenceTime={endTime} />
-												)}
+												<NodeSummaryBand
+													counts={counts}
+													activeScope={statusScope}
+													onScopeChange={(next) => patchSearch({ status: next })}
+													waiting={result.waiting}
+												/>
 												<div className="flex items-center justify-between gap-3">
 													<InputGroup className="w-64">
 														<InputGroupAddon>
@@ -193,13 +215,19 @@ function NodesPage() {
 															size="sm"
 															placeholder="Search nodes…"
 															value={searchText}
-															onChange={(e) => setSearchText(e.target.value)}
+															onChange={(e) =>
+																patchSearch({
+																	q: e.target.value || undefined,
+																})
+															}
 														/>
 														{searchText && (
 															<InputGroupAddon align="inline-end">
 																<InputGroupButton
 																	aria-label="Clear search"
-																	onClick={() => setSearchText("")}
+																	onClick={() =>
+																		patchSearch({ q: undefined })
+																	}
 																>
 																	<XmarkIcon />
 																</InputGroupButton>
@@ -211,18 +239,17 @@ function NodesPage() {
 														{filtered.length === 1 ? "node" : "nodes"}
 													</span>
 												</div>
-												{q && filtered.length === 0 ? (
+												{(q || statusScope) && filtered.length === 0 ? (
 													<Empty className="py-12">
 														<EmptyHeader>
 															<EmptyMedia variant="icon">
 																<MagnifierIcon size={16} />
 															</EmptyMedia>
-															<EmptyTitle>
-																No nodes match “{searchText}”
-															</EmptyTitle>
+															<EmptyTitle>No nodes match</EmptyTitle>
 															<EmptyDescription>
-																Try a different name, or clear the search to
-																see all nodes.
+																{q
+																	? `Nothing named “${searchText}” in this scope.`
+																	: "Nothing in this scope right now — which is good news."}
 															</EmptyDescription>
 														</EmptyHeader>
 													</Empty>
@@ -244,4 +271,18 @@ function NodesPage() {
 			</DashboardLayout.Root>
 		</PageRefreshProvider>
 	)
+}
+
+/** Fleet counts for the band, taken as of the window's end rather than the wall clock. */
+function statusCounts(nodes: ReadonlyArray<{ lastSeen: string }>, referenceTime: string): NodeStatusCounts {
+	let active = 0
+	let idle = 0
+	let down = 0
+	for (const node of nodes) {
+		const status: HostStatus = deriveHostStatus(node.lastSeen, referenceTime)
+		if (status === "active") active++
+		else if (status === "idle") idle++
+		else down++
+	}
+	return { total: nodes.length, active, idle, down }
 }

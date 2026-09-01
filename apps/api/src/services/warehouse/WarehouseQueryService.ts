@@ -1,6 +1,6 @@
 import { createClient as createClickHouseClient } from "@clickhouse/client-web"
 import { Tinybird } from "@tinybirdco/sdk"
-import { Context, Effect, Layer, Option, Redacted } from "effect"
+import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { WarehouseConfigError, type WarehouseQueryRequest } from "@maple/domain/http"
 import {
 	BackendDialect,
@@ -38,12 +38,50 @@ import { TinybirdOrgTokenService } from "@/services/integrations/TinybirdOrgToke
 // Re-export the executor types so existing import sites stay stable.
 export type { WarehouseQueryServiceApi, SqlQueryOptions }
 
-const createClickHouseSqlClient = (config: ClickHouseProtocolBackendConfig): WarehouseSqlClient => {
+/**
+ * A ClickHouse-protocol endpoint answering a query with a redirect is never
+ * legitimate, and a BYO cluster's URL is org-configured and validated when
+ * saved, not when used — so a target that passed validation can still answer a
+ * query with a 307 into the internal network. Refused here, and named so it is
+ * distinguishable from an ordinary 4xx (same reasoning as the ingest exporter's
+ * `redirect_refused` drop, which keeps redirects for Tinybird and R2).
+ */
+export class WarehouseRedirectRefusedError extends Schema.TaggedError<WarehouseRedirectRefusedError>()(
+	"@maple/api/warehouse/WarehouseRedirectRefusedError",
+	{
+		status: Schema.Number,
+		location: Schema.optionalKey(Schema.String),
+		message: Schema.String,
+	},
+) {}
+
+const redirectRefusingFetch =
+	(requestFetch: typeof fetch = fetch): typeof fetch =>
+	async (input, init) => {
+		const response = await requestFetch(input, { ...init, redirect: "manual" })
+		// `redirect: "manual"` surfaces the 3xx itself on Workers/undici, and an
+		// `opaqueredirect` response (status 0) in browser-shaped runtimes.
+		if ((response.status >= 300 && response.status < 400) || response.type === "opaqueredirect") {
+			const location = response.headers.get("location")
+			throw new WarehouseRedirectRefusedError({
+				status: response.status,
+				...(location === null ? undefined : { location }),
+				message: `ClickHouse redirect responses are not allowed (${response.status})`,
+			})
+		}
+		return response
+	}
+
+const createClickHouseSqlClient = (
+	config: ClickHouseProtocolBackendConfig,
+	requestFetch: typeof fetch = fetch,
+): WarehouseSqlClient => {
 	const client = createClickHouseClient({
 		url: config.url,
 		username: config.username,
 		password: config.password,
 		database: config.database,
+		fetch: redirectRefusingFetch(requestFetch),
 	})
 	// Wire-format parity with the Tinybird SDK: without this, JSONEachRow quotes
 	// 64-bit ints ("count":"42") and every schema-less query leaks strings into
@@ -514,5 +552,6 @@ export const __testables = {
 	createClickHouseSqlClient,
 	createTinybirdSdkSqlClient,
 	boundedResponseFetch,
+	redirectRefusingFetch,
 	isEmptyJsonBodyError,
 }

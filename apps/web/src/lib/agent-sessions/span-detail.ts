@@ -54,6 +54,16 @@ export interface SpanToolCall {
 	readonly description: string | undefined
 	readonly argumentsText: string | undefined
 	readonly resultText: string | undefined
+	/**
+	 * This span EXECUTED this call, rather than merely making it: the call came
+	 * from the span's own `gen_ai.tool.*` attributes.
+	 *
+	 * It is the only call a reader may read the span's status against. A model
+	 * span's output calls are its request — a model call that failed on
+	 * `context_length_exceeded` says nothing about whether the tools it asked
+	 * for ever ran, and colouring them red would claim it did.
+	 */
+	readonly own: boolean
 }
 
 /**
@@ -89,6 +99,7 @@ export function spanToolCalls(
 						description: undefined,
 						argumentsText: part.argumentsText,
 						resultText: undefined,
+						own: false,
 					},
 					span,
 					results,
@@ -191,6 +202,7 @@ function ownToolCall(span: AiSessionSpan): SpanToolCall | undefined {
 		description: toolDescription,
 		argumentsText: toolCallArguments === undefined ? undefined : jsonText(toolCallArguments),
 		resultText: toolCallResult === undefined ? undefined : jsonText(toolCallResult),
+		own: true,
 	}
 }
 

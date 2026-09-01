@@ -332,6 +332,14 @@ export interface SlackIntegrationServiceApi {
 		teamId: string,
 	) => Effect.Effect<SlackBotResolution, IntegrationsNotConnectedError | IntegrationsPersistenceError>
 	/**
+	 * The org bound to an active Slack team, without touching the row's encrypted
+	 * secrets — for internal callers that need attribution only (the bot's AI
+	 * usage reports), never credentials.
+	 */
+	readonly orgIdForTeam: (
+		teamId: string,
+	) => Effect.Effect<OrgId, IntegrationsNotConnectedError | IntegrationsPersistenceError>
+	/**
 	 * Revoke a workspace binding by Slack team id without calling Slack's
 	 * `auth.revoke` — for the two cases where Slack has already told us (or we've
 	 * already confirmed) the token is dead: an inbound `app_uninstalled` /
@@ -1228,6 +1236,37 @@ const make: Effect.Effect<
 		} satisfies SlackBotResolution
 	})
 
+	const orgIdForTeam = Effect.fn("SlackIntegrationService.orgIdForTeam")(function* (teamId: string) {
+		yield* Effect.annotateCurrentSpan({ teamId })
+		const rows = yield* database
+			.execute((db) =>
+				db
+					.select({ orgId: slackWorkspaces.orgId })
+					.from(slackWorkspaces)
+					.where(and(eq(slackWorkspaces.teamId, teamId), isNull(slackWorkspaces.revokedAt)))
+					.limit(1),
+			)
+			.pipe(Effect.mapError(toPersistenceError))
+		const row = rows[0]
+		if (row === undefined) {
+			return yield* Effect.fail(
+				new IntegrationsNotConnectedError({
+					message: "No active Slack installation for this team",
+				}),
+			)
+		}
+		const orgId = yield* decodeOrgId(row.orgId).pipe(
+			Effect.mapError(
+				(error) =>
+					new IntegrationsPersistenceError({
+						message: `Stored Slack workspace has an invalid orgId: ${error.message}`,
+					}),
+			),
+		)
+		yield* Effect.annotateCurrentSpan({ orgId })
+		return orgId
+	})
+
 	const revokeByTeamId = Effect.fn("SlackIntegrationService.revokeByTeamId")(function* (
 		teamId: string,
 		reason: SlackRevocationReason,
@@ -1347,6 +1386,7 @@ const make: Effect.Effect<
 		uninstall,
 		listChannels,
 		resolveForBot,
+		orgIdForTeam,
 		revokeByTeamId,
 		reconcileWorkspaces,
 	})

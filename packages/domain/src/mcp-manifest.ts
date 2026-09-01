@@ -25,7 +25,15 @@ export const MAPLE_MCP_SERVER_DESCRIPTION =
 	"Query Maple traces, logs, metrics, errors, dashboards, and alerts over the Model Context Protocol."
 
 export interface MapleMcpManifestOptions {
-	/** Origin of the API worker that serves `/mcp`, e.g. `https://api.maple.dev`. */
+	/**
+	 * Origin of the API worker that serves `/mcp`, e.g. `https://api.maple.dev`.
+	 *
+	 * Must come from configuration (`MAPLE_API_BASE_URL`, or the landing site's
+	 * build-time `API_ORIGIN`) — NEVER from the request's `Host`/`X-Forwarded-*`
+	 * headers. The manifest tells clients to send a Maple bearer token to this
+	 * origin, and it is served publicly cacheable, so a request-derived value is
+	 * a credential-redirection primitive for anyone who can forge a header.
+	 */
 	readonly apiBaseUrl: string
 	/** Origin of the marketing/docs site. Defaults to production. */
 	readonly siteUrl?: string

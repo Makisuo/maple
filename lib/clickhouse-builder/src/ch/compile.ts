@@ -15,7 +15,7 @@ import { aliased } from "./expr"
 import { raw, ident, escapeClickHouseString, compile as compileSqlFragment } from "../sql/sql-fragment"
 import { splitTerminalClauses } from "../sql/terminal-clauses"
 import { compileQuery, type SqlQuery } from "../sql/sql-query"
-import { PARAM_PLACEHOLDER_PATTERN, paramSchema, type ParamKind } from "./param"
+import { PARAM_MARKER_PREFIX, PARAM_PLACEHOLDER_PATTERN, paramSchema, type ParamKind } from "./param"
 import { encodeLiteral } from "./literal"
 import { Effect, Option, Schema } from "effect"
 import { QueryBuilderDefect, QueryBuilderError } from "./errors"
@@ -969,6 +969,17 @@ function resolveParams(sql: string, params: Record<string, unknown>): string {
 			message: `compile: no value given for param${missing.length > 1 ? "s" : ""} ${missing
 				.map((n) => `'${n}'`)
 				.join(", ")}`,
+		})
+	}
+
+	// Nothing placeholder-shaped may survive a resolved compile. The loop above
+	// only reports the names it recognised, so a marker naming a kind the pattern
+	// matches but `paramSchema` cannot resolve — or one a value smuggled past the
+	// escaper — would otherwise reach the warehouse as query text.
+	if (resolved.includes(PARAM_MARKER_PREFIX)) {
+		throw new QueryBuilderError({
+			code: "UnresolvedParam",
+			message: "compile: unresolved param placeholder remains in the compiled SQL",
 		})
 	}
 

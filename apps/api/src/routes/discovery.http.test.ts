@@ -1,8 +1,28 @@
 import { afterAll, describe, expect, it } from "@effect/vitest"
 import { MAPLE_MCP_SERVER_NAME } from "@maple/domain/mcp-manifest"
-import { Effect, Layer } from "effect"
+import { ConfigProvider, Effect, Layer } from "effect"
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http"
+import { Env } from "@/platform/Env"
 import { DiscoveryRouter, NotFoundRouter } from "./discovery.http"
+
+const API_ORIGIN = "https://api.maple.test"
+
+const envLive = Env.layer.pipe(
+	Layer.provide(
+		ConfigProvider.layer(
+			ConfigProvider.fromUnknown({
+				TINYBIRD_HOST: "https://api.tinybird.co",
+				TINYBIRD_TOKEN: "test-token",
+				MAPLE_AUTH_MODE: "self_hosted",
+				MAPLE_ROOT_PASSWORD: "test-root-password",
+				MAPLE_DEFAULT_ORG_ID: "default",
+				MAPLE_API_BASE_URL: `${API_ORIGIN}/`,
+				MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 4).toString("base64"),
+				MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
+			}),
+		),
+	),
+)
 
 // A registered route that must keep winning over the catch-all.
 const ProbeRouter = HttpRouter.use((router) =>
@@ -13,7 +33,7 @@ const ProbeRouter = HttpRouter.use((router) =>
 )
 
 const { handler, dispose } = HttpRouter.toWebHandler(
-	Layer.mergeAll(DiscoveryRouter, NotFoundRouter, ProbeRouter),
+	Layer.mergeAll(DiscoveryRouter, NotFoundRouter, ProbeRouter).pipe(Layer.provide(envLive)),
 	{ disableLogger: true },
 )
 afterAll(() => dispose())
@@ -55,17 +75,34 @@ describe("DiscoveryRouter", () => {
 			const manifest = await response.json()
 			expect(manifest.name).toBe(MAPLE_MCP_SERVER_NAME)
 			expect(manifest.remotes).toEqual([
-				expect.objectContaining({ type: "streamable-http", url: "https://api.example.com/mcp" }),
+				expect.objectContaining({ type: "streamable-http", url: `${API_ORIGIN}/mcp` }),
 			])
 		}
+	})
+
+	// The manifest tells clients where to send a Maple bearer token and is served
+	// publicly cacheable, so it must never be built from headers a client sets.
+	it("ignores forged forwarded headers when building the MCP manifest", async () => {
+		const response = await handler(
+			new Request("https://api.example.com/.well-known/mcp.json", {
+				headers: {
+					host: "attacker.example",
+					"x-forwarded-host": "attacker.example",
+					"x-forwarded-proto": "https",
+				},
+			}),
+		)
+		const manifest = await response.json()
+		expect(JSON.stringify(manifest)).not.toContain("attacker.example")
+		expect(manifest.remotes[0].url).toBe(`${API_ORIGIN}/mcp`)
 	})
 
 	it("answers the bare origin with a JSON index", async () => {
 		const response = await get("/")
 		expect(response.status).toBe(200)
 		const index = await response.json()
-		expect(index.openapi).toBe("https://api.example.com/openapi.json")
-		expect(index.mcp.endpoint).toBe("https://api.example.com/mcp")
+		expect(index.openapi).toBe(`${API_ORIGIN}/openapi.json`)
+		expect(index.mcp.endpoint).toBe(`${API_ORIGIN}/mcp`)
 	})
 })
 

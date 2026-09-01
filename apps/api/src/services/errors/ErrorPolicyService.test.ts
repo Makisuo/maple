@@ -6,6 +6,7 @@ import {
 	IssueEscalationPolicyRule,
 	IssueEscalationPolicyUpsertRequest,
 	OrgId,
+	RoleName,
 	UserId,
 } from "@maple/domain/http"
 import { AlertDestinationId, ErrorIssueId, IssueEscalationId } from "@maple/domain/primitives"
@@ -25,6 +26,9 @@ const asUserId = Schema.decodeUnknownSync(UserId)
 const asDestinationId = Schema.decodeUnknownSync(AlertDestinationId)
 const asIssueId = Schema.decodeUnknownSync(ErrorIssueId)
 const asEscalationId = Schema.decodeUnknownSync(IssueEscalationId)
+const asRoleName = Schema.decodeUnknownSync(RoleName)
+const ADMIN_ROLES = [asRoleName("org:admin")]
+const MEMBER_ROLES = [asRoleName("org:member")]
 
 const ORG = asOrgId("org_error_policy_service_test")
 const OTHER_ORG = asOrgId("org_error_policy_service_other")
@@ -80,6 +84,7 @@ describe("ErrorPolicyService", () => {
 			const updated = yield* policies.upsertNotificationPolicy(
 				ORG,
 				USER,
+				ADMIN_ROLES,
 				new ErrorNotificationPolicyUpsertRequest({
 					destinationIds: [destinationId],
 					notifyOnResolve: true,
@@ -98,6 +103,27 @@ describe("ErrorPolicyService", () => {
 			assert.deepStrictEqual(policies.parseNotificationDestinationIds(row?.destinationIdsJson), [
 				destinationId,
 			])
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
+	// The gate lives here rather than on the v1 route because the MCP tool and
+	// the chat apply path reach the same mutation.
+	it.effect("refuses a notification policy write from a non-admin", () =>
+		Effect.gen(function* () {
+			const policies = yield* ErrorPolicyService
+
+			const failure = yield* Effect.flip(
+				policies.upsertNotificationPolicy(
+					ORG,
+					USER,
+					MEMBER_ROLES,
+					new ErrorNotificationPolicyUpsertRequest({ enabled: false }),
+				),
+			)
+
+			assert.strictEqual(failure._tag, "@maple/http/errors/ErrorForbiddenError")
+			// And nothing was written.
+			assert.isNull(yield* policies.loadNotificationPolicyRow(ORG))
 		}).pipe(Effect.provide(makeLayer())),
 	)
 

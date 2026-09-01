@@ -116,4 +116,20 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		manifestDigest: "693be62c03142596a4fe081c20d22e0c72f002ee1725d5a900d51055a8f069a7",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
+	Object.freeze({
+		// The three discriminator counters on both service-operations rollups
+		// (ClickHouse migration 0023). Additive and metadata-only, exactly like
+		// v11 -> v12: no part is rewritten and no row moves, so the edge is six
+		// `ADD COLUMN` statements, a view recreation and a verify.
+		//
+		// projectRevision stays pinned to the v11/v12 value for the same reason
+		// recorded there — it is a hardcoded constant that no longer tracks the
+		// generator's header, and the identity this gate compares is the
+		// fingerprint/digest pair.
+		version: 13,
+		fingerprint: "7c44772116706420",
+		digest: "7c4477211670642086313b71593d848cbadefc24142a1c6e0fe5fd93a8dd7a6e",
+		manifestDigest: "353715a6b6c7a05f3227215b072ac95a8bd5ee67d5eec35f8c2b4c86839a1187",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
 ] as const)
