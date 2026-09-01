@@ -625,25 +625,23 @@ export class PlanetScaleConnectionService extends Context.Service<
 						Effect.mapError(toPersistenceError),
 						Effect.tapError(() =>
 							createdTarget
-								? scrapeTargetsService
-										.delete(orgId, scrapeTargetId, { allowManaged: true })
-										.pipe(
-											Effect.catchTag(
-												"@maple/http/errors/ScrapeTargetNotFoundError",
-												() => Effect.void,
+								? scrapeTargetsService.deleteManaged(orgId, scrapeTargetId).pipe(
+										Effect.catchTag(
+											"@maple/http/errors/ScrapeTargetNotFoundError",
+											() => Effect.void,
+										),
+										Effect.catch((error) =>
+											Effect.logWarning(
+												"Failed to compensate newly created PlanetScale target after binding failure",
+											).pipe(
+												Effect.annotateLogs({
+													orgId,
+													scrapeTargetId,
+													error: String(error),
+												}),
 											),
-											Effect.catch((error) =>
-												Effect.logWarning(
-													"Failed to compensate newly created PlanetScale target after binding failure",
-												).pipe(
-													Effect.annotateLogs({
-														orgId,
-														scrapeTargetId,
-														error: String(error),
-													}),
-												),
-											),
-										)
+										),
+									)
 								: Effect.void,
 						),
 					)
@@ -732,16 +730,17 @@ export class PlanetScaleConnectionService extends Context.Service<
 				// owns it (a user-created row adopted by a *different* connection stays).
 				const target = yield* selectManagedTarget(connection)
 				if (target !== null && target.managedBy === managedByForConnection(connection.id)) {
-					yield* scrapeTargetsService.delete(orgId, target.id, { allowManaged: true }).pipe(
-						Effect.catchTag("@maple/http/errors/ScrapeTargetNotFoundError", () =>
-							Effect.annotateCurrentSpan("maple.planetscale.disconnect_target_missing", true),
-						),
-						// `allowManaged` is the only thing delete validates, so this
-						// branch is unreachable — a reachable one is a bug, not a 400.
-						Effect.catchTag("@maple/http/errors/ScrapeTargetValidationError", (error) =>
-							Effect.die(error),
-						),
-					)
+					// A target that is already gone is the state we wanted.
+					yield* scrapeTargetsService
+						.deleteManaged(orgId, target.id)
+						.pipe(
+							Effect.catchTag("@maple/http/errors/ScrapeTargetNotFoundError", () =>
+								Effect.annotateCurrentSpan(
+									"maple.planetscale.disconnect_target_missing",
+									true,
+								),
+							),
+						)
 				}
 
 				yield* database

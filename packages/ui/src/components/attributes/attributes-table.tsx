@@ -1,6 +1,9 @@
 // BOUNDARY: This module intentionally carries opaque values; callers decode them before domain use.
 "use client"
 
+import { Option } from "effect"
+
+import { trySync } from "../../lib/try-sync"
 import { ChevronRightIcon } from "../icons"
 import { cn } from "../../lib/utils"
 import { useCopy } from "../../hooks/use-copy"
@@ -63,11 +66,7 @@ export function CopyableValue({
 export function tryParseJson(value: string): unknown | null {
 	const trimmed = value.trimStart()
 	if (trimmed[0] !== "{" && trimmed[0] !== "[") return null
-	try {
-		return JSON.parse(value)
-	} catch {
-		return null
-	}
+	return Option.getOrNull(trySync<unknown>(() => JSON.parse(value)))
 }
 
 export function AttributeRow({

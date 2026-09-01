@@ -19,6 +19,7 @@ import { Effect, Layer } from "effect"
 import {
 	buildResolved,
 	fetchTransport,
+	guardFlush,
 	makeSerializedFlush,
 	type Resolved,
 	runFlush,
@@ -153,14 +154,12 @@ export const make = (config: MapleFlushableConfig = {}): FlushableTelemetry => {
 		return resolvedPromise
 	}
 
-	// `flush` is documented to never reject: callers `await` it at shutdown and
-	// the auto-flush timer fires it as `void flush()`, where a rejection would be
-	// an unhandled rejection every tick (fatal under
-	// `--unhandled-rejections=strict`). `runFlush` already swallows per-signal
-	// transport errors; this catch covers resource resolution, which runs before
-	// it.
-	const flush = makeSerializedFlush(async (): Promise<void> => {
-		try {
+	// `guardFlush` is what makes `flush` documented-never-rejects hold: callers
+	// `await` it at shutdown and the auto-flush timer fires it as `void flush()`.
+	// It covers resource resolution, which runs before `runFlush` absorbs the
+	// per-signal transport errors.
+	const flush = makeSerializedFlush(
+		guardFlush("[MapleServerSDK]", async (): Promise<void> => {
 			const resolved = await ensureResolved()
 			await runFlush({
 				resolved,
@@ -174,10 +173,8 @@ export const make = (config: MapleFlushableConfig = {}): FlushableTelemetry => {
 				logPrefix: "[MapleServerSDK]",
 				onNoOp: noOpNotice,
 			})
-		} catch (err) {
-			console.error("[MapleServerSDK] flush failed:", err)
-		}
-	})
+		}),
+	)
 
 	const intervalMs =
 		config.autoFlushInterval === undefined

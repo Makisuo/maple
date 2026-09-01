@@ -71,6 +71,17 @@ const describeIncident = (input: UpsertAlertIssueInput): string => {
 	return `${input.signalType} ${input.comparator} ${bound} — ${observed}${group}`
 }
 
+/**
+ * The system-alerts actor row is upserted immediately above, so a follow-up
+ * select that finds nothing means the write and the read disagreed — a defect,
+ * not something the alert tick could handle. The org and agent name are what
+ * make it reproducible.
+ */
+class SystemActorMissingError extends Schema.TaggedError<SystemActorMissingError>()(
+	"@maple/api/errors/SystemActorMissingError",
+	{ orgId: Schema.String, agentName: Schema.String, message: Schema.String },
+) {}
+
 const ensureSystemAlertsActor = Effect.fn("issueHub.ensureSystemAlertsActor")(function* (orgId: OrgId) {
 	const database = yield* Database
 	const select = () =>
@@ -110,7 +121,18 @@ const ensureSystemAlertsActor = Effect.fn("issueHub.ensureSystemAlertsActor")(fu
 	)
 	const after = yield* select()
 	const row = after[0]
-	if (!row) return yield* Effect.die(new Error("Failed to ensure system-alerts actor row"))
+	if (!row) {
+		// The row was upserted two statements above; a select that then finds nothing
+		// means the write and the read disagree, which the alert tick cannot act on.
+		// oxlint-disable-next-line maple/no-effect-die
+		return yield* Effect.die(
+			new SystemActorMissingError({
+				orgId,
+				agentName: SYSTEM_ALERTS_AGENT_NAME,
+				message: "Failed to ensure the system-alerts actor row",
+			}),
+		)
+	}
 	return row.id
 })
 

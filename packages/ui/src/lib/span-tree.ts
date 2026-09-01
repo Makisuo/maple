@@ -1,6 +1,7 @@
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 import { TraceId, SpanId } from "@maple/domain"
 import type { Span, SpanNode } from "./types"
+import { trySync } from "./try-sync"
 
 const toTraceId = Schema.decodeSync(TraceId)
 const toSpanId = Schema.decodeSync(SpanId)
@@ -27,12 +28,11 @@ export interface SpanHierarchyRow {
 /** JSON-parse an attribute column, tolerating null/empty/garbage. */
 export function parseAttributes(value: string | null | undefined): Record<string, string> {
 	if (!value) return {}
-	try {
-		const parsed = JSON.parse(value)
-		return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {}
-	} catch {
-		return {}
-	}
+	const parsed = Option.filter(
+		trySync<unknown>(() => JSON.parse(value)),
+		(decoded): decoded is Record<string, string> => decoded !== null && typeof decoded === "object",
+	)
+	return Option.getOrElse(parsed, (): Record<string, string> => ({}))
 }
 
 /** Map a raw hierarchy row into a branded `Span`. */

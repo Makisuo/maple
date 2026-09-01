@@ -180,8 +180,19 @@ export const facetAttrExpr = (
 		? deploymentEnvExpr(resourceAttributes)
 		: resourceAttributes.get(attrKey)
 
+/**
+ * The sole element of a one-element list, else `undefined`.
+ *
+ * Every "one value narrows to a substring/equality match, more than one is set
+ * membership" branch in this file asks the same question, and `length === 1`
+ * answers it for the reader without answering it for the type system.
+ */
+export const soleValue = <A>(values: readonly A[]): A | undefined =>
+	values.length === 1 ? values[0] : undefined
+
 export function inclusionCondition(col: CH.Expr<string>, values: readonly string[]): CH.Condition {
-	return values.length === 1 ? col.eq(values[0]!) : CH.inList(col, values)
+	const only = soleValue(values)
+	return only === undefined ? CH.inList(col, values) : col.eq(only)
 }
 
 /**
@@ -194,9 +205,10 @@ export function inclusionCondition(col: CH.Expr<string>, values: readonly string
  * multi-select means (there it is set membership, not fuzzy matching).
  */
 export function matchOrIn(col: CH.Expr<string>, values: readonly string[], contains: boolean): CH.Condition {
-	return contains && values.length === 1
-		? CH.positionCaseInsensitive(col, CH.lit(values[0]!)).gt(0)
-		: inclusionCondition(col, values)
+	const only = contains ? soleValue(values) : undefined
+	return only === undefined
+		? inclusionCondition(col, values)
+		: CH.positionCaseInsensitive(col, CH.lit(only)).gt(0)
 }
 
 /**
@@ -259,11 +271,12 @@ export function tracesBaseWhereConditions(
 				$.SpanAttributes.get("http.route"),
 				$.SpanAttributes.get("url.path"),
 			)
-			return mm?.spanName === "contains" && v.length === 1
-				? CH.positionCaseInsensitive($.SpanName, CH.lit(v[0]!))
+			const needle = mm?.spanName === "contains" ? soleValue(v) : undefined
+			return needle === undefined
+				? inclusionCondition($.SpanName, v).or(inclusionCondition(display, v))
+				: CH.positionCaseInsensitive($.SpanName, CH.lit(needle))
 						.gt(0)
-						.or(CH.positionCaseInsensitive(display, CH.lit(v[0]!)).gt(0))
-				: inclusionCondition($.SpanName, v).or(inclusionCondition(display, v))
+						.or(CH.positionCaseInsensitive(display, CH.lit(needle)).gt(0))
 		}),
 		CH.when(opts.statusCode, (v: string) => $.StatusCode.eq(v)),
 		CH.whenTrue(!!opts.rootOnly, () => $.SpanKind.in_("Server", "Consumer").or($.ParentSpanId.eq(""))),
@@ -508,11 +521,7 @@ export function tracesAggregatesWhereConditions(
 		CH.when(services, (v: readonly string[]) =>
 			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),
-		CH.when(spanNames, (v: readonly string[]) =>
-			mm?.spanName === "contains" && v.length === 1
-				? CH.positionCaseInsensitive($.SpanName, CH.lit(v[0]!)).gt(0)
-				: inclusionCondition($.SpanName, v),
-		),
+		CH.when(spanNames, (v: readonly string[]) => matchOrIn($.SpanName, v, mm?.spanName === "contains")),
 		CH.whenTrue(!!opts.rootOnly, () => $.IsEntryPoint.eq(1)),
 		errorsOnlyCondition($.StatusCode, opts.errorsOnly),
 	]

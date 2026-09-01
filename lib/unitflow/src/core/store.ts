@@ -24,6 +24,7 @@ import {
 	trackSubscription,
 } from "./registry.js"
 import type * as KeyValueStore from "effect/unstable/persistence/KeyValueStore"
+import { UnitflowMisuseError } from "./defects.js"
 import { makeSlot, type PersistOptions } from "./persistence.js"
 import { awaitFirst, evaluate, type WaitPredicate } from "./wait-for.js"
 
@@ -132,10 +133,26 @@ export const ref = <A>(
 	store: Source<A> | Sink<A>,
 ): Effect.Effect<SubscriptionRef.SubscriptionRef<A>, never, Registry> => {
 	if (isCombined(store)) {
-		return Effect.die(new Error("Unitflow combined stores are computed and have no backing ref."))
+		// The shape is fixed when the model is declared, so a program that asks this
+		// once asks it every time — a misuse to fix, not a failure to handle.
+		// oxlint-disable-next-line maple/no-effect-die
+		return Effect.die(
+			new UnitflowMisuseError({
+				id: store.id,
+				message: "Unitflow combined stores are computed and have no backing ref.",
+			}),
+		)
 	}
 	if (isFlatten(store)) {
-		return Effect.die(new Error("Unitflow flattened stores are computed and have no backing ref."))
+		// The shape is fixed when the model is declared, so a program that asks this
+		// once asks it every time — a misuse to fix, not a failure to handle.
+		// oxlint-disable-next-line maple/no-effect-die
+		return Effect.die(
+			new UnitflowMisuseError({
+				id: store.id,
+				message: "Unitflow flattened stores are computed and have no backing ref.",
+			}),
+		)
 	}
 	return Effect.flatMap(Registry, (registry) => refFromRegistry(registry, store))
 }

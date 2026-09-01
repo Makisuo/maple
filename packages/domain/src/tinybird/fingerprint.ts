@@ -11,6 +11,8 @@
  * grouping quality.
  */
 
+import { Option, Schema } from "effect"
+
 export interface FingerprintInputs {
 	/** First normalized frame — stored on error_events and error_issues for display. */
 	readonly topFrame: string
@@ -207,15 +209,14 @@ const LABEL_KEYS = ["title", "message", "error", "_tag", "reason", "name"] as co
  * Parity caveat: JS `JSON.parse` is stricter than ClickHouse `isValidJSON`;
  * acceptable for the well-formed RFC7807 / serialized-error messages we see.
  */
+const decodeJsonObject = Schema.decodeUnknownOption(
+	Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+)
+
 function tryParseJsonObject(s: string): Record<string, unknown> | undefined {
-	try {
-		const v = JSON.parse(s) as unknown
-		return v !== null && typeof v === "object" && !Array.isArray(v)
-			? (v as Record<string, unknown>)
-			: undefined
-	} catch {
-		return undefined
-	}
+	// `Schema.Record` rejects arrays and scalars, so the non-object cases the SQL
+	// gate excludes decode to `None` alongside the malformed ones.
+	return Option.getOrUndefined(decodeJsonObject(s))
 }
 
 /**

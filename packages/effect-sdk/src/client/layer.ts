@@ -1,6 +1,7 @@
 import type { Duration } from "effect"
 import { Effect, Layer } from "effect"
 import { Otlp } from "effect/unstable/observability"
+import { trySyncOrUndefined } from "../shared/try-sync.js"
 import { browserNavigator } from "./browser-globals.js"
 import { consentHttpClientLayer } from "./consent-http-client.js"
 import { type ClientReplayConfig, startClientSession } from "./replay-loader.js"
@@ -90,9 +91,10 @@ export const layer = (config: MapleClientConfig) => {
 		if (nav.language) attributes["browser.language"] = nav.language
 	}
 	if (typeof Intl !== "undefined") {
-		try {
-			attributes["browser.timezone"] = Intl.DateTimeFormat().resolvedOptions().timeZone
-		} catch {}
+		// A locale-stripped build throws from `DateTimeFormat` rather than
+		// reporting an unknown zone.
+		const timezone = trySyncOrUndefined(() => Intl.DateTimeFormat().resolvedOptions().timeZone)
+		if (timezone) attributes["browser.timezone"] = timezone
 	}
 	if (config.environment) {
 		// Dual-emit: legacy key (pre-extracted by Tinybird MVs) + the canonical

@@ -375,12 +375,26 @@ const getOptionalString = <A>(option: Option.Option<A>): A | undefined => Option
 const getOptionalSecret = (option: Option.Option<Redacted.Redacted<string>>): string | undefined =>
 	Option.match(option, { onNone: () => undefined, onSome: Redacted.value })
 
+/**
+ * A secret the auth mode requires but the deployment did not supply. Config is
+ * read once at layer build, so this is a misconfigured deployment rather than a
+ * request that could be answered differently.
+ */
+class MissingAuthSecretError extends Schema.TaggedError<MissingAuthSecretError>()(
+	"@maple/auth/MissingAuthSecretError",
+	{ secret: Schema.String, message: Schema.String },
+) {}
+
 const requireSecret = (
 	option: Option.Option<Redacted.Redacted<string>>,
 	label: string,
 ): Effect.Effect<string, never> =>
 	Option.match(option, {
-		onNone: () => Effect.die(new Error(`${label} is required`)),
+		// Config is read once at layer build, so a missing secret is a misconfigured
+		// deployment, not a request that could be answered differently.
+		onNone: () =>
+			// oxlint-disable-next-line maple/no-effect-die
+			Effect.die(new MissingAuthSecretError({ secret: label, message: `${label} is required` })),
 		onSome: (value) => Effect.succeed(Redacted.value(value)),
 	})
 

@@ -1,5 +1,7 @@
 import { consentAllowedSince, hasConsent } from "@maple/browser-session"
 import { Effect, Layer } from "effect"
+
+import { trySyncOrUndefined } from "../shared/try-sync.js"
 import {
 	FetchHttpClient,
 	HttpBody,
@@ -35,13 +37,11 @@ interface OtlpBody {
 	readonly resourceLogs?: ReadonlyArray<OtlpResourceLogs>
 }
 
-const after = (value: unknown, threshold: bigint): boolean => {
-	try {
-		return BigInt(String(value ?? 0)) >= threshold
-	} catch {
-		return false
-	}
-}
+// A nanosecond timestamp that is not a numeric string throws out of `BigInt`
+// rather than producing NaN, and an event with no readable timestamp cannot be
+// shown to postdate consent — so it is dropped.
+const after = (value: unknown, threshold: bigint): boolean =>
+	trySyncOrUndefined(() => BigInt(String(value ?? 0)) >= threshold) ?? false
 
 const pruneTraces = (body: OtlpBody, threshold: bigint): OtlpBody | undefined => {
 	const resourceSpans = (body.resourceSpans ?? [])
@@ -87,12 +87,17 @@ export const filterOtlpRequestForConsent = (
 	if (!requireConsent) return request
 	if (request.url.endsWith("/v1/metrics")) return undefined
 	if (request.body._tag !== "Uint8Array") return undefined
+	// Bound before the closure: narrowing on `request.body` does not survive into one.
+	const body = request.body
 
 	const since = consentAllowedSince()
 	if (!Number.isFinite(since)) return undefined
-	try {
-		// SAFETY: The SDK's OTLP encoder created this body; malformed shapes throw below and fail closed.
-		const decoded = JSON.parse(new TextDecoder().decode(request.body.body)) as OtlpBody
+	// Unknown payloads must fail closed on an explicit-consent install: an
+	// undecodable body, or a `since` past the BigInt range, drops the request
+	// rather than forwarding it unfiltered.
+	return trySyncOrUndefined(() => {
+		// SAFETY: The SDK's OTLP encoder created this body; malformed shapes throw here and fail closed.
+		const decoded = JSON.parse(new TextDecoder().decode(body.body)) as OtlpBody
 		const threshold = BigInt(Math.trunc(since)) * 1_000_000n
 		const filtered = request.url.endsWith("/v1/traces")
 			? pruneTraces(decoded, threshold)
@@ -100,12 +105,9 @@ export const filterOtlpRequestForConsent = (
 				? pruneLogs(decoded, threshold)
 				: undefined
 		return filtered
-			? HttpClientRequest.setBody(request, HttpBody.jsonUnsafe(filtered, request.body.contentType))
+			? HttpClientRequest.setBody(request, HttpBody.jsonUnsafe(filtered, body.contentType))
 			: undefined
-	} catch {
-		// Unknown payloads must fail closed on an explicit-consent install.
-		return undefined
-	}
+	})
 }
 
 export const consentHttpClientLayer = (requireConsent: boolean) =>

@@ -983,10 +983,10 @@ describe("BYO ClickHouse redirect refusal", () => {
 
 	it("refuses a 3xx from the query endpoint and never follows the Location", async () => {
 		const seen: RequestInit[] = []
-		const requestFetch = (async (_input: unknown, init: RequestInit) => {
-			seen.push(init)
+		const requestFetch: typeof fetch = async (_input, init) => {
+			seen.push(init ?? {})
 			return new Response("", { status: 307, headers: { location: "http://169.254.169.254/" } })
-		}) as unknown as typeof fetch
+		}
 
 		const client = __testables.createClickHouseSqlClient(chConfig, requestFetch)
 		let thrown: unknown
@@ -1007,8 +1007,7 @@ describe("BYO ClickHouse redirect refusal", () => {
 	})
 
 	it("passes an ordinary 2xx response through untouched", async () => {
-		const requestFetch = (async () =>
-			new Response('{"n":1}\n', { status: 200 })) as unknown as typeof fetch
+		const requestFetch: typeof fetch = async () => new Response('{"n":1}\n', { status: 200 })
 		const response = await __testables.redirectRefusingFetch(requestFetch)("https://ch.example.com")
 		assert.strictEqual(response.status, 200)
 	})

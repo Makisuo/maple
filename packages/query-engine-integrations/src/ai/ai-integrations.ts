@@ -12,6 +12,8 @@
 // `apps/ingest/src/ai_session.rs`). Attributes arrive as `Map(String, String)`,
 // so a missing key reads back as `''` and an undecodable value yields no field.
 
+import { Effect, Option } from "effect"
+
 import {
 	AI_CORE_FIELDS,
 	AI_GENAI_FIELDS,
@@ -64,13 +66,8 @@ const readAttribute = (attributes: Record<string, string>, key: string): string 
 	return value === undefined || value.trim() === "" ? undefined : value
 }
 
-const parseJson = (raw: string): unknown => {
-	try {
-		return JSON.parse(raw)
-	} catch {
-		return undefined
-	}
-}
+const parseJson = (raw: string): unknown =>
+	Option.getOrUndefined(Effect.runSync(Effect.option(Effect.try((): unknown => JSON.parse(raw)))))
 
 const decodeStringArray = (raw: string): readonly string[] | undefined => {
 	// Real data carries both shapes for the same attribute: `'["stop"]'` from

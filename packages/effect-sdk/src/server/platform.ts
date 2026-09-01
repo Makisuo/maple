@@ -73,10 +73,10 @@ const archAttrs = (a: string): Attrs =>
 				),
 			}
 
-const lambdaAttrs = (env: PlatformInputs["env"]): Attrs => ({
+const lambdaAttrs = (env: PlatformInputs["env"], functionName: string): Attrs => ({
 	"cloud.provider": "aws",
 	"cloud.platform": "aws_lambda",
-	"faas.name": env.AWS_LAMBDA_FUNCTION_NAME!,
+	"faas.name": functionName,
 	...(env.AWS_LAMBDA_FUNCTION_VERSION && { "faas.version": env.AWS_LAMBDA_FUNCTION_VERSION }),
 	...(env.AWS_LAMBDA_LOG_STREAM_NAME && { "faas.instance": env.AWS_LAMBDA_LOG_STREAM_NAME }),
 	...(env.AWS_REGION
@@ -205,7 +205,10 @@ export const derivePlatformAttributes = (inputs: PlatformInputs): PlatformAttrib
 
 	// Lambda overrides std-env's provider when present; matches the original
 	// short-circuit semantics. Otherwise std-env's provider drives cloud.*.
-	const cloudAttrs = env.AWS_LAMBDA_FUNCTION_NAME ? lambdaAttrs(env) : providerAttrs(prov, env)
+	// The presence of the function name IS the Lambda detection, so hand it to
+	// `lambdaAttrs` rather than have it look the same variable up again.
+	const lambdaFunctionName = env.AWS_LAMBDA_FUNCTION_NAME
+	const cloudAttrs = lambdaFunctionName ? lambdaAttrs(env, lambdaFunctionName) : providerAttrs(prov, env)
 	const cloudResolved = "cloud.provider" in cloudAttrs
 
 	return {

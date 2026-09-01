@@ -55,7 +55,8 @@ export const withoutNull = <T>(
 	const rest = ast.types.filter((type) => type._tag !== "Null")
 	if (rest.length === ast.types.length || rest.length === 0) return undefined
 	const members = rest.map((type) => Schema.make(type))
-	return (members.length === 1 ? members[0]! : Schema.Union(members)) as Schema.Codec<T, any>
+	const only = members.length === 1 ? members[0] : undefined
+	return (only ?? Schema.Union(members)) as Schema.Codec<T, any>
 }
 
 // Re-export for consumer convenience

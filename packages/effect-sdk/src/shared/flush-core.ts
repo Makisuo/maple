@@ -6,7 +6,7 @@
 // resolution (env-lazy on Workers, env-auto-detect on Node, programmatic in the
 // browser) and its transport (plain `fetch` vs `fetch(keepalive)`); everything
 // downstream of a resolved endpoint lives here.
-import { Redacted } from "effect"
+import { Effect, Redacted, Result } from "effect"
 import type { LogBuffer, LogRecord } from "./flushable-logger.js"
 import type { MetricBuffer } from "./flushable-metrics.js"
 import type { OtlpSpan, SpanBuffer } from "./flushable-tracer.js"
@@ -164,14 +164,39 @@ const flushSignal = async <A>(args: {
 	state.disabledUntil = 0
 	const batch = buffer.drain()
 	if (batch.length === 0) return
-	try {
-		await transport.post(url, headers, body(batch))
-	} catch (err) {
+	const posted = await Effect.runPromise(
+		Effect.result(
+			Effect.tryPromise({
+				try: () => transport.post(url, headers, body(batch)),
+				catch: (cause) => cause,
+			}),
+		),
+	)
+	if (Result.isFailure(posted)) {
 		buffer.restore(batch)
 		state.disabledUntil = Date.now() + COOLDOWN_MS
-		console.error(`${logPrefix} ${signal} flush failed; cooldown 60s:`, err)
+		console.error(`${logPrefix} ${signal} flush failed; cooldown 60s:`, posted.failure)
 	}
 }
+
+/**
+ * Wrap a flush body so it logs its failure rather than rejecting.
+ *
+ * Every flush is documented never to reject: they are fired as `void flush()`
+ * from auto-flush timers, `pagehide`/`visibilitychange` handlers, and
+ * `ctx.waitUntil`, where a rejection is an unhandled rejection — fatal under
+ * `--unhandled-rejections=strict` — caused purely by telemetry. `runFlush`
+ * already absorbs per-signal transport errors; this covers everything around it,
+ * chiefly resource resolution.
+ */
+export const guardFlush =
+	<Args extends ReadonlyArray<unknown>>(logPrefix: string, run: (...args: Args) => Promise<void>) =>
+	async (...args: Args): Promise<void> => {
+		const outcome = await Effect.runPromise(
+			Effect.result(Effect.tryPromise({ try: () => run(...args), catch: (cause) => cause })),
+		)
+		if (Result.isFailure(outcome)) console.error(`${logPrefix} flush failed:`, outcome.failure)
+	}
 
 /** Serialize flush calls so concurrent timers/manual hooks cannot drain overlapping batches. */
 export const makeSerializedFlush = <Args extends ReadonlyArray<unknown>>(

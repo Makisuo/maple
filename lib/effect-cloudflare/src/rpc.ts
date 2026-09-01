@@ -433,6 +433,9 @@ export const toRpcStream = (stream: Stream.Stream<any, any, any>) =>
 					),
 				} satisfies RpcStreamEnvelope)
 			}
+			// A non-stream RPC failure that the envelope could not carry: there is no
+			// wire shape left to report it in, so it crosses the boundary as a defect.
+			// oxlint-disable-next-line maple/no-effect-die
 			return Effect.die(Cause.squash(cause))
 		}),
 	)

@@ -47,6 +47,7 @@ export const ANTICIPATED_ERROR_IDENTIFIER_LIST: ReadonlyArray<string> = [
 	"@maple/http/errors/ErrorIssuePullRequestNotFoundError",
 	"@maple/http/errors/ErrorIssueTransitionError",
 	"@maple/http/errors/ErrorValidationError",
+	"@maple/http/errors/IngestAttributeMappingForbiddenError",
 	"@maple/http/errors/IngestAttributeMappingNotFoundError",
 	"@maple/http/errors/IngestAttributeMappingValidationError",
 	"@maple/http/errors/IntegrationsForbiddenError",

@@ -8,6 +8,10 @@
  * shape here — pure, testable, no React — and let the component paint it.
  */
 
+import { Option } from "effect"
+
+import { trySync } from "./try-sync"
+
 export type ErrorBodyFormat = "json" | "text"
 
 export interface ErrorBody {
@@ -28,14 +32,13 @@ export function parseErrorBody(message: string): ErrorBody {
 	const trimmed = message.trim()
 
 	if (looksLikeJson(trimmed)) {
-		try {
-			// The delimiter check already guarantees an object or an array — the
-			// JSON grammar admits nothing else between those braces — so a parse
-			// that returns is a parse worth pretty-printing.
-			const parsed: unknown = JSON.parse(trimmed)
-			return { format: "json", full: JSON.stringify(parsed, null, 2) }
-		} catch {
-			// Truncated or otherwise malformed — fall through to text.
+		// The delimiter check already guarantees an object or an array — the JSON
+		// grammar admits nothing else between those braces — so a parse that
+		// succeeds is a parse worth pretty-printing. A truncated or otherwise
+		// malformed body decodes to `None` and falls through to text.
+		const parsed = trySync<unknown>(() => JSON.parse(trimmed))
+		if (Option.isSome(parsed)) {
+			return { format: "json", full: JSON.stringify(parsed.value, null, 2) }
 		}
 	}
 

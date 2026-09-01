@@ -128,6 +128,19 @@ export interface ScrapeTargetsServiceApi {
 		ScrapeTargetDeleteResponse,
 		ScrapeTargetNotFoundError | ScrapeTargetValidationError | ScrapeTargetPersistenceError
 	>
+	/**
+	 * Delete a target the calling integration owns, skipping the managed-ownership
+	 * guard rather than opting out of it with a flag.
+	 *
+	 * `delete(…, { allowManaged: true })` could not fire `ScrapeTargetValidationError`
+	 * but still declared it, which left every integration caller either widening its
+	 * own contract with an impossible 400 or killing the branch as a defect. The
+	 * caller is responsible for having checked `managedBy` first.
+	 */
+	readonly deleteManaged: (
+		orgId: OrgId,
+		targetId: ScrapeTargetId,
+	) => Effect.Effect<ScrapeTargetDeleteResponse, ScrapeTargetNotFoundError | ScrapeTargetPersistenceError>
 	readonly listAllEnabled: (
 		interval?: ScrapeIntervalSeconds,
 	) => Effect.Effect<ReadonlyArray<ScrapeTargetRow>, ScrapeTargetPersistenceError>
@@ -1037,13 +1050,18 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				return yield* rowToResponse(row.value)
 			})
 
-			const remove = Effect.fn("ScrapeTargetsService.delete")(function* (
+			/**
+			 * The delete itself, past the managed-ownership question.
+			 *
+			 * Split out so `deleteManaged` can expose a channel without
+			 * `ScrapeTargetValidationError` in it: that error comes only from
+			 * `rejectManaged`, so a caller that never runs the guard cannot receive
+			 * it, and shouldn't have to say what it would do if it did.
+			 */
+			const removeRow = Effect.fn("ScrapeTargetsService.deleteRow")(function* (
 				orgId: OrgId,
 				targetId: ScrapeTargetId,
-				options?: ScrapeTargetMutationOptions,
 			) {
-				yield* Effect.annotateCurrentSpan({ orgId, scrapeTargetId: targetId })
-				yield* rejectManaged(yield* requireTarget(orgId, targetId), options, "remove")
 				const rows = yield* database
 					.execute((db) =>
 						db
@@ -1069,6 +1087,24 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				return new ScrapeTargetDeleteResponse({
 					id: decodeTargetIdSync(deleted.value.id),
 				})
+			})
+
+			const remove = Effect.fn("ScrapeTargetsService.delete")(function* (
+				orgId: OrgId,
+				targetId: ScrapeTargetId,
+				options?: ScrapeTargetMutationOptions,
+			) {
+				yield* Effect.annotateCurrentSpan({ orgId, scrapeTargetId: targetId })
+				yield* rejectManaged(yield* requireTarget(orgId, targetId), options, "remove")
+				return yield* removeRow(orgId, targetId)
+			})
+
+			const removeManaged = Effect.fn("ScrapeTargetsService.deleteManaged")(function* (
+				orgId: OrgId,
+				targetId: ScrapeTargetId,
+			) {
+				yield* Effect.annotateCurrentSpan({ orgId, scrapeTargetId: targetId })
+				return yield* removeRow(orgId, targetId)
 			})
 
 			const listAllEnabled = Effect.fn("ScrapeTargetsService.listAllEnabled")(function* (
@@ -1486,6 +1522,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				create,
 				update,
 				delete: remove,
+				deleteManaged: removeManaged,
 				listAllEnabled,
 				scrapeForCollector,
 				recordScrapeResults,
