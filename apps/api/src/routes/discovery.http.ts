@@ -3,7 +3,7 @@ import { mapleMcpServerManifest } from "@maple/domain/mcp-manifest"
 import { Effect } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { OpenApi } from "effect/unstable/httpapi"
-import { requestOrigin } from "@/routes/v1/oauth-discovery.http"
+import { Env } from "@/platform/Env"
 
 /**
  * Machine discovery for agents and tooling.
@@ -16,10 +16,27 @@ import { requestOrigin } from "@/routes/v1/oauth-discovery.http"
  * - `GET /` — a JSON index pointing at all of the above, so the bare origin
  *   is self-describing instead of an empty 404.
  *
- * Everything here is public, unauthenticated, and cacheable.
+ * Everything here is public, unauthenticated, and cacheable — which is exactly
+ * why the self-describing URLs come from the configured `MAPLE_API_BASE_URL` and
+ * not from the request. `Host`/`X-Forwarded-*` are client-controlled, so a forged
+ * header would otherwise publish (and let an intermediary cache) a manifest that
+ * tells MCP clients to send their Maple bearer token to an attacker's origin.
  */
 
 const PUBLIC_CACHE = { "cache-control": "public, max-age=300" }
+
+/**
+ * Origin as the CALLER sees it, from headers the caller controls. Deliberately
+ * private and used only for the doc links echoed into an uncached 404 body —
+ * anything published, cached, or credential-bearing must use the configured
+ * `MAPLE_API_BASE_URL` instead.
+ */
+const untrustedRequestOrigin = (request: HttpServerRequest.HttpServerRequest) => {
+	const forwarded = (value: string | undefined) => value?.split(",")[0]?.trim()
+	const proto = forwarded(request.headers["x-forwarded-proto"]) ?? "https"
+	const host = forwarded(request.headers["x-forwarded-host"]) ?? request.headers.host
+	return host ? `${proto}://${host}` : ""
+}
 
 let openApiDocument: string | undefined
 const openApiJson = Effect.sync(() => {
@@ -49,22 +66,20 @@ export const DiscoveryRouter = HttpRouter.use((router) =>
 		yield* router.add("GET", "/openapi.json", serveOpenApi)
 		yield* router.add("GET", "/v2/openapi.json", serveOpenApi)
 
-		const serveManifest = (request: HttpServerRequest.HttpServerRequest) =>
-			Effect.succeed(
-				HttpServerResponse.jsonUnsafe(
-					mapleMcpServerManifest({ apiBaseUrl: requestOrigin(request) }),
-					{
-						headers: PUBLIC_CACHE,
-					},
-				),
-			)
+		const env = yield* Env
+		const origin = env.MAPLE_API_BASE_URL.replace(/\/+$/, "")
+
+		const manifest = HttpServerResponse.jsonUnsafe(mapleMcpServerManifest({ apiBaseUrl: origin }), {
+			headers: PUBLIC_CACHE,
+		})
+		const serveManifest = Effect.succeed(manifest)
 		yield* router.add("GET", "/.well-known/mcp.json", serveManifest)
 		yield* router.add("GET", "/.well-known/mcp/server.json", serveManifest)
 
-		yield* router.add("GET", "/", (request) =>
-			Effect.succeed(
-				HttpServerResponse.jsonUnsafe(apiIndex(requestOrigin(request)), { headers: PUBLIC_CACHE }),
-			),
+		yield* router.add(
+			"GET",
+			"/",
+			Effect.succeed(HttpServerResponse.jsonUnsafe(apiIndex(origin), { headers: PUBLIC_CACHE })),
 		)
 	}),
 )
@@ -77,7 +92,7 @@ export const DiscoveryRouter = HttpRouter.use((router) =>
  */
 export const NotFoundRouter = HttpRouter.use((router) =>
 	router.add("*", "/*", (request) => {
-		const origin = requestOrigin(request)
+		const origin = untrustedRequestOrigin(request)
 		const path = request.url.split("?")[0] ?? request.url
 		return Effect.succeed(
 			HttpServerResponse.jsonUnsafe(
