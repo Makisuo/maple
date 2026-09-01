@@ -79,6 +79,10 @@
 		"vitest": "^4.1.9"
 	},
 	"catalogs": {
+		"charts": {
+			"@tanstack/charts": "0.16.0",
+			"@tanstack/charts-scales": "0.16.0"
+		},
 		"clickhouse": {
 			"@clickhouse/client-web": "^1.21.0"
 		},

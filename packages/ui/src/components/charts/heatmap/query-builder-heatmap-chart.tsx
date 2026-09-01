@@ -848,45 +848,47 @@ export function QueryBuilderHeatmapChart({
 			// first measurement, where the scene's automatic margins are the better
 			// answer anyway.
 			margin: layout.margin ?? undefined,
-			x: {
-				// A pinned INSTANCE, not the bare factory: an inferred domain drops a
-				// fully-empty column, turning a hole into a missing axis slot.
-				//
-				// No `paddingOuter`: the plot rect is already the grid, so there is no
-				// surplus left inside it to buy back.
-				scale: scaleBand<string>(model.xDomain, [0, 1]).paddingInner(layout.paddingInnerX),
-				grid: false,
-				axis: {
-					line: false,
-					// No `spacing`/`count` policy: a band scale has no `ticks()`, so
-					// every category is a candidate and the axis thins them by MEASURED
-					// label collision, keeping the ends first on a categorical x. That
-					// is what the old `pickXTicks` stride approximated with a
-					// characters-times-6.3px estimate.
-					ticks: { size: 0, padding: 6 },
-				},
-			},
-			y: {
-				scale: scaleBand<string>(model.yDomain, [0, 1]).paddingInner(layout.paddingInnerY),
-				grid: false,
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 6,
-						// An all-ISO y axis is a time axis wearing timestamps; only the
-						// clock time distinguishes the rows, and the date repeated down
-						// the axis costs the width every label has to fit in. The
-						// truncation is what makes the locked `margin.left` safe — the
-						// axis would otherwise measure the full string and want a gutter
-						// it is not going to get.
-						format: (value: string) =>
-							truncateYLabel(shortenYLabel(value, allYIso), layout.yLabelChars),
+			scales: {
+				x: {
+					// A pinned INSTANCE, not the bare factory: an inferred domain drops a
+					// fully-empty column, turning a hole into a missing axis slot.
+					//
+					// No `paddingOuter`: the plot rect is already the grid, so there is no
+					// surplus left inside it to buy back.
+					scale: scaleBand<string>(model.xDomain, [0, 1]).paddingInner(layout.paddingInnerX),
+					grid: false,
+					axis: {
+						line: false,
+						// No `spacing`/`count` policy: a band scale has no `ticks()`, so
+						// every category is a candidate and the axis thins them by MEASURED
+						// label collision, keeping the ends first on a categorical x. That
+						// is what the old `pickXTicks` stride approximated with a
+						// characters-times-6.3px estimate.
+						ticks: { size: 0, padding: 6 },
 					},
-					// `thinTickLabels` only prioritises the ends automatically for a
-					// categorical X, so a y axis was thinned middle-out and could drop the
-					// first and last ROW labels — the two that say what the axis spans.
-					tickLabels: { thin: { priority: "ends" } },
+				},
+				y: {
+					scale: scaleBand<string>(model.yDomain, [0, 1]).paddingInner(layout.paddingInnerY),
+					grid: false,
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 6,
+							// An all-ISO y axis is a time axis wearing timestamps; only the
+							// clock time distinguishes the rows, and the date repeated down
+							// the axis costs the width every label has to fit in. The
+							// truncation is what makes the locked `margin.left` safe — the
+							// axis would otherwise measure the full string and want a gutter
+							// it is not going to get.
+							format: (value: string) =>
+								truncateYLabel(shortenYLabel(value, allYIso), layout.yLabelChars),
+						},
+						// `thinTickLabels` only prioritises the ends automatically for a
+						// categorical X, so a y axis was thinned middle-out and could drop the
+						// first and last ROW labels — the two that say what the axis spans.
+						tickLabels: { thin: { priority: "ends" } },
+					},
 				},
 			},
 			color: { scale: colors },

@@ -123,6 +123,7 @@ export {
 	linearYScale,
 	logYDomain,
 	logYScale,
+	minBarLength,
 	niceLinearDomain,
 	type DomainThreshold,
 	type LinearYDomainOptions,

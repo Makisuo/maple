@@ -139,32 +139,34 @@ export const TanstackThroughputAreaChart = memo(function TanstackThroughputAreaC
 				),
 				focusCrosshair(chromeColors),
 			],
-			x: {
-				scale: scalePoint,
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 8,
-						spacing: 72,
-						format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+			scales: {
+				x: {
+					scale: scalePoint,
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 8,
+							spacing: 72,
+							format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+						},
 					},
 				},
-			},
-			y: {
-				// Recharts anchors a numeric YAxis at 0 by default (production passes
-				// no `domain`, `throughput-area-chart.tsx:152`); TanStack's inferred
-				// linear domain starts at the data minimum, which floats the area off
-				// the axis. Same pin as `latency-line.tsx`.
-				scale: scaleLinear().domain([0, dataMax]),
-				nice: true,
-				grid: true,
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 6,
-						format: (value: number) => formatThroughput(value, rateLabel),
+				y: {
+					// Recharts anchors a numeric YAxis at 0 by default (production passes
+					// no `domain`, `throughput-area-chart.tsx:152`); TanStack's inferred
+					// linear domain starts at the data minimum, which floats the area off
+					// the axis. Same pin as `latency-line.tsx`.
+					scale: scaleLinear().domain([0, dataMax]),
+					nice: true,
+					grid: true,
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 6,
+							format: (value: number) => formatThroughput(value, rateLabel),
+						},
 					},
 				},
 			},

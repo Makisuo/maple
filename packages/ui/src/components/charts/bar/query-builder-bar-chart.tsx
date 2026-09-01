@@ -11,6 +11,7 @@ import {
 	cursorTooltip,
 	dashedGridY,
 	findFirstPartialIndex,
+	minBarLength,
 	thresholdRules,
 	timeseriesBandXAxis,
 	timeseriesYAxis,
@@ -258,6 +259,21 @@ export function QueryBuilderBarChart({
 	const yDomainFloor = yAxis.domain[0]
 	const floored = React.useCallback((value: number) => Math.max(yDomainFloor, value), [yDomainFloor])
 
+	/**
+	 * The minimum painted length of a non-zero bar — see `minBarLength`.
+	 *
+	 * Off for a stack, and off on a log axis. Lifting one segment of a stack
+	 * raises every segment above it, so the top of the column would state a total
+	 * the axis disagrees with; and on a log axis a share of the domain SPAN is not
+	 * a share of the painted height, so the same fraction would be an enormous
+	 * lift near the floor and none at all near the top.
+	 */
+	const liftBar = React.useMemo(() => {
+		if (stacked || logScale) return (value: number) => value
+		const lift = minBarLength(yAxis.domain)
+		return (value: number) => lift(value) ?? value
+	}, [stacked, logScale, yAxis.domain])
+
 	const definition = React.useMemo(() => {
 		/**
 		 * One lane of bars — the closed buckets, or the in-flight tail.
@@ -267,7 +283,7 @@ export function QueryBuilderBarChart({
 		 * them. Slicing the array per lane (what `splitAtFirstPartial` does for the
 		 * line) would be wrong here: bar width is inferred from the *minimum gap
 		 * between the x positions a mark can see*, so a one-bucket tail would see a
-		 * single position, fall through to `min(48, width / (count + 1) * 0.8)` and
+		 * single position, fall through to `min(48, width / max(2, count + 1) * 0.8)` and
 		 * paint at a completely different width from the bars beside it. Masking
 		 * keeps both lanes' x channels identical, so both infer the same bandwidth.
 		 *
@@ -289,7 +305,8 @@ export function QueryBuilderBarChart({
 				 *
 				 * `barY` does not need a band scale. With a continuous scale it derives
 				 * the bandwidth itself — `inferBandwidth` takes the minimum gap between
-				 * distinct plotted x positions and keeps 80% of it (`dist/bar.js`),
+				 * distinct plotted x positions and keeps 80% of it (`dist/bar.js:403-414`
+				 * at 0.16.0),
 				 * which is the equivalent of Recharts' `barCategoryGap="15%"` and is why
 				 * no `inset` is passed here: the gap is already in the bandwidth, and
 				 * insetting on top of it would subtract the gap twice.
@@ -317,7 +334,7 @@ export function QueryBuilderBarChart({
 				 */
 				y1: (cell: BarCell) => floored(cell.base),
 				y2: (cell: BarCell) =>
-					cell.partial === partialLane ? floored(cell.base + cell.value) : null,
+					cell.partial === partialLane ? floored(cell.base + liftBar(cell.value)) : null,
 				z: (cell: BarCell) => cell.key,
 				fill: (cell: BarCell) => cell.color,
 				fillOpacity: partialLane ? PARTIAL_FILL_OPACITY : undefined,
@@ -369,8 +386,10 @@ export function QueryBuilderBarChart({
 				lane(false),
 				lane(true),
 			],
-			x: xAxis,
-			y: yAxis.y,
+			scales: {
+				x: xAxis,
+				y: yAxis.y,
+			},
 			// Resolves on horizontal distance alone (`dist/focus.js`), so the whole
 			// column is live wherever the pointer sits inside it — which is what
 			// Recharts' category cursor did.
@@ -384,7 +403,19 @@ export function QueryBuilderBarChart({
 			focusRing: false,
 			tooltip: tooltip === "hidden" ? false : cursorTooltip(focusStore.anchor),
 		})
-	}, [cells, xAxis, yAxis, bandDomain, plotRows, floored, focusStore, stacked, thresholds, tooltip])
+	}, [
+		cells,
+		xAxis,
+		yAxis,
+		bandDomain,
+		plotRows,
+		floored,
+		liftBar,
+		focusStore,
+		stacked,
+		thresholds,
+		tooltip,
+	])
 
 	return (
 		<Timeseries.Provider model={model}>

@@ -153,57 +153,59 @@ export const BoxPlotSpike = memo(function BoxPlotSpike({
 					r: 2.5,
 				}),
 			],
-			x: {
-				// A PINNED instance, not the `scaleBand` factory. The factory infers the
-				// categories fine, but it also leaves `paddingInner` at zero, so each box
-				// fills its whole slot and the chart reads as a bar chart. Padding is the
-				// only lever that actually narrows a `boxY` box (see the `inset` note
-				// above), and pinning is the price of setting it.
-				scale: scaleBand<string>(
-					OPERATIONS.map((operation) => operation.name),
-					[0, 1],
-				).paddingInner(0.55),
-				axis: {
-					line: false,
-					ticks: { size: 0, padding: 8 },
-					// Operation names are long; rotating beats thinning, which would drop
-					// whole boxes' labels.
-					tickLabels: { rotate: -30, anchor: "end", fontSize: 10 },
+			scales: {
+				x: {
+					// A PINNED instance, not the `scaleBand` factory. The factory infers the
+					// categories fine, but it also leaves `paddingInner` at zero, so each box
+					// fills its whole slot and the chart reads as a bar chart. Padding is the
+					// only lever that actually narrows a `boxY` box (see the `inset` note
+					// above), and pinning is the price of setting it.
+					scale: scaleBand<string>(
+						OPERATIONS.map((operation) => operation.name),
+						[0, 1],
+					).paddingInner(0.55),
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 8 },
+						// Operation names are long; rotating beats thinning, which would drop
+						// whole boxes' labels.
+						tickLabels: { rotate: -30, anchor: "end", fontSize: 10 },
+					},
 				},
-			},
-			y: {
-				// LOG, not linear. Latency across operations spans orders of magnitude —
-				// a 2ms index lookup beside a 540ms table scan — and on a linear axis
-				// pinned at zero every fast operation's box collapses onto the baseline
-				// while the slow one's outliers set the maximum. The chart then shows
-				// only "one of these is slow", which the reader already knew, and hides
-				// the spread, which is the entire reason to draw a box plot.
-				//
-				// A log axis gives every operation the same visual budget for its own
-				// distribution. This is also what the production percentile charts
-				// cannot express at all.
-				// The domain follows the DATA with a little headroom, not the enclosing
-				// whole decades. Snapping outward added most of an unused decade at each
-				// end here, and on a log axis every wasted decade is a proportional
-				// slice of every box's height.
-				// d3's `scaleLog`, per the Scales and D3 guide: the compact scales cover
-				// linear/band/point/ordinal, and anything beyond that is a documented
-				// d3-scale dependency rather than something to hand-roll.
-				//
-				// A CONFIGURED INSTANCE, and called deliberately rather than defensively.
-				// `isScaleFactory()` is `typeof source === "function" && !("copy" in
-				// source)`, and `copy` lives on the INSTANCE, not on the factory
-				// function — verified: `"copy" in scaleLog` is false, `"copy" in
-				// scaleLog()` is true. So a bare `scaleLog` would be treated as a factory
-				// and would infer its domain from the data, which is a perfectly good
-				// default; it is simply not what this chart wants.
-				//
-				// It wants the domain to follow the data with a little headroom rather
-				// than snapping out to whole decades, because on a log axis every wasted
-				// decade takes a proportional slice out of every box's height.
-				scale: scaleLog().domain([minDuration * 0.85, maxDuration * 1.2]),
-				grid: true,
-				axis: { line: false, ticks: { size: 0, padding: 6, format: formatLatency } },
+				y: {
+					// LOG, not linear. Latency across operations spans orders of magnitude —
+					// a 2ms index lookup beside a 540ms table scan — and on a linear axis
+					// pinned at zero every fast operation's box collapses onto the baseline
+					// while the slow one's outliers set the maximum. The chart then shows
+					// only "one of these is slow", which the reader already knew, and hides
+					// the spread, which is the entire reason to draw a box plot.
+					//
+					// A log axis gives every operation the same visual budget for its own
+					// distribution. This is also what the production percentile charts
+					// cannot express at all.
+					// The domain follows the DATA with a little headroom, not the enclosing
+					// whole decades. Snapping outward added most of an unused decade at each
+					// end here, and on a log axis every wasted decade is a proportional
+					// slice of every box's height.
+					// d3's `scaleLog`, per the Scales and D3 guide: the compact scales cover
+					// linear/band/point/ordinal, and anything beyond that is a documented
+					// d3-scale dependency rather than something to hand-roll.
+					//
+					// A CONFIGURED INSTANCE, and called deliberately rather than defensively.
+					// `isScaleFactory()` is `typeof source === "function" && !("copy" in
+					// source)`, and `copy` lives on the INSTANCE, not on the factory
+					// function — verified: `"copy" in scaleLog` is false, `"copy" in
+					// scaleLog()` is true. So a bare `scaleLog` would be treated as a factory
+					// and would infer its domain from the data, which is a perfectly good
+					// default; it is simply not what this chart wants.
+					//
+					// It wants the domain to follow the data with a little headroom rather
+					// than snapping out to whole decades, because on a log axis every wasted
+					// decade takes a proportional slice out of every box's height.
+					scale: scaleLog().domain([minDuration * 0.85, maxDuration * 1.2]),
+					grid: true,
+					axis: { line: false, ticks: { size: 0, padding: 6, format: formatLatency } },
+				},
 			},
 			// Cartesian, so `focus: "nearest"` engages — the polar caveat from
 			// `pie-spike.tsx` does not apply. Nearest rather than `group-x`: the

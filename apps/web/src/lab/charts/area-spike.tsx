@@ -202,30 +202,33 @@ function AreaFigure({
 				),
 				focusCrosshair(chromeColors),
 			],
-			x: {
-				// The d3 time-scale FACTORY over `row.date`, inferred rather than
-				// pinned — see `line-spike.tsx` for the full note: a continuous domain
-				// is min/max over the union of the solid and dashed slices
-				// (`dist/scale-input.js` `inferScaleDomain`), so the partial-coverage
-				// hazard that forced the point scale's pinning does not exist here.
-				scale: scaleTime,
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 8,
-						spacing: 72,
-						// Ticks are scale-chosen Dates now, and `formatBucketLabel` returns
-						// "" for non-strings — round-trip through ISO (see `line-spike.tsx`).
-						format: (value: Date) => formatBucketLabel(value.toISOString(), axisContext, "tick"),
+			scales: {
+				x: {
+					// The d3 time-scale FACTORY over `row.date`, inferred rather than
+					// pinned — see `line-spike.tsx` for the full note: a continuous domain
+					// is min/max over the union of the solid and dashed slices
+					// (`dist/scale-input.js` `inferScaleDomain`), so the partial-coverage
+					// hazard that forced the point scale's pinning does not exist here.
+					scale: scaleTime,
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 8,
+							spacing: 72,
+							// Ticks are scale-chosen Dates now, and `formatBucketLabel` returns
+							// "" for non-strings — round-trip through ISO (see `line-spike.tsx`).
+							format: (value: Date) =>
+								formatBucketLabel(value.toISOString(), axisContext, "tick"),
+						},
 					},
 				},
-			},
-			y: {
-				scale: scaleLinear().domain([0, dataMax]),
-				nice: true,
-				grid: true,
-				axis: { line: false, ticks: { size: 0, padding: 6, format: formatNumber } },
+				y: {
+					scale: scaleLinear().domain([0, dataMax]),
+					nice: true,
+					grid: true,
+					axis: { line: false, ticks: { size: 0, padding: 6, format: formatNumber } },
+				},
 			},
 			focus: "group-x",
 			focusRing: false,

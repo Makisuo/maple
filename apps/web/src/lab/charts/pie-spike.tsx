@@ -159,6 +159,10 @@ function PieFigure({
 					// clipped at the plot edge otherwise, and a clipped "grown" slice reads
 					// as a rendering bug rather than an affordance.
 					inset: 8,
+					// Neither scale is read: `radialArc` takes raw angles and pixel radii, and
+					// this spike draws no label mark. `scales` is required all the same, so
+					// both are declared absent rather than left to infer an empty domain.
+					scales: { angle: null, radius: null },
 					marks: [
 						// Accessors, not `"startAngle"` field-name strings: `ChannelField`
 						// resolves `TDatum[TKey] extends TValue`, and `PieSpikeRow`'s
@@ -189,8 +193,7 @@ function PieFigure({
 			],
 			// No x/y axes exist in a polar chart; passing null keeps the cartesian
 			// guides off rather than letting them infer an empty domain.
-			x: null,
-			y: null,
+			scales: { x: null, y: null },
 			// Cartesian `focus: "nearest"` does not engage on polar marks — no tooltip, no
 			// focus state. `focusGroupAngle` is the polar-specific strategy.
 			focus: focusGroupAngle,

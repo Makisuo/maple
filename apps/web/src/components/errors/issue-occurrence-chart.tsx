@@ -10,13 +10,20 @@ import {
 	createTooltipFocusStore,
 	cursorTooltip,
 	dashedGridY,
+	integerTickValues,
+	linearYDomain,
+	minBarLength,
+	niceLinearDomain,
 	usePlotColors,
 	type PlotTooltipSeries,
 } from "@maple/ui/components/plot"
 import { cn } from "@maple/ui/lib/utils"
 import { formatBucketLabel, formatNumber } from "@maple/ui/lib/format"
 
-interface TimeseriesPoint {
+// A type alias, not an interface: only an alias gets TypeScript's implicit index
+// signature, which is what lets a row be read by key name — `linearYDomain` takes
+// `Record<string, unknown>` rows.
+type TimeseriesPoint = {
 	bucket: string
 	count: number
 }
@@ -92,6 +99,22 @@ export function IssueOccurrenceChart({ data, severity = null, className }: Issue
 		[colors.bar],
 	)
 
+	/**
+	 * An EXPLICIT count domain, anchored at zero and rounded to the ticks drawn.
+	 *
+	 * The bare `scaleLinear` factory infers from the data extent, which is the one
+	 * inference `plot-scales` exists to prevent — and an inferred domain has no
+	 * span to take a minimum bar length from. Counts, so the ticks are whole.
+	 */
+	const yDomain = React.useMemo(
+		() => niceLinearDomain(linearYDomain({ rows: sorted, keys: ["count"] })),
+		[sorted],
+	)
+	// A single occurrence in an hour of quiet is the reading this chart exists to
+	// show, and against a domain topping out in the thousands it paints as
+	// nothing. See `minBarLength`.
+	const liftCount = React.useMemo(() => minBarLength(yDomain), [yDomain])
+
 	const definition = React.useMemo(
 		() =>
 			defineChart({
@@ -99,28 +122,35 @@ export function IssueOccurrenceChart({ data, severity = null, className }: Issue
 					dashedGridY(),
 					barY(sorted, {
 						x: (point: TimeseriesPoint) => point.bucket,
-						y: (point: TimeseriesPoint) => point.count,
+						y: (point: TimeseriesPoint) => liftCount(point.count),
 						fill: colors.bar,
 						radius: 2,
 					}),
 				],
-				x: {
-					scale: scalePoint,
-					axis: {
-						line: false,
-						ticks: {
-							size: 0,
-							padding: 4,
-							format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+				scales: {
+					x: {
+						scale: scalePoint,
+						axis: {
+							line: false,
+							ticks: {
+								size: 0,
+								padding: 4,
+								format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+							},
+							tickLabels: { thin: { minGap: 12 } },
 						},
-						tickLabels: { thin: { minGap: 12 } },
 					},
-				},
-				y: {
-					scale: scaleLinear,
-					axis: {
-						line: false,
-						ticks: { size: 0, padding: 4, format: (value: number) => formatNumber(value) },
+					y: {
+						scale: scaleLinear().domain(yDomain),
+						axis: {
+							line: false,
+							ticks: {
+								size: 0,
+								padding: 4,
+								values: integerTickValues(yDomain),
+								format: (value: number) => formatNumber(value),
+							},
+						},
 					},
 				},
 				// Room for the axes to actually draw in. `bottom: 0` clipped the x tick
@@ -132,7 +162,7 @@ export function IssueOccurrenceChart({ data, severity = null, className }: Issue
 				focusRing: false,
 				tooltip: cursorTooltip(focusStore.anchor),
 			}),
-		[sorted, colors.bar, axisContext, focusStore],
+		[sorted, colors.bar, axisContext, focusStore, yDomain, liftCount],
 	)
 
 	if (sorted.length === 0) {

@@ -187,54 +187,57 @@ function LineFigure({
 				),
 				focusCrosshair(chromeColors),
 			],
-			x: {
-				// A d3 TIME scale over the precomputed `row.date`, per the Scales and D3
-				// guide — the compact scales stop at linear/band/point/ordinal, and a
-				// point scale over ISO strings put axis ticks on arbitrary buckets
-				// ("08:25 PM") instead of clock boundaries.
-				//
-				// The bare FACTORY, as the docs example passes it: `isScaleFactory` is
-				// `typeof source === "function" && !("copy" in source)`
-				// (`dist/scale-input.js`), and `"copy" in scaleTime` is false — `copy`
-				// lives on the instance, so the factory infers its domain from the data.
-				// Inference is safe here even though the solid and dashed marks each
-				// cover only a slice: a continuous domain is min/max over the union
-				// (`inferScaleDomain`), which is order-independent, and the slices
-				// overlap at the bridge row — so the inferred domain IS the old pinned
-				// one, [first bucket, last bucket]. The point-scale pinning existed
-				// because a CATEGORICAL union had no such guarantee.
-				//
-				// No `nice`: snapping the domain outward would detach the first/last
-				// point from the plot edges, which the Recharts arm this lab diffs
-				// against does not do.
-				//
-				// `scaleTime`, not the docs' `scaleUtc`: labels below render in LOCAL
-				// time (`formatBucketLabel` uses `toLocaleTimeString`), and only
-				// local-time ticks land on locally round boundaries — UTC ticks read as
-				// ":15"/":45" in a fractional-offset timezone.
-				scale: scaleTime,
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 8,
-						spacing: 72,
-						// Ticks are now Dates the SCALE chose, not row buckets, so this
-						// cannot pass `value.bucket` — and `formatBucketLabel` returns ""
-						// for anything but a string. Round-tripping through ISO keeps the
-						// labels byte-identical to the production arm's; ~7 ticks per
-						// render, so the allocation is noise.
-						format: (value: Date) => formatBucketLabel(value.toISOString(), axisContext, "tick"),
+			scales: {
+				x: {
+					// A d3 TIME scale over the precomputed `row.date`, per the Scales and D3
+					// guide — the compact scales stop at linear/band/point/ordinal, and a
+					// point scale over ISO strings put axis ticks on arbitrary buckets
+					// ("08:25 PM") instead of clock boundaries.
+					//
+					// The bare FACTORY, as the docs example passes it: `isScaleFactory` is
+					// `typeof source === "function" && !("copy" in source)`
+					// (`dist/scale-input.js`), and `"copy" in scaleTime` is false — `copy`
+					// lives on the instance, so the factory infers its domain from the data.
+					// Inference is safe here even though the solid and dashed marks each
+					// cover only a slice: a continuous domain is min/max over the union
+					// (`inferScaleDomain`), which is order-independent, and the slices
+					// overlap at the bridge row — so the inferred domain IS the old pinned
+					// one, [first bucket, last bucket]. The point-scale pinning existed
+					// because a CATEGORICAL union had no such guarantee.
+					//
+					// No `nice`: snapping the domain outward would detach the first/last
+					// point from the plot edges, which the Recharts arm this lab diffs
+					// against does not do.
+					//
+					// `scaleTime`, not the docs' `scaleUtc`: labels below render in LOCAL
+					// time (`formatBucketLabel` uses `toLocaleTimeString`), and only
+					// local-time ticks land on locally round boundaries — UTC ticks read as
+					// ":15"/":45" in a fractional-offset timezone.
+					scale: scaleTime,
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 8,
+							spacing: 72,
+							// Ticks are now Dates the SCALE chose, not row buckets, so this
+							// cannot pass `value.bucket` — and `formatBucketLabel` returns ""
+							// for anything but a string. Round-tripping through ISO keeps the
+							// labels byte-identical to the production arm's; ~7 ticks per
+							// render, so the allocation is noise.
+							format: (value: Date) =>
+								formatBucketLabel(value.toISOString(), axisContext, "tick"),
+						},
 					},
 				},
-			},
-			y: {
-				scale: scaleLinear().domain([0, dataMax]),
-				nice: true,
-				grid: true,
-				axis: {
-					line: false,
-					ticks: { size: 0, padding: 6, format: (value: number) => formatLatency(value) },
+				y: {
+					scale: scaleLinear().domain([0, dataMax]),
+					nice: true,
+					grid: true,
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 6, format: (value: number) => formatLatency(value) },
+					},
 				},
 			},
 			focus: "group-x",

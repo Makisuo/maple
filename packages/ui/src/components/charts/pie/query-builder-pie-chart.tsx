@@ -489,84 +489,86 @@ export function QueryBuilderPieChart({
 			strokeWidth: SLICE_STROKE_WIDTH,
 		}
 
-		return defineChart({
-			marks: [
-				polar({
-					radiusRatio: 1,
-					inset: PLOT_INSET,
-					/**
-					 * Both scales exist for the LABEL mark alone — `radialArc` reads raw
-					 * angles and pixel radii and declares neither.
-					 *
-					 * Pinned domains, and pinned for different reasons. The angle scale is
-					 * ranged over the polar span (0…2π), so a domain of the same numbers
-					 * makes it the identity and a label can be positioned in the radians
-					 * `pie()` already computed. The radius scale is ranged from the donut
-					 * hole to the outer edge, so a 0…1 domain turns "how far across the
-					 * ring" into a single number that means the same thing on a pie and on
-					 * a donut of any hole size.
-					 *
-					 * Fresh instances per definition, never module scope: the layout
-					 * resolver calls `scale.range()` on whatever it is handed, so a shared
-					 * instance would carry one chart's pixel range into the next.
-					 */
-					angle: { scale: scaleLinear().domain([0, Math.PI * 2]) },
-					radius: {
-						scale: scaleLinear().domain([0, 1]),
-						range: [innerRadiusFor, (context) => context.radius],
+		/**
+		 * TWO arc marks, not one, and that is the whole hover affordance:
+		 * `outerRadius` and `fillOpacity` are per-MARK (a `PolarLength` and a flat
+		 * number), never per-datum, so the only way to give one slice its own radius
+		 * is to give it its own mark over a one-element slice of the same transformed
+		 * data. Polar marks take no `states`, so there is no in-definition route to a
+		 * hover style at all.
+		 */
+		const arcs = [
+			radialArc(rest, {
+				...arcOptions,
+				outerRadius: (context) => context.radius,
+				fillOpacity: activeName === null ? undefined : REST_OPACITY,
+			}),
+			radialArc(active, {
+				...arcOptions,
+				outerRadius: (context) => context.radius * HOVER_GROWTH,
+			}),
+		] as const
+
+		const labels = radialText(slices, {
+			angle: (slice: PieSlice) => slice.angle,
+			// `null` skips the label AND its focus point, which is how a wedge too
+			// narrow to host text opts out without leaving an invisible target behind.
+			radius: (slice: PieSlice) =>
+				slice.fraction < LABEL_MIN_FRACTION ? null : donut ? LABEL_RADIUS_DONUT : LABEL_RADIUS_PIE,
+			text: (slice: PieSlice) =>
+				showPercent ? fmtPercent(slice.fraction, 1) : fmtValue(slice.value, unit),
+			// White on the wedge, as before. The Recharts-era chart also carried a dark
+			// paint-order stroke behind it; `radialText` has no stroke, so a label over
+			// a pale slice leans on the palette's contrast instead.
+			fill: "#ffffff",
+			fontSize: 11,
+			fontWeight: 600,
+		})
+
+		const frame = { radiusRatio: 1, inset: PLOT_INSET } as const
+
+		/**
+		 * TWO complete `polar()` calls, chosen by `showLabels`, rather than one call
+		 * with a conditional mark and conditional scales.
+		 *
+		 * Both scales exist for the LABEL mark alone — `radialArc` reads raw angles
+		 * and pixel radii and declares neither — so with labels off both must be
+		 * `null`, or `resolvePolarLayout` throws on a scale configured for a channel
+		 * no mark materializes. `PolarScales` derives that requirement FROM the marks
+		 * tuple, so the two have to vary together in one inference: a ternary inside a
+		 * single call gives the checker a marks tuple that always admits the label and
+		 * a scales union it therefore rejects.
+		 *
+		 * Pinned domains, and pinned for different reasons. The angle scale is ranged
+		 * over the polar span (0…2π), so a domain of the same numbers makes it the
+		 * identity and a label can be positioned in the radians `pie()` already
+		 * computed. The radius scale is ranged from the donut hole to the outer edge,
+		 * so a 0…1 domain turns "how far across the ring" into a single number that
+		 * means the same thing on a pie and on a donut of any hole size.
+		 *
+		 * Fresh instances per definition, never module scope: the layout resolver
+		 * calls `scale.range()` on whatever it is handed, so a shared instance would
+		 * carry one chart's pixel range into the next.
+		 */
+		const wedges = showLabels
+			? polar({
+					...frame,
+					scales: {
+						angle: { scale: scaleLinear().domain([0, Math.PI * 2]) },
+						radius: {
+							scale: scaleLinear().domain([0, 1]),
+							range: [innerRadiusFor, (context) => context.radius],
+						},
 					},
-					marks: [
-						/**
-						 * TWO arc marks, not one, and that is the whole hover affordance:
-						 * `outerRadius` and `fillOpacity` are per-MARK (a `PolarLength` and
-						 * a flat number), never per-datum, so the only way to give one slice
-						 * its own radius is to give it its own mark over a one-element slice
-						 * of the same transformed data. Polar marks take no `states`, so
-						 * there is no in-definition route to a hover style at all.
-						 */
-						radialArc(rest, {
-							...arcOptions,
-							outerRadius: (context) => context.radius,
-							fillOpacity: activeName === null ? undefined : REST_OPACITY,
-						}),
-						radialArc(active, {
-							...arcOptions,
-							outerRadius: (context) => context.radius * HOVER_GROWTH,
-						}),
-						...(showLabels
-							? [
-									radialText(slices, {
-										angle: (slice: PieSlice) => slice.angle,
-										// `null` skips the label AND its focus point, which is
-										// how a wedge too narrow to host text opts out without
-										// leaving an invisible target behind.
-										radius: (slice: PieSlice) =>
-											slice.fraction < LABEL_MIN_FRACTION
-												? null
-												: donut
-													? LABEL_RADIUS_DONUT
-													: LABEL_RADIUS_PIE,
-										text: (slice: PieSlice) =>
-											showPercent
-												? fmtPercent(slice.fraction, 1)
-												: fmtValue(slice.value, unit),
-										// White on the wedge, as before. The Recharts-era chart
-										// also carried a dark paint-order stroke behind it;
-										// `radialText` has no stroke, so a label over a pale
-										// slice leans on the palette's contrast instead.
-										fill: "#ffffff",
-										fontSize: 11,
-										fontWeight: 600,
-									}),
-								]
-							: []),
-					],
-				}),
-			],
+					marks: [...arcs, labels],
+				})
+			: polar({ ...frame, scales: { angle: null, radius: null }, marks: [...arcs] })
+
+		return defineChart({
+			marks: [wedges],
 			// No x/y axes exist in a polar chart; passing null keeps the cartesian
 			// guides off rather than letting them infer an empty domain.
-			x: null,
-			y: null,
+			scales: { x: null, y: null },
 			// Cartesian `focus: "nearest"` does not engage on polar marks at all — no
 			// tooltip, no focus state, no error — and the library's polar strategy,
 			// `focusGroupAngle`, engages far too readily: see `wedgeFocus`, which

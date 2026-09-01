@@ -87,13 +87,36 @@ describe("throughput area chart: derived error series", () => {
 		expect(focusDotYs(container)).toHaveLength(1)
 	})
 
-	it("places a half-error bucket midway up the band", () => {
-		const { container } = render(<ThroughputAreaChart data={rows(() => ({ errorRate: 0.5 }))} />)
-		const [throughputY, errorY] = focusDotYs(container)
-		// Smaller y is higher up. The axis runs [0, 3600] over a 400px box, so the
-		// error dot at 1800 sits halfway between the band's top edge and the floor.
-		const floor = throughputY + (errorY - throughputY) * 2
-		expect(errorY - throughputY).toBeCloseTo(floor - errorY, 5)
+	it("plots the errors as a count on the throughput axis, not on a second one", () => {
+		// ONE y axis: every tick carries the throughput unit and none is a
+		// percentage. A right-hand rate axis was tried and read worse on a chart
+		// this size — see `ERROR_KEY`.
+		const { container } = render(<ThroughputAreaChart data={rows(() => ({ errorRate: 0.25 }))} />)
+		const labels = axisTickLabels(container)
+		expect(labels.some((label) => label.endsWith("/h"))).toBe(true)
+		expect(labels.some((label) => label.endsWith("%"))).toBe(false)
+	})
+
+	it("positions the error line at its true share of the band", () => {
+		// Throughput is fixed at 3,600/h in all three, so all three share one y
+		// domain and the error values 900 / 1,800 / 2,700 are evenly spaced. On a
+		// shared linear axis their pixels must be evenly spaced too — which is what
+		// "the error line sits at its real fraction of the band" means, and what a
+		// second axis or a rescaled series would break.
+		const errorYFor = (errorRate: number) => {
+			const view = render(<ThroughputAreaChart data={rows(() => ({ errorRate }))} />)
+			// Two dots: throughput above, errors below. Larger y is lower down.
+			const errorY = focusDotYs(view.container).at(-1) as number
+			view.unmount()
+			return errorY
+		}
+
+		const [low, mid, high] = [errorYFor(0.25), errorYFor(0.5), errorYFor(0.75)]
+		// One decimal: `cy` is serialised rounded, so the two ~82.7px gaps differ in
+		// the hundredths. Anything non-linear would be out by whole pixels.
+		expect(low - mid).toBeCloseTo(mid - high, 1)
+		// ...and a non-zero gap, so three identical positions cannot pass.
+		expect(low - mid).toBeGreaterThan(1)
 	})
 
 	it("draws no error line, and no error key, when nothing failed", () => {

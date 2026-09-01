@@ -163,23 +163,25 @@ function LogsVolumePlot({
 						]
 					: []),
 			],
-			x: {
-				scale: scalePoint,
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 4,
-						format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+			scales: {
+				x: {
+					scale: scalePoint,
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 4,
+							format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+						},
+						tickLabels: { thin: { minGap: 12 } },
 					},
-					tickLabels: { thin: { minGap: 12 } },
 				},
-			},
-			y: {
-				scale: scaleLinear().domain(yDomain),
-				axis: {
-					line: false,
-					ticks: { size: 0, padding: 4, format: (value: number) => formatNumber(value) },
+				y: {
+					scale: scaleLinear().domain(yDomain),
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 4, format: (value: number) => formatNumber(value) },
+					},
 				},
 			},
 			// `bottom` is left unset: an authored side is a hard lock, and `bottom: 0`
