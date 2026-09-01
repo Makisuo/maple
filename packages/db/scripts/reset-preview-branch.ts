@@ -46,7 +46,9 @@
  * Exits non-zero if the reset cannot be completed; the caller falls back to
  * the slow delete + recreate path, so failure here costs time, not correctness.
  *
- * Usage:  DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:reset-preview
+ * Usage:  RESET_EXPECTED_BRANCH=pr-<n> DATABASE_URL="<pr branch dsn>" \
+ *             bun run --cwd packages/db db:reset-preview
+ * (or RESET_PREVIEW_CONFIRM=1 for a manual run — see {@link resetGuardError})
  */
 import postgres from "postgres"
 
@@ -70,19 +72,44 @@ const quoteIdent = (name: string): string => {
 	return `"${name}"`
 }
 
+/** Only `pr-<n>` PlanetScale branches are ever a legitimate reset target. */
+export const isPreviewBranchName = (name: string | undefined): boolean =>
+	name !== undefined && /^pr-\d+$/.test(name)
+
+/**
+ * Tripwire: this script empties whatever DATABASE_URL points at, and the
+ * connected role inherits `postgres`, so nothing downstream would stop it from
+ * gutting prod/stg. The caller must therefore assert WHAT it is resetting —
+ * `RESET_EXPECTED_BRANCH=pr-<n>` (planetscale-pr-branch.ts sets it from the
+ * branch it minted the credential for) — or a human must set
+ * `RESET_PREVIEW_CONFIRM=1`. The old guard keyed off `process.env.CI`, which
+ * any CI environment sets (`CI=false` included — it is a nonempty string), so
+ * one copied job or secret mix-up away from wiping a real database. A generic
+ * environment flag is not authorization for a destructive target.
+ *
+ * Returns the refusal message, or `null` to proceed.
+ */
+export const resetGuardError = (env: {
+	readonly RESET_EXPECTED_BRANCH?: string | undefined
+	readonly RESET_PREVIEW_CONFIRM?: string | undefined
+}): string | null => {
+	if (env.RESET_PREVIEW_CONFIRM === "1") return null
+	if (isPreviewBranchName(env.RESET_EXPECTED_BRANCH?.trim())) return null
+	return (
+		"Refusing to reset: this drops ALL objects in the target database. " +
+		"Set RESET_EXPECTED_BRANCH=pr-<n> to name the disposable preview branch DATABASE_URL points at " +
+		"(planetscale-pr-branch.ts does this), or RESET_PREVIEW_CONFIRM=1 for a manual run."
+	)
+}
+
 const main = async () => {
 	const url = process.env.DATABASE_URL?.trim()
 	if (!url) {
 		fail("DATABASE_URL is not set — pass the PR branch connection string (MAPLE_PG_URL)")
 	}
-	// Tripwire: this script empties whatever DATABASE_URL points at, and the
-	// connected role inherits `postgres`, so nothing downstream would stop it
-	// from gutting prod/stg. It is only ever meant for ephemeral PR-preview
-	// branches, driven by CI.
-	if (!process.env.CI && process.env.RESET_PREVIEW_CONFIRM !== "1") {
-		fail(
-			"Refusing to reset: this drops ALL objects in the target database. Set RESET_PREVIEW_CONFIRM=1 to confirm DATABASE_URL points at a disposable preview branch (CI runs set CI).",
-		)
+	const guardError = resetGuardError(process.env)
+	if (guardError !== null) {
+		fail(guardError)
 	}
 	const sql = postgres(url as string, { max: 1, fetch_types: false })
 	try {
@@ -282,18 +309,21 @@ const main = async () => {
 	}
 }
 
-try {
-	await main()
-} catch (error) {
-	// postgres.js errors carry the failing statement — surface it, because the
-	// server's own error report doesn't. This is how the `malformed array
-	// literal: ""` failure was pinned to the empty-array bind parameter
-	// (`!= ALL(${[]})` under fetch_types:false — run 30086768041's
-	// `parameters: ["pg\\_%", ""]`); keep it so the next mystery identifies
-	// itself too.
-	const query = (error as { query?: unknown }).query
-	const parameters = (error as { parameters?: unknown }).parameters
-	if (query !== undefined) console.error(`✗ failing query: ${String(query).slice(0, 500)}`)
-	if (parameters !== undefined) console.error(`✗ query parameters: ${JSON.stringify(parameters)}`)
-	throw error
+// CLI entry (skipped when the guard exports above are imported by tests).
+if (import.meta.main) {
+	try {
+		await main()
+	} catch (error) {
+		// postgres.js errors carry the failing statement — surface it, because the
+		// server's own error report doesn't. This is how the `malformed array
+		// literal: ""` failure was pinned to the empty-array bind parameter
+		// (`!= ALL(${[]})` under fetch_types:false — run 30086768041's
+		// `parameters: ["pg\\_%", ""]`); keep it so the next mystery identifies
+		// itself too.
+		const query = (error as { query?: unknown }).query
+		const parameters = (error as { parameters?: unknown }).parameters
+		if (query !== undefined) console.error(`✗ failing query: ${String(query).slice(0, 500)}`)
+		if (parameters !== undefined) console.error(`✗ query parameters: ${JSON.stringify(parameters)}`)
+		throw error
+	}
 }

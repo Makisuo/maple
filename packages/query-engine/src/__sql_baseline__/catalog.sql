@@ -9659,15 +9659,15 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- spec:metrics-timeseries-grouped-by-attribute:baseline  [8b63032e]
+-- spec:metrics-timeseries-grouped-by-attribute:baseline  [7f18f69a]
 SELECT
           toStartOfInterval(TimeUnix, INTERVAL 300 SECOND) AS bucket,
           ServiceName AS serviceName,
           Attributes['http.route'] AS attributeValue,
           Attributes['http.route'] AS groupName,
           if(sum(Count) > 0, sum(Sum) / sum(Count), 0) AS avgValue,
-          min(Min) AS minValue,
-          max(Max) AS maxValue,
+          ifNull(min(Min), 0) AS minValue,
+          ifNull(max(Max), 0) AS maxValue,
           sum(Sum) AS sumValue,
           sum(Count) AS dataPointCount
         FROM metrics_histogram
@@ -9680,15 +9680,15 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- spec:metrics-timeseries-grouped-by-resource:baseline  [b9a2d4d6]
+-- spec:metrics-timeseries-grouped-by-resource:baseline  [c0ea8282]
 SELECT
           toStartOfInterval(TimeUnix, INTERVAL 300 SECOND) AS bucket,
           ServiceName AS serviceName,
           ResourceAttributes['host.name'] AS attributeValue,
           ResourceAttributes['host.name'] AS groupName,
           if(sum(Count) > 0, sum(Sum) / sum(Count), 0) AS avgValue,
-          min(Min) AS minValue,
-          max(Max) AS maxValue,
+          ifNull(min(Min), 0) AS minValue,
+          ifNull(max(Max), 0) AS maxValue,
           sum(Sum) AS sumValue,
           sum(Count) AS dataPointCount
         FROM metrics_histogram
@@ -9732,15 +9732,15 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- spec:metrics-timeseries:baseline  [e6156cc2]
+-- spec:metrics-timeseries:baseline  [8a2c3b82]
 SELECT
           toStartOfInterval(TimeUnix, INTERVAL 3600 SECOND) AS bucket,
           ServiceName AS serviceName,
           '' AS attributeValue,
           ServiceName AS groupName,
           if(sum(Count) > 0, sum(Sum) / sum(Count), 0) AS avgValue,
-          min(Min) AS minValue,
-          max(Max) AS maxValue,
+          ifNull(min(Min), 0) AS minValue,
+          ifNull(max(Max), 0) AS maxValue,
           sum(Sum) AS sumValue,
           sum(Count) AS dataPointCount
         FROM metrics_histogram

@@ -24,8 +24,16 @@
  *   - Every row is DECODED as v3 after transform. A row that fails is left byte
  *     identical and reported; writing a document we could not decode is the one
  *     irreversible mistake available here.
- *   - The pre-write JSONL dump is flushed BEFORE the batch that it covers, so a
- *     crash mid-run still leaves every already-written row recoverable.
+ *   - The pre-write JSONL journal is APPENDED AND FSYNCED before the batch it
+ *     covers — for dashboards and for dashboard_versions snapshots — so a crash
+ *     mid-run still leaves every already-written row recoverable. Each line
+ *     carries the preimage AND the exact upgraded payload about to be written:
+ *     restore only touches a row that still holds that exact payload, so a
+ *     CAS-missed backfill row (whose version N+1 belongs to a concurrent user
+ *     edit) is skipped instead of having the user's edit replaced by the stale
+ *     preimage. Restore advances `version` rather than rolling it back — the
+ *     counter is an optimistic-concurrency token and must stay monotonic, or a
+ *     stale tab holding the pre-backfill version could CAS over the restore.
  *   - Writes CAS on `version`. Not bumping it would not avoid disturbing clients
  *     (the change streams over Electric either way) — it would let a stale tab
  *     win the compare-and-swap and silently overwrite the backfill with v2.
@@ -45,6 +53,7 @@
  * the version-history page, not merely restore. They are not Electric-streamed,
  * so they carry no open-tab risk.
  */
+import { closeSync, fsyncSync, openSync, readFileSync, writeSync } from "node:fs"
 import { Option, Schema } from "effect"
 import postgres from "postgres"
 import {
@@ -78,7 +87,7 @@ const decodeIssue = (payload: unknown): string => {
 	return exit._tag === "Failure" ? String(exit.cause) : ""
 }
 
-interface Args {
+export interface Args {
 	readonly branch?: string
 	readonly url?: string
 	readonly apply: boolean
@@ -135,6 +144,64 @@ interface Row {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
+ * One line of the recovery journal. The preimage plus the exact upgraded
+ * payload the backfill wrote: `upgraded_json` is what lets restore prove a row
+ * still holds the backfill's write (and not a user's concurrent edit that won
+ * the CAS) before reverting it.
+ */
+export interface JournalLine {
+	readonly table: "dashboards" | "dashboard_versions"
+	readonly org_id: string
+	readonly id: string
+	/** dashboards only — the pre-backfill CAS token. */
+	readonly version?: number
+	/** dashboards preimage. */
+	readonly payload_json?: unknown
+	/** dashboard_versions preimage. */
+	readonly snapshot_json?: unknown
+	readonly upgraded_json: unknown
+}
+
+export interface RecoveryJournal {
+	readonly append: (line: JournalLine) => void
+	/** Persist (write + fsync) everything appended so far. */
+	readonly flush: () => void
+	readonly close: () => void
+	readonly count: () => number
+}
+
+/**
+ * Append-only JSONL journal. `flush` is called before each batch's writes and
+ * fsyncs, so an OOM kill, disk error, or crash mid-run cannot lose the
+ * preimages of rows already committed — the previous version buffered every
+ * line in memory and wrote once at exit, which is exactly the plan that fails
+ * when the run does.
+ */
+export const openJournal = (path: string): RecoveryJournal => {
+	let fd: number | null = null
+	let buffered: string[] = []
+	let count = 0
+	return {
+		append: (line) => {
+			buffered.push(JSON.stringify(line))
+			count += 1
+		},
+		flush: () => {
+			if (buffered.length === 0) return
+			if (fd === null) fd = openSync(path, "a")
+			writeSync(fd, `${buffered.join("\n")}\n`)
+			fsyncSync(fd)
+			buffered = []
+		},
+		close: () => {
+			if (fd !== null) closeSync(fd)
+			fd = null
+		},
+		count: () => count,
+	}
+}
+
+/**
  * Classifies a row without writing anything.
  *
  * `brokenBefore` is reported separately from `quarantined` on purpose: a row that
@@ -160,10 +227,10 @@ const classify = (payload: unknown) => {
 	return { kind: "converted" as const, upgraded }
 }
 
-const backfillDashboards = async (
+export const backfillDashboards = async (
 	sql: postgres.Sql,
 	args: Args,
-	dump: (line: unknown) => void,
+	journal: RecoveryJournal,
 	quarantine: (line: unknown) => void,
 ): Promise<Report> => {
 	const report = emptyReport()
@@ -198,9 +265,12 @@ const backfillDashboards = async (
 		}
 
 		if (args.apply && writes.length > 0) {
-			// Dump BEFORE the write, so a crash between the two still leaves every
-			// already-written row recoverable from the file.
-			for (const { row } of writes) dump(row)
+			// Journal + fsync BEFORE the write, so a crash between the two still
+			// leaves every already-written row recoverable from the file.
+			for (const { row, upgraded } of writes) {
+				journal.append({ table: "dashboards", ...row, upgraded_json: upgraded })
+			}
+			journal.flush()
 
 			await sql.begin(async (tx) => {
 				for (const { row, upgraded } of writes) {
@@ -226,9 +296,10 @@ const backfillDashboards = async (
 	return report
 }
 
-const backfillVersionSnapshots = async (
+export const backfillVersionSnapshots = async (
 	sql: postgres.Sql,
 	args: Args,
+	journal: RecoveryJournal,
 	quarantine: (line: unknown) => void,
 ): Promise<Report> => {
 	const report = emptyReport()
@@ -245,6 +316,7 @@ const backfillVersionSnapshots = async (
 					ORDER BY org_id, id LIMIT ${args.batch}`
 		if (rows.length === 0) break
 
+		const writes: Array<{ row: (typeof rows)[number]; upgraded: unknown }> = []
 		for (const row of rows) {
 			report.scanned += 1
 			const outcome = classify(row.snapshot_json)
@@ -261,14 +333,33 @@ const backfillVersionSnapshots = async (
 				quarantine({ ...row, reason: `snapshot_${outcome.kind}` })
 				continue
 			}
-			report.converted += 1
-			if (args.apply) {
-				// No CAS column and no user-visible timestamp here; `created_at` is left
-				// alone so history keeps its ordering.
-				await sql`
-					UPDATE dashboard_versions SET snapshot_json = ${sql.json(outcome.upgraded as never)}
-					WHERE org_id = ${row.org_id} AND id = ${row.id}`
+			writes.push({ row, upgraded: outcome.upgraded })
+		}
+
+		if (args.apply && writes.length > 0) {
+			// Snapshot preimages go in the same fsynced journal as dashboards —
+			// these mutations previously had no rollback path at all.
+			for (const { row, upgraded } of writes) {
+				journal.append({ table: "dashboard_versions", ...row, upgraded_json: upgraded })
 			}
+			journal.flush()
+			for (const { row, upgraded } of writes) {
+				// No version column here, so the preimage itself is the CAS: the
+				// persistence service coalesces a fresh save by rewriting this row
+				// in place, and an unconditioned UPDATE racing it would bury the
+				// newer user snapshot under an upgrade of the older one. A miss is
+				// reported, not converted; the re-run classifies the new snapshot
+				// on its own. `created_at` is left alone so history keeps ordering.
+				const result = await sql`
+					UPDATE dashboard_versions SET snapshot_json = ${sql.json(upgraded as never)}
+					WHERE org_id = ${row.org_id} AND id = ${row.id}
+						AND snapshot_json = ${sql.json(row.snapshot_json as never)}::jsonb
+					RETURNING id`
+				if (result.length === 0) report.casMissed += 1
+				else report.converted += 1
+			}
+		} else {
+			report.converted += writes.length
 		}
 
 		const last = rows[rows.length - 1]!
@@ -281,21 +372,43 @@ const backfillVersionSnapshots = async (
 }
 
 /**
- * Restores `payload_json` verbatim from a dump, guarded on `version`.
+ * Restores preimages from a journal, guarded on the row still holding the
+ * exact payload the backfill wrote (`upgraded_json`) — `version = N + 1` alone
+ * is not proof of ownership: when the backfill's CAS missed, N + 1 belongs to
+ * the user's concurrent edit, and matching on it alone replaced that edit with
+ * the stale preimage.
  *
- * A row someone has edited since the backfill fails the guard and is reported
- * rather than reverted — reverting a user's later edit to undo our own write is
- * strictly worse than leaving it.
+ * A row anyone has edited since the backfill fails the payload guard and is
+ * reported rather than reverted. Dashboards restores bump `version` forward —
+ * it is an optimistic-concurrency token, and handing back the pre-backfill
+ * value would let a stale tab's CAS overwrite the restored state.
  */
-const restore = async (sql: postgres.Sql, path: string): Promise<void> => {
-	const text = await Bun.file(path).text()
+export const restore = async (sql: postgres.Sql, path: string): Promise<void> => {
+	const text = readFileSync(path, "utf8")
 	let restored = 0
 	let skipped = 0
 	for (const line of text.split("\n").filter((l) => l.trim().length > 0)) {
-		const row = JSON.parse(line) as Row
+		const row = JSON.parse(line) as JournalLine
+		if (row.upgraded_json === undefined) {
+			fail(
+				"Journal line lacks upgraded_json — this dump predates payload-verified restore and cannot be applied safely.",
+			)
+		}
+		if (row.table === "dashboard_versions") {
+			const result = await sql`
+				UPDATE dashboard_versions SET snapshot_json = ${sql.json(row.snapshot_json as never)}
+				WHERE org_id = ${row.org_id} AND id = ${row.id}
+					AND snapshot_json = ${sql.json(row.upgraded_json as never)}::jsonb
+				RETURNING id`
+			if (result.length === 0) skipped += 1
+			else restored += 1
+			continue
+		}
 		const result = await sql`
-			UPDATE dashboards SET payload_json = ${sql.json(row.payload_json as never)}, version = ${row.version}
-			WHERE org_id = ${row.org_id} AND id = ${row.id} AND version = ${row.version + 1}
+			UPDATE dashboards SET payload_json = ${sql.json(row.payload_json as never)}, version = version + 1
+			WHERE org_id = ${row.org_id} AND id = ${row.id}
+				AND version = ${(row.version ?? 0) + 1}
+				AND payload_json = ${sql.json(row.upgraded_json as never)}::jsonb
 			RETURNING id`
 		if (result.length === 0) skipped += 1
 		else restored += 1
@@ -315,7 +428,7 @@ const printReport = (label: string, report: Report, apply: boolean): void => {
 
 const run = async (connectionUrl: string, args: Args): Promise<void> => {
 	const sql = postgres(connectionUrl, { max: 1, prepare: false, onnotice: () => {} })
-	const dumpLines: string[] = []
+	const journal = openJournal(args.dump)
 	const quarantineLines: string[] = []
 
 	try {
@@ -324,25 +437,21 @@ const run = async (connectionUrl: string, args: Args): Promise<void> => {
 			return
 		}
 
-		const dashboards = await backfillDashboards(
-			sql,
-			args,
-			(line) => dumpLines.push(JSON.stringify(line)),
-			(line) => quarantineLines.push(JSON.stringify(line)),
+		const dashboards = await backfillDashboards(sql, args, journal, (line) =>
+			quarantineLines.push(JSON.stringify(line)),
 		)
 		printReport("dashboards", dashboards, args.apply)
 
 		let snapshots: Report | null = null
 		if (!args.skipVersions) {
-			snapshots = await backfillVersionSnapshots(sql, args, (line) =>
+			snapshots = await backfillVersionSnapshots(sql, args, journal, (line) =>
 				quarantineLines.push(JSON.stringify(line)),
 			)
 			printReport("dashboard_versions", snapshots, args.apply)
 		}
 
-		if (args.apply && dumpLines.length > 0) {
-			await Bun.write(args.dump, `${dumpLines.join("\n")}\n`)
-			console.log(`\n✓ Pre-write dump: ${args.dump} (${dumpLines.length} rows)`)
+		if (args.apply && journal.count() > 0) {
+			console.log(`\n✓ Pre-write journal: ${args.dump} (${journal.count()} rows)`)
 			console.log("  Contains customer SQL and query definitions — treat as production data.")
 		}
 		if (quarantineLines.length > 0) {
@@ -357,17 +466,21 @@ const run = async (connectionUrl: string, args: Args): Promise<void> => {
 			fail(`${dashboards.quarantined} live dashboard(s) quarantined — inspect ${args.quarantine}`)
 		}
 	} finally {
+		journal.close()
 		await sql.end({ timeout: 5 })
 	}
 }
 
-const args = parseArgs(process.argv.slice(2))
-if (args.url === undefined && args.branch === undefined) {
-	fail("Pass --branch <name> (PlanetScale) or --url <dsn> (local rehearsal).")
-}
+// CLI entry (skipped when the exports above are imported by tests).
+if (import.meta.main) {
+	const args = parseArgs(process.argv.slice(2))
+	if (args.url === undefined && args.branch === undefined) {
+		fail("Pass --branch <name> (PlanetScale) or --url <dsn> (local rehearsal).")
+	}
 
-if (args.url !== undefined) {
-	await run(args.url, args)
-} else {
-	await withBranchConnection(args.branch!, (url) => run(url, args))
+	if (args.url !== undefined) {
+		await run(args.url, args)
+	} else {
+		await withBranchConnection(args.branch!, (url) => run(url, args))
+	}
 }

@@ -62,8 +62,10 @@ describe("metricsTimeseriesQuery", () => {
 		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("FROM metrics_histogram")
 		expect(sql).toContain("sum(Sum) / sum(Count)")
-		expect(sql).toContain("min(Min) AS minValue")
-		expect(sql).toContain("max(Max) AS maxValue")
+		// Nullable extrema fall back to 0 so an all-NULL bucket still decodes
+		// through the non-null Float64 row contract.
+		expect(sql).toContain("ifNull(min(Min), 0) AS minValue")
+		expect(sql).toContain("ifNull(max(Max), 0) AS maxValue")
 		expect(sql).toContain("sum(Sum) AS sumValue")
 		expect(sql).toContain("sum(Count) AS dataPointCount")
 	})

@@ -184,6 +184,7 @@ export {
 	if_,
 	multiIf,
 	coalesce,
+	ifNull,
 	nullIf,
 	ifNotFinite,
 	// Array
