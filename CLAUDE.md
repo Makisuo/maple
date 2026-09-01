@@ -109,16 +109,17 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
   dial is bounded so a stall lands as `error.type = CONNECT_TIMEOUT` instead of hanging.
 - Migrations: `bun run --cwd packages/db db:generate`; CI applies them against the branch's DIRECT
   port 5432 (never a pooler) before `alchemy deploy`. PGlite applies them at layer build.
-- **PR preview deploys are disabled** (2026-08, cost). `deploy-pr-preview.yml` triggers on the
-  `closed` event only, so it tears down pre-cutover stacks and never deploys a new one; restore
-  `types: [opened, synchronize, reopened, closed]` to re-enable.
-- **PR previews have no application database** either (PS-DEV branches billed continuously and
-  ate the Hyperdrive config cap) — this is the state previews return to when re-enabled.
-  `resolveDatabaseMode` in
-  `packages/infra/src/cloudflare/stage.ts` returns `"none"` for `pr`, so no `MAPLE_DB` is bound
-  and `DatabasePgLive` fails every query with a `DatabaseError` — DB-backed routes 500, the rest
-  of the preview works. To restore: return `"managed"` for `pr` and re-add the PlanetScale +
-  Electric steps to `.github/workflows/deploy-pr-preview.yml` (the scripts are kept, dormant).
+- **PR preview deploys are label-gated** (2026-08, cost — re-enabled by `fd00bcd412`). A PR gets a
+  preview only while it carries the `preview` label; `deploy-pr-preview.yml` triggers on
+  `opened, reopened, synchronize, labeled, unlabeled, closed` and tears the stack down the moment
+  the label is removed or the PR closes. `cleanup-preview-orphans.yml` is the backstop for PRs that
+  close without a teardown run.
+- **PR previews still have no application database** (PS-DEV branches billed continuously and ate
+  the Hyperdrive config cap). `resolveDatabaseMode` in `packages/infra/src/cloudflare/stage.ts`
+  returns `"none"` for `pr`, so no `MAPLE_DB` is bound and `DatabasePgLive` fails every query with a
+  `DatabaseError` — DB-backed routes 500, the rest of the preview works. To restore: return
+  `"managed"` for `pr` and re-add the PlanetScale + Electric steps to
+  `.github/workflows/deploy-pr-preview.yml` (the scripts are kept, dormant).
 - The ingest gateway resolves ingest keys from the same Postgres via PSBouncer (6432, no Hyperdrive).
 
 ## Conventions
