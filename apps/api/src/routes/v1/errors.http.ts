@@ -299,14 +299,14 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-					yield* requireAdmin(
+					// The gate itself lives in the service (the MCP tool and chat apply
+					// reach the same mutation); this keeps the failure adjacent to the route.
+					return yield* policies.upsertNotificationPolicy(
+						tenant.orgId,
+						tenant.userId,
 						tenant.roles,
-						() =>
-							new ErrorForbiddenError({
-								message: "Only org admins can manage error notification policy",
-							}),
+						payload,
 					)
-					return yield* policies.upsertNotificationPolicy(tenant.orgId, tenant.userId, payload)
 				}).pipe(Effect.withSpan("HttpErrors.upsertNotificationPolicy")),
 			)
 			.handle("getEscalationPolicy", () =>

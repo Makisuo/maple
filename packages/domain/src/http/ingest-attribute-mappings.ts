@@ -4,6 +4,7 @@ import {
 	IngestMappingOperation,
 	IngestMappingSourceContext,
 	IsoDateTimeString,
+	RoleName,
 } from "../primitives"
 import { HttpTaggedError } from "./error-policy"
 
@@ -83,6 +84,27 @@ export class IngestAttributeMappingNotFoundError extends HttpTaggedError<IngestA
 		param: "id",
 		retry: "never",
 		recovery: "none",
+		exposure: "redacted",
+	},
+) {}
+
+/**
+ * Mappings rewrite every ingested span for the whole organization, so the
+ * write endpoints are admin-only.
+ */
+export class IngestAttributeMappingForbiddenError extends HttpTaggedError<IngestAttributeMappingForbiddenError>()(
+	"@maple/http/errors/IngestAttributeMappingForbiddenError",
+	{
+		message: Schema.String,
+		roles: Schema.optionalKey(Schema.Array(RoleName)),
+	},
+	{
+		status: 403,
+		code: "attribute_mapping_forbidden",
+		title: "Permission required",
+		message: "Only org admins can manage attribute mappings.",
+		retry: "never",
+		recovery: "request_access",
 		exposure: "redacted",
 	},
 ) {}

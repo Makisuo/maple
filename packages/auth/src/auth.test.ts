@@ -1186,7 +1186,63 @@ describe(`${ORG_SELECTION_HEADER} (organization selection)`, () => {
 			)
 
 			assertDenied(exit)
-			assert.strictEqual(membership.calls(), 0)
+		}),
+	)
+
+	// The pin replaces the organization, so it must replace the role too.
+	it.effect("MAPLE_ORG_ID_OVERRIDE takes its role from the pinned org's membership", () =>
+		Effect.gen(function* () {
+			const membership = verifier([{ orgId: "org_pinned", role: "org:member" }])
+			const resolveTenant = makeResolveTenant(
+				{ ...clerkEnv, MAPLE_ORG_ID_OVERRIDE: Option.some("org_pinned") },
+				// The session is an `org:admin` of org_123, a different organization.
+				clerkAuth(),
+				undefined,
+				membership.verify,
+			)
+
+			const tenant = yield* resolveTenant({ authorization: "Bearer test-token" })
+
+			assert.deepStrictEqual(tenant, {
+				orgId: asOrgId("org_pinned"),
+				roles: [asRoleName("org:member")],
+				userId: asUserId("user_123"),
+				authMode: "clerk",
+			})
+		}),
+	)
+
+	it.effect("MAPLE_ORG_ID_OVERRIDE refuses an org the user is not a member of", () =>
+		Effect.gen(function* () {
+			const membership = verifier([])
+			const resolveTenant = makeResolveTenant(
+				{ ...clerkEnv, MAPLE_ORG_ID_OVERRIDE: Option.some("org_pinned") },
+				clerkAuth(),
+				undefined,
+				membership.verify,
+			)
+
+			assertDenied(yield* Effect.exit(resolveTenant({ authorization: "Bearer test-token" })))
+		}),
+	)
+
+	// No membership directory wired (MCP, electric-sync): the pin still selects
+	// the organization, but it can prove nothing, so it confers no role.
+	it.effect("MAPLE_ORG_ID_OVERRIDE confers no role without a verifier", () =>
+		Effect.gen(function* () {
+			const resolveTenant = makeResolveTenant(
+				{ ...clerkEnv, MAPLE_ORG_ID_OVERRIDE: Option.some("org_pinned") },
+				clerkAuth(),
+			)
+
+			const tenant = yield* resolveTenant({ authorization: "Bearer test-token" })
+
+			assert.deepStrictEqual(tenant, {
+				orgId: asOrgId("org_pinned"),
+				roles: [],
+				userId: asUserId("user_123"),
+				authMode: "clerk",
+			})
 		}),
 	)
 
