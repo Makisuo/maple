@@ -183,6 +183,54 @@ describe("safeFetch", () => {
 		expect(calls).toBe(2)
 	})
 
+	it("drops credential headers on a cross-origin redirect", async () => {
+		const seen: Array<string | null> = []
+		const fakeFetch: typeof fetch = async (_url, init) => {
+			seen.push(new Headers(init?.headers).get("authorization"))
+			return seen.length === 1
+				? new Response(null, { status: 302, headers: { location: "https://attacker.example/steal" } })
+				: new Response("ok", { status: 200 })
+		}
+		const response = await safeFetch("https://api.example.com/metrics", {
+			fetchFn: fakeFetch,
+			headers: { Authorization: "Bearer scrape-secret", Accept: "text/plain" },
+		})
+		expect(response.status).toBe(200)
+		expect(seen).toEqual(["Bearer scrape-secret", null])
+	})
+
+	it("keeps credential headers on a same-origin redirect", async () => {
+		const seen: Array<string | null> = []
+		const fakeFetch: typeof fetch = async (_url, init) => {
+			seen.push(new Headers(init?.headers).get("authorization"))
+			return seen.length === 1
+				? new Response(null, { status: 302, headers: { location: "/metrics/v2" } })
+				: new Response("ok", { status: 200 })
+		}
+		await safeFetch("https://api.example.com/metrics", {
+			fetchFn: fakeFetch,
+			headers: { Authorization: "Bearer scrape-secret" },
+		})
+		expect(seen).toEqual(["Bearer scrape-secret", "Bearer scrape-secret"])
+	})
+
+	it("does not restore credentials when a redirect bounces back to the original origin", async () => {
+		const seen: Array<string | null> = []
+		const hops = ["https://attacker.example/a", "https://api.example.com/back"]
+		const fakeFetch: typeof fetch = async (_url, init) => {
+			seen.push(new Headers(init?.headers).get("authorization"))
+			const location = hops[seen.length - 1]
+			return location === undefined
+				? new Response("ok", { status: 200 })
+				: new Response(null, { status: 302, headers: { location } })
+		}
+		await safeFetch("https://api.example.com/metrics", {
+			fetchFn: fakeFetch,
+			headers: { Authorization: "Bearer scrape-secret" },
+		})
+		expect(seen).toEqual(["Bearer scrape-secret", null, null])
+	})
+
 	it("caps redirect chains", async () => {
 		let calls = 0
 		const fakeFetch: typeof fetch = async () => {
