@@ -43,6 +43,54 @@ describe("startBaselineCapture", () => {
 		expect(events[0]?.targetText).toBeUndefined()
 	})
 
+	it("omits click target text inside an rrweb-blocked subtree", () => {
+		start()
+		// A backup code the user clicks to select: rrweb never serializes it, and this
+		// separate click path must not either.
+		const blocked = document.createElement("div")
+		blocked.className = "rr-block"
+		const code = document.createElement("span")
+		code.textContent = "11112222"
+		blocked.appendChild(code)
+		document.body.appendChild(blocked)
+		code.click()
+
+		expect(events).toHaveLength(1)
+		expect(events[0]?.type).toBe("click")
+		expect(events[0]?.targetSelector).toBe("span")
+		expect(events[0]?.targetText).toBeUndefined()
+		expect(JSON.stringify(events[0])).not.toContain("11112222")
+	})
+
+	// `data-rr-block` is advertised beside `.rr-block` in the README and docs, so
+	// it has to hide a subtree from this path too — not only from rrweb's.
+	it("omits click target text inside a data-rr-block subtree", () => {
+		start()
+		const blocked = document.createElement("div")
+		blocked.setAttribute("data-rr-block", "")
+		const code = document.createElement("span")
+		code.textContent = "33334444"
+		blocked.appendChild(code)
+		document.body.appendChild(blocked)
+		code.click()
+
+		expect(events[0]?.targetText).toBeUndefined()
+		expect(JSON.stringify(events[0])).not.toContain("33334444")
+	})
+
+	it("still captures click target text outside a blocked subtree", () => {
+		start()
+		const blocked = document.createElement("div")
+		blocked.className = "rr-block"
+		document.body.appendChild(blocked)
+		const button = document.createElement("button")
+		button.textContent = "Save changes"
+		document.body.appendChild(button)
+		button.click()
+
+		expect(events[0]?.targetText).toBe("Save changes")
+	})
+
 	it("captures uncaught errors as error-level events", () => {
 		start()
 		window.dispatchEvent(new ErrorEvent("error", { message: "boom" }))
