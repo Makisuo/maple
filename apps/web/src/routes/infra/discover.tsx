@@ -33,7 +33,7 @@ interface CollectorSource {
 	/** What you get once it reports — written as the payoff, not the mechanism. */
 	readonly blurb: string
 	/** Where to look once it's live. */
-	readonly to: "/infra" | "/infra/containers" | "/infra/kubernetes/pods"
+	readonly to: "/infra" | "/infra/containers" | "/infra/kubernetes"
 	/** Which tab the install modal opens on. */
 	readonly tab: "kubernetes" | "docker"
 }
@@ -60,7 +60,7 @@ const COLLECTOR_SOURCES: ReadonlyArray<CollectorSource> = [
 		icon: KubernetesIcon,
 		surfaces: ["k8sPods", "k8sNodes", "k8sWorkloads"],
 		blurb: "Pods, nodes and workloads",
-		to: "/infra/kubernetes/pods",
+		to: "/infra/kubernetes",
 		tab: "kubernetes",
 	},
 ]
@@ -112,9 +112,7 @@ function DiscoverInfraPage() {
 											reporting={
 												surfaces === null
 													? null
-													: source.surfaces.some((surface) =>
-															surfaces.has(surface),
-														)
+													: source.surfaces.some((surface) => surfaces.has(surface))
 											}
 											onInstall={() => openInstall(source.tab)}
 										/>

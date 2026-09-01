@@ -118,15 +118,41 @@ describe("navGroups", () => {
 		)
 	})
 
-	it("collapses the four k8s pages to one mark, leaving five unique glyphs", () => {
-		// The four k8s pages sharing one mark is deliberate — `NavRow` dedupes by
-		// icon identity. Five is exactly NavRow's all-or-nothing preview cap, so a
-		// sixth unique glyph here would drop the closed row's miniatures entirely
-		// rather than truncate them. Adding a k8s page is therefore free; adding a
-		// page with a new glyph is not.
+	it("keeps Infrastructure at five children with five unique glyphs", () => {
+		// Five is exactly NavRow's all-or-nothing preview cap, so a sixth unique
+		// glyph here would drop the closed row's miniatures entirely rather than
+		// truncate them. A new Kubernetes view goes in `views` (free); a new
+		// child with a new glyph is not free.
 		const infra = findItem("Infrastructure")
-		expect(infra.subItems?.length).toBe(8)
+		expect(infra.subItems?.map((sub) => sub.title)).toEqual([
+			"Hosts",
+			"Containers",
+			"Kubernetes",
+			"Cloudflare",
+			"PlanetScale",
+		])
 		expect(new Set(infra.subItems?.map((sub) => sub.icon)).size).toBe(5)
+	})
+
+	it("folds the Kubernetes views behind one row that points at the section root", () => {
+		const k8s = findItem("Infrastructure").subItems?.find((sub) => sub.title === "Kubernetes")
+		expect(k8s?.href).toBe("/infra/kubernetes")
+		expect(k8s?.views?.map((view) => view.href)).toEqual([
+			"/infra/kubernetes/pods",
+			"/infra/kubernetes/workloads",
+			"/infra/kubernetes/nodes",
+			"/infra/kubernetes/services",
+		])
+		// The one row lights on every view and every detail page beneath it.
+		for (const path of [
+			"/infra/kubernetes",
+			"/infra/kubernetes/pods",
+			"/infra/kubernetes/nodes/ip-10-0-0-1",
+			"/infra/kubernetes/workloads/deployment/api",
+			"/infra/kubernetes/services/checkout",
+		]) {
+			expect(isPathActive(path, k8s?.href ?? "")).toBe(true)
+		}
 	})
 })
 
@@ -140,13 +166,25 @@ describe("paletteNavItems", () => {
 			"Replays",
 			"Hosts",
 			"Containers",
-			"K8s Pods",
-			"K8s Nodes",
-			"K8s Workloads",
+			"Kubernetes",
 			"Cloudflare",
 			"PlanetScale",
 		]) {
 			expect(titles).toContain(title)
+		}
+	})
+
+	it("keeps every folded Kubernetes view typeable by name", () => {
+		// The sidebar shows one Kubernetes row; the palette must not. Someone who
+		// types "nodes" expects to land on the nodes list, not the section root.
+		const entries = paletteNavItems()
+		for (const [title, href] of [
+			["Kubernetes Pods", "/infra/kubernetes/pods"],
+			["Kubernetes Workloads", "/infra/kubernetes/workloads"],
+			["Kubernetes Nodes", "/infra/kubernetes/nodes"],
+			["Kubernetes Services", "/infra/kubernetes/services"],
+		]) {
+			expect(entries.find((entry) => entry.title === title)?.href).toBe(href)
 		}
 	})
 
@@ -169,21 +207,14 @@ describe("partitionInfraSubItems", () => {
 
 	it("shows every child while the org's surfaces are unknown", () => {
 		const { shown, hidden } = partitionInfraSubItems(subItems(), null, "/infra")
-		expect(shown).toHaveLength(8)
+		expect(shown).toHaveLength(5)
 		expect(hidden).toEqual([])
 	})
 
 	it("shows only the surfaces the org reports", () => {
 		const { shown, hidden } = partitionInfraSubItems(subItems(), present("hosts", "containers"), "/infra")
 		expect(titles(shown)).toEqual(["Hosts", "Containers"])
-		expect(titles(hidden)).toEqual([
-			"K8s Pods",
-			"K8s Nodes",
-			"K8s Workloads",
-			"K8s Services",
-			"Cloudflare",
-			"PlanetScale",
-		])
+		expect(titles(hidden)).toEqual(["Kubernetes", "Cloudflare", "PlanetScale"])
 	})
 
 	it("keeps the connected integration pages", () => {
@@ -199,32 +230,23 @@ describe("partitionInfraSubItems", () => {
 			present("hosts"),
 			"/infra/kubernetes/nodes",
 		)
-		expect(titles(shown)).toEqual(["Hosts", "K8s Nodes"])
-		expect(titles(hidden)).not.toContain("K8s Nodes")
+		expect(titles(shown)).toEqual(["Hosts", "Kubernetes"])
+		expect(titles(hidden)).not.toContain("Kubernetes")
 	})
 
 	it("falls back to three starters when the org reports nothing", () => {
 		const { shown, hidden } = partitionInfraSubItems(subItems(), present(), "/infra")
-		expect(titles(shown)).toEqual(["Hosts", "Containers", "K8s Pods"])
-		expect(hidden).toHaveLength(5)
+		expect(titles(shown)).toEqual(["Hosts", "Containers", "Kubernetes"])
+		expect(hidden).toHaveLength(2)
 	})
 
-	// "K8s Services" shares the k8sPods surface, so without the `starter` opt-out
-	// it would ride the fallback in and make the first-run list four rows — two of
-	// them Kubernetes. The fallback answers "what would you plug in?", and the
-	// lens is not something you plug in.
-	it("keeps a non-starter row out of the fallback even when its surface qualifies", () => {
-		const { shown, hidden } = partitionInfraSubItems(subItems(), present(), "/infra")
-		expect(titles(shown)).not.toContain("K8s Services")
-		expect(titles(hidden)).toContain("K8s Services")
-	})
-
-	it("shows a non-starter row once its surface actually reports", () => {
-		// "Hosts" rides along on every /infra/* path: its href is "/infra", and
-		// `isPathActive` treats that as a prefix. Pre-existing, and not what this
-		// test is about.
-		const { shown } = partitionInfraSubItems(subItems(), present("k8sPods"), "/infra/kubernetes/pods")
-		expect(titles(shown)).toEqual(["Hosts", "K8s Pods", "K8s Services"])
+	// A cluster that only ships node metrics is still a cluster: the row gates on
+	// any of its three surfaces, not on pods specifically.
+	it("shows Kubernetes when any of its surfaces reports", () => {
+		for (const surface of ["k8sPods", "k8sNodes", "k8sWorkloads"] as const) {
+			const { shown } = partitionInfraSubItems(subItems(), present("hosts", surface), "/infra")
+			expect(titles(shown)).toEqual(["Hosts", "Kubernetes"])
+		}
 	})
 
 	// Every child stays reachable — the split shortens the default list, it does
