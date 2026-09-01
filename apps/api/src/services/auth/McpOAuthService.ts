@@ -20,8 +20,8 @@ import {
 	mcpOAuthRefreshTokens,
 	parseIngestKeyLookupHmacKey,
 } from "@maple/db"
-import type { MapleDatabaseTransaction } from "@maple/db/client"
-import { and, eq, gt, inArray, isNull, lt } from "drizzle-orm"
+import { and, eq, gt, isNull, lt } from "drizzle-orm"
+import { revokeRefreshFamily } from "./mcp-oauth-family"
 import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
@@ -31,6 +31,14 @@ const AUTHORIZATION_REQUEST_TTL_MS = 10 * 60 * 1000
 const AUTHORIZATION_CODE_TTL_MS = 5 * 60 * 1000
 const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000
+/**
+ * The grant's absolute ceiling, independent of rotation. `expires_at` is
+ * reset on every refresh, so without this a client that rotates once a month
+ * holds an MCP credential forever. A quarter is long enough that no healthy
+ * client is ever interrupted (it re-consents once) and short enough that a
+ * grant which escaped every revocation path still dies on its own.
+ */
+const REFRESH_FAMILY_ABSOLUTE_TTL_MS = 90 * 24 * 60 * 60 * 1000
 const MCP_SCOPE = "mcp:tools"
 const MCP_OAUTH_RATE_LIMIT_BINDING = "MCP_OAUTH_RATE_LIMITER"
 
@@ -719,6 +727,7 @@ export class McpOAuthService extends Context.Service<
 							accessKeyId: values.accessKeyId,
 							createdAt: new Date(now),
 							expiresAt: new Date(now + REFRESH_TOKEN_TTL_MS),
+							familyExpiresAt: new Date(now + REFRESH_FAMILY_ABSOLUTE_TTL_MS),
 						})
 						return true
 					}),
@@ -727,29 +736,6 @@ export class McpOAuthService extends Context.Service<
 			if (!issued) return yield* protocolError("invalid_grant", "Authorization code was already used")
 			return tokenResponse(values.accessToken, values.refreshToken, row.scopes)
 		})
-
-		const revokeFamily = async (tx: MapleDatabaseTransaction, familyId: string, now: Date) => {
-			const family = await tx
-				.select({ accessKeyId: mcpOAuthRefreshTokens.accessKeyId })
-				.from(mcpOAuthRefreshTokens)
-				.where(eq(mcpOAuthRefreshTokens.familyId, familyId))
-			await tx
-				.update(mcpOAuthRefreshTokens)
-				.set({ revokedAt: now })
-				.where(
-					and(
-						eq(mcpOAuthRefreshTokens.familyId, familyId),
-						isNull(mcpOAuthRefreshTokens.revokedAt),
-					),
-				)
-			const accessKeyIds = family.map((item) => item.accessKeyId)
-			if (accessKeyIds.length > 0) {
-				await tx
-					.update(apiKeys)
-					.set({ revoked: true, revokedAt: now })
-					.where(inArray(apiKeys.id, accessKeyIds))
-			}
-		}
 
 		const refresh = Effect.fn("McpOAuthService.refresh")(function* (
 			input: McpOAuthRefreshInput,
@@ -778,9 +764,48 @@ export class McpOAuthService extends Context.Service<
 			) {
 				return yield* protocolError("invalid_grant", "Refresh token is invalid or expired")
 			}
+			// The grant's absolute ceiling. Rotation resets `expires_at`, so this is
+			// the only thing that ever ends a grant nobody explicitly revoked.
+			// A pre-column row is anchored from the row in hand — at most one
+			// rotation window old — rather than being grandfathered in forever.
+			const familyExpiresAtMs =
+				row.familyExpiresAt?.getTime() ?? row.createdAt.getTime() + REFRESH_FAMILY_ABSOLUTE_TTL_MS
+			if (familyExpiresAtMs <= now) {
+				yield* database
+					.execute((db) =>
+						db.transaction((tx) => revokeRefreshFamily(tx, row.familyId, new Date(now))),
+					)
+					.pipe(Effect.mapError(persistenceError))
+				return yield* protocolError(
+					"invalid_grant",
+					"Authorization has expired; sign in again to reauthorize",
+				)
+			}
+			// The visible `api_keys` row is the only handle a member has on this
+			// grant in the UI, and revoking it used to be a no-op the next rotation
+			// undid. Treating it as the grant's kill switch is what makes that
+			// button — and the membership-removal sweep — actually bite.
+			const accessKeyRows = yield* database
+				.execute((db) =>
+					db
+						.select({ revoked: apiKeys.revoked })
+						.from(apiKeys)
+						.where(eq(apiKeys.id, row.accessKeyId))
+						.limit(1),
+				)
+				.pipe(Effect.mapError(persistenceError))
+			const accessKeyRow = accessKeyRows[0]
+			if (!accessKeyRow || accessKeyRow.revoked) {
+				yield* database
+					.execute((db) =>
+						db.transaction((tx) => revokeRefreshFamily(tx, row.familyId, new Date(now))),
+					)
+					.pipe(Effect.mapError(persistenceError))
+				return yield* protocolError("invalid_grant", "The grant behind this refresh token was revoked")
+			}
 			if (row.revokedAt) {
 				yield* database
-					.execute((db) => db.transaction((tx) => revokeFamily(tx, row.familyId, new Date(now))))
+					.execute((db) => db.transaction((tx) => revokeRefreshFamily(tx, row.familyId, new Date(now))))
 					.pipe(Effect.mapError(persistenceError))
 				return yield* protocolError(
 					"invalid_grant",
@@ -813,7 +838,7 @@ export class McpOAuthService extends Context.Service<
 							)
 							.returning({ id: mcpOAuthRefreshTokens.id })
 						if (claimed.length === 0) {
-							await revokeFamily(tx, row.familyId, new Date(now))
+							await revokeRefreshFamily(tx, row.familyId, new Date(now))
 							return "reused" as const
 						}
 						await tx
@@ -848,7 +873,10 @@ export class McpOAuthService extends Context.Service<
 							userEmail: row.userEmail,
 							accessKeyId: values.accessKeyId,
 							createdAt: new Date(now),
-							expiresAt: new Date(now + REFRESH_TOKEN_TTL_MS),
+							// Never extended past the rotating token's own window: the
+							// grant dies at whichever of the two comes first.
+							expiresAt: new Date(Math.min(now + REFRESH_TOKEN_TTL_MS, familyExpiresAtMs)),
+							familyExpiresAt: new Date(familyExpiresAtMs),
 						})
 						return "issued" as const
 					}),
@@ -879,7 +907,7 @@ export class McpOAuthService extends Context.Service<
 				if (row && row.clientId === clientId) {
 					yield* database
 						.execute((db) =>
-							db.transaction((tx) => revokeFamily(tx, row.familyId, new Date(now))),
+							db.transaction((tx) => revokeRefreshFamily(tx, row.familyId, new Date(now))),
 						)
 						.pipe(Effect.mapError(persistenceError))
 				}
@@ -909,7 +937,7 @@ export class McpOAuthService extends Context.Service<
 								.where(eq(mcpOAuthRefreshTokens.accessKeyId, row.id))
 								.limit(1)
 							if (refreshRows[0]) {
-								await revokeFamily(tx, refreshRows[0].familyId, new Date(now))
+								await revokeRefreshFamily(tx, refreshRows[0].familyId, new Date(now))
 								return
 							}
 							await tx

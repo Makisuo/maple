@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "@effect/vitest"
 import { OrgId, RoleName, UserId } from "@maple/domain/http"
 import { ConfigProvider, Effect, Layer, Option, Schema } from "effect"
 import { Env } from "@/platform/Env"
-import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { CliDeviceAuthService } from "./CliDeviceAuthService"
 
@@ -34,6 +34,34 @@ const userId = Schema.decodeUnknownSync(UserId)("user_cli")
 const memberRole = Schema.decodeUnknownSync(RoleName)("org:member")
 
 describe("CliDeviceAuthService", () => {
+	it.effect("mints a CLI key with a bounded lifetime rather than a permanent one", () => {
+		const db = createTestDb(createdDbs)
+		return Effect.gen(function* () {
+			const auth = yield* CliDeviceAuthService
+			const started = yield* auth.start("Maple CLI on laptop", "127.0.0.1")
+			yield* auth.approve(started.userCode, {
+				orgId,
+				userId,
+				roles: [memberRole],
+				userEmail: null,
+			})
+			yield* auth.poll(started.deviceCode)
+
+			const row = yield* Effect.promise(() =>
+				queryFirstRow<{ expires_at: string | null; kind: string }>(
+					db,
+					"select expires_at, kind from api_keys",
+				),
+			)
+			expect(row?.kind).toBe("standard")
+			// The whole point of the fix: not null.
+			expect(row?.expires_at).not.toBe(null)
+			const ninetyDays = 90 * 24 * 60 * 60 * 1000
+			const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
+			expect(new Date(row!.expires_at!).getTime() - now).toBe(ninetyDays)
+		}).pipe(Effect.provide(makeLayer(db)))
+	})
+
 	it.effect("runs an idempotent browser approval flow and preserves roles", () => {
 		const db = createTestDb(createdDbs)
 		return Effect.gen(function* () {
