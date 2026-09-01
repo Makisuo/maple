@@ -733,14 +733,13 @@ export class PlanetScaleConnectionService extends Context.Service<
 				const target = yield* selectManagedTarget(connection)
 				if (target !== null && target.managedBy === managedByForConnection(connection.id)) {
 					yield* scrapeTargetsService.delete(orgId, target.id, { allowManaged: true }).pipe(
-						Effect.catchTag("@maple/http/errors/ScrapeTargetNotFoundError", () =>
-							Effect.annotateCurrentSpan("maple.planetscale.disconnect_target_missing", true),
-						),
-						// `allowManaged` is the only thing delete validates, so this
-						// branch is unreachable — a reachable one is a bug, not a 400.
-						Effect.catchTag("@maple/http/errors/ScrapeTargetValidationError", (error) =>
-							Effect.die(error),
-						),
+						Effect.catchTags({
+							"@maple/http/errors/ScrapeTargetNotFoundError": () =>
+								Effect.annotateCurrentSpan("maple.planetscale.disconnect_target_missing", true),
+							// `allowManaged` is the only thing delete validates, so this
+							// branch is unreachable — a reachable one is a bug, not a 400.
+							"@maple/http/errors/ScrapeTargetValidationError": (error) => Effect.die(error),
+						}),
 					)
 				}
 

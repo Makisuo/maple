@@ -95,6 +95,16 @@
 				"typescript/no-non-null-assertion": "off"
 			}
 		},
+		// "shape" is Electric's own protocol noun — `/v1/shape` is the endpoint this
+		// app proxies and `maple.electric.shape` is the span attribute naming which
+		// one. The rule is about `shape` as a stand-in for a domain role it could not
+		// name; here it IS the domain role.
+		{
+			"files": ["apps/electric-sync/**"],
+			"rules": {
+				"anti-slop/no-shape-in-symbol-names": "off"
+			}
+		},
 		// Standalone generic DSLs use `any` as a variance placeholder; Maple product code may not.
 		{
 			"files": ["lib/**"],
