@@ -123,7 +123,11 @@ import {
 	getWebAnalyticsSummary,
 	getWebAnalyticsTimeseries,
 } from "@/api/warehouse/web-analytics"
-import { getProductEventNames } from "@/api/warehouse/product-events"
+import {
+	getProductEventNames,
+	getProductEventsForTrace,
+	getProductEventTraceSamples,
+} from "@/api/warehouse/product-events"
 
 /**
  * The error union every warehouse server function fails with: the structured
@@ -382,6 +386,16 @@ export const webAnalyticsBreakdownsResultAtom = makeQueryAtomFamily(getWebAnalyt
 // The event-name list backs the step builder's autocomplete and changes only
 // when someone ships a new `track()` call, so it can sit for a minute.
 export const productEventNamesResultAtom = makeQueryAtomFamily(getProductEventNames, {
+	staleTime: 60_000,
+})
+
+// A completed trace's product events never change, so this is only ever refetched
+// because the trace is still open. 60s matches the route cache behind it.
+export const productEventsForTraceResultAtom = makeQueryAtomFamily(getProductEventsForTrace, {
+	staleTime: 60_000,
+})
+
+export const productEventTraceSamplesResultAtom = makeQueryAtomFamily(getProductEventTraceSamples, {
 	staleTime: 60_000,
 })
 

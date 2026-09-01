@@ -132,4 +132,29 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		manifestDigest: "353715a6b6c7a05f3227215b072ac95a8bd5ee67d5eec35f8c2b4c86839a1187",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
+	Object.freeze({
+		// Product events from traces. `product_events` gains `TraceId`/`SpanId`
+		// (`DEFAULT ''`, appended) and an `idx_trace_id` bloom filter, and
+		// `product_events_traces_mv` starts projecting spans annotated with
+		// `maple.product_event.name` into the table — carrying the span's attribute
+		// map as the event's properties, narrowable with
+		// `maple.product_event.include` and overridable with
+		// `maple.product_event.prop.*`.
+		//
+		// The trace half IS backfilled from `traces`, unlike the last two edges:
+		// there is a source to re-project from. It is bounded by raw traces'
+		// 30-day retention against `product_events`' 365, so annotated spans older
+		// than that window are gone and the table accrues them from here. No
+		// existing row is rewritten — the columns are metadata-only defaults, and
+		// the browser/server/mobile rows are verified byte-identical afterwards.
+		//
+		// projectRevision is carried forward deliberately — it is a hardcoded
+		// constant that no longer tracks the generator's header, and the identity
+		// this gate compares is the fingerprint/digest pair.
+		version: 14,
+		fingerprint: "892bcf3b1df69fdd",
+		digest: "892bcf3b1df69fdd2ca04c738a5f7e21746de2a7e74a2444cf5c4525f9eb4821",
+		manifestDigest: "4870ae8019002bf1a0b41bba1d6da88366cd72a39e0961e1db24f5cd4dd721d0",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
 ] as const)

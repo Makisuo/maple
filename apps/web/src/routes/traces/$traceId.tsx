@@ -13,6 +13,7 @@ import { QueryErrorState } from "@/components/common/query-error-state"
 import { TraceViewTabs } from "@maple/ui/components/traces/trace-view-tabs"
 import { SpanDetailPanel } from "@/components/traces/span-detail-panel"
 import { TraceAnatomyStrip } from "@/components/traces/trace-anatomy-strip"
+import { TraceProductEvents } from "@/components/traces/trace-product-events"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@maple/ui/components/ui/resizable"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@maple/ui/components/ui/sheet"
@@ -245,6 +246,20 @@ function TraceDetailContent({
 		[search.spanId, navigate],
 	)
 
+	// The product-events panel knows a span ID, not a `SpanNode` — its rows come
+	// from `product_events`, not the hierarchy. Selecting by id keeps the two
+	// sources from having to agree on a node shape.
+	const handleSelectSpanId = React.useCallback(
+		(spanId: string) => {
+			if (search.spanId === spanId) return
+			navigate({
+				search: (prev: Record<string, unknown>) => ({ ...prev, spanId }),
+				replace: true,
+			})
+		},
+		[search.spanId, navigate],
+	)
+
 	const handleCloseSpanDetails = React.useCallback(() => {
 		navigate({
 			search: (prev: Record<string, unknown>) => ({ ...prev, spanId: undefined }),
@@ -333,6 +348,13 @@ function TraceDetailContent({
 								httpStatusCode={rootHttpInfo?.statusCode}
 								deploymentEnv={deploymentEnv}
 								commitSha={commitSha}
+							/>
+
+							<TraceProductEvents
+								traceId={traceId}
+								traceStartTime={traceStartTime}
+								totalDurationMs={data.totalDurationMs}
+								onSelectSpan={handleSelectSpanId}
 							/>
 
 							{isMobile ? (

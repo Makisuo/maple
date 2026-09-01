@@ -2202,6 +2202,20 @@ export const productEvents = defineDatasource("product_events", {
 		Attributes: column(t.map(t.string(), t.string()).defaultExpr("map()"), {
 			jsonPath: "$.attributes",
 		}),
+		/**
+		 * The trace this event was derived from — set on `Source = 'trace'` rows,
+		 * `''` on every other source. This column IS the link, in both directions:
+		 * the trace view lists the product events a trace produced, and a funnel
+		 * row hands back the exact trace that performed the step.
+		 *
+		 * A real column rather than an `Attributes` key because both directions
+		 * filter on it, and a `Map` lookup on this table reads the whole map per
+		 * row — the cost `product_events` was split out of `session_events` to
+		 * avoid. Last in the schema because `ALTER TABLE … ADD COLUMN` appends.
+		 */
+		TraceId: column(t.string().default(""), { jsonPath: "$.trace_id" }),
+		/** The annotated span within {@link TraceId}. `''` on non-trace rows. */
+		SpanId: column(t.string().default(""), { jsonPath: "$.span_id" }),
 	},
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",
@@ -2224,6 +2238,17 @@ export const productEvents = defineDatasource("product_events", {
 			// UserId-keyed funnel branch. Near-unique values, so a bloom filter.
 			name: "idx_user_id",
 			expr: "UserId",
+			type: "bloom_filter",
+			granularity: 4,
+		},
+		{
+			// "Which product events did this trace produce?" — the trace view asks
+			// it by id with no other predicate, so without this the lookup scans
+			// every partition in the retained window. Near-unique values, and the
+			// column is `''` on the overwhelming majority of rows, so a bloom
+			// filter both prunes hard and stays cheap.
+			name: "idx_trace_id",
+			expr: "TraceId",
 			type: "bloom_filter",
 			granularity: 4,
 		},

@@ -25,6 +25,7 @@ import {
 	LOCAL_SCHEMA_V11,
 	LOCAL_SCHEMA_V12,
 	LOCAL_SCHEMA_V13,
+	LOCAL_SCHEMA_V14,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -68,16 +69,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v12 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("7c44772116706420")
-		expect(SCHEMA_DIGEST).toBe("7c4477211670642086313b71593d848cbadefc24142a1c6e0fe5fd93a8dd7a6e")
+	it("matches the generated v14 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("892bcf3b1df69fdd")
+		expect(SCHEMA_DIGEST).toBe("892bcf3b1df69fdd2ca04c738a5f7e21746de2a7e74a2444cf5c4525f9eb4821")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(13)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V13)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(14)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V14)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -159,6 +160,7 @@ describe("current local schema identity", () => {
 			"identity_links_mv",
 			"product_events",
 			"product_events_mv",
+			"product_events_traces_mv",
 		])
 		const errorEventsView = LOCAL_SCHEMA_MANIFEST.objects.find(
 			(object) => object.name === "error_events_mv",
@@ -185,7 +187,7 @@ describe("current local schema identity", () => {
 		expect(productEvents?.engine).toBe("MergeTree")
 		expect(productEvents?.orderBy).toBe("(OrgId, Timestamp, VisitorId, SessionId, Seq)")
 		expect(productEvents?.ttl).toContain("365 DAY")
-		expect(productEvents?.indexes).toEqual(["idx_event_name", "idx_user_id"])
+		expect(productEvents?.indexes).toEqual(["idx_event_name", "idx_user_id", "idx_trace_id"])
 		expect(productEvents?.columns.map((column) => column.name)).toEqual([
 			"OrgId",
 			"Timestamp",
@@ -202,6 +204,10 @@ describe("current local schema identity", () => {
 			"Url",
 			"ServiceName",
 			"Attributes",
+			// Appended, not inserted: `ALTER TABLE … ADD COLUMN` puts them last, and
+			// every projection into this table has to match that order.
+			"TraceId",
+			"SpanId",
 		])
 		const productEventsView = LOCAL_SCHEMA_MANIFEST.objects.find(
 			(object) => object.name === "product_events_mv",
@@ -230,14 +236,21 @@ describe("current local schema identity", () => {
 			"GroupId",
 		])
 		const v10Names = new Set(LOCAL_SCHEMA_V10_MANIFEST.objects.map((object) => object.name))
-		const v11Names = new Set(LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name))
-		expect([...v11Names].filter((name) => !v10Names.has(name))).toEqual([
+		// Named for what it is: the CURRENT manifest, not v11's. The delta below is
+		// therefore everything since v10, which is why v14's
+		// `product_events_traces_mv` belongs in it.
+		const currentObjectNames = new Set(LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name))
+		expect([...currentObjectNames].filter((name) => !v10Names.has(name))).toEqual([
 			"identity_links",
 			"identity_links_mv",
 			"product_events",
 			"product_events_mv",
+			"product_events_traces_mv",
 		])
-		expect([...v10Names].filter((name) => !v11Names.has(name))).toEqual(["web_events", "web_events_mv"])
+		expect([...v10Names].filter((name) => !currentObjectNames.has(name))).toEqual([
+			"web_events",
+			"web_events_mv",
+		])
 	})
 
 	it("recognises Apple crash frames at v8 but not before", () => {
@@ -270,6 +283,7 @@ describe("local migration registry", () => {
 			"local-0010-to-0011-product-events",
 			"local-0011-to-0012-service-map-edge-quantiles",
 			"local-0012-to-0013-service-operations-discriminators",
+			"local-0013-to-0014-product-events-from-traces",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
@@ -316,7 +330,7 @@ describe("local migration registry", () => {
 				// One past the current tip — bump alongside LOCAL_SCHEMA_VERSION, or this
 				// stops testing the future-store guard and starts testing the
 				// unknown-fingerprint one.
-				{ ...CURRENT_LOCAL_SCHEMA, version: 14, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 15, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)
@@ -1318,6 +1332,7 @@ describe("v10 -> v11 product events module", () => {
 			"local-0010-to-0011-product-events",
 			"local-0011-to-0012-service-map-edge-quantiles",
 			"local-0012-to-0013-service-operations-discriminators",
+			"local-0013-to-0014-product-events-from-traces",
 		])
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V11)
 		// The dropped table is declared, and the backfilled ones say what they

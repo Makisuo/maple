@@ -694,3 +694,127 @@ export function productEventNamesQuery(
 		.limit(limit)
 		.format("JSON")
 }
+
+// Trace ↔ product event linking
+//
+// A span the customer annotated with `maple.product_event.name` lands in
+// `product_events` as a `Source = 'trace'` row carrying its `TraceId`/`SpanId`
+// (ClickHouse migration 0024 / `product_events_traces_mv`). That column is the
+// link, and these two queries are the two directions of walking it:
+//
+//   trace  → its product events   `productEventsForTraceQuery`
+//   event  → the traces behind it `productEventTraceSamplesQuery`
+//
+// Both filter `TraceId` directly rather than reaching through `Attributes`,
+// because both are single-predicate lookups that must prune on the table's
+// `idx_trace_id` bloom filter — a `Map` read would take the whole map per row on
+// the one table that exists to avoid exactly that.
+
+export const productEventForTraceRowSchema = Schema.Struct({
+	timestamp: Schema.String,
+	eventName: Schema.String,
+	spanId: Schema.String,
+	serviceName: Schema.String,
+	userId: Schema.String,
+	groupId: Schema.String,
+	visitorId: Schema.String,
+	sessionId: Schema.String,
+	attributes: Schema.Record(Schema.String, Schema.String),
+})
+export type ProductEventForTraceOutput = typeof productEventForTraceRowSchema.Type
+
+export interface ProductEventsForTraceOpts {
+	/** Default 50 — a single trace producing more than this is pathological. */
+	readonly limit?: number
+}
+
+/**
+ * The product events one trace produced, oldest first — the trace view's
+ * "this request performed these things" panel.
+ *
+ * Deliberately NOT time-bounded beyond the caller's window: a trace id is
+ * already near-unique, and `idx_trace_id` prunes on it, so adding a narrow time
+ * predicate would only risk missing an event whose span started either side of
+ * the window the caller happened to pass. Callers still bound the range, because
+ * `OrgId`/`Timestamp` lead the sorting key and partition pruning is what keeps
+ * this off every retained day.
+ *
+ * `Source` is not filtered: a row carrying a `TraceId` can only have come from
+ * the trace projection, so filtering it would be a second way to say the same
+ * thing and a second thing to keep in sync.
+ */
+export function productEventsForTraceQuery(
+	opts: ProductEventsForTraceOpts = {},
+): CHQuery<any, ProductEventForTraceOutput, any> {
+	return from(ProductEvents)
+		.select(($) => ({
+			timestamp: $.Timestamp,
+			eventName: $.EventName,
+			spanId: $.SpanId,
+			serviceName: $.ServiceName,
+			userId: $.UserId,
+			groupId: $.GroupId,
+			visitorId: $.VisitorId,
+			sessionId: $.SessionId,
+			attributes: $.Attributes,
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
+			$.TraceId.eq(param.string("traceId")),
+		])
+		.orderBy(["timestamp", "asc"], ["spanId", "asc"])
+		.limit(opts.limit ?? 50)
+		.format("JSON")
+}
+
+export const productEventTraceSampleRowSchema = Schema.Struct({
+	traceId: Schema.String,
+	spanId: Schema.String,
+	timestamp: Schema.String,
+	serviceName: Schema.String,
+	userId: Schema.String,
+	visitorId: Schema.String,
+})
+export type ProductEventTraceSampleOutput = typeof productEventTraceSampleRowSchema.Type
+
+export interface ProductEventTraceSamplesOpts {
+	/** Default 20. */
+	readonly limit?: number
+}
+
+/**
+ * Recent traces behind one event name, newest first — the other direction:
+ * standing on a funnel step or an event in the analytics list, go look at what
+ * actually happened.
+ *
+ * Only annotated rows can answer this, so `TraceId != ''` is the filter rather
+ * than `Source = 'trace'`: it is the same set, and it is the predicate that
+ * makes the result USEFUL (a row with no trace id is not a sample of anything),
+ * so stating it that way keeps the query honest about why it excludes the
+ * browser and `/v1/events` rows.
+ */
+export function productEventTraceSamplesQuery(
+	opts: ProductEventTraceSamplesOpts = {},
+): CHQuery<any, ProductEventTraceSampleOutput, any> {
+	return from(ProductEvents)
+		.select(($) => ({
+			traceId: $.TraceId,
+			spanId: $.SpanId,
+			timestamp: $.Timestamp,
+			serviceName: $.ServiceName,
+			userId: $.UserId,
+			visitorId: $.VisitorId,
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
+			$.EventName.eq(param.string("eventName")),
+			$.TraceId.neq(""),
+		])
+		.orderBy(["timestamp", "desc"])
+		.limit(opts.limit ?? 20)
+		.format("JSON")
+}

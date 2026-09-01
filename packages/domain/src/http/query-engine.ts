@@ -1742,6 +1742,70 @@ export class ProductEventNamesResponse extends Schema.Class<ProductEventNamesRes
 	),
 }) {}
 
+/**
+ * The product events one trace produced — the trace view's side of the link a
+ * `maple.product_event.name` span attribute creates.
+ *
+ * `traceId` is the branded `TraceId`, not a bare string: it reaches a
+ * `param.string` in `productEventsForTraceQuery`, so constraining it here is
+ * what makes a malformed id a 400 rather than a warehouse 500.
+ */
+export class ProductEventsForTraceRequest extends Schema.Class<ProductEventsForTraceRequest>(
+	"ProductEventsForTraceRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	traceId: TraceId,
+	/** Default 50. */
+	limit: Schema.optional(Schema.Number),
+}) {}
+
+export class ProductEventsForTraceResponse extends Schema.Class<ProductEventsForTraceResponse>(
+	"ProductEventsForTraceResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			timestamp: Schema.String,
+			eventName: Schema.String,
+			/** The annotated span within the trace. */
+			spanId: Schema.String,
+			serviceName: Schema.String,
+			userId: Schema.String,
+			groupId: Schema.String,
+			visitorId: Schema.String,
+			sessionId: Schema.String,
+			/** The event's `maple.product_event.prop.*` attributes, prefix stripped. */
+			attributes: Schema.Record(Schema.String, Schema.String),
+		}),
+	),
+}) {}
+
+/** Recent traces behind one event name — the analytics side of the same link. */
+export class ProductEventTraceSamplesRequest extends Schema.Class<ProductEventTraceSamplesRequest>(
+	"ProductEventTraceSamplesRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	eventName: Schema.String,
+	/** Default 20. */
+	limit: Schema.optional(Schema.Number),
+}) {}
+
+export class ProductEventTraceSamplesResponse extends Schema.Class<ProductEventTraceSamplesResponse>(
+	"ProductEventTraceSamplesResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			traceId: Schema.String,
+			spanId: Schema.String,
+			timestamp: Schema.String,
+			serviceName: Schema.String,
+			userId: Schema.String,
+			visitorId: Schema.String,
+		}),
+	),
+}) {}
+
 export class PodFacetsRequest extends Schema.Class<PodFacetsRequest>("PodFacetsRequest")({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
@@ -2696,6 +2760,20 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("productEventNames", "/product-event-names", {
 			payload: ProductEventNamesRequest,
 			success: ProductEventNamesResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("productEventsForTrace", "/product-events-for-trace", {
+			payload: ProductEventsForTraceRequest,
+			success: ProductEventsForTraceResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("productEventTraceSamples", "/product-event-trace-samples", {
+			payload: ProductEventTraceSamplesRequest,
+			success: ProductEventTraceSamplesResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)
