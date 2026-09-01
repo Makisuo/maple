@@ -47,12 +47,6 @@ const linePaths = (container: HTMLElement) => [...container.querySelectorAll(".t
 const axisTickLabels = (container: HTMLElement): string[] =>
 	[...container.querySelectorAll("text")].map((node) => node.textContent ?? "")
 
-/** The largest label on the right-hand rate axis — the ceiling it resolved to. */
-function topPercentTick(container: HTMLElement): string | undefined {
-	const percents = axisTickLabels(container).filter((label) => label.endsWith("%"))
-	return percents.at(-1)
-}
-
 /**
  * The y pixel of every focus dot, deduplicated.
  *
@@ -83,58 +77,60 @@ describe("throughput area chart: rate mode", () => {
 	})
 })
 
-describe("throughput area chart: the error rate has its own axis", () => {
-	it("draws the rate on a right-hand percent axis, not in the throughput unit", () => {
+describe("throughput area chart: derived error series", () => {
+	it("treats errorRate as a fraction, not a percentage", () => {
+		// Every request failed. `errorThroughput` is therefore EXACTLY `throughput`,
+		// so the two series' focus dots land on the same pixel. A stray `/ 100`
+		// would put the error line two orders of magnitude below the band, which is
+		// the bug this pins down.
+		const { container } = render(<ThroughputAreaChart data={rows(() => ({ errorRate: 1 }))} />)
+		expect(focusDotYs(container)).toHaveLength(1)
+	})
+
+	it("plots the errors as a count on the throughput axis, not on a second one", () => {
+		// ONE y axis: every tick carries the throughput unit and none is a
+		// percentage. A right-hand rate axis was tried and read worse on a chart
+		// this size — see `ERROR_KEY`.
 		const { container } = render(<ThroughputAreaChart data={rows(() => ({ errorRate: 0.25 }))} />)
 		const labels = axisTickLabels(container)
-
-		// Both axes are present and each states its own unit. The rate used to be
-		// multiplied into the throughput unit to share the left axis, which is
-		// what put a stray `/ 100` two orders of magnitude out.
 		expect(labels.some((label) => label.endsWith("/h"))).toBe(true)
-		expect(labels.some((label) => label.endsWith("%"))).toBe(true)
+		expect(labels.some((label) => label.endsWith("%"))).toBe(false)
 	})
 
-	it("fixes the rate axis at 0–100% rather than fitting it to the worst bucket", () => {
-		// The height IS the severity, comparable across services and time windows
-		// without reading the axis. A fitted ceiling would draw a 0.1%–0.3% service
-		// and a 10%–30% one as the same mountain.
-		const busy = render(<ThroughputAreaChart data={rows(() => ({ errorRate: 1 }))} />)
-		expect(topPercentTick(busy.container)).toBe("100.0%")
-		busy.unmount()
+	it("positions the error line at its true share of the band", () => {
+		// Throughput is fixed at 3,600/h in all three, so all three share one y
+		// domain and the error values 900 / 1,800 / 2,700 are evenly spaced. On a
+		// shared linear axis their pixels must be evenly spaced too — which is what
+		// "the error line sits at its real fraction of the band" means, and what a
+		// second axis or a rescaled series would break.
+		const errorYFor = (errorRate: number) => {
+			const view = render(<ThroughputAreaChart data={rows(() => ({ errorRate }))} />)
+			// Two dots: throughput above, errors below. Larger y is lower down.
+			const errorY = focusDotYs(view.container).at(-1) as number
+			view.unmount()
+			return errorY
+		}
 
-		const quiet = render(<ThroughputAreaChart data={rows(() => ({ errorRate: 0.001 }))} />)
-		expect(topPercentTick(quiet.container)).toBe("100.0%")
+		const [low, mid, high] = [errorYFor(0.25), errorYFor(0.5), errorYFor(0.75)]
+		// One decimal: `cy` is serialised rounded, so the two ~82.7px gaps differ in
+		// the hundredths. Anything non-linear would be out by whole pixels.
+		expect(low - mid).toBeCloseTo(mid - high, 1)
+		// ...and a non-zero gap, so three identical positions cannot pass.
+		expect(low - mid).toBeGreaterThan(1)
 	})
 
-	it("puts the rate dot at its own axis position, not at the throughput's", () => {
-		// Every request failed, so the rate sits at the TOP of its axis while
-		// throughput (3,600/h against a niced 4,000 ceiling) sits below the top of
-		// its own. Two distinct pixels is the proof the two series read different
-		// scales; sharing the axis collapsed them onto one.
-		const { container } = render(<ThroughputAreaChart data={rows(() => ({ errorRate: 1 }))} />)
-		const [rateY, throughputY] = focusDotYs(container)
-		expect(focusDotYs(container)).toHaveLength(2)
-		// Smaller y is higher up: the saturated rate is above the throughput line.
-		expect(rateY).toBeLessThan(throughputY)
-	})
-
-	it("draws no error line, no rate axis, and no error key, when nothing failed", () => {
+	it("draws no error line, and no error key, when nothing failed", () => {
 		const { container } = render(<ThroughputAreaChart data={rows(() => ({ errorRate: 0 }))} />)
 		// The band's own top edge, and nothing else.
 		expect(linePaths(container)).toHaveLength(1)
-		expect(screen.queryByText(/Error/)).toBeNull()
-		// Every non-null scale draws an axis, so the named scale is declared only
-		// when something is plotted against it.
-		expect(axisTickLabels(container).some((label) => label.endsWith("%"))).toBe(false)
+		expect(screen.queryByText(/Errors/)).toBeNull()
 	})
 
 	it("shows the key for the error line even when no legend was asked for", () => {
-		// The dashed error line is a second unit on the same plot, so it is
-		// unreadable without a key — the legend appears for it whether or not the
-		// caller wanted one.
+		// The dashed error line has no axis of its own, so it is unreadable without
+		// a key — the legend appears for it whether or not the caller wanted one.
 		render(<ThroughputAreaChart data={rows(() => ({ errorRate: 0.25 }))} />)
-		expect(screen.getByText("Error rate")).toBeTruthy()
+		expect(screen.getByText("Errors (/h)")).toBeTruthy()
 	})
 })
 

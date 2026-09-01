@@ -1,8 +1,7 @@
 import { areaY, defineChart, lineY } from "@tanstack/charts"
-import { scaleLinear } from "@tanstack/charts-scales/linear"
 import { memo, useMemo } from "react"
 
-import { bucketIntervalLabel, formatErrorRate, formatThroughput } from "../../../lib/format"
+import { bucketIntervalLabel, formatThroughput } from "../../../lib/format"
 import { cn } from "../../../lib/utils"
 import {
 	FixedMetricLegend,
@@ -33,18 +32,21 @@ import { throughputTimeSeriesData } from "../_shared/sample-data"
 
 const THROUGHPUT_KEY = "throughput"
 /**
- * The RAW fraction the source reports, plotted against its own right-hand axis.
+ * Failing requests as a COUNT — `throughput × errorRate` — not the rate itself.
  *
- * It used to be a derived `errorThroughput = throughput × errorRate`, which
- * existed only to force a rate onto the throughput axis. That multiplication was
- * the chart's one shipped bug — an earlier revision also divided by 100 and drew
- * the overlay two orders of magnitude too small on the overview.
+ * ONE y axis, deliberately. A right-hand percent axis was tried (0.16.0 added
+ * named scales) and read worse: two axes on a chart this size means the shape of
+ * the red line says nothing until you have worked out which axis it belongs to,
+ * and the plot loses a gutter to labels. Errors per second is a count in the same
+ * unit as throughput, so it shares the axis honestly rather than being rescaled
+ * onto it — the line sits under the band it is a part of, which is the reading.
+ *
+ * `errorRate` is a FRACTION (errors / requests), not a percentage. An earlier
+ * revision divided by 100 as well and drew the overlay two orders of magnitude
+ * too small on the overview; `throughput-series.test.tsx` pins that down.
  */
-const ERROR_KEY = "errorRate"
+const ERROR_KEY = "errorThroughput"
 const TRACED_KEY = "tracedThroughput"
-
-/** The named right-hand scale the error rate is plotted against. */
-const ERROR_SCALE_ID = "errorRate"
 
 /** The in-flight split is decided by the primary series alone. */
 const PARTIAL_KEYS = [THROUGHPUT_KEY]
@@ -66,15 +68,10 @@ const THROUGHPUT_TOKENS = {
 } as const satisfies Record<string, readonly [PlotColorToken, string]>
 
 /**
- * One row with the rate conversion applied.
+ * One row with the rate conversion applied and the derived error count attached.
  *
- * The error rate is passed through UNSCALED — it is a fraction (errors /
- * requests) on its own axis, not a count. Only the two throughput series are
- * divided into the requested rate unit.
- *
- * It is still nulled wherever throughput is: a bucket the source never reported
- * has no rate to state, and a null keeps the line broken there rather than
- * dropping it to the floor.
+ * See `ERROR_KEY` for why the overlay is a count rather than the rate, and for
+ * the fraction-versus-percentage trap in the multiplication below.
  */
 function deriveRows(rows: readonly TimeseriesRow[], divisor: number): TimeseriesRow[] {
 	return rows.map((row) => {
@@ -87,7 +84,7 @@ function deriveRows(rows: readonly TimeseriesRow[], divisor: number): Timeseries
 			...row,
 			[THROUGHPUT_KEY]: throughput,
 			[TRACED_KEY]: traced,
-			[ERROR_KEY]: throughput == null ? null : errorRate,
+			[ERROR_KEY]: throughput == null ? null : throughput * errorRate,
 		}
 	})
 }
@@ -160,9 +157,7 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 		if (hasErrors) {
 			entries.push({
 				key: ERROR_KEY,
-				// No rate unit: the series is a percentage on its own axis now, and
-				// "Errors (/s)" described the derived count it used to be.
-				label: "Error rate",
+				label: rateLabel ? `Errors (${rateLabel})` : "Errors",
 				color: colors.error,
 				dashed: true,
 			})
@@ -186,16 +181,16 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 		]
 		if (hasErrors) {
 			entries.push({
-				label: "Error rate",
+				label: "Errors",
 				color: colors.error,
 				dashed: true,
 				// A zero-error bucket prints no row at all: on a healthy service that
-				// is most of them, and "Error rate 0%" in every card is noise.
+				// is most of them, and "Errors 0" in every card is noise.
 				value: (row: TimeseriesRow) => {
 					const value = row[ERROR_KEY]
 					return typeof value === "number" && value > 0 ? value : null
 				},
-				format: formatErrorRate,
+				format: withSuffix,
 			})
 		}
 		if (hasTraced) {
@@ -266,10 +261,9 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 
 		const errorLine = (rowSlice: readonly TimeseriesRow[], partial: boolean) =>
 			lineY(rowSlice, {
-				id: partial ? "error-rate-partial" : "error-rate",
+				id: partial ? "error-throughput-partial" : "error-throughput",
 				x: at,
 				y: value(ERROR_KEY),
-				yScale: ERROR_SCALE_ID,
 				stroke: colors.error,
 				strokeWidth: ERROR_STROKE_WIDTH,
 				strokeDasharray: errorDash,
@@ -313,56 +307,18 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 				// focus dot over a bucket no band draws still feeds scale inference, and
 				// that is what kept the dropped in-flight slot on the axis and hoverable.
 				focusDot(rows, at, value(THROUGHPUT_KEY), colors.throughput, chromeColors),
-				...(hasErrors
-					? [focusDot(rows, at, value(ERROR_KEY), colors.error, chromeColors, ERROR_SCALE_ID)]
-					: []),
+				...(hasErrors ? [focusDot(rows, at, value(ERROR_KEY), colors.error, chromeColors)] : []),
 				focusCrosshair(chromeColors),
 			],
 			scales: {
 				x: timeseriesXAxis(axisContext),
 				y: timeseriesYAxis({
 					rows,
-					// Every plotted series widens the axis — but only the ones ON it. The
-					// error rate lives on `ERROR_SCALE_ID` and would otherwise pull this
-					// axis down to a fraction.
-					visibleKeys: [THROUGHPUT_KEY, TRACED_KEY],
+					// Every plotted series widens the axis, including the derived ones —
+					// a traced line above the sampled estimate must not run off the top.
+					visibleKeys: [THROUGHPUT_KEY, ERROR_KEY, TRACED_KEY],
 					format: (tick: number) => formatThroughput(tick, rateLabel),
 				}).y,
-				// `null`, not omitted, when nothing failed: every non-null scale draws an
-				// axis, so a live entry would paint an empty right-hand gutter on every
-				// healthy service. `null` is the library's own way to say the scale
-				// does not exist, and no mark binds it in that case either.
-				[ERROR_SCALE_ID]: hasErrors
-					? {
-							channel: "y" as const,
-							side: "right" as const,
-							/**
-							 * The FULL 0–100% range, fixed, not a ceiling fitted to the worst
-							 * bucket.
-							 *
-							 * A fitted ceiling reads the wrong way round on a chart whose
-							 * subject is throughput: it magnifies the quiet windows, so a
-							 * service moving between 0.1% and 0.3% draws the same alarming
-							 * mountain as one moving between 10% and 30%, and the shape only
-							 * means anything once you have read the axis. Against a fixed
-							 * range the height IS the severity, and it is comparable across
-							 * services and across time windows without reading anything.
-							 *
-							 * The cost is real and accepted: a sub-1% rate sits on the
-							 * baseline. That is the honest picture — at 0.26% almost nothing
-							 * is failing — and the tooltip carries the number for anyone who
-							 * needs the exact value. `ErrorRateAreaChart` is the chart to
-							 * reach for when the rate itself is the subject; it keeps the
-							 * fitted ceiling because there the shape is the whole point.
-							 */
-							scale: scaleLinear().domain([0, 1]),
-							grid: false,
-							axis: {
-								line: false,
-								ticks: { size: 0, padding: 8, format: formatErrorRate },
-							},
-						}
-					: null,
 			},
 			focus: "group-x",
 			focusRing: false,

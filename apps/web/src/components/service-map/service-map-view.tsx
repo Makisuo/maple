@@ -802,13 +802,14 @@ function formatQueryLabel(value: string): string {
  *
  * That was once forced: `@tanstack/charts` carried a single y scale per chart
  * until 0.16.0, which added named scales (`scales: { …, latency: { channel: "y",
- * side: "right" } }` with marks binding `yScale`). So this is now a CHOICE, and
- * it is deliberately kept — see `throughput-area-chart` for what adopting a
- * second axis looks like where it earns its place.
+ * side: "right" } }` with marks binding `yScale`). So this is now a CHOICE.
  *
- * It stays split because the split landed somewhere better than the workaround
- * it replaced. Every other place in the product that shows volume beside latency
- * already does it this way:
+ * It stays split, and a right-hand axis was tried and backed out elsewhere on
+ * the same reasoning: on a card this size a second axis means the shape of a
+ * line says nothing until the reader has worked out which axis it belongs to.
+ * The split landed somewhere better than the workaround it replaced, and every
+ * other place in the product that shows volume beside latency already does it
+ * this way:
  * `MetricsGrid` on the service detail page, host detail, infra correlation, the
  * Cloudflare zone panels. This chart was the outlier. Two plots also give each
  * series a full readable range instead of one axis squashing the other, and the

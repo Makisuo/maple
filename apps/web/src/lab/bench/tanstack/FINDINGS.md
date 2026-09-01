@@ -32,10 +32,13 @@ Supersedes the 2026-08-05 spike, which ported the same three charts to 0.6.4 and
 >   with them. Every spec quoted below is in the old shape. `scales.x`/`scales.y` are required;
 >   `null` is how a chart says a dimension does not exist.
 > - **One y scale per chart is no longer true.** Named entries (`channel`, `side`) give a mark its
->   own axis via `xScale`/`yScale`. `throughput-area-chart` uses it for the error rate, which
->   deletes the `throughput × errorRate` derivation §9's overview note blames for the 100× bug.
->   The §"usePlotScales" overlay discussion below still holds: named scales are axes, not layers,
->   and the commit markers still have no in-scene home.
+>   own axis via `xScale`/`yScale`. **Tried and backed out** on `throughput-area-chart`, which is
+>   the repo's only real candidate: on a card that size the second axis cost a gutter and made the
+>   red line unreadable until you had worked out which axis it belonged to. Errors per second is a
+>   count in the throughput unit, so it shares the one axis honestly. Nothing in the repo uses a
+>   named scale today — it is available, not adopted. The §"usePlotScales" overlay discussion below
+>   still holds either way: named scales are axes, not layers, and the commit markers still have no
+>   in-scene home.
 > - **`ChartLayerRenderer` is not an overlay API** — it is per-mark SVG-vs-Canvas selection
 >   (`renderer: canvasChartRenderer` on one dense mark). Not adopted.
 > - Re-read of `dist` per the rule above: the grid paint (0.11), `lineY`'s hard-coded round cap,

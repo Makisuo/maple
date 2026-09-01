@@ -50,17 +50,11 @@ export function focusDot<TDatum>(
 	y: (datum: TDatum) => number | null,
 	color: string,
 	chromeColors: PlotChromeColors,
-	// The named y scale this series is plotted against, for a chart with a second
-	// axis. Omitted, the dot binds the reserved `y` — which is right for every
-	// single-axis chart and wrong for the series on the right-hand axis, whose dot
-	// would otherwise sit at the pixel its value maps to on the LEFT scale.
-	yScale?: string,
 ) {
 	return whenFocused(
 		dot(rows, {
 			x,
 			y,
-			yScale,
 			r: 3.5,
 			fill: color,
 			// A ring in the page background separates the dot from the line beneath.
