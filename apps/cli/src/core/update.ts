@@ -19,6 +19,7 @@ import { PlatformError } from "effect/PlatformError"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { randomUUID } from "node:crypto"
 import { realpathSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { amber, bold, dim, green } from "../lib/style"
@@ -296,7 +297,43 @@ const clearQuarantine = (paths: ReadonlyArray<string>): Effect.Effect<void, neve
 		Effect.ignore,
 	)
 
-export const __testables = { downloadTo, extractTar, fetchText, mapFsError }
+/**
+ * Swap both bundle files into place. Each rename is atomic but the PAIR is
+ * not; the previous files are parked inside `tmpDir` first so a failure after
+ * the first swap restores the matched old pair instead of leaving a new
+ * executable beside an old native library. A hard crash mid-swap can still
+ * mismatch — rerunning `maple update` replaces both.
+ */
+const swapBundlePair = (
+	srcDir: string,
+	installDir: string,
+	tmpDir: string,
+): Effect.Effect<void, PlatformError, FileSystem> =>
+	Effect.gen(function* () {
+		const fs = yield* FileSystem
+		const previousDir = join(tmpDir, "previous")
+		const mapleDst = join(installDir, "maple")
+		const libDst = join(installDir, "libchdb.so")
+		const restorePrevious = Effect.gen(function* () {
+			for (const [parked, dst] of [
+				[join(previousDir, "maple"), mapleDst],
+				[join(previousDir, "libchdb.so"), libDst],
+			] as const) {
+				if (yield* fs.exists(parked)) {
+					yield* fs.remove(dst, { force: true }).pipe(Effect.ignore)
+					yield* fs.rename(parked, dst)
+				}
+			}
+		}).pipe(Effect.ignore)
+		yield* Effect.gen(function* () {
+			yield* fs.makeDirectory(previousDir, { recursive: true })
+			if (yield* fs.exists(mapleDst)) yield* fs.rename(mapleDst, join(previousDir, "maple"))
+			yield* fs.rename(join(srcDir, "maple"), mapleDst)
+			if (yield* fs.exists(libDst)) yield* fs.rename(libDst, join(previousDir, "libchdb.so"))
+			yield* fs.rename(join(srcDir, "libchdb.so"), libDst)
+			yield* fs.chmod(mapleDst, 0o755)
+		}).pipe(Effect.tapError(() => restorePrevious))
+	})
 
 export interface UpdateResult {
 	readonly tag: string
@@ -320,8 +357,27 @@ export const performUpdate = (
 		const name = `maple-${tag}-${target}`
 		const url = `https://github.com/${REPO}/releases/download/${tag}/${name}.tar.gz`
 		// Temp dir lives *inside* installDir so the final rename is same-filesystem
-		// (atomic; cross-device rename would EXDEV).
-		const tmpDir = join(installDir, ".maple-update-tmp")
+		// (atomic; cross-device rename would EXDEV). It is UNIQUE per invocation:
+		// a shared name let one updater delete another's extracted library after
+		// its executable had already been installed, pairing mismatched files.
+		const tmpDir = join(installDir, `.maple-update-tmp-${randomUUID()}`)
+
+		// Best-effort sweep of temp dirs abandoned by crashed updates (including
+		// the legacy fixed ".maple-update-tmp" name). Age-gated so a concurrent
+		// in-flight update is never touched.
+		const sweepStaleTmpDirs = Effect.gen(function* () {
+			const entries = yield* fs.readDirectory(installDir)
+			const cutoff = Date.now() - 60 * 60 * 1000
+			for (const entry of entries) {
+				if (!entry.startsWith(".maple-update-tmp")) continue
+				const path = join(installDir, entry)
+				const info = yield* fs.stat(path)
+				const mtime = Option.getOrUndefined(info.mtime)
+				if (mtime !== undefined && mtime.getTime() < cutoff) {
+					yield* fs.remove(path, { recursive: true, force: true })
+				}
+			}
+		}).pipe(Effect.ignore)
 
 		yield* Effect.scoped(
 			Effect.gen(function* () {
@@ -329,11 +385,10 @@ export const performUpdate = (
 					fs.remove(tmpDir, { recursive: true, force: true }).pipe(Effect.ignore),
 				)
 
-				// Fresh temp dir.
-				yield* fs.remove(tmpDir, { recursive: true, force: true }).pipe(
-					Effect.andThen(fs.makeDirectory(tmpDir, { recursive: true })),
-					Effect.mapError((e) => mapFsError(e, installDir)),
-				)
+				yield* sweepStaleTmpDirs
+				yield* fs
+					.makeDirectory(tmpDir, { recursive: true })
+					.pipe(Effect.mapError((e) => mapFsError(e, installDir)))
 
 				const tarball = join(tmpDir, "bundle.tar.gz")
 				yield* downloadTo(url, tarball)
@@ -351,10 +406,7 @@ export const performUpdate = (
 				yield* extractTar(tarball, tmpDir)
 				const srcDir = join(tmpDir, name)
 
-				// Atomic in-place swap of both bundle files.
-				yield* fs.rename(join(srcDir, "maple"), join(installDir, "maple")).pipe(
-					Effect.andThen(fs.rename(join(srcDir, "libchdb.so"), join(installDir, "libchdb.so"))),
-					Effect.andThen(fs.chmod(join(installDir, "maple"), 0o755)),
+				yield* swapBundlePair(srcDir, installDir, tmpDir).pipe(
 					Effect.mapError((e) => mapFsError(e, installDir)),
 				)
 
@@ -422,3 +474,5 @@ export const maybeNotifyUpdate: Effect.Effect<void, never, MapleConfig | HttpCli
 		}
 	},
 )
+
+export const __testables = { downloadTo, extractTar, fetchText, mapFsError, swapBundlePair }

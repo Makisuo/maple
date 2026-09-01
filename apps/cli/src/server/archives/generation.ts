@@ -1062,6 +1062,13 @@ const reconcilePrePublication = async (
 	building: string,
 	endPhase: ArchiveOperationPhase,
 ): Promise<void> => {
+	// Durably record the terminal phase BEFORE any cleanup. The pin release
+	// below is phase-gated on recovery: releasing it first and crashing before
+	// this write would leave a mid-flight phase whose required pin is absent,
+	// which validateOwnedPinState rightly fails closed on — stranding every
+	// later archive operation. From "aborted", each cleanup step is idempotent
+	// and decideCreate resumes this same path.
+	await advancePhase(archiveDir, intent.operationId, endPhase)
 	// Quarantine incomplete building output if present (retain, don't delete).
 	if (existsSync(building)) {
 		// Move the building debris into a quarantine subdir named for the
@@ -1096,7 +1103,6 @@ const reconcilePrePublication = async (
 	// "pin-released" would be an error, but a pre-publication abort releasing its
 	// own pin is the intended recovery — so tolerate already-absent here.
 	await releaseOwnedPin(dataDir, intent)
-	await advancePhase(archiveDir, intent.operationId, endPhase)
 	// Archive the aborted operation journal to completed/ (retained for audit).
 	await archiveCompletedOperation(archiveDir, intent.operationId)
 }
