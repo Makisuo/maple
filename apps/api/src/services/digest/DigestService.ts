@@ -14,8 +14,8 @@ import {
 } from "@maple/domain/http"
 import type { RoleName as RoleNameType } from "@maple/domain/http"
 import { createClerkClient } from "@clerk/backend"
-import { and, eq, inArray, isNull, lt, or } from "drizzle-orm"
-import { Clock, Array as Arr, Cause, Effect, Layer, Option, Redacted, Ref, Schema, Context } from "effect"
+import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
+import { Clock, Array as Arr, Cause, Effect, Layer, Option, Redacted, Schema, Context } from "effect"
 import {
 	computeDelta,
 	deriveDigestStatus,
@@ -27,7 +27,7 @@ import {
 } from "@maple/email/weekly-digest-core"
 import { renderWeeklyDigest } from "@maple/email/weekly-digest"
 import { Database } from "@/platform/DatabaseLive"
-import { dateToMs } from "@/platform/time"
+import { dateToMs, msToDate } from "@/platform/time"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -344,18 +344,23 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 							userId,
 							email: input.email,
 							enabled: input.enabled !== false,
+							optedOutAt: input.enabled === false ? msToDate(now) : null,
 							dayOfWeek: input.dayOfWeek ?? 1,
 							timezone: input.timezone ?? "UTC",
 							namespacesJson: JSON.stringify(input.namespaces ?? []),
 							environmentsJson: JSON.stringify(input.environments ?? []),
-							createdAt: new Date(now),
-							updatedAt: new Date(now),
+							createdAt: msToDate(now),
+							updatedAt: msToDate(now),
 						})
 						.onConflictDoUpdate({
 							target: [digestSubscriptions.orgId, digestSubscriptions.userId],
 							set: {
 								email: input.email,
 								enabled: input.enabled !== false,
+								// The subscriber turning the digest off is the one signal the
+								// Clerk reconciliation must not overwrite; stamp it here so it
+								// can tell an opt-out from a member it disabled itself.
+								optedOutAt: input.enabled === false ? msToDate(now) : null,
 								...(input.dayOfWeek != null ? { dayOfWeek: input.dayOfWeek } : undefined),
 								...(input.timezone != null ? { timezone: input.timezone } : undefined),
 								...(input.namespaces != null
@@ -364,7 +369,7 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 								...(input.environments != null
 									? { environmentsJson: JSON.stringify(input.environments) }
 									: undefined),
-								updatedAt: new Date(now),
+								updatedAt: msToDate(now),
 							},
 						}),
 				)
@@ -373,6 +378,12 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			return yield* getSubscription(orgId, userId)
 		})
 
+		/**
+		 * The digest is opt-out: every current member is a subscriber, so the
+		 * Clerk reconciliation recreates any row it does not find. Deleting the
+		 * row would therefore last until the next tick — the opt-out has to be
+		 * recorded, not erased.
+		 */
 		const deleteSubscription = Effect.fn("DigestService.deleteSubscription")(function* (
 			orgId: OrgId,
 			userId: UserId,
@@ -380,10 +391,13 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			yield* Effect.annotateCurrentSpan("tenant.userId", userId)
 
+			const now = yield* Clock.currentTimeMillis
+
 			yield* database
 				.execute((db) =>
 					db
-						.delete(digestSubscriptions)
+						.update(digestSubscriptions)
+						.set({ enabled: false, optedOutAt: msToDate(now), updatedAt: msToDate(now) })
 						.where(
 							and(eq(digestSubscriptions.orgId, orgId), eq(digestSubscriptions.userId, userId)),
 						),
@@ -847,8 +861,11 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			return new DigestPreviewResponse({ html })
 		})
 
-		const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000 // 24 hours
-		const lastSyncAt = yield* Ref.make<number | null>(null)
+		// The digest tick fires every 15 minutes, so the daily Clerk sweep is
+		// pinned to the first tick of the UTC day. An in-memory limiter cannot do
+		// this: the worker builds a fresh layer per cron invocation, so any Ref it
+		// holds starts empty on every tick.
+		const SYNC_WINDOW_MS = 15 * 60 * 1000
 
 		const paginateClerk = <T>(
 			spanName: string,
@@ -927,7 +944,10 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 		) {
 			const now = yield* Clock.currentTimeMillis
 
-			// Upsert all current Clerk members (re-enables returning members, updates email)
+			// Upsert all current Clerk members (re-enables returning members, updates
+			// email). `enabled` is recomputed from the stored opt-out rather than
+			// forced true: a member who turned the digest off stays off, while one
+			// this sweep disabled when they left the org comes back enabled.
 			yield* Effect.forEach(
 				clerkMemberships,
 				(m) =>
@@ -943,15 +963,15 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 									enabled: true,
 									dayOfWeek: 1,
 									timezone: "UTC",
-									createdAt: new Date(now),
-									updatedAt: new Date(now),
+									createdAt: msToDate(now),
+									updatedAt: msToDate(now),
 								})
 								.onConflictDoUpdate({
 									target: [digestSubscriptions.orgId, digestSubscriptions.userId],
 									set: {
 										email: m.email,
-										enabled: true,
-										updatedAt: new Date(now),
+										enabled: sql`${digestSubscriptions.optedOutAt} is null`,
+										updatedAt: msToDate(now),
 									},
 								}),
 						)
@@ -986,7 +1006,7 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 					.execute((db) =>
 						db
 							.update(digestSubscriptions)
-							.set({ enabled: false, updatedAt: new Date(now) })
+							.set({ enabled: false, updatedAt: msToDate(now) })
 							.where(inArray(digestSubscriptions.id, staleIds)),
 					)
 					.pipe(Effect.mapError(toPersistenceError))
@@ -1001,10 +1021,8 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			if (env.MAPLE_AUTH_MODE.toLowerCase() !== "clerk") return
 			if (Option.isNone(env.CLERK_SECRET_KEY)) return
 
-			// Rate-limit: only sync from Clerk once per 24 hours
 			const now = yield* Clock.currentTimeMillis
-			const lastSync = yield* Ref.get(lastSyncAt)
-			if (lastSync != null && now - lastSync < SYNC_INTERVAL_MS) return
+			if (now % 86_400_000 >= SYNC_WINDOW_MS) return
 
 			const clerk = createClerkClient({
 				secretKey: Redacted.value(env.CLERK_SECRET_KEY.value),
@@ -1012,8 +1030,6 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 
 			const memberships = yield* fetchAllClerkMemberships(clerk)
 			yield* reconcileSubscriptions(memberships)
-
-			yield* Ref.set(lastSyncAt, now)
 
 			yield* Effect.logInfo("Digest subscriptions synced from Clerk").pipe(
 				Effect.annotateLogs({ memberCount: memberships.length }),
@@ -1247,6 +1263,9 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			// Exposed so the shape of a digest can be asserted directly rather than
 			// through rendered HTML.
 			generateDigestData,
+			// Exposed so the Clerk sweep's effect on a subscriber's own choice can
+			// be asserted without standing up a Clerk client.
+			reconcileSubscriptions,
 			preview,
 			runDigestTick,
 		}
