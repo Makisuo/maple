@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, Effect, Exit, Layer } from "effect"
+import { Cause, Effect, Exit, Fiber, Latch, Layer } from "effect"
 import { env as workerEnv } from "../test/stubs/cloudflare-workers"
 import { buildLayer, catchTickFailure, selectScheduledProgram, type ScheduledTickPrograms } from "./worker"
 
@@ -38,6 +38,37 @@ describe("alerting Effect root", () => {
 			)
 		})
 	}
+
+	it.effect("never starts fixVerification before the error tick completes", () => {
+		// The adversarial schedule for concurrency 2: alert and escalation are
+		// instant, so both finish while error is still running. Listing the four
+		// ticks side by side would hand the freed slot to fixVerification here —
+		// only the explicit error→fixVerification chain keeps the ordering.
+		const calls: Array<string> = []
+		const record = (name: string) => Effect.sync(() => calls.push(name)).pipe(Effect.asVoid)
+		return Effect.gen(function* () {
+			const errorGate = yield* Latch.make(false)
+			const ticks = {
+				alert: record("alert"),
+				anomaly: record("anomaly"),
+				cloudflareAnalytics: record("cloudflareAnalytics"),
+				digest: record("digest"),
+				error: errorGate.await.pipe(Effect.andThen(record("error"))),
+				escalation: record("escalation"),
+				fixVerification: record("fixVerification"),
+				planetScale: record("planetScale"),
+				serviceMapRollup: record("serviceMapRollup"),
+			} satisfies ScheduledTickPrograms
+			const fiber = yield* Effect.forkChild(selectScheduledProgram("* * * * *", ticks))
+			// Let alert and escalation run to completion while error is held open.
+			yield* Effect.yieldNow
+			yield* Effect.yieldNow
+			expect(calls).not.toContain("fixVerification")
+			yield* errorGate.open
+			yield* Fiber.join(fiber)
+			expect(calls.indexOf("error")).toBeLessThan(calls.indexOf("fixVerification"))
+		})
+	})
 
 	it.effect("fails closed for an unknown cron", () => {
 		const calls: Array<string> = []

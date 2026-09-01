@@ -630,4 +630,20 @@ describe("runInvestigationFanout", () => {
 		expect((await run(baseDeps())).status).toBe("skipped")
 		expect(await loadLanes()).toHaveLength(0)
 	})
+
+	it("stands down a stale attempt instead of publishing over a restart", async () => {
+		// A restart bumped the fence and re-queued the row; the terminated-but-alive
+		// attempt-0 instance replays its claim. Termination is best-effort, so this
+		// check is the only thing keeping the old workflow from overwriting the new
+		// attempt's status, report, and lanes' parent state.
+		await harness.db
+			.update(investigations)
+			.set({ fanoutAttempt: 1, fanoutState: "queued" })
+			.where(eq(investigations.id, harness.investigationId))
+		expect((await run(baseDeps())).status).toBe("skipped")
+		const row = await loadInvestigation()
+		expect(row.status).toBe("investigating")
+		expect(row.reportJson).toBeNull()
+		expect(await loadLanes()).toHaveLength(0)
+	})
 })

@@ -664,6 +664,19 @@ async function runWithDb(
 			),
 		)
 
+	/**
+	 * Every parent-row write carries the attempt fence: a straggler instance that
+	 * outlived a best-effort termination — or replayed after a restart bumped
+	 * `fanoutAttempt` — must find zero rows, not overwrite the live attempt's
+	 * status, plan, or report. Lane rows are already attempt-scoped.
+	 */
+	const fencedParentRow = () =>
+		and(
+			eq(investigations.orgId, orgIdTyped),
+			eq(investigations.id, idTyped),
+			eq(investigations.fanoutAttempt, attempt),
+		)
+
 	const laneRows = () =>
 		dbStep((db) =>
 			db
@@ -696,6 +709,11 @@ async function runWithDb(
 		if (row.fanoutState !== "queued" && row.fanoutState !== "running") {
 			return { proceed: false as const }
 		}
+		// The attempt is a fencing token: a restart bumps `fanoutAttempt` and
+		// termination of the prior instance is best-effort, so an old instance
+		// replaying its claim against the restarted row must stand down rather
+		// than run to completion over the new attempt's state.
+		if (row.fanoutAttempt !== attempt) return { proceed: false as const }
 
 		// Both deadlines fixed here, once, and returned on the cached result. Reading
 		// a clock anywhere downstream of this would differ per replay.
@@ -709,7 +727,7 @@ async function runWithDb(
 					fanoutDeadlineAt: new Date(hypothesisDeadlineAtMs),
 					updatedAt: new Date(now),
 				})
-				.where(and(eq(investigations.orgId, orgIdTyped), eq(investigations.id, idTyped))),
+				.where(fencedParentRow()),
 		)
 
 		return {
@@ -799,7 +817,7 @@ async function runWithDb(
 						plannerElapsedMs: finishedAt - startedAt,
 						updatedAt: new Date(finishedAt),
 					})
-					.where(and(eq(investigations.orgId, orgIdTyped), eq(investigations.id, idTyped)))
+					.where(fencedParentRow())
 
 				for (const [ordinal, hypothesis] of plan.hypotheses.entries()) {
 					await db
@@ -943,12 +961,7 @@ async function runWithDb(
 											reportJson: output.report as never,
 											updatedAt: new Date(finishedAt),
 										})
-										.where(
-											and(
-												eq(investigations.orgId, orgIdTyped),
-												eq(investigations.id, idTyped),
-											),
-										),
+										.where(fencedParentRow()),
 								)
 							}
 							return {
@@ -1043,7 +1056,7 @@ async function runWithDb(
 								outputTokens,
 								updatedAt: new Date(now),
 							})
-							.where(and(eq(investigations.orgId, orgIdTyped), eq(investigations.id, idTyped))),
+							.where(fencedParentRow()),
 					)
 					await meterTokens(env, orgId, investigationId, attempt, inputTokens, outputTokens)
 					return { status: "inconclusive" as const }
@@ -1120,7 +1133,7 @@ async function runWithDb(
 							outputTokens,
 							updatedAt: new Date(now),
 						})
-						.where(and(eq(investigations.orgId, orgIdTyped), eq(investigations.id, idTyped))),
+						.where(fencedParentRow()),
 				)
 				await meterTokens(env, orgId, investigationId, attempt, inputTokens, outputTokens)
 				return { metered: inputTokens + outputTokens }
@@ -1135,7 +1148,7 @@ async function runWithDb(
 					db
 						.update(investigations)
 						.set({ fanoutState: "validating", updatedAt: new Date(startedAt) })
-						.where(and(eq(investigations.orgId, orgIdTyped), eq(investigations.id, idTyped))),
+						.where(fencedParentRow()),
 				)
 
 				// Read the lanes back from Postgres rather than from the step results: a

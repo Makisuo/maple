@@ -2,11 +2,7 @@ import { randomUUID } from "node:crypto"
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { Clock, ConfigProvider, Effect, Layer, Schema } from "effect"
 import { OrgId } from "@maple/domain/http"
-import {
-	ErrorIssueId,
-	ErrorIssuePullRequestId,
-	ErrorIssueVerificationId,
-} from "@maple/domain/primitives"
+import { ErrorIssueId, ErrorIssuePullRequestId, ErrorIssueVerificationId } from "@maple/domain/primitives"
 import {
 	aiTriageSettings,
 	errorIssues,
@@ -167,6 +163,10 @@ describe("enqueueFixVerification", () => {
 			)
 			assert.strictEqual(rows.length, 1)
 			assert.strictEqual(rows[0]?.status, "investigating")
+			// The fence a restart needs: `restartInvestigation` terminates the prior
+			// workflow only when this column is populated. Left null, the old
+			// instance survives every restart and publishes over the new attempt.
+			assert.strictEqual(rows[0]?.workflowInstanceId, workflow.created[0]?.id)
 		}).pipe(Effect.provide(makeLayer())),
 	)
 
