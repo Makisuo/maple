@@ -86,16 +86,17 @@ have since moved back to the typed `/v2` endpoints, and were pruned from both by
    If your Postgres volume predates the `wal_level` change, recreate it:
    `docker compose -f docker-compose.development.yml up -d --force-recreate postgres electric`.
 2. `bun db:migrate:local` applies migrations, including `0009_electric_publication`.
-3. `.env.local`: `ELECTRIC_URL=http://localhost:3473` and
-   `VITE_ELECTRIC_SYNC_URL=http://localhost:3476` (both already in `.env.example`).
-   `ELECTRIC_URL` is now read by the `apps/electric-sync` worker (default port 3476);
-   `VITE_ELECTRIC_SYNC_URL` points the web app's ShapeStreams at it.
-4. Run the app (`bun dev`) — it starts the `electric-sync` worker alongside the
-   others via portless. The dashboards/alerts/errors lists read exclusively from
-   the sync path, so steps 1–3 are required for them to load.
+3. `.env.local`: `ELECTRIC_URL=http://localhost:3473` (already in `.env.example`), read by
+   the `apps/electric-sync` worker. Under `bun dev` the web app finds that worker at
+   `https://electric-sync.localhost` on its own; `VITE_ELECTRIC_SYNC_URL` only matters when
+   running the web app on a raw port without the portless proxy.
+4. Run the app (`bun dev`) — the `electric-sync` worker comes up in the `alchemy dev`
+   stack with everything else (`bun dev api electric-sync web` for just the pieces that
+   matter here). The dashboards/alerts/errors lists read exclusively from the sync path, so
+   steps 1–3 are required for them to load.
 
 Smoke-test the proxy directly (through the standalone worker; needs a bearer):
-`curl -g 'http://localhost:3476/api/sync/shape?shape=dashboards&offset=-1' -H "authorization: Bearer <token>"`,
+`curl -g 'https://electric-sync.localhost/api/sync/shape?shape=dashboards&offset=-1' -H "authorization: Bearer <token>"`,
 or hit Electric with no proxy: `curl -g 'http://localhost:3473/v1/shape?table=dashboards&offset=-1'`.
 
 ### Troubleshooting
@@ -104,8 +105,8 @@ or hit Electric with no proxy: `curl -g 'http://localhost:3473/v1/shape?table=da
 no upstream `ELECTRIC_URL`. Two causes:
 
 1. `ELECTRIC_URL` isn't set in `.env.local`. Set `ELECTRIC_URL=http://localhost:3473`,
-   then **restart** the worker — `--env-file` is read once at wrangler startup, so a
-   hot source reload won't pick it up (`bun dev`, or just the `electric-sync` task).
+   then **restart** `bun dev` — `--env-file` is read once when `alchemy dev` starts, so
+   a hot source reload won't pick it up.
 2. The docker `electric` service isn't running on `:3473`. `bun db:up` starts it now;
    confirm with `docker compose ps` (expect `maple-electric-1`).
 
@@ -179,7 +180,7 @@ like local docker does.
 1. **PlanetScale cluster params:** `wal_level=logical`, `max_replication_slots>=10`,
    `max_wal_senders>=10`, `max_slot_wal_keep_size>=4096`, `sync_replication_slots=on`,
    `hot_standby_feedback=on`. Already set for Cloud; unchanged.
-2. **Dedicated role** with the `REPLICATION` *attribute* — never inherited through
+2. **Dedicated role** with the `REPLICATION` _attribute_ — never inherited through
    role membership, and Electric's database validation rejects a role without it
    with a message that does not say so — plus `SELECT` on the synced tables.
    Avoid the ephemeral pscale migration roles.

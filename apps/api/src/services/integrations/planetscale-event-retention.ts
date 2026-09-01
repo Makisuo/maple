@@ -13,8 +13,8 @@ import { Database } from "@/platform/DatabaseLive"
  * charts are useful, and a per-org row cap as a backstop.
  *
  * Runs from the API worker's existing hourly retention cron rather than its own
- * schedule — every new cron string costs an entry in both `wrangler.jsonc` and
- * `alchemy.run.ts`, and this has no reason to tick on a different beat.
+ * schedule — every new cron string costs an entry in `alchemy.run.ts` and a
+ * branch in `worker.ts`, and this has no reason to tick on a different beat.
  */
 
 /** Age cutoff. Beyond this a deploy marker has no chart left to sit on. */

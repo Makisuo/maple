@@ -31,32 +31,46 @@ the first, and keeps the failure in the typed error channel. `packages/alchemy-m
 `MapleEnvironment` is the same pattern inside a provider; the runtime worker env schemas
 use `@maple/effect-cloudflare/config-helpers`, which `env.ts` builds on.
 
-## Local dev: `alchemy dev` for the Workers
+## Local dev: one `alchemy dev` stack
 
-The three Worker apps — **api, alerting, electric-sync** — run under a single
-`alchemy dev` process:
+`bun dev` (`scripts/dev.ts`) runs the whole local stack as a single `alchemy dev`:
 
 ```bash
-bun run dev:workers   # api + alerting + electric-sync, one stack, one process
-bun dev               # everything else: web, landing, ingest, scraper, local-ui
+bun dev             # everything
+bun dev api web     # a subset: api, alerting, electric-sync, web, landing, ingest, local-ui, scraper
 ```
 
-`scripts/dev-workers.ts` reserves a free port per Worker, registers a static portless
-route at it (`portless alias <name> <port>`), and passes the ports into the stack, where
-each app's `dev: devServer("<app>")` picks its own up. **Ports are ephemeral by design**:
-portless exists so nobody has to care which port anything is on and so several worktrees
-can run the same app at once — a pinned port would reintroduce exactly the collision it
-removes. Linked worktrees get the same branch-prefixed hostnames portless itself
-produces (`fix-ui.api.localhost`), so both naming schemes agree.
+The Workers — **api, alerting, electric-sync** — are served by alchemy's local runtime from
+the same `create*` factories that deploy them. Everything that is not a Worker — web, landing
+and local-ui (vite/astro dev servers), ingest (`cargo run`) and scraper — runs as a
+`Command.Dev` child of the same stack: each app's own `dev` script, started by
+`createDevProcess` in `alchemy.run.ts`, kept alive across stack restarts, stopped with the
+stack. `Command.Dev` is a no-op on a deploy, so this is dev-only by construction; the asset
+Workers' deploy shape (`Command.Build` + assets Worker) never runs in dev.
 
-The stack narrows itself under the dev server: `isDevServer` (`ALCHEMY_DEV=true`, set by
-`alchemy dev`) drops web, landing and local-ui, each of which is gated on a production
-`Command.Build` — their vite/astro dev servers serve them instead. It is not stage-derived,
-because a dev _stage_ can still be deployed to the cloud.
+Portless is the one thing alchemy cannot provide: named HTTPS hosts that several worktrees
+share without anyone caring about ports. So `scripts/dev.ts` reserves a free port per app,
+registers a static portless route at it (`portless alias <name> <port>`), and passes ports
+and URLs into the stack through `MAPLE_DEV_PORT_<APP>` / `MAPLE_DEV_URL_<APP>`
+(`@maple/infra/dev-urls`). **Ports are ephemeral by design** — a pinned port would
+reintroduce exactly the collision portless removes. Linked worktrees get the same
+branch-prefixed hostnames portless itself produces (`fix-ui.api.localhost`), and each
+non-Worker child is told its own name through `PORTLESS_URL`, which is how the vite/astro
+configs find the api and ingest (`siblingUrl`).
 
-What this buys over the old per-app `wrangler dev`:
+`isDevServer` (`ALCHEMY_DEV=true`, set by `alchemy dev`) is what switches the stack into this
+shape, and `MAPLE_DEV_APPS` narrows it to the requested apps. Neither is stage-derived: a dev
+_stage_ can still be deployed to the cloud, and a deploy is never partial.
 
-- **One definition.** Bindings come from the same `create*` factories that deploy.
+What this buys over the old per-app `wrangler dev` under turbo + portless:
+
+- **One definition.** Bindings, crons and exported classes come from `alchemy.run.ts`, for
+  dev and deploy alike. There are no `wrangler.jsonc` files any more; the crons/DO/KV/
+  rate-limiter mirroring that used to drift between the two is gone with them. `wrangler`
+  survives only as an `apps/api` devDependency for `bench:startup-cpu`, whose `worker` mode
+  writes a throwaway config for `wrangler check startup`.
+- **One process tree.** No turbo fan-out, no per-app `portless` wrapper, no `dev:app`
+  indirection: `bun dev` is the stack, and Ctrl-C stops all of it.
 - **Crons fire on their real schedule.** `alchemy dev` runs each Worker's declared crons
   itself, and `/cdn-cgi/handler/scheduled` triggers one on demand (Miniflare's path, always
   on — no `--test-scheduled` flag).
@@ -76,11 +90,14 @@ Gotchas worth knowing:
   ingest key; without the exemption the whole stack refuses to start over a key whose only
   job is exporting the Worker's own telemetry.
 - Dev stacks run with `ALCHEMY_LOCAL_STATE=1`, so they never touch the account state store.
-
-The six `wrangler.jsonc` files still exist and still carry the duplicated crons, DO classes,
-KV bindings and rate limiters. They are dead weight for api/alerting/electric-sync now — the
-next cleanup is deleting those three and the `dev:app`/`portless-wrangler.ts` plumbing behind
-them. web/landing/local-ui keep theirs until their dev servers move too.
+- `--env-file .env.local` is read once at start: a changed variable needs a restart.
+- The children's logs share one terminal. There are no per-app panes as under turbo's TUI.
+- A harness that cannot resolve `*.localhost` (the browser-verification preview) can pin a
+  port by pre-setting the variable the script would otherwise publish:
+  `MAPLE_DEV_PORT_API=3472 bun dev api`.
+- Ctrl-C stops the whole tree: the script runs alchemy in its own process group and forwards
+  the signal to the group, because alchemy's CLI is several node processes deep and a signal
+  to any one of them stops nothing. On exit it removes the routes it registered.
 
 ## The retired AWS opt-in flag (`MAPLE_DEPLOY_AWS_INGEST`)
 

@@ -451,8 +451,8 @@ const handleQueue = async (
 	}
 }
 
-// Cron handler. Three schedules (see wrangler.jsonc / alchemy.run.ts
-// `triggers.crons`), dispatched on `event.cron`:
+// Cron handler. Three schedules (see `crons` in alchemy.run.ts), dispatched on
+// `event.cron`:
 //   "0 */12 * * *" — enqueue a periodic VCS sync per installation
 //   "0 * * * *"    — apply scrape-check retention
 //   "0 */6 * * *"  — Slack workspace reconciliation
@@ -477,7 +477,7 @@ const handleScheduled = async (
 			await import("@/services/integrations/planetscale-event-retention")
 		try {
 			// Both sweeps ride this one cron: each new cron string costs an entry in
-			// wrangler.jsonc and alchemy.run.ts, and neither needs its own beat.
+			// alchemy.run.ts and a branch here, and neither needs its own beat.
 			// Sequential, not concurrent — they share one Postgres socket for the
 			// whole tick, so running them concurrently would only queue on it.
 			await runScheduledEffect(

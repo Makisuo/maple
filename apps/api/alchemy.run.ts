@@ -12,7 +12,6 @@ import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
 	formatMapleStage,
-	resolveDatabaseMode,
 	resolveHyperdriveName,
 	resolveHyperdriveRefId,
 	resolveWorkerName,
@@ -41,6 +40,8 @@ export interface CreateMapleApiOptions {
 	domains: MapleDomains
 	/** Read side of the replay payload store; see `createReplayBlobStore`. */
 	replayBlobs: Cloudflare.R2.Bucket
+	/** The managed application database from `createManagedMapleDb`; undefined on ref stages (stg/prd) and PR previews. */
+	mapleDb: Cloudflare.Hyperdrive.Connection | undefined
 }
 
 /** R2 credentials for the ingest gateway, when this stage writes replay blobs. */
@@ -228,7 +229,18 @@ const apiConfiguredEnv = (stage: MapleStage, domains: MapleDomains) =>
 /** Alchemy resource type for the API Worker, carrying its internal RPC surface. */
 export type MapleApiWorker = Cloudflare.Worker & Rpc<MapleApiRpcContract>
 
-const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleStage) {
+/**
+ * The alchemy-MANAGED application database of a dev stage: a Hyperdrive whose
+ * origin is pushed from MAPLE_PG_URL (a standard Postgres connection string,
+ * direct port 5432) — the same env var the CI `drizzle-kit migrate` step and
+ * the import scripts use. Cloudflare Hyperdrive needs a STRUCTURED origin
+ * (discrete host/user/…), not a URL, so it is parsed here. Schema migrations
+ * run in CI before deploy, never at boot.
+ *
+ * Created once at the root and handed to both the api and alerting Workers;
+ * stg/prd bind a dashboard-managed config by id instead (see `createMapleApi`).
+ */
+export const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleStage) {
 	const pgUrl = new URL(yield* requiredPlain("MAPLE_PG_URL"))
 	return yield* Cloudflare.Hyperdrive.Connection("maple-db", {
 		name: resolveHyperdriveName(stage),
@@ -260,7 +272,7 @@ const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleStage) {
 	})
 })
 
-export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOptions) =>
+export const createMapleApi = ({ stage, domains, replayBlobs, mapleDb }: CreateMapleApiOptions) =>
 	Effect.gen(function* () {
 		// MAPLE_DB Hyperdrive comes in two flavors:
 		//
@@ -270,20 +282,14 @@ export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOp
 		//   live only in the Cloudflare dashboard; deploys never see them and
 		//   MAPLE_PG_URL is not required.
 		//
-		// - dev stages get an alchemy-MANAGED Hyperdrive whose origin is pushed
-		//   from MAPLE_PG_URL (a standard Postgres connection string, direct port
-		//   5432) — the same env var the CI `drizzle-kit migrate` step + import
-		//   scripts use. Cloudflare Hyperdrive needs a STRUCTURED origin (discrete
-		//   host/user/…), not a URL, so we parse it here. Schema migrations run in
-		//   CI before deploy, never at boot.
+		// - dev stages get the alchemy-MANAGED Hyperdrive the root creates with
+		//   `createManagedMapleDb` and passes in as `mapleDb`.
 		//
 		// - pr previews get NO database binding at all (resolveDatabaseMode →
 		//   "none"): PlanetScale PR branches are no longer provisioned. The worker
 		//   still boots and serves — DatabasePgLive fails per query instead of
 		//   dying — so DB-backed routes 500 while everything else works.
-		const databaseMode = resolveDatabaseMode(stage)
 		const hyperdriveRefId = resolveHyperdriveRefId(stage, "api")
-		const mapleDb = databaseMode !== "managed" ? undefined : yield* createManagedMapleDb(stage)
 
 		// Resolved before any resource is created, so a misconfigured deploy fails
 		// with the full list of missing vars rather than part-way through applying.
@@ -321,8 +327,8 @@ export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOp
 
 		// Vendor-agnostic VCS sync queue (commit backfill + webhook deltas). The same
 		// `api` worker is both producer (binding) and consumer (Queues.Consumer
-		// below). Local dev is wired separately in wrangler.jsonc so miniflare runs
-		// it in-process.
+		// below). Under `alchemy dev` both halves are emulated in-process from this
+		// same definition.
 		const vcsSyncQueueName = resolveWorkerName("vcs-sync", stage)
 		const vcsSyncQueue = yield* Cloudflare.Queues.Queue("vcs-sync", {
 			name: vcsSyncQueueName,
@@ -451,6 +457,5 @@ export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOp
 			},
 		})
 
-		// `db` is undefined on ref stages — alerting resolves the same ref itself.
-		return { worker, db: mapleDb }
+		return worker
 	})

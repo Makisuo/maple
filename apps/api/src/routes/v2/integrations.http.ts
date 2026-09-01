@@ -98,7 +98,8 @@ export const isTrustedCallbackOrigin = (origin: string, appBaseUrl: string): boo
 	if (host === null || appHost === null) return false
 	if (host === appHost) return true
 	// Local dev is one family: `*.localhost` (portless proxy) plus loopback IPs
-	// (`bun dev:app`, which serves web and api on different loopback ports).
+	// (raw-port dev servers with no portless proxy, where web and api sit on
+	// different loopback ports).
 	const isLocal = (value: string) =>
 		value === "localhost" || value.endsWith(".localhost") || value.startsWith("127.") || value === "[::1]"
 	if (isLocal(host) || isLocal(appHost)) return isLocal(host) && isLocal(appHost)

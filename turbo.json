@@ -25,10 +25,8 @@
 			"dependsOn": ["^build"],
 			"cache": false
 		},
-		"dev": {
-			"cache": false,
-			"persistent": true
-		},
+		// No `dev` task: `bun dev` is one `alchemy dev` stack (scripts/dev.ts), not
+		// a turbo fan-out over per-package dev servers.
 		"tinybird:dev": {
 			"cache": false
 		},

@@ -6,7 +6,7 @@
 	"workspaces": {
 		".": {
 			"entry": ["alchemy.run.ts", "scripts/**/*.ts", "scripts/oxlint-plugins/*.mjs"],
-			"ignoreBinaries": ["wrangler", "tb", "pscale"]
+			"ignoreBinaries": ["tb", "pscale"]
 		},
 		"apps/web": {
 			"entry": [
@@ -24,7 +24,9 @@
 		},
 		"apps/api": {
 			"entry": ["alchemy.run.ts", "autumn.config.ts", "scripts/cold-path/*.mjs"],
-			"ignoreDependencies": ["cloudflare"]
+			// `wrangler` is only shelled out to by scripts/bench-startup-cpu.ts
+			// (`wrangler check startup`); nothing imports it.
+			"ignoreDependencies": ["cloudflare", "wrangler"]
 		},
 		"apps/alerting": {
 			"entry": ["alchemy.run.ts"]
