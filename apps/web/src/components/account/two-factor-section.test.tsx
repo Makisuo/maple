@@ -4,6 +4,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { REPLAY_BLOCK_CLASS } from "@/components/common/replay-privacy"
+
 const BACKUP_CODES = ["11112222", "33334444", "55556666"]
 
 async function mount(user: Record<string, unknown>) {
@@ -50,6 +52,43 @@ describe("TwoFactorSection", () => {
 		await screen.findByText("Save your backup codes")
 		for (const code of BACKUP_CODES) {
 			expect(screen.getByText(code)).toBeTruthy()
+		}
+	}, 30_000)
+
+	it("blocks the enrollment dialog from session replay", async () => {
+		const secret = "JBSWY3DPEHPK3PXP"
+		const user = {
+			id: "user_1",
+			totpEnabled: false,
+			backupCodeEnabled: false,
+			createTOTP: vi.fn().mockResolvedValue({
+				uri: `otpauth://totp/Maple:ada@example.com?secret=${secret}&issuer=Maple`,
+				secret,
+			}),
+			verifyTOTP: vi.fn().mockResolvedValue({ verified: true, backupCodes: BACKUP_CODES }),
+		}
+		await mount(user)
+
+		fireEvent.click(screen.getByRole("button", { name: /Set up authenticator/ }))
+		await screen.findByText("Scan this code")
+
+		// rrweb blocks an `rr-block` element together with its whole subtree, so asserting
+		// each secret sits under one is what keeps it out of the replay stream.
+		const blocked = document.querySelector(`.${REPLAY_BLOCK_CLASS}`)
+		expect(blocked).not.toBeNull()
+		expect(blocked?.contains(screen.getByDisplayValue(secret))).toBe(true)
+		expect(blocked?.contains(screen.getByRole("img", { name: "Two-factor setup QR code" }))).toBe(true)
+
+		fireEvent.click(screen.getByRole("button", { name: "Continue" }))
+		await screen.findByText("Enter the code")
+		const inputs = screen.getAllByLabelText(/Digit \d of 6/)
+		fireEvent.change(inputs[0] as HTMLInputElement, { target: { value: "123456" } })
+
+		await screen.findByText("Save your backup codes")
+		for (const code of BACKUP_CODES) {
+			expect(document.querySelector(`.${REPLAY_BLOCK_CLASS}`)?.contains(screen.getByText(code))).toBe(
+				true,
+			)
 		}
 	}, 30_000)
 

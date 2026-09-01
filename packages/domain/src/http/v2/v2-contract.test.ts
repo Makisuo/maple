@@ -1,12 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Result, Schema } from "effect"
+import { Effect, Predicate, Result, Schema } from "effect"
+import { MapleApiV2 } from "./api"
 import { V2AlertDestinationCreateParams } from "./alert-destinations"
 import { V2AlertIncident } from "./alert-incidents"
 import { V2AlertRule, V2AlertRuleMutationResponse } from "./alert-rules"
 import { V2ApiKey, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "./api-keys"
 import { V2DashboardMutation } from "./dashboards"
 import { V2ErrorIssue, V2ErrorIssueDetail } from "./error-issues"
-import { requiredScopeForRequest, scopeAllows, V2Scope } from "./auth"
+import { AuthorizationV2, requiredScopeForRoute, scopeAllows, V2Scope } from "./auth"
 import {
 	V2PlanetScaleIntegration,
 	V2PlanetScaleMetricsTokenRequest,
@@ -564,36 +565,36 @@ describe("scopes", () => {
 	})
 
 	it("derives the required scope from method + path", () => {
-		expect(requiredScopeForRequest("GET", "/v2/api_keys")).toEqual({
+		expect(requiredScopeForRoute("GET", "/v2/api_keys")).toEqual({
 			family: "api_keys",
 			access: "read",
 		})
-		expect(requiredScopeForRequest("GET", "/v2/api_keys/key_abc")).toEqual({
+		expect(requiredScopeForRoute("GET", "/v2/api_keys/key_abc")).toEqual({
 			family: "api_keys",
 			access: "read",
 		})
-		expect(requiredScopeForRequest("POST", "/v2/api_keys/key_abc/roll")).toEqual({
+		expect(requiredScopeForRoute("POST", "/v2/api_keys/key_abc/roll")).toEqual({
 			family: "api_keys",
 			access: "write",
 		})
-		expect(requiredScopeForRequest("DELETE", "/v2/api_keys/key_abc")).toEqual({
+		expect(requiredScopeForRoute("DELETE", "/v2/api_keys/key_abc")).toEqual({
 			family: "api_keys",
 			access: "write",
 		})
 		// Namespaced groups share one family: the first path segment under /v2.
-		expect(requiredScopeForRequest("GET", "/v2/alerts/rules")).toEqual({
+		expect(requiredScopeForRoute("GET", "/v2/alerts/rules")).toEqual({
 			family: "alerts",
 			access: "read",
 		})
-		expect(requiredScopeForRequest("POST", "/v2/alerts/destinations/dest_abc/test")).toEqual({
+		expect(requiredScopeForRoute("POST", "/v2/alerts/destinations/dest_abc/test")).toEqual({
 			family: "alerts",
 			access: "write",
 		})
-		expect(requiredScopeForRequest("POST", "/v2/session_replays/search")).toEqual({
+		expect(requiredScopeForRoute("POST", "/v2/session_replays/search")).toEqual({
 			family: "session_replays",
 			access: "read",
 		})
-		expect(requiredScopeForRequest("POST", "/v2/session_replays/for_trace")).toEqual({
+		expect(requiredScopeForRoute("POST", "/v2/session_replays/for_trace")).toEqual({
 			family: "session_replays",
 			access: "read",
 		})
@@ -607,19 +608,19 @@ describe("scopes", () => {
 			["/v2/metrics/timeseries", "metrics"],
 			["/v2/metrics/breakdown", "metrics"],
 		] as const) {
-			expect(requiredScopeForRequest("POST", path)).toEqual({ family, access: "read" })
+			expect(requiredScopeForRoute("POST", path)).toEqual({ family, access: "read" })
 		}
 		// Every /v2/integrations/<provider> group shares one family, and the two
 		// PlanetScale proxies are POSTs only because their filters need a body.
-		expect(requiredScopeForRequest("GET", "/v2/integrations/planetscale")).toEqual({
+		expect(requiredScopeForRoute("GET", "/v2/integrations/planetscale")).toEqual({
 			family: "integrations",
 			access: "read",
 		})
-		expect(requiredScopeForRequest("POST", "/v2/integrations/planetscale/metrics_token")).toEqual({
+		expect(requiredScopeForRoute("POST", "/v2/integrations/planetscale/metrics_token")).toEqual({
 			family: "integrations",
 			access: "write",
 		})
-		expect(requiredScopeForRequest("DELETE", "/v2/integrations/planetscale")).toEqual({
+		expect(requiredScopeForRoute("DELETE", "/v2/integrations/planetscale")).toEqual({
 			family: "integrations",
 			access: "write",
 		})
@@ -627,12 +628,69 @@ describe("scopes", () => {
 			"/v2/integrations/planetscale/query_insights",
 			"/v2/integrations/planetscale/events",
 		]) {
-			expect(requiredScopeForRequest("POST", path)).toEqual({
+			expect(requiredScopeForRoute("POST", path)).toEqual({
 				family: "integrations",
 				access: "read",
 			})
 		}
-		expect(requiredScopeForRequest("GET", "/api/api-keys")).toBeNull()
+		expect(requiredScopeForRoute("GET", "/api/api-keys")).toBeNull()
+	})
+
+	// The derivation only ever sees the router's matched route template, and it
+	// classifies path parameters exactly like a concrete id.
+	it("derives the scope from a route template with path parameters", () => {
+		expect(requiredScopeForRoute("GET", "/v2/api_keys/:keyId")).toEqual({
+			family: "api_keys",
+			access: "read",
+		})
+		expect(requiredScopeForRoute("POST", "/v2/api_keys/:keyId/roll")).toEqual({
+			family: "api_keys",
+			access: "write",
+		})
+		expect(requiredScopeForRoute("POST", "/v2/dashboards/templates/:templateId/preview")).toEqual({
+			family: "dashboards",
+			access: "read",
+		})
+	})
+
+	// The fail-closed half of the contract: a scope-protected route the
+	// derivation cannot classify is a 500, so every declared one must classify.
+	it("classifies every scope-protected v2 route template", () => {
+		let checked = 0
+		for (const group of Object.values(MapleApiV2.groups)) {
+			for (const endpoint of Object.values(group.endpoints)) {
+				const scoped = Array.from(endpoint.middlewares).some(
+					(middleware) =>
+						Predicate.hasProperty(middleware, "key") &&
+						Predicate.isString(middleware.key) &&
+						middleware.key === AuthorizationV2.key,
+				)
+				if (!scoped) continue
+				checked += 1
+				expect(
+					requiredScopeForRoute(endpoint.method, endpoint.path),
+					`${endpoint.method} ${endpoint.path}`,
+				).not.toBeNull()
+			}
+		}
+		expect(checked).toBeGreaterThan(50)
+	})
+
+	// These are the shapes the router normalizes away before matching. They must
+	// stay unclassifiable so the caller fails closed instead of skipping the
+	// check — see the enforcement test in apps/api/src/routes/v2.
+	it("refuses to classify non-canonical paths", () => {
+		for (const path of [
+			"/V2/api_keys",
+			"/v2/API_KEYS",
+			"/v2/%61pi_keys",
+			"/v2//api_keys",
+			"/v2/api_keys;x",
+			"/v2/",
+			"/v2",
+		]) {
+			expect(requiredScopeForRoute("POST", path)).toBeNull()
+		}
 	})
 
 	it("enforces the scope matrix", () => {
@@ -651,11 +709,11 @@ describe("scopes", () => {
 	})
 
 	it("treats alert preview as a read-only POST", () => {
-		expect(requiredScopeForRequest("POST", "/v2/alerts/rules/preview")).toEqual({
+		expect(requiredScopeForRoute("POST", "/v2/alerts/rules/preview")).toEqual({
 			family: "alerts",
 			access: "read",
 		})
-		expect(requiredScopeForRequest("POST", "/v2/alerts/rules/test")).toEqual({
+		expect(requiredScopeForRoute("POST", "/v2/alerts/rules/test")).toEqual({
 			family: "alerts",
 			access: "write",
 		})
@@ -664,16 +722,16 @@ describe("scopes", () => {
 	// Template preview builds the dashboard without saving it, so a read key
 	// must reach it; instantiate right next to it must not.
 	it("treats template preview as a read-only POST but instantiate as a write", () => {
-		expect(requiredScopeForRequest("POST", "/v2/dashboards/templates/dtpl_abc/preview")).toEqual({
+		expect(requiredScopeForRoute("POST", "/v2/dashboards/templates/dtpl_abc/preview")).toEqual({
 			family: "dashboards",
 			access: "read",
 		})
-		expect(requiredScopeForRequest("POST", "/v2/dashboards/templates/dtpl_abc/instantiate")).toEqual({
+		expect(requiredScopeForRoute("POST", "/v2/dashboards/templates/dtpl_abc/instantiate")).toEqual({
 			family: "dashboards",
 			access: "write",
 		})
 		// The pattern must not open up nested or lookalike paths.
-		expect(requiredScopeForRequest("POST", "/v2/dashboards/templates/dtpl_abc/preview/apply")).toEqual({
+		expect(requiredScopeForRoute("POST", "/v2/dashboards/templates/dtpl_abc/preview/apply")).toEqual({
 			family: "dashboards",
 			access: "write",
 		})

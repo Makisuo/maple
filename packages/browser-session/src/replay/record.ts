@@ -1,4 +1,5 @@
 import { record } from "rrweb"
+import { BLOCK_SELECTOR } from "../privacy-markers"
 import { markActivity, nextChunkSeq } from "../session/session"
 import type { IngestConfig } from "../platform/transport"
 import { gzip, postSessionBlob, warnDropped, type ChunkMeta } from "../platform/transport"
@@ -175,6 +176,11 @@ export function startRecording(config: IngestConfig, sessionId: string): Recorde
 			if (bufferBytes >= FLUSH_BYTES) void flush()
 		},
 		maskAllInputs: config.maskAllInputs,
+		// The README and docs advertise `data-rr-block` alongside `.rr-block`, but
+		// rrweb defaults `blockSelector` to null — the attribute silently did
+		// nothing, so anyone who marked up sensitive elements from the docs was
+		// still being recorded. Declaring it makes the documented hook real.
+		blockSelector: BLOCK_SELECTOR,
 		// rrweb has no `maskAllText` flag; selecting all elements masks every text node.
 		...(config.maskAllText ? { maskTextSelector: "*" } : undefined),
 		checkoutEveryNms: CHECKOUT_EVERY_MS,

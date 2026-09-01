@@ -17,7 +17,7 @@ jobs:
                 working-directory: "."
         services:
             tinybird:
-                image: tinybirdco/tinybird-local:latest
+                image: tinybirdco/tinybird-local@sha256:de47f2863c43bfec24024ea20db8a82cfe26511e69daf021d668e3be389a8a39 # latest
                 ports:
                     - 7181:7181
         steps:

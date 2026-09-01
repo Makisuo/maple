@@ -16,6 +16,43 @@ import {
 	VcsRepositoryId,
 } from "./vcs"
 
+const RETURN_PATH_MAX_LENGTH = 2048
+// One leading `/`, never `//` or `/\` (protocol-relative or backslash origin
+// tricks), and no backslash, whitespace or control character anywhere — which
+// leaves no room for a scheme or embedded credentials.
+export const RETURN_PATH_PATTERN = /^\/(?![/\\])[^\\\s\u0000-\u001f\u007f]*$/
+
+/**
+ * A path inside the Maple dashboard, e.g. `/integrations?connected=1`.
+ *
+ * The OAuth callback page renders this value as an href on the *API* origin, so
+ * anything but a single-slash relative path is a stored-XSS / open-redirect sink
+ * (`javascript:…` survives HTML escaping intact). Checking it here makes a
+ * hostile value a 400 instead of a persisted payload.
+ */
+export const IntegrationReturnPath = Schema.String.check(
+	Schema.isMaxLength(RETURN_PATH_MAX_LENGTH),
+	Schema.isPattern(RETURN_PATH_PATTERN),
+).pipe(
+	Schema.brand("@maple/IntegrationReturnPath"),
+	Schema.annotate({
+		identifier: "@maple/IntegrationReturnPath",
+		title: "Dashboard return path",
+		description:
+			"Relative path in the Maple dashboard to send the user back to, e.g. `/integrations?connected=1`. Absolute URLs and schemes are rejected.",
+	}),
+)
+export type IntegrationReturnPath = Schema.Schema.Type<typeof IntegrationReturnPath>
+
+/**
+ * Runtime guard for the same rule, for values read back out of storage — rows
+ * persisted before the schema-level check existed are not trusted either.
+ */
+export const validateIntegrationReturnPath = (raw: string | null | undefined): string | null =>
+	typeof raw === "string" && raw.length <= RETURN_PATH_MAX_LENGTH && RETURN_PATH_PATTERN.test(raw)
+		? raw
+		: null
+
 export class HazelIntegrationStatus extends Schema.Class<HazelIntegrationStatus>("HazelIntegrationStatus")({
 	connected: Schema.Boolean,
 	externalUserId: Schema.NullOr(ExternalUserId),
@@ -61,7 +98,7 @@ export class HazelChannelsListResponse extends Schema.Class<HazelChannelsListRes
 export class HazelStartConnectRequest extends Schema.Class<HazelStartConnectRequest>(
 	"HazelStartConnectRequest",
 )({
-	returnTo: Schema.optionalKey(Schema.String),
+	returnTo: Schema.optionalKey(IntegrationReturnPath),
 }) {}
 
 export class HazelStartConnectResponse extends Schema.Class<HazelStartConnectResponse>(
@@ -256,7 +293,7 @@ export class CloudflareTopTrafficResponse extends Schema.Class<CloudflareTopTraf
 export class CloudflareStartConnectRequest extends Schema.Class<CloudflareStartConnectRequest>(
 	"CloudflareStartConnectRequest",
 )({
-	returnTo: Schema.optionalKey(Schema.String),
+	returnTo: Schema.optionalKey(IntegrationReturnPath),
 }) {}
 
 export class CloudflareStartConnectResponse extends Schema.Class<CloudflareStartConnectResponse>(
@@ -361,7 +398,7 @@ export class PlanetScaleIntegrationStatus extends Schema.Class<PlanetScaleIntegr
 export class PlanetScaleStartConnectRequest extends Schema.Class<PlanetScaleStartConnectRequest>(
 	"PlanetScaleStartConnectRequest",
 )({
-	returnTo: Schema.optionalKey(Schema.String),
+	returnTo: Schema.optionalKey(IntegrationReturnPath),
 }) {}
 
 export class PlanetScaleStartConnectResponse extends Schema.Class<PlanetScaleStartConnectResponse>(
@@ -674,7 +711,7 @@ export class GithubIntegrationStatus extends Schema.Class<GithubIntegrationStatu
 export class GithubStartConnectRequest extends Schema.Class<GithubStartConnectRequest>(
 	"GithubStartConnectRequest",
 )({
-	returnTo: Schema.optionalKey(Schema.String),
+	returnTo: Schema.optionalKey(IntegrationReturnPath),
 }) {}
 
 export class GithubStartConnectResponse extends Schema.Class<GithubStartConnectResponse>(

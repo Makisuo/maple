@@ -3,6 +3,7 @@ import {
 	type AlertDestinationId,
 	ErrorNotificationPolicyDocument,
 	type ErrorNotificationPolicyUpsertRequest,
+	ErrorForbiddenError,
 	ErrorPersistenceError,
 	ErrorValidationError,
 	EscalationDestinationOutcome,
@@ -16,6 +17,7 @@ import {
 	type IssueEscalationPolicyUpsertRequest,
 	type ErrorIssueId,
 	type OrgId,
+	type RoleName,
 	type UserId,
 	UserId as UserIdSchema,
 } from "@maple/domain/http"
@@ -31,6 +33,7 @@ import {
 import { and, desc, eq, inArray } from "drizzle-orm"
 import { Array as Arr, Clock, Context, Effect, HashSet, Layer, Option, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
+import { requireAdmin } from "@/services/auth/auth"
 import { msToDate } from "@/platform/time"
 import { evaluateEscalationPolicy as evaluateRoutingPolicy } from "@/services/alerts/escalation-policy"
 import { makeErrorDatabaseExecute } from "./error-persistence"
@@ -55,11 +58,19 @@ export interface ErrorPolicyPublicApi {
 	readonly getNotificationPolicy: (
 		orgId: OrgId,
 	) => Effect.Effect<ErrorNotificationPolicyDocument, ErrorPersistenceError>
+	/**
+	 * Roles live on the service, not the route: the same mutation is reachable
+	 * from the v1 route, the MCP tool and the chat apply path.
+	 */
 	readonly upsertNotificationPolicy: (
 		orgId: OrgId,
 		userId: UserId,
+		roles: ReadonlyArray<RoleName>,
 		request: ErrorNotificationPolicyUpsertRequest,
-	) => Effect.Effect<ErrorNotificationPolicyDocument, ErrorPersistenceError | ErrorValidationError>
+	) => Effect.Effect<
+		ErrorNotificationPolicyDocument,
+		ErrorForbiddenError | ErrorPersistenceError | ErrorValidationError
+	>
 	readonly getEscalationPolicy: (
 		orgId: OrgId,
 	) => Effect.Effect<IssueEscalationPolicyDocument, ErrorPersistenceError>
@@ -169,8 +180,15 @@ const make: Effect.Effect<ErrorPolicyServiceApi, never, Database> = Effect.gen(f
 
 	const upsertNotificationPolicy: ErrorPolicyServiceApi["upsertNotificationPolicy"] = Effect.fn(
 		"ErrorsService.upsertNotificationPolicy",
-	)(function* (orgId, userId, request) {
+	)(function* (orgId, userId, roles, request) {
 		yield* Effect.annotateCurrentSpan({ orgId })
+		yield* requireAdmin(
+			roles,
+			() =>
+				new ErrorForbiddenError({
+					message: "Only org admins can manage error notification policy",
+				}),
+		)
 		const existing = yield* loadNotificationPolicyRow(orgId)
 		const timestamp = yield* Clock.currentTimeMillis
 		const base = existing ?? defaultNotificationPolicy(orgId, timestamp)

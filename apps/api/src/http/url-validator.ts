@@ -189,6 +189,20 @@ export const validateExternalUrl = (raw: string): Effect.Effect<URL, UrlValidati
 
 const MAX_REDIRECTS = 5
 
+/**
+ * Headers that authenticate the caller to a specific origin. Validating a
+ * redirect's destination says it is not internal; it says nothing about whether
+ * it should be handed the credential meant for the origin we started at.
+ */
+const CREDENTIAL_HEADERS = ["authorization", "cookie", "proxy-authorization"] as const
+
+/** Strip credential headers, whatever shape `RequestInit.headers` arrived in. */
+const withoutCredentialHeaders = (headers: HeadersInit | undefined): Headers => {
+	const next = new Headers(headers)
+	for (const name of CREDENTIAL_HEADERS) next.delete(name)
+	return next
+}
+
 export interface SafeFetchOptions extends RequestInit {
 	readonly fetchFn?: typeof fetch
 }
@@ -196,9 +210,18 @@ export interface SafeFetchOptions extends RequestInit {
 export const safeFetch = async (initialUrl: string, init: SafeFetchOptions = {}): Promise<Response> => {
 	const fetchFn = init.fetchFn ?? fetch
 	let currentUrl = initialUrl
+	let headers = init.headers
+	let previousOrigin: string | null = null
 	for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
 		const validated = validateExternalUrlSync(currentUrl)
-		const response = await fetchFn(validated.toString(), { ...init, redirect: "manual" })
+		// A cross-origin hop drops the credentials for good: restoring them on a
+		// bounce back to the original origin would make the strip trivially
+		// bypassable by redirecting away and back again.
+		if (previousOrigin !== null && validated.origin !== previousOrigin) {
+			headers = withoutCredentialHeaders(headers)
+		}
+		previousOrigin = validated.origin
+		const response = await fetchFn(validated.toString(), { ...init, headers, redirect: "manual" })
 		if (response.status < 300 || response.status >= 400) return response
 		const location = response.headers.get("location")
 		if (!location) return response

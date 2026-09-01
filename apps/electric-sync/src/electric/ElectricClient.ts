@@ -60,6 +60,26 @@ export const describeUpstreamFailure = (error: unknown): string => {
 	return redactSecrets(cause === undefined ? text : `${text}: ${cause}`)
 }
 
+/**
+ * The client span's attributes, with the query string structurally absent
+ * rather than scrubbed — `secret` cannot leak through an attribute that is
+ * never written. `url.full` and `url.query` are deliberately NOT among them;
+ * everything a trace needs to identify the hop (target, path, shape) is.
+ *
+ * Exported so the omission is asserted directly, not inferred from a span.
+ */
+export const sanitizedUpstreamAttributes = (upstreamUrl: string, shape: string): Record<string, string> => {
+	const url = new URL(upstreamUrl)
+	return {
+		"http.request.method": "GET",
+		"server.address": url.host,
+		"url.path": url.pathname,
+		"url.scheme": url.protocol.slice(0, -1),
+		"peer.service": "electric",
+		"maple.electric.shape": shape,
+	}
+}
+
 const isLiveRequest = (clientParams: URLSearchParams): boolean => {
 	const live = clientParams.get("live")
 	return live !== null && live !== "false"
@@ -241,7 +261,12 @@ export class ElectricClient extends Context.Service<ElectricClient, ElectricClie
 				// (not an open SSE stream), and control-plane shapes are small, so we
 				// buffer the body rather than manage a scoped pass-through stream.
 				const fetched = client.get(url).pipe(
-					Effect.annotateSpans("peer.service", "electric"),
+					// Electric authenticates a shape request with `secret` in the query
+					// string and offers no header equivalent, so the HTTP client's own
+					// span — which records `url.full` and `url.query` verbatim — would
+					// write the credential into Maple's warehouse. Its span is suppressed
+					// and replaced by the sanitized one below, which never sees a query.
+					Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
 					Effect.flatMap((response) =>
 						response.text.pipe(Effect.map((body) => ({ response, body }))),
 					),
@@ -254,13 +279,22 @@ export class ElectricClient extends Context.Service<ElectricClient, ElectricClie
 				).pipe(
 					// One mapping for transport failures and timeouts alike: the cause
 					// travels in the message instead of the mutable closure variable this
-					// replaces, so the span can say what actually went wrong.
+					// replaces, so the span can say what actually went wrong. Mapped
+					// INSIDE the span below: an `HttpClientError`'s raw text is
+					// "Transport error (GET <full url>)", secret included.
 					Effect.mapError(
 						(error) =>
 							new ElectricUpstreamUnreachable({
 								message: `Electric upstream unreachable (${request.shape}): ${describeUpstreamFailure(error)}`,
 							}),
 					),
+					Effect.tap(({ response }) =>
+						Effect.annotateCurrentSpan("http.response.status_code", response.status),
+					),
+					Effect.withSpan("http.client GET", {
+						kind: "client",
+						attributes: sanitizedUpstreamAttributes(url, request.shape),
+					}),
 					Effect.tapError((error) =>
 						Effect.logWarning("Electric shape upstream request failed").pipe(
 							Effect.annotateLogs({ shape: request.shape, error: error.message }),
