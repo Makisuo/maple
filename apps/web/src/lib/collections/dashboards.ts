@@ -148,6 +148,16 @@ const rowToUpdateRequest = (row: DashboardRow): V2DashboardUpdateParams => {
 	}
 }
 
+/**
+ * The server acknowledged a write without the txid the sync handler needs to
+ * confirm it. Never observed for dashboards — `Number(undefined)` would be `NaN`
+ * and roll back a write that actually succeeded, so this fails loudly instead.
+ */
+class MissingWriteTxidError extends Schema.TaggedError<MissingWriteTxidError>()(
+	"@maple/web/collections/MissingWriteTxidError",
+	{ message: Schema.String },
+) {}
+
 // The API attaches a txid on every successful dashboard write (readTxid over the
 // mutating statement), but `txid` is `Schema.optionalKey` on the response types,
 // so it's typed `string | undefined`. `@maple/effect-db`'s handler requires a
@@ -156,7 +166,11 @@ const rowToUpdateRequest = (row: DashboardRow): V2DashboardUpdateParams => {
 // case (never observed for dashboards) instead of silently producing NaN.
 const requireTxid = (txid: string | undefined): Effect.Effect<number> =>
 	txid === undefined
-		? Effect.die(new Error("Dashboard write succeeded but the server returned no txid"))
+		? Effect.die(
+				new MissingWriteTxidError({
+					message: "Dashboard write succeeded but the server returned no txid",
+				}),
+			)
 		: Effect.succeed(Number(txid))
 
 /**

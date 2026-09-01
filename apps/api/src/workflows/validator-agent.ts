@@ -18,7 +18,7 @@ import { makeChatSessionId } from "@maple/domain/chat-session"
 import { ValidatorVerdict } from "@maple/domain/http"
 import type { InvestigationSubject, InvestigationSubjectSnapshot } from "@maple/domain/http"
 import type { LanguageModel } from "@opencode-ai/ai"
-import { Effect, Option } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { AGENTS } from "@/chat/agents"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { runAgentPass } from "./agent-pass"
@@ -108,9 +108,25 @@ const buildValidatorPrompt = (input: ValidatorAgentInput): string => {
 	return buildIncidentContextMessage(lines.join("\n"), input.subject, input.snapshot)
 }
 
+/**
+ * The agent table is a module constant, so a missing entry is a build that
+ * shipped without it rather than a runtime condition to recover from.
+ */
+class MissingAgentError extends Schema.TaggedError<MissingAgentError>()(
+	"@maple/api/workflows/MissingAgentError",
+	{ agentName: Schema.String, message: Schema.String },
+) {}
+
 export const runValidatorAgent = Effect.fn("investigation.validator")(function* (input: ValidatorAgentInput) {
 	const agent = AGENTS["investigation-validator"]
-	if (!agent) return yield* Effect.die(new Error("no investigation-validator agent registered"))
+	if (!agent) {
+		return yield* Effect.die(
+			new MissingAgentError({
+				agentName: "investigation-validator",
+				message: "No investigation-validator agent is registered",
+			}),
+		)
+	}
 
 	yield* Effect.annotateCurrentSpan({
 		"maple.investigation.id": input.investigationId,

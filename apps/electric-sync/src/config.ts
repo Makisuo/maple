@@ -1,6 +1,6 @@
 import type { AuthEnv } from "@maple/auth"
 import { optionalRedacted, optionalString, stringWithDefault } from "@maple/effect-cloudflare/config-helpers"
-import { Config, Context, Effect, Layer, Option, Redacted } from "effect"
+import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 
 /**
  * Standalone config for the Electric shape-sync worker. Deliberately a small,
@@ -14,6 +14,16 @@ import { Config, Context, Effect, Layer, Option, Redacted } from "effect"
  * `SyncConfigValues extends AuthEnv`, so the value can be handed straight to
  * `makeResolveTenant` (see routes/shape.http.ts).
  */
+/**
+ * A boot-time configuration value the process cannot run without. Raised as a
+ * defect, not a failure: there is no caller that could recover, and the tag plus
+ * `variable` is what makes a crashed container's log say which one.
+ */
+class SyncConfigInvalidError extends Schema.TaggedError<SyncConfigInvalidError>()(
+	"@maple/electric-sync/SyncConfigInvalidError",
+	{ variable: Schema.String, message: Schema.String },
+) {}
+
 export interface SyncConfigValues extends AuthEnv {
 	readonly ELECTRIC_URL: Option.Option<string>
 	readonly ELECTRIC_SOURCE_ID: Option.Option<string>
@@ -45,17 +55,30 @@ const makeSyncConfig = Effect.gen(function* () {
 	const authMode = config.MAPLE_AUTH_MODE.toLowerCase()
 
 	if (config.MAPLE_DEFAULT_ORG_ID.trim().length === 0) {
-		return yield* Effect.die(new Error("MAPLE_DEFAULT_ORG_ID cannot be empty"))
+		return yield* Effect.die(
+			new SyncConfigInvalidError({
+				variable: "MAPLE_DEFAULT_ORG_ID",
+				message: "MAPLE_DEFAULT_ORG_ID cannot be empty",
+			}),
+		)
 	}
 
 	if (authMode !== "clerk" && Option.isNone(config.MAPLE_ROOT_PASSWORD)) {
 		return yield* Effect.die(
-			new Error("MAPLE_ROOT_PASSWORD is required when MAPLE_AUTH_MODE=self_hosted"),
+			new SyncConfigInvalidError({
+				variable: "MAPLE_ROOT_PASSWORD",
+				message: "MAPLE_ROOT_PASSWORD is required when MAPLE_AUTH_MODE=self_hosted",
+			}),
 		)
 	}
 
 	if (authMode === "clerk" && Option.isNone(config.CLERK_SECRET_KEY)) {
-		return yield* Effect.die(new Error("CLERK_SECRET_KEY is required when MAPLE_AUTH_MODE=clerk"))
+		return yield* Effect.die(
+			new SyncConfigInvalidError({
+				variable: "CLERK_SECRET_KEY",
+				message: "CLERK_SECRET_KEY is required when MAPLE_AUTH_MODE=clerk",
+			}),
+		)
 	}
 
 	return SyncConfig.of(config)
