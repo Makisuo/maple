@@ -1,6 +1,19 @@
 import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
 
 export type MapleAuthHeaders = Readonly<Record<string, string>>
+
+/**
+ * Raised instead of authorizing a request whose identity changed while its
+ * headers were resolving. The request was constructed under the org the user
+ * just left; the API scopes every call by bearer, so re-signing it with the new
+ * identity's token would run it — including mutations — against the wrong
+ * tenant. Failing closed lets per-org query state recreate the request itself.
+ */
+export class MapleAuthIdentityChangedError extends Schema.TaggedError<MapleAuthIdentityChangedError>()(
+	"@maple/web/services/MapleAuthIdentityChangedError",
+	{ message: Schema.String },
+) {}
 
 type MapleAuthHeadersProvider = () => Promise<MapleAuthHeaders> | MapleAuthHeaders
 
@@ -156,12 +169,29 @@ const resolveProvidedHeaders = async (): Promise<MapleAuthHeaders> => {
 
 export const getMapleAuthHeaders = async (): Promise<MapleAuthHeaders> => {
 	const generation = authGeneration
+	const orgAtStart = activeOrgId
 	let providedHeaders = await resolveProvidedHeaders()
-	// The identity changed while we were waiting, so what we are holding belongs
-	// to an org (or provider) the user has left — the API would resolve it
-	// against the wrong tenant. Resolve once more under the current identity;
-	// bounded to one retry so a burst of switches cannot spin here.
-	if (generation !== authGeneration) providedHeaders = await resolveProvidedHeaders()
+	if (generation !== authGeneration) {
+		// The identity changed while we were waiting. If this request was formed
+		// under a real org, fail closed: its URL and payload belong to the tenant
+		// the user just left, and re-signing it with the new identity's bearer
+		// would dispatch it against the wrong org.
+		if (orgAtStart !== null) {
+			throw new MapleAuthIdentityChangedError({
+				message: "The active organization changed while this request was being authorized.",
+			})
+		}
+		// Boot path — no previous org, the bump was auth arriving rather than the
+		// user leaving a tenant. Resolve once more under the current identity,
+		// and fail closed if it moved again mid-retry.
+		const retryGeneration = authGeneration
+		providedHeaders = await resolveProvidedHeaders()
+		if (retryGeneration !== authGeneration) {
+			throw new MapleAuthIdentityChangedError({
+				message: "The active organization changed while this request was being authorized.",
+			})
+		}
+	}
 	return {
 		...providedHeaders,
 		...authHeaders,

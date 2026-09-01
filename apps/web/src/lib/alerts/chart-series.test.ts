@@ -8,6 +8,7 @@ import {
 
 import {
 	clipToDomain,
+	downsample,
 	GHOST_KEY,
 	mergeGhost,
 	projectPreview,
@@ -277,5 +278,47 @@ describe("clipToDomain", () => {
 		expect(clipToDomain([{ x1: T0, x2: T0 + MINUTE, open: true }], domain)).toEqual([
 			{ x1: T0, x2: T0 + MINUTE, open: true },
 		])
+	})
+})
+
+describe("downsample", () => {
+	const rowsOf = (length: number, valueAt: (index: number) => number | null): ChartPoint[] =>
+		Array.from({ length }, (_, index) => ({ t: T0 + index * MINUTE, [SINGLE_KEY]: valueAt(index) }))
+
+	it("returns series within the budget untouched", () => {
+		const preview = projectPreview(
+			previewOf([{ groupKey: "all", points: [{ offsetMinutes: 0, value: 1 }] }]),
+			domain.max,
+		)
+		expect(preview.rows).toHaveLength(1)
+	})
+
+	it("keeps a one-window spike that stride sampling used to drop (721 points)", () => {
+		// 721 points forces downsampling; the spike sits off every stride offset.
+		const rows = rowsOf(721, (index) => (index === 33 ? 99 : 1))
+		const out = downsample(rows)
+		expect(out.length).toBeLessThanOrEqual(722)
+		expect(out.some((row) => row[SINGLE_KEY] === 99)).toBe(true)
+	})
+
+	it("keeps both the deepest dip and the highest spike at 1441 points", () => {
+		const rows = rowsOf(1441, (index) => (index === 700 ? -50 : index === 701 ? 120 : 1))
+		const out = downsample(rows)
+		expect(out.some((row) => row[SINGLE_KEY] === -50)).toBe(true)
+		expect(out.some((row) => row[SINGLE_KEY] === 120)).toBe(true)
+		// First and last rows always survive, and time order is preserved.
+		expect(out[0]?.t).toBe(rows[0]?.t)
+		expect(out[out.length - 1]?.t).toBe(rows[rows.length - 1]?.t)
+		expect(out.every((row, index) => index === 0 || row.t > out[index - 1]!.t)).toBe(true)
+	})
+
+	it("keeps a spike carried by a secondary series key", () => {
+		const rows: ChartPoint[] = Array.from({ length: 900 }, (_, index) => ({
+			t: T0 + index * MINUTE,
+			a: 1,
+			b: index === 450 ? 77 : 2,
+		}))
+		const out = downsample(rows)
+		expect(out.some((row) => row.b === 77)).toBe(true)
 	})
 })

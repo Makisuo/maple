@@ -6,6 +6,7 @@ import {
 	SDK_HINT_HEADER,
 	sdkHint,
 } from "@maple/browser-session"
+import { context, propagation, ProxyTracerProvider, trace } from "@opentelemetry/api"
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
 import { registerInstrumentations } from "@opentelemetry/instrumentation"
 import { FetchInstrumentation } from "@opentelemetry/instrumentation-fetch"
@@ -138,6 +139,13 @@ export function setupTracing(config: ResolvedConfig): () => Promise<void> {
 		],
 	})
 	provider.register()
+	// The OTel globals are first-write-wins. If a host app registered its own
+	// provider before us, ours never became the global one — remember whether we
+	// won so shutdown releases only globals this SDK actually owns.
+	const globalProvider = trace.getTracerProvider()
+	const ownsGlobals =
+		globalProvider === provider ||
+		(globalProvider instanceof ProxyTracerProvider && globalProvider.getDelegate() === provider)
 
 	// Without this the batch processor's queue dies with the tab: its only flush
 	// is `provider.shutdown()`, which a host app that never calls `shutdown()`
@@ -182,6 +190,15 @@ export function setupTracing(config: ResolvedConfig): () => Promise<void> {
 		}
 		unregisterInstrumentations?.()
 		await provider.shutdown()
+		// Release the globals so a later init() can register a live provider.
+		// The global proxy keeps delegating to this now-shut-down provider
+		// otherwise, and the documented init → shutdown → init lifecycle would
+		// silently export nothing on the second session.
+		if (ownsGlobals) {
+			trace.disable()
+			context.disable()
+			propagation.disable()
+		}
 	}
 }
 

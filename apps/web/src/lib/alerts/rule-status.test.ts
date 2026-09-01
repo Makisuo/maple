@@ -124,13 +124,37 @@ describe("deriveRuleStatus", () => {
 		expect(result.reason).toBe("Never evaluated")
 	})
 
-	it("marks rules stale past 3x max(window, cadence)", () => {
-		const rule = makeRule({ lastEvaluatedAt: iso(staleThresholdMs(makeRule()) + 60_000) })
+	it("marks rules stale past 3x the state heartbeat", () => {
+		const rule = makeRule({ lastEvaluatedAt: iso(staleThresholdMs() + 60_000) })
 		const result = derive({
 			rule,
 			states: [makeState({ last_evaluated_at: rule.lastEvaluatedAt })],
 		})
 		expect(result.status).toBe("stale")
+	})
+
+	it("applies the same missed-tick SLA regardless of the rule's window", () => {
+		// The scheduler evaluates every enabled rule about once a minute; the
+		// window sizes what an evaluation reads, not how often it runs. Scaling
+		// staleness by it hid a dead scheduler for 72h on a 24h-window rule.
+		const gap = staleThresholdMs() + 60_000
+		for (const windowMinutes of [5, 60, 1440]) {
+			const rule = makeRule({ windowMinutes, lastEvaluatedAt: iso(gap) })
+			const result = derive({
+				rule,
+				states: [makeState({ last_evaluated_at: rule.lastEvaluatedAt })],
+			})
+			expect(result.status).toBe("stale")
+		}
+		// And a fresh evaluation is healthy at every window size.
+		for (const windowMinutes of [5, 1440]) {
+			const rule = makeRule({ windowMinutes, lastEvaluatedAt: iso(60_000) })
+			const result = derive({
+				rule,
+				states: [makeState({ last_evaluated_at: rule.lastEvaluatedAt })],
+			})
+			expect(result.status).toBe("healthy")
+		}
 	})
 
 	it("reports no-data only when every group last skipped", () => {

@@ -63,13 +63,60 @@ export interface BucketMeta {
 // band data stay computed from the full series.
 const MAX_PLOTTED_POINTS = 720
 
+/**
+ * Min/max bucket downsampling: the series is cut into equal buckets and each
+ * keeps the rows holding its lowest and highest value across every series key,
+ * in time order, plus the first and last row. A plain stride kept arbitrary
+ * aligned samples, so a one-window spike or breach — the exact point an alert
+ * chart exists to show — could vanish once the series exceeded the budget.
+ */
 export function downsample(rows: ReadonlyArray<ChartPoint>): ChartPoint[] {
 	if (rows.length <= MAX_PLOTTED_POINTS) return [...rows]
-	const stride = Math.ceil(rows.length / MAX_PLOTTED_POINTS)
+	// Two survivors per bucket keeps the output within the point budget.
+	const bucketCount = Math.floor(MAX_PLOTTED_POINTS / 2)
 	const out: ChartPoint[] = []
-	for (let i = 0; i < rows.length; i += stride) out.push(rows[i]!)
-	const last = rows[rows.length - 1]!
-	if (out[out.length - 1] !== last) out.push(last)
+	const push = (row: ChartPoint) => {
+		if (out[out.length - 1] !== row) out.push(row)
+	}
+	push(rows[0]!)
+	for (let bucket = 0; bucket < bucketCount; bucket += 1) {
+		const start = Math.floor((bucket * rows.length) / bucketCount)
+		const end = Math.floor(((bucket + 1) * rows.length) / bucketCount)
+		let minRow: ChartPoint | undefined
+		let maxRow: ChartPoint | undefined
+		let min = Number.POSITIVE_INFINITY
+		let max = Number.NEGATIVE_INFINITY
+		for (let i = start; i < end; i += 1) {
+			const row = rows[i]!
+			for (const key in row) {
+				if (key === "t") continue
+				const value = row[key]
+				if (typeof value !== "number") continue
+				if (value < min) {
+					min = value
+					minRow = row
+				}
+				if (value > max) {
+					max = value
+					maxRow = row
+				}
+			}
+		}
+		if (minRow === undefined || maxRow === undefined) {
+			// Entirely valueless bucket — keep one row so the gap still renders.
+			if (end > start) push(rows[start]!)
+			continue
+		}
+		if (minRow === maxRow) push(minRow)
+		else if (minRow.t <= maxRow.t) {
+			push(minRow)
+			push(maxRow)
+		} else {
+			push(maxRow)
+			push(minRow)
+		}
+	}
+	push(rows[rows.length - 1]!)
 	return out
 }
 
