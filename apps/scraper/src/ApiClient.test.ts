@@ -1,7 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Layer, Redacted, Schema } from "effect"
+import { Effect, Layer, Redacted } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { ScrapeTargetId } from "@maple/domain/http"
 import { ApiClient } from "./ApiClient"
 import { ScraperEnv, type ScraperEnvConfig } from "./Env"
 
@@ -18,8 +17,6 @@ const testEnv: ScraperEnvConfig = {
 const TestLayer = ApiClient.layer.pipe(
 	Layer.provide(Layer.mergeAll(FetchHttpClient.layer, Layer.succeed(ScraperEnv, testEnv))),
 )
-
-const TARGET_ID = Schema.decodeSync(ScrapeTargetId)("11111111-1111-4111-8111-111111111111")
 
 interface RecordedRequest {
 	url: string
@@ -57,7 +54,10 @@ const VALID_TARGET = {
 	orgId: "org_1",
 	name: "Node",
 	serviceName: "node",
+	targetType: "prometheus",
 	url: "https://node.example.com/metrics",
+	scrapeUrl: "https://node.example.com/metrics",
+	authHeaders: { Authorization: "Bearer stored-token" },
 	subTargetKey: null,
 	scrapeIntervalSeconds: 15,
 	labels: { env: "prod" },
@@ -82,6 +82,7 @@ describe("ApiClient", () => {
 			assert.strictEqual(targets[0]?.id, VALID_TARGET.id)
 			assert.deepStrictEqual(targets[0]?.labels, { env: "prod" })
 			assert.strictEqual(targets[0]?.ingestKey, "maple_pk_org_1_key")
+			assert.deepStrictEqual(targets[0]?.authHeaders, { Authorization: "Bearer stored-token" })
 		}).pipe(Effect.provide(TestLayer)),
 	)
 
@@ -111,45 +112,6 @@ describe("ApiClient", () => {
 				Effect.flip,
 			)
 			assert.include(result.message, "payload mismatch")
-		}).pipe(Effect.provide(TestLayer)),
-	)
-
-	it.effect("scrapes a target through the proxy, passing the upstream status through", () =>
-		Effect.gen(function* () {
-			const recorded: Array<RecordedRequest> = []
-			const client = yield* ApiClient
-			const response = yield* client.scrapeTarget(TARGET_ID).pipe(
-				Effect.provideService(
-					FetchHttpClient.Fetch,
-					stubFetch(recorded, () => new Response("# TYPE up gauge\nup 1", { status: 200 })),
-				),
-			)
-
-			assert.strictEqual(
-				recorded[0]?.url,
-				`http://api.test/api/internal/prometheus-scrape?targetId=${TARGET_ID}`,
-			)
-			assert.strictEqual(recorded[0]?.headers.authorization, "Bearer internal-token")
-			assert.strictEqual(response.status, 200)
-			assert.include(response.body, "up 1")
-		}).pipe(Effect.provide(TestLayer)),
-	)
-
-	it.effect("passes the sub-target key to the proxy as the sub query param", () =>
-		Effect.gen(function* () {
-			const recorded: Array<RecordedRequest> = []
-			const client = yield* ApiClient
-			yield* client.scrapeTarget(TARGET_ID, "branch a/1").pipe(
-				Effect.provideService(
-					FetchHttpClient.Fetch,
-					stubFetch(recorded, () => new Response("up 1", { status: 200 })),
-				),
-			)
-
-			assert.strictEqual(
-				recorded[0]?.url,
-				`http://api.test/api/internal/prometheus-scrape?targetId=${TARGET_ID}&sub=branch%20a%2F1`,
-			)
 		}).pipe(Effect.provide(TestLayer)),
 	)
 

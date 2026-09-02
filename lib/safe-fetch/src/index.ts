@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect"
 
 export class UrlValidationError extends Schema.TaggedError<UrlValidationError>()(
-	"@maple/api/lib/UrlValidationError",
+	"@maple/safe-fetch/UrlValidationError",
 	{
 		message: Schema.String,
 		url: Schema.optional(Schema.String),
@@ -142,12 +142,10 @@ export const validateExternalUrlSync = (raw: string): URL => {
 	if (trimmed.length === 0) {
 		throw new UrlValidationError({ message: "URL is required" })
 	}
-	let parsed: URL
-	try {
-		parsed = new URL(trimmed)
-	} catch {
+	if (!URL.canParse(trimmed)) {
 		throw new UrlValidationError({ message: `Invalid URL: ${trimmed}`, url: trimmed })
 	}
+	const parsed = new URL(trimmed)
 	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
 		throw new UrlValidationError({
 			message: `URL scheme '${parsed.protocol}' is not allowed; use http or https`,
@@ -197,7 +195,7 @@ const MAX_REDIRECTS = 5
 const CREDENTIAL_HEADERS = ["authorization", "cookie", "proxy-authorization"] as const
 
 /** Strip credential headers, whatever shape `RequestInit.headers` arrived in. */
-const withoutCredentialHeaders = (headers: HeadersInit | undefined): Headers => {
+const withoutCredentialHeaders = (headers: RequestInit["headers"]): Headers => {
 	const next = new Headers(headers)
 	for (const name of CREDENTIAL_HEADERS) next.delete(name)
 	return next

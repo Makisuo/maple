@@ -44,6 +44,7 @@
 		"@maple/query-engine": "workspace:*",
 		"@maple/query-engine-integrations": "workspace:*",
 		"@maple/query-model": "workspace:*",
+		"@maple/safe-fetch": "workspace:*",
 		"@maple/widgets": "workspace:*",
 		"@opencode-ai/ai": "0.0.0-beta-18050",
 		"@tinybirdco/sdk": "catalog:tinybird",
