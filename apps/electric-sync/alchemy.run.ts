@@ -5,6 +5,7 @@ import * as Portless from "@maple/alchemy-portless"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import { CLOUDFLARE_WORKER_PLACEMENT, resolveWorkerName } from "@maple/infra/cloudflare"
 import { authEnv, merge, optionalPlain, optionalSecret, selfObservabilityEnv } from "@maple/infra/env"
+import { impl } from "./src/worker.ts"
 
 export interface CreateElectricSyncWorkerOptions {
 	stage: MapleStage
@@ -43,23 +44,32 @@ const electricSyncConfiguredEnv = (stage: MapleStage) =>
 		selfObservabilityEnv(stage),
 	)
 
+// Effect-native worker (the fleet's pilot): `src/worker.ts` carries the
+// runtime `impl`; the stage-derived props stay here, where portless and
+// `@maple/infra` are safe to import. This factory's construct is the only one
+// the stack yields, so its props are the ones deployed (the module's default
+// export exists for the generated bundle entry and is inert).
 export const createElectricSyncWorker = ({ stage, domains, dev }: CreateElectricSyncWorkerOptions) =>
 	Effect.gen(function* () {
 		const configuredEnv = yield* electricSyncConfiguredEnv(stage)
-		const worker = yield* Cloudflare.Worker("electric-sync", {
-			name: resolveWorkerName("electric-sync", stage),
-			main: path.join(import.meta.dirname, "src", "worker.ts"),
-			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
-			placement: CLOUDFLARE_WORKER_PLACEMENT,
-			// Under `bun dev`: a sticky port the app's route follows.
-			dev,
-			workersDev: true,
-			// Custom domain (not a zone route): routes don't create DNS records, so
-			// pr-stage hostnames would be authoritative NXDOMAIN. Custom domains
-			// provision DNS + edge certs automatically.
-			domain: domains.sync,
-			env: configuredEnv,
-		})
+		const worker = yield* Cloudflare.Worker(
+			"electric-sync",
+			{
+				name: resolveWorkerName("electric-sync", stage),
+				main: path.join(import.meta.dirname, "src", "worker.ts"),
+				compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
+				placement: CLOUDFLARE_WORKER_PLACEMENT,
+				// Under `bun dev`: a sticky port the app's route follows.
+				dev,
+				workersDev: true,
+				// Custom domain (not a zone route): routes don't create DNS records, so
+				// pr-stage hostnames would be authoritative NXDOMAIN. Custom domains
+				// provision DNS + edge certs automatically.
+				domain: domains.sync,
+				env: configuredEnv,
+			},
+			impl,
+		)
 
 		return worker
 	})
