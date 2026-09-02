@@ -302,7 +302,7 @@ export function ServiceRecentDeploys({ releases, isLoading = false }: ServiceRec
 					<span className="text-muted-foreground/70">
 						Deploy tracking needs spans to carry the{" "}
 						<code className="rounded bg-muted px-1 py-px font-mono text-[11px]">
-							deployment.commit_sha
+							vcs.ref.head.revision
 						</code>{" "}
 						resource attribute.
 					</span>

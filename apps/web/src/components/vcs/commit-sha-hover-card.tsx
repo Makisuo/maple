@@ -11,7 +11,7 @@ import { CopyIndicator } from "@maple/ui/components/ui/copy-button"
 import { useCopy } from "@maple/ui/hooks/use-copy"
 import { cn } from "@maple/ui/lib/utils"
 
-// A full 40-hex git SHA. Telemetry `deployment.commit_sha` is unguarded OTel
+// A full 40-hex git SHA. Telemetry `vcs.ref.head.revision` is unguarded OTel
 // data, so a value may be a short SHA, a tag, or arbitrary text — those never
 // open a hover card (and never hit the backend); they render as plain children.
 const FULL_SHA = /^[0-9a-f]{40}$/i
@@ -211,7 +211,7 @@ function CommitHoverBody({ sha, compact = false }: { sha: string; compact?: bool
 }
 
 // A reference Maple can't resolve to a commit (short SHA, tag, arbitrary
-// `deployment.commit_sha` telemetry). Shown in the marker tooltip — which, unlike
+// `vcs.ref.head.revision` telemetry). Shown in the marker tooltip — which, unlike
 // the hover card, always renders a row for every commit in a bucket.
 function CommitPlain({ sha, compact = false }: { sha: string; compact?: boolean }) {
 	return (

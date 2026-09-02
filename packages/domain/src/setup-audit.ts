@@ -860,12 +860,14 @@ const UNSTRUCTURED_LOG_KEY_LIMIT = 3
 const STANDARD_SEVERITIES = new Set(["TRACE", "DEBUG", "INFO", "WARN", "WARNING", "ERROR", "FATAL"])
 
 /**
- * Attribute keys people invent instead of the semconv names Maple reads. `deployment.commit_sha` is
- * deliberately absent — Maple's own rollups pre-extract it, so it is supported, not invented.
+ * Attribute keys people invent instead of the semconv names Maple reads. `deployment.commit_sha`
+ * was Maple's own vendor key for the commit and is retired: nothing reads it any more, so it is
+ * flagged like any other parallel spelling of `vcs.ref.head.revision`.
  */
 const INVENTED_RESOURCE_KEYS = [
 	"env",
 	"environment",
+	"deployment.commit_sha",
 	"git.repo",
 	"git.commit",
 	"git.sha",
@@ -1110,7 +1112,7 @@ const attributeQualityChecks: ReadonlyArray<AuditCheck> = [
 	resourceKeyCheck(
 		"RES-05",
 		"Deploys are identifiable",
-		["vcs.ref.head.revision", "deployment.commit_sha"],
+		["vcs.ref.head.revision"],
 		"No commit revision on any resource. Release markers and per-deploy comparisons have nothing to anchor to.",
 		"Set `vcs.ref.head.revision` best-effort from the build environment (`VERCEL_GIT_COMMIT_SHA`, `GITHUB_SHA`, …). Never shell out to git at runtime.",
 	),

@@ -730,7 +730,7 @@ export type ServicePlatformsHourlyRow = InferRow<typeof servicePlatformsHourly>
 
 /**
  * Lightweight projection of service entry point spans for service overview queries.
- * Pre-extracts deployment.environment and deployment.commit_sha from ResourceAttributes.
+ * Pre-extracts deployment.environment(.name) and vcs.ref.head.revision from ResourceAttributes.
  * Stores Server/Consumer spans (service entry points) plus root spans as fallback.
  * Populated by materialized view, not direct ingestion.
  */

@@ -147,4 +147,20 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		manifestDigest: "faf78f67abd5901351ce6632cee59f22fadb3c1f7eb9b195dc2f9702d4c9c9bd",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
+	Object.freeze({
+		// v15 rebuilds the three service-overview views so `CommitSha` reads the
+		// semconv `vcs.ref.head.revision` instead of the retired vendor key
+		// `deployment.commit_sha` (ClickHouse migration 0025). View bodies only:
+		// no table or column changes, no row moves, and nothing is backfilled —
+		// rollup rows materialized with an empty commit age out with their TTL.
+		//
+		// projectRevision is carried forward deliberately — it is a hardcoded
+		// constant that no longer tracks the generator's header, and the identity
+		// this gate compares is the fingerprint/digest pair.
+		version: 15,
+		fingerprint: "24710426938d7b4a",
+		digest: "24710426938d7b4adf615f87f78315c2a5c6145a0029c4f244a339888b25f6d3",
+		manifestDigest: "65f0bc9e91171fbefd4452373ad15f8139b56111ffff27f65ffa4a09ba82cdb2",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
 ] as const)

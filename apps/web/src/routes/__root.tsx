@@ -32,7 +32,7 @@ const CommitShaAttributeValue = lazy(() =>
 	})),
 )
 
-const COMMIT_SHA_KEYS = new Set(["deployment.commit_sha", "vcs.ref.head.revision"])
+const COMMIT_SHA_KEYS = new Set(["vcs.ref.head.revision"])
 
 function renderAttributeValue(attrKey: string, value: string) {
 	if (!COMMIT_SHA_KEYS.has(attrKey)) return null

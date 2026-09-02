@@ -315,7 +315,7 @@ export function tracesBaseWhereConditions(
 		}
 	}
 	if (opts.commitShas?.length) {
-		conditions.push(CH.inList($.ResourceAttributes.get("deployment.commit_sha"), opts.commitShas))
+		conditions.push(CH.inList($.ResourceAttributes.get("vcs.ref.head.revision"), opts.commitShas))
 	}
 	if (opts.attributeFilters) {
 		for (const af of opts.attributeFilters) {
@@ -351,7 +351,7 @@ export function tracesBaseWhereConditions(
 	}
 	if (opts.excludedCommitShas?.length) {
 		conditions.push(
-			CH.notInList($.ResourceAttributes.get("deployment.commit_sha"), opts.excludedCommitShas),
+			CH.notInList($.ResourceAttributes.get("vcs.ref.head.revision"), opts.excludedCommitShas),
 		)
 	}
 

@@ -23,6 +23,7 @@ import { migration_0021_product_events } from "./0021_product_events"
 import { migration_0022_service_map_edge_quantiles } from "./0022_service_map_edge_quantiles"
 import { migration_0023_service_operations_discriminators } from "./0023_service_operations_discriminators"
 import { migration_0024_ai_trace_index } from "./0024_ai_trace_index"
+import { migration_0025_commit_sha_vcs_revision } from "./0025_commit_sha_vcs_revision"
 
 /**
  * A migration statement is either a raw SQL string (structural DDL) or a
@@ -78,6 +79,7 @@ export const migrations: ReadonlyArray<ClickHouseMigration> = [
 	migration_0022_service_map_edge_quantiles,
 	migration_0023_service_operations_discriminators,
 	migration_0024_ai_trace_index,
+	migration_0025_commit_sha_vcs_revision,
 ] as const
 
 /** Highest migration `version` bundled — i.e. the schema level a fully-applied

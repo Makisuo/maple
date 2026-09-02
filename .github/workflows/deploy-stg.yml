@@ -29,7 +29,7 @@ jobs:
         environment: staging
         env:
             INFISICAL_ENV_SLUG: staging
-            # Stamped onto deployed telemetry as `deployment.commit_sha` (server SDK
+            # Stamped onto deployed telemetry as `vcs.ref.head.revision` (server SDK
             # reads COMMIT_SHA; web build reads VITE_COMMIT_SHA via Vite define).
             COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
             VITE_COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}

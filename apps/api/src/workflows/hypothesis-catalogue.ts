@@ -179,7 +179,7 @@ export const SEED_HYPOTHESES: ReadonlyArray<SeedHypothesis> = [
 		name: "Deploy correlation",
 		question: "What shipped before the window, and does the onset line up?",
 		claimToTest:
-			"A release landed shortly before the onset and introduced the failure — visible as a change in service.version or deployment.commit_sha across the window.",
+			"A release landed shortly before the onset and introduced the failure — visible as a change in service.version or vcs.ref.head.revision across the window.",
 		toolNames: [
 			"explore_attributes",
 			"get_incident_timeline",

@@ -42,7 +42,7 @@ export function getPerformanceHints(whereClause: string, groupByKeys: string[]):
 				speed: "slow",
 				reason: `"${clause.key}" scans Map column for every row`,
 			})
-		} else if (key === "deployment.environment" || key === "deployment.commit_sha") {
+		} else if (key === "deployment.environment" || key === "vcs.ref.head.revision") {
 			hints.push({
 				key: clause.key,
 				location: "filter",
