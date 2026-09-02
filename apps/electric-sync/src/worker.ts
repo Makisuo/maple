@@ -9,7 +9,7 @@
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import * as Cloudflare from "alchemy/Cloudflare"
-import { Effect, Layer } from "effect"
+import { type Cause, Effect, Layer } from "effect"
 import { FetchHttpClient, HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import * as HttpServerError from "effect/unstable/http/HttpServerError"
 
@@ -77,19 +77,15 @@ export const impl = Effect.gen(function* () {
 	// records an Ok span (effect's RouteNotFound is not a Maple anticipated
 	// error, so letting it escape would error-mark every bot scan). 5xx
 	// residuals log through the OTLP logger; expected 4xx stay quiet.
-	const app = HttpMiddleware.tracer(
-		router
-			.asHttpEffect()
-			.pipe(
-				Effect.catchCause((cause) =>
-					Effect.flatMap(HttpServerError.causeResponse(cause), ([response, residual]) =>
-						response.status >= 500
-							? Effect.as(Effect.logError("electric-sync handler failed", residual), response)
-							: Effect.succeed(response),
-					),
-				),
-			),
-	)
+	const respond = Effect.fnUntraced(function* (cause: Cause.Cause<unknown>) {
+		const [response, residual] = yield* HttpServerError.causeResponse(cause)
+		if (response.status >= 500) {
+			yield* Effect.logError("electric-sync handler failed", residual)
+		}
+		return response
+	})
+
+	const app = HttpMiddleware.tracer(router.asHttpEffect().pipe(Effect.catchCause(respond)))
 
 	return {
 		fetch: Effect.gen(function* () {
