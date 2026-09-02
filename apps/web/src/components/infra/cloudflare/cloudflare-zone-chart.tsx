@@ -2,7 +2,6 @@ import { useMemo } from "react"
 
 import { d3Curve, defineChart, lineY } from "@tanstack/charts"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
-import { scalePoint } from "@tanstack/charts-scales/point"
 import { curveMonotoneX } from "d3-shape"
 
 import {
@@ -26,7 +25,7 @@ import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 import type { CloudflareZoneTimeseriesRow } from "@/api/warehouse/cloudflare-infra"
 import { formatNumber } from "@maple/ui/lib/format"
 import { formatBytes, formatPercent } from "@maple/ui/lib/format"
-import { CHART_EMPTY_MESSAGE, makeBucketLabeler, transformRows, type TransformedPoint } from "../chart-utils"
+import { CHART_EMPTY_MESSAGE, makeBucketAxis, transformRows, type TransformedPoint } from "../chart-utils"
 import { CHART_HEIGHT, ChartCardMessage } from "../primitives/chart-card"
 import { OTHER_ZONES_COLOR, OTHER_ZONES_SERIES } from "./constants"
 
@@ -108,8 +107,7 @@ export function CloudflareZoneChart({
 				longForm.push({ bucket, attributeValue: zone, value: metricValue(agg, metric) })
 			}
 		}
-		const labeler = makeBucketLabeler([...byBucketZone.keys()])
-		const transformed = transformRows(longForm, labeler)
+		const transformed = transformRows(longForm)
 		// Draw order = legend order: hottest zone first, the pooled remainder last.
 		const present = new Set(transformed.series)
 		const ordered = [
@@ -138,6 +136,10 @@ export function CloudflareZoneChart({
 	const colors = useResolvedSeriesColors(seriesColor, chromeColors.border)
 	const focusStore = useMemo(() => createTooltipFocusStore(), [])
 
+	// A time axis over the buckets' instants — see `makeBucketAxis` for why the
+	// label point scale this replaced folded a 24h window onto itself.
+	const axis = useMemo(() => makeBucketAxis(data.map((point) => point.bucket)), [data])
+
 	const yDomain = useMemo<[number, number]>(
 		() => niceLinearDomain(linearYDomain({ rows: data, keys: series })),
 		[data, series],
@@ -158,7 +160,7 @@ export function CloudflareZoneChart({
 	)
 
 	const definition = useMemo(() => {
-		const at = (point: TransformedPoint) => point.time
+		const at = (point: TransformedPoint) => point.date
 		const valueOf = (name: string) => (point: TransformedPoint) => {
 			const value = point[name]
 			return typeof value === "number" ? value : null
@@ -182,14 +184,7 @@ export function CloudflareZoneChart({
 				focusCrosshair(chromeColors),
 			],
 			scales: {
-				x: {
-					scale: scalePoint,
-					axis: {
-						line: false,
-						ticks: { size: 0, padding: 8 },
-						tickLabels: { thin: { minGap: 12 } },
-					},
-				},
+				x: axis.x,
 				y: {
 					scale: scaleLinear().domain(yDomain),
 					axis: {
@@ -206,7 +201,7 @@ export function CloudflareZoneChart({
 			focusRing: false,
 			tooltip: cursorTooltip(focusStore.anchor),
 		})
-	}, [data, series, colors, chromeColors, yDomain, metric, focusStore])
+	}, [data, series, axis, colors, chromeColors, yDomain, metric, focusStore])
 
 	return (
 		<div
@@ -232,7 +227,7 @@ export function CloudflareZoneChart({
 								points={points}
 								series={tooltipSeries}
 								focusStore={focusStore}
-								heading={(point: TransformedPoint) => point.time}
+								heading={(point: TransformedPoint) => axis.heading(point.bucket)}
 							/>
 						)}
 					/>

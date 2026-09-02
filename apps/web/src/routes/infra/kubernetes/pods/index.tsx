@@ -14,7 +14,7 @@ import { FolderIcon, MagnifierIcon } from "@/components/icons"
 import { KubernetesShell } from "@/components/infra/kubernetes/kubernetes-shell"
 import { PodPeekSheet } from "@/components/infra/kubernetes/pod-peek-sheet"
 import { PodsFilterSidebarView, type PodFilters } from "@/components/infra/k8s-filter-sidebar"
-import { PodTable, PodTableLoading, podKey } from "@/components/infra/pod-table"
+import { PodTable, PodTableLoading, podKey, type PodRow } from "@/components/infra/pod-table"
 import { FleetBand, FleetBandLoading, type FleetBandCell } from "@/components/infra/primitives/fleet-band"
 import { ListToolbar, countLabel } from "@/components/infra/primitives/list-toolbar"
 import { podFilterChips } from "@/lib/infra/pod-filter-chips"
@@ -192,6 +192,10 @@ function PodsPage() {
 		.orElse(() => [])
 	const peekIndex = search.peek ? pods.findIndex((pod) => podKey(pod) === search.peek) : -1
 	const peekPod = peekIndex >= 0 ? (pods[peekIndex] ?? null) : null
+	// The rows ↑/↓ would land on, fetched ahead so the step is instant.
+	const peekNeighbors = peekPod
+		? [pods[peekIndex - 1], pods[peekIndex + 1]].filter((row): row is PodRow => row !== undefined)
+		: []
 	// Stepping and closing replace history: walking fifty rows must not leave
 	// fifty entries behind the back button.
 	const stepPeek = (delta: 1 | -1) => {
@@ -372,6 +376,7 @@ function PodsPage() {
 			<PodPeekSheet
 				pod={peekPod}
 				position={peekPod ? { index: peekIndex, count: pods.length } : null}
+				neighbors={peekNeighbors}
 				onStep={stepPeek}
 				onClose={() => patchSearch({ peek: undefined }, { replace: true })}
 				startTime={startTime}
