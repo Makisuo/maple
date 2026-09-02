@@ -1,11 +1,20 @@
+/**
+ * The alerting Worker as an alchemy class: the root stack yields it
+ * (`yield* Alerting`) and its stage-derived props read `MapleStack`. The entry
+ * stays the hand-written async module at `src/worker.ts`: its crons rely on
+ * the platform's failure-and-retry semantics, which alchemy's Effect-native
+ * cron source does not carry (a failing handler there is caught and never
+ * reported). So unlike electric-sync this module is stack-side only — nothing
+ * here ships in the bundle.
+ */
 import path from "node:path"
 import * as Cloudflare from "alchemy/Cloudflare"
 import * as Effect from "effect/Effect"
-import * as Portless from "@maple/alchemy-portless"
-import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
-	resolveHyperdriveRefId,
+	ManagedMapleDb,
+	MapleStack,
+	type MapleStage,
 	resolveWorkerName,
 } from "@maple/infra/cloudflare"
 import {
@@ -22,17 +31,6 @@ import {
 	tinybirdEnv,
 } from "@maple/infra/env"
 
-export interface CreateAlertingWorkerOptions {
-	stage: MapleStage
-	domains: MapleDomains
-	/** The managed application database from the root (`createManagedMapleDb`); undefined on ref stages (stg/prd). */
-	mapleDb: Cloudflare.Hyperdrive.Connection | undefined
-	/** Local dev-server block from `Portless.workerDev` under `bun dev`; undefined on a deploy. */
-	dev?: Portless.WorkerDev | undefined
-	/** Inter-app URLs under `bun dev`, spread last so `.env.local` cannot override them. */
-	devEnv?: Record<string, string> | undefined
-}
-
 /**
  * The alerting worker's resource bindings, split from the `Config`-sourced env
  * so `InferEnv` can derive `AlertingWorkerEnv` below.
@@ -44,7 +42,7 @@ const makeWorkerBindings = ({
 	stage: MapleStage
 	mapleDb: Cloudflare.Hyperdrive.Connection | undefined
 }) => ({
-	// Ref stages attach MAPLE_DB via worker.bind below.
+	// Ref stages attach MAPLE_DB via `bindMapleDbRef` in the root stack.
 	...(mapleDb ? { MAPLE_DB: mapleDb } : undefined),
 	// Cross-script binding to the investigation fan-out Workflow hosted by the
 	// api worker. Alert, error, and anomaly ticks start investigations when
@@ -91,7 +89,7 @@ export type AlertingWorkerEnv = Partial<Cloudflare.InferEnv<ReturnType<typeof ma
  * than from a resource. Largely the api worker's set — the two share 32 keys,
  * which is why the groups live in `@maple/infra/env`.
  */
-const alertingConfiguredEnv = (stage: MapleStage) =>
+const configuredEnv = (stage: MapleStage) =>
 	merge(
 		// Alert-rule evaluation runs Tinybird-scoped raw SQL through
 		// TinybirdOrgTokenService, so this is the same set the api worker binds.
@@ -121,38 +119,28 @@ const alertingConfiguredEnv = (stage: MapleStage) =>
 		planetScaleOAuthEnv,
 	)
 
-export const createAlertingWorker = ({ stage, mapleDb, dev, devEnv }: CreateAlertingWorkerOptions) =>
-	Effect.gen(function* () {
-		const configuredEnv = yield* alertingConfiguredEnv(stage)
-		// `alerting` binds its own Hyperdrive config on prd — it issues ~97% of the
-		// workers' Postgres traffic and was starving the api's connection pool.
-		const hyperdriveRefId = resolveHyperdriveRefId(stage, "alerting")
-		const worker = yield* Cloudflare.Worker("alerting", {
-			name: resolveWorkerName("alerting", stage),
-			main: path.join(import.meta.dirname, "src", "worker.ts"),
-			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
-			placement: CLOUDFLARE_WORKER_PLACEMENT,
-			// Under `bun dev`: a sticky port the app's route follows.
-			dev,
-			workersDev: false,
-			// `0 9 * * *` (the onboarding drip) was retired when that sequence moved to
-			// maple-portal's campaign system. Removing it here is what stops the two
-			// from both sending during cutover.
-			crons: ["* * * * *", "*/5 * * * *", "*/15 * * * *", "0 * * * *"],
-			env: {
-				...makeWorkerBindings({ stage, mapleDb }),
-				...configuredEnv,
-				...devEnv,
-			},
-		})
+const props = Effect.gen(function* () {
+	const { stage, workerDev, devEnv } = yield* MapleStack
+	// Dev stages only; stg/prd bind their own Hyperdrive config by id in the
+	// root stack — `alerting` issues ~97% of the workers' Postgres traffic and
+	// was starving the api's connection pool when the two shared one.
+	const mapleDb = yield* ManagedMapleDb
+	const env = yield* configuredEnv(stage)
+	return {
+		name: resolveWorkerName("alerting", stage),
+		main: path.join(import.meta.dirname, "src", "worker.ts"),
+		compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
+		placement: CLOUDFLARE_WORKER_PLACEMENT,
+		// Under `bun dev`: a sticky port the app's route follows.
+		dev: workerDev("alerting"),
+		workersDev: false,
+		// `0 9 * * *` (the onboarding drip) was retired when that sequence moved to
+		// maple-portal's campaign system. Removing it here is what stops the two
+		// from both sending during cutover.
+		crons: ["* * * * *", "*/5 * * * *", "*/15 * * * *", "0 * * * *"],
+		// `devEnv` last, so `.env.local` cannot override the inter-app URLs.
+		env: { ...makeWorkerBindings({ stage, mapleDb }), ...env, ...devEnv },
+	}
+})
 
-		if (hyperdriveRefId) {
-			// v1 `HyperdriveRef` equivalent: bind the dashboard-managed config by ID
-			// (see apps/api/alchemy.run.ts for the full rationale).
-			yield* worker.bind("MAPLE_DB", {
-				bindings: [{ type: "hyperdrive", name: "MAPLE_DB", id: hyperdriveRefId }],
-			})
-		}
-
-		return worker
-	})
+export default class Alerting extends Cloudflare.Worker<Alerting>()("alerting", props) {}

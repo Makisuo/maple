@@ -17,6 +17,7 @@
 	"dependencies": {
 		"@maple/alchemy-portless": "workspace:*",
 		"@maple/effect-cloudflare": "workspace:*",
+		"alchemy": "2.0.0-beta.74",
 		"effect": "catalog:effect"
 	},
 	"devDependencies": {

@@ -10,13 +10,24 @@ put it here instead. Git blame does not survive a refactor of the line it annota
 
 ## Layout
 
-- `alchemy.run.ts` — the root stack. Composes one `create*` factory per app, resolves
-  stage/domains, and returns the deploy summary (also emitted as GitHub step outputs).
-- `apps/<app>/alchemy.run.ts` — one factory per deployable. Owns that app's resources and
-  bindings, and nothing else's.
-- `packages/infra` — stage/region/domain/naming logic and the shared deploy-time env
-  groups. Pure functions, unit-tested, no cloud calls.
+- `alchemy.run.ts` — the root stack. Provides `MapleStack` (stage, domains, public URLs,
+  the `bun dev` blocks) once, yields one module per app, and returns the deploy summary
+  (also emitted as GitHub step outputs).
+- `apps/<app>/alchemy.run.ts` — one module per deployable, owning that app's resources and
+  bindings and nothing else's. Two shapes, see "Worker classes" below: an alchemy Worker
+  **class** whose props are an Effect over `MapleStack` (`alerting`, `landing`, `local-ui`;
+  electric-sync's class lives in its `src/worker.ts` because it is also the bundle), or a
+  `create*` **factory** where the Worker still takes another resource as an argument
+  (`api`, `web`, `ingest`, `electric`).
+- `packages/infra` — stage/region/domain/naming logic, the shared deploy-time env groups,
+  and the few resources several Worker modules bind.
     - `cloudflare/stage.ts` — `MapleStage`, domains, worker names, Hyperdrive resolution.
+      Pure functions, unit-tested, no cloud calls.
+    - `cloudflare/stack.ts` — `MapleStack`, what the root stack tells the Worker classes.
+    - `cloudflare/maple-db.ts` / `cloudflare/observability.ts` — the managed Hyperdrive
+      and the Workers Observability destinations, declared once and yielded from every
+      module that binds them (alchemy registers a resource by id; a second yield returns
+      the first's).
     - `aws/stage.ts` — `MapleRegion`, AWS naming, task sizing, Cloud Map.
     - `env.ts` — the deploy-time env primitives and the shared groups the workers spread.
 
@@ -115,13 +126,40 @@ Gotchas worth knowing:
   reachable on `127.0.0.1:<port>` only; the inter-app URLs still name the `*.localhost`
   hosts, so start the proxy (`portless proxy start`) rather than work around it.
 
-## Single-module Workers: electric-sync
+## Worker classes: props as an Effect over `MapleStack`
+
+The end state for every Worker is alchemy's class form — `export default class Alerting
+extends Cloudflare.Worker<Alerting>()("alerting", props) {}` — where `props` is an Effect
+that reads `MapleStack` (`@maple/infra/cloudflare`, provided once by the root stack from
+`Alchemy.Stage`) and yields whatever other resources the Worker binds. The root stack then
+just `yield*`s the class; there is no factory and no options bag, and a resource two
+Workers share (`ManagedMapleDb`, `WorkersObservabilityDestinations`) is yielded from both
+modules — alchemy registers resources by id, so the second yield returns the first's.
+
+Two variants of the class, by what `main` is:
+
+- **External entry** (`alerting`, `landing`, `local-ui`): `main` is the hand-written
+  `src/worker.ts`, so the class lives in the app's `alchemy.run.ts` and nothing stack-side
+  ships in the bundle. alerting stays on this shape on purpose: its crons rely on the
+  platform's failure-and-retry semantics, and alchemy's Effect-native cron source catches a
+  failing handler and never reports it. The one thing the class cannot express is the
+  stg/prd Hyperdrive bound **by id** — alchemy has no `env` form for a binding it did not
+  create (its own `Hyperdrive.Connect` attaches the same raw metadata) — so the root stack
+  calls `bindMapleDbRef` after the yield.
+- **Single module** (`electric-sync`): the class is also the bundle entry, below.
+
+Still factories: `api` (the `web` service binding needs the Worker value, and its DO +
+Workflow class exports need the async entry), `web` (takes `api`), `ingest` and `electric`
+(ECS). `web` follows once `api` is a class its props can `yield*`.
+
+### Single-module Workers: electric-sync
 
 electric-sync ships in alchemy's single-module form. `apps/electric-sync/src/worker.ts` is
 both the resource the root stack yields (`yield* ElectricSync`) and the bundle alchemy builds
 (`main: import.meta.url`): no hand-written `export default { fetch }`, no per-app
-`alchemy.run.ts`. api and alerting keep the factory + async-entry shape — crons, queues and
-the cron event source's failure handling do not fit the Effect-native form yet.
+`alchemy.run.ts`. api keeps the factory + async-entry shape — its queues, Workflows and
+Durable Object need the async entry, and the cron event source's failure handling does not
+fit the Effect-native form yet.
 
 Alchemy evaluates that module in three places — the deploy process, `alchemy dev`, and the
 deployed isolate — and two rules keep it honest about which one it is in:
