@@ -6,7 +6,7 @@ import { statusLabel } from "./severity-tokens"
 const STATUS_TEXT: Record<HostStatus, string> = {
 	active: "text-[var(--severity-info)]",
 	idle: "text-muted-foreground",
-	down: "text-[var(--severity-error)]",
+	ended: "text-muted-foreground",
 } satisfies Record<HostStatus, string>
 
 interface HostStatusBadgeProps {

@@ -167,18 +167,31 @@ describe("listPodsQuery", () => {
 	it("filters the saturated scope outside the grouping", () => {
 		const { sql } = compileUnsafe(listPodsQuery({ scope: "saturated" }), baseParams)
 		expect(sql).toContain("GROUP BY podName) AS pods")
-		expect(sql).toContain("WHERE saturation >= 0.9")
+		expect(sql).toContain("AND saturation >= 0.9")
 	})
 
 	it("treats a pod with no limit metrics as unbounded, not as healthy", () => {
 		const { sql } = compileUnsafe(listPodsQuery({ scope: "unbounded" }), baseParams)
-		expect(sql).toContain("WHERE (saturation = 0 AND cpuUsagePeak > 0)")
+		expect(sql).toContain("AND (saturation = 0 AND cpuUsagePeak > 0)")
 	})
 
-	it("scopes stale pods relative to the window end, not wall-clock now", () => {
-		const { sql } = compileUnsafe(listPodsQuery({ scope: "stale" }), baseParams)
+	// Ending is the normal end of a pod's life on an autoscaled fleet, so the
+	// list must not lead with pods that no longer exist.
+	it("lists only live pods by default", () => {
+		const { sql } = compileUnsafe(listPodsQuery({}), baseParams)
+		expect(sql).toContain("WHERE lastSeen >= '2024-01-02 00:00:00' - INTERVAL 300 SECOND")
+	})
+
+	it("scopes the lifecycle relative to the window end, not wall-clock now", () => {
+		const { sql } = compileUnsafe(listPodsQuery({ lifecycle: "ended" }), baseParams)
 		expect(sql).toContain("WHERE lastSeen < '2024-01-02 00:00:00' - INTERVAL 300 SECOND")
 		expect(sql).not.toMatch(/__PARAM_\w+__/)
+	})
+
+	it("drops the lifecycle predicate entirely for the whole window", () => {
+		const { sql } = compileUnsafe(listPodsQuery({ lifecycle: "all" }), baseParams)
+		expect(sql).not.toContain("lastSeen >=")
+		expect(sql).not.toContain("lastSeen <")
 	})
 
 	it("emits no scope predicate when none is asked for", () => {
@@ -192,15 +205,28 @@ describe("listPodsSummaryQuery", () => {
 	it("aggregates per pod first so the band counts are exact, not HLL estimates", () => {
 		const { sql } = compileUnsafe(listPodsSummaryQuery({}), baseParams)
 		expect(sql).toContain("GROUP BY podName")
-		expect(sql).toContain("count() AS totalPods")
-		expect(sql).toContain("countIf(saturation >= 0.9) AS saturatedPods")
-		expect(sql).toContain("countIf((saturation >= 0.6 AND saturation < 0.9)) AS elevatedPods")
+		expect(sql).toContain("countIf(lastSeen >= '2024-01-02 00:00:00' - INTERVAL 300 SECOND) AS livePods")
+		expect(sql).toContain("countIf(lastSeen < '2024-01-02 00:00:00' - INTERVAL 300 SECOND) AS endedPods")
 		expect(sql).not.toContain("uniq(")
 		expect(sql).not.toMatch(/__PARAM_\w+__/)
 	})
 
-	it("counts unbounded pods as burning CPU with no limit samples at all", () => {
+	// The band's buckets are the list's denominator, so they have to count the
+	// same slice of the fleet the list is showing — live, by default.
+	it("counts the saturation buckets within the requested lifecycle", () => {
 		const { sql } = compileUnsafe(listPodsSummaryQuery({}), baseParams)
+		expect(sql).toContain(
+			"countIf((lastSeen >= '2024-01-02 00:00:00' - INTERVAL 300 SECOND AND saturation >= 0.9)) AS saturatedPods",
+		)
+	})
+
+	it("counts every bucket over the whole window when lifecycle is all", () => {
+		const { sql } = compileUnsafe(listPodsSummaryQuery({ lifecycle: "all" }), baseParams)
+		expect(sql).toContain("countIf(saturation >= 0.9) AS saturatedPods")
+	})
+
+	it("counts unbounded pods as burning CPU with no limit samples at all", () => {
+		const { sql } = compileUnsafe(listPodsSummaryQuery({ lifecycle: "all" }), baseParams)
 		expect(sql).toContain("countIf((limitSamples = 0 AND cpuUsagePeak > 0)) AS unboundedPods")
 	})
 

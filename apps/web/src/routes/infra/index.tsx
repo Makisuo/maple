@@ -37,7 +37,7 @@ const STATUS_FILTERS: ReadonlyArray<{ value: StatusFilter; label: string }> = [
 	{ value: "all", label: "All" },
 	{ value: "active", label: "Active" },
 	{ value: "idle", label: "Idle" },
-	{ value: "down", label: "Down" },
+	{ value: "ended", label: "Ended" },
 ]
 
 function InfraPage() {
@@ -162,7 +162,7 @@ function FleetView({
 	)
 
 	const counts = useMemo(() => {
-		const c: Record<HostStatus, number> = { active: 0, idle: 0, down: 0 } satisfies Record<
+		const c: Record<HostStatus, number> = { active: 0, idle: 0, ended: 0 } satisfies Record<
 			HostStatus,
 			number
 		>
