@@ -214,8 +214,9 @@ export function PlanetScaleChart({
 				},
 			},
 			// A pinned left margin keeps this chart's plot aligned with its siblings
-			// on the page, as `<YAxis width={52}>` did.
-			margin: { left: 52, top: 12, right: 12, bottom: 4 },
+			// on the page, as `<YAxis width={52}>` did. `bottom` stays unset: a set
+			// side is a hard lock, and only a measured side reserves the x labels.
+			margin: { left: 52, top: 12, right: 12 },
 			focus: "group-x",
 			focusRing: false,
 			tooltip: cursorTooltip(focusStore.anchor),
