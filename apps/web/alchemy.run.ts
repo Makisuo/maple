@@ -77,7 +77,7 @@ export const createMapleWeb = ({
 					process.env.VITE_MAPLE_INGEST_KEY?.trim() ||
 					process.env.MAPLE_OTEL_PUBLIC_INGEST_KEY?.trim() ||
 					"",
-				// Stamped onto browser telemetry as `deployment.commit_sha` /
+				// Stamped onto browser telemetry as `vcs.ref.head.revision` /
 				// `service.version`; listed here so a SHA-only change (e.g. a rebase)
 				// busts the build memo instead of serving a stale cached bundle.
 				VITE_COMMIT_SHA: process.env.VITE_COMMIT_SHA?.trim() || "",

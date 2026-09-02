@@ -38,7 +38,9 @@ export const normalizeKey = (raw: string): string =>
 		Match.when("service", () => "service.name"),
 		Match.when("span", () => "span.name"),
 		Match.whenOr("environment", "env", () => "deployment.environment"),
-		Match.when("commit_sha", () => "deployment.commit_sha"),
+		// `deployment.commit_sha` is retired telemetry, kept only as an alias so a
+		// saved where-clause written against it still names the commit filter.
+		Match.whenOr("commit_sha", "deployment.commit_sha", () => "vcs.ref.head.revision"),
 		Match.when("root.only", () => "root_only"),
 		Match.when("errors_only", () => "has_error"),
 		Match.orElse((k) => k),

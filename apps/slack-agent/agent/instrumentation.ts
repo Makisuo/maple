@@ -47,7 +47,7 @@ export interface ResourceAttributeInput {
  * pre-extract the legacy `deployment.environment`; keep both it and the
  * OTel-canonical `.name` until the MVs coalesce them.
  *
- * `service.version` + `deployment.commit_sha` are what tie a span back to a
+ * `service.version` + `vcs.ref.head.revision` are what tie a span back to a
  * release — Maple's own MV extracts CommitSha to power the commit-hover UI, so
  * omitting it makes this service the one that never shows a deploy marker.
  */
@@ -61,7 +61,7 @@ export function buildResourceAttributes(input: ResourceAttributeInput = {}): Rec
 		"vcs.repository.url.full": "https://github.com/MapleTechLabs/maple",
 	} satisfies Record<string, string>
 	if (input.commitSha?.trim()) {
-		attributes["deployment.commit_sha"] = input.commitSha.trim()
+		attributes["vcs.ref.head.revision"] = input.commitSha.trim()
 	}
 	if (input.environment) {
 		attributes["deployment.environment"] = input.environment

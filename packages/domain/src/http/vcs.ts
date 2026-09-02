@@ -36,7 +36,7 @@ export type VcsBranchId = Schema.Schema.Type<typeof VcsBranchId>
 /**
  * A full 40-char git commit SHA. Case-insensitive on input and normalized to
  * lowercase during decode, so the same commit is identified regardless of the
- * case a provider — or an OTel `deployment.commit_sha` attribute — emits it in.
+ * case a provider — or an OTel `vcs.ref.head.revision` attribute — emits it in.
  * Strict — unlike the permissive telemetry `CommitSha` brand (which must not
  * throw on arbitrary OTel data) — so the SHA-shape regex lives in exactly this
  * one declarative type, validated at the webhook/REST boundary and on persistence.
@@ -541,7 +541,7 @@ export class UnknownVcsProviderError extends Schema.TaggedError<UnknownVcsProvid
 
 /**
  * The requested commit reference is not a resolvable git SHA — it failed the
- * strict 40-hex `GitCommitSha` shape. Telemetry `deployment.commit_sha` is
+ * strict 40-hex `GitCommitSha` shape. Telemetry `vcs.ref.head.revision` is
  * unguarded OTel data, so a value can be a short SHA, a tag, or arbitrary text;
  * the hover-card endpoint surfaces that as this distinct, non-retryable error
  * (422) rather than a generic 400, so the dashboard can render a muted

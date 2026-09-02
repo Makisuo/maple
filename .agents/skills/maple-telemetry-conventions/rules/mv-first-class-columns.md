@@ -41,7 +41,7 @@ Hourly service-overview rollup.
 | Column | Extracted from | Line |
 |---|---|---|
 | `DeploymentEnv` | `DEPLOYMENT_ENV_SQL` | `materializations.ts:277` |
-| `CommitSha` | `ResourceAttributes['deployment.commit_sha']` | `materializations.ts:278` (see file for the field) |
+| `CommitSha` | `ResourceAttributes['vcs.ref.head.revision']` | `materializations.ts:278` (see file for the field) |
 
 ## `service_platforms_hourly_mv`
 
