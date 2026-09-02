@@ -3,6 +3,8 @@ import { tinybirdProjectManifest } from "../generated/tinybird-project-manifest"
 
 const RETENTION_DAYS = {
 	alert_checks: 365,
+	// Six years — HIPAA's documentation retention floor. Never rebuildable.
+	audit_log: 2190,
 	attribute_keys_hourly: 90,
 	attribute_values_hourly: 90,
 	error_events: 90,

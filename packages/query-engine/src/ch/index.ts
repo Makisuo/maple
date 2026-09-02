@@ -400,6 +400,13 @@ export {
 	type AlertChecksSummaryOutput,
 } from "./queries/alert-checks"
 
+// Queries — Audit log (org-wide audit trail, admin-only)
+export {
+	auditLogEntriesQuery,
+	type AuditLogEntriesOpts,
+	type AuditLogEntriesOutput,
+} from "./queries/audit-log"
+
 // Queries — Cloudflare integration usage (integrations-page ingest proof)
 
 // Queries — Cloudflare service-map stats (per-zone / per-Worker node rollups)

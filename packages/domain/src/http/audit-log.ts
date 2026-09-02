@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Context, Schema } from "effect"
 import { HttpTaggedError } from "./error-policy"
 
 /**
@@ -36,6 +36,30 @@ export const AuditChanges = Schema.Struct({
 	title: "Audit Changes",
 })
 export type AuditChanges = Schema.Schema.Type<typeof AuditChanges>
+
+/**
+ * The audit action a data-read endpoint records. Telemetry (traces, logs,
+ * metrics, error events) and session replays are the two surfaces that can
+ * carry customer end-user data, so every read of them is logged — HIPAA audit
+ * controls cover access, not only change.
+ */
+export const AuditReadAction = Schema.Literals(["telemetry.read", "session_replay.read"]).annotate({
+	identifier: "@maple/AuditReadAction",
+	title: "Audit Read Action",
+})
+export type AuditReadAction = Schema.Schema.Type<typeof AuditReadAction>
+
+/**
+ * Endpoint/group annotation declaring that a successful call is a data read
+ * worth an audit entry. The auth middlewares consult it on every request; an
+ * endpoint without it (configuration, billing, the audit log itself) records
+ * nothing on reads. Declared here, next to the contracts, so "which endpoints
+ * expose telemetry" is visible where the endpoints are.
+ */
+export class AuditedRead extends Context.Reference<AuditReadAction | undefined>(
+	"@maple/http/AuditedRead",
+	{ defaultValue: () => undefined },
+) {}
 
 export class AuditLogPersistenceError extends HttpTaggedError<AuditLogPersistenceError>()(
 	"@maple/http/errors/AuditLogPersistenceError",

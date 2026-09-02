@@ -40,6 +40,12 @@ export const AuditResources = {
 	error_issue: { prefix: PublicIdPrefixes.errorIssue, verbs: ErrorIssueEventType.literals },
 	/** Org-singleton public/private pair; which one rolled is in `metadata`. */
 	ingest_key: { verbs: ["rolled"] },
+	/**
+	 * Every MCP tool invocation, whichever surface drove it (MCP transport, the
+	 * in-app chat, workflows, internal RPC). The tool and its parameters are in
+	 * `metadata`; a tool that also mutates a resource records that action too.
+	 */
+	mcp_tool: { verbs: ["called"] },
 	investigation: { prefix: PublicIdPrefixes.investigation, verbs: ["created", "restarted", "status_changed"] },
 	/**
 	 * Org-singleton connections. `*_started` is the admin action Maple sees; the
@@ -61,6 +67,17 @@ export const AuditResources = {
 	 */
 	organization: { verbs: ["deleted"] },
 	scrape_target: { prefix: PublicIdPrefixes.scrapeTarget, verbs: ["created", "updated", "deleted"] },
+	/**
+	 * Reads of recorded browser sessions — the surface most likely to carry
+	 * end-user data. Recorded by the auth layers from the `AuditedRead` annotation.
+	 */
+	session_replay: { verbs: ["read"] },
+	/**
+	 * Reads of traces, logs, metrics and error events (`read`, from the
+	 * `AuditedRead` annotation on the endpoint) and every raw SQL statement run
+	 * against the warehouse (`sql_executed`, with the statement in `metadata`).
+	 */
+	telemetry: { verbs: ["read", "sql_executed"] },
 	/** Org-singleton BYO-ClickHouse connection; holds warehouse credentials. */
 	warehouse_settings: { verbs: ["updated", "deleted", "schema_applied"] },
 	/** Short-lived device credentials for the mobile widget; keyed by installation. */

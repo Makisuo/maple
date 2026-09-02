@@ -20,6 +20,7 @@ import {
 	QueryEngineExecuteResponse,
 	TinybirdDateTime,
 } from "../query-engine"
+import { AuditedRead } from "./audit-log"
 import { SessionAuthorization } from "./current-tenant"
 import { HttpTaggedError } from "./error-policy"
 import { warehouseHttpErrors } from "./warehouse"
@@ -2430,4 +2431,6 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		}),
 	)
 	.prefix("/internal/query-engine")
-	.middleware(SessionAuthorization) {}
+	.middleware(SessionAuthorization)
+	// Every endpoint here reads telemetry for the dashboard.
+	.annotate(AuditedRead, "telemetry.read") {}

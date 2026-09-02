@@ -581,6 +581,31 @@ export const AlertChecks = table("alert_checks", {
 	ErrorCategory: T.string,
 })
 
+export const AuditLog = table("audit_log", {
+	OrgId: orgId,
+	Id: T.string,
+	OccurredAt: dateTime64,
+	RecordedAt: dateTime64,
+	ActorType: T.string,
+	UserId: T.string,
+	ApiKeyId: T.string,
+	ActorId: T.string,
+	ActorLabel: T.string,
+	AffectedUserId: T.string,
+	Source: T.string,
+	Action: T.string,
+	Outcome: T.string,
+	DenialReason: T.string,
+	ResourceType: T.string,
+	ResourceId: T.string,
+	ChangedFields: T.array(T.string),
+	Changes: T.string,
+	Metadata: T.string,
+	RequestId: T.string,
+	OriginIp: T.string,
+	OriginCountry: T.string,
+})
+
 export const SessionReplays = table("session_replays", {
 	OrgId: orgId,
 	SessionId: T.string,
