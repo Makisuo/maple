@@ -16,6 +16,27 @@ import { warehouseReadHttpErrors } from "./warehouse"
 // shapes exist for it alone, so they live in the internal tier where they can
 // follow the UI.
 
+/** The measures the list can be ordered by; `startTime` is the default. */
+export const AI_SESSION_SORT_KEYS = [
+	"startTime",
+	"durationMs",
+	"cost",
+	"totalTokens",
+	"errorSpanCount",
+	"llmCalls",
+	"toolCalls",
+] as const
+export const AiSessionSortKey = Schema.Literals(AI_SESSION_SORT_KEYS)
+export type AiSessionSortKey = Schema.Schema.Type<typeof AiSessionSortKey>
+
+export const AiSessionSortDir = Schema.Literals(["asc", "desc"])
+export type AiSessionSortDir = Schema.Schema.Type<typeof AiSessionSortDir>
+
+/** A range bound. Every measure the list filters on is non-negative, so a
+ *  negative bound is a malformed request rather than an empty page. */
+const RangeBound = Schema.optional(Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)))
+const CountBound = Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)))
+
 export class ListAiSessionsRequest extends Schema.Class<ListAiSessionsRequest>("ListAiSessionsRequest")({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
@@ -30,13 +51,44 @@ export class ListAiSessionsRequest extends Schema.Class<ListAiSessionsRequest>("
 	 * that ranking returned, so the offset costs nothing there.
 	 */
 	offset: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
-	// Both filters land on the `ai_trace_index` level of both stages, each as
-	// its own per-trace existence test: `serviceNames` means "some agent span
-	// of the trace came from this service", not "the trace touched it", and a
-	// vendor and a service given together may be matched by different spans of
-	// the trace — see `aiSessionPageQuery`.
+	// The counted filters land on the `ai_trace_index` level of both stages,
+	// one per index column, each as its own per-trace existence test:
+	// `serviceNames` means "some agent span of the trace came from this
+	// service", not "the trace touched it", and a model and a tool given
+	// together are matched by different spans of the trace — see
+	// `aiSessionPageQuery`. Each selects exactly the population its facet
+	// counted.
 	vendorIds: Schema.optional(Schema.Array(Schema.String)),
 	serviceNames: Schema.optional(Schema.Array(Schema.String)),
+	deploymentEnvs: Schema.optional(Schema.Array(Schema.String)),
+	models: Schema.optional(Schema.Array(Schema.String)),
+	agentNames: Schema.optional(Schema.Array(Schema.String)),
+	toolNames: Schema.optional(Schema.Array(Schema.String)),
+	/**
+	 * A session id or trace id, or the leading characters of one, matched as a
+	 * prefix. Bounded because it becomes a `LIKE` pattern against the index —
+	 * no id in either column is anywhere near this long.
+	 */
+	search: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
+	// The session-level filters: applied to the ranked row over the measures
+	// the index carries per agent span, so they have no facet count behind
+	// them. `hasErrors` means a failed agent span; a session whose only error
+	// is on a non-agent span shows the badge but is not matched.
+	hasErrors: Schema.optional(Schema.Boolean),
+	/** Drop the `trace:` sessions — traces whose vendor exposes no session key. */
+	excludeTraceSessions: Schema.optional(Schema.Boolean),
+	durationMinMs: RangeBound,
+	durationMaxMs: RangeBound,
+	costMin: RangeBound,
+	costMax: RangeBound,
+	tokensMin: CountBound,
+	tokensMax: CountBound,
+	llmCallsMin: CountBound,
+	llmCallsMax: CountBound,
+	toolCallsMin: CountBound,
+	toolCallsMax: CountBound,
+	sortBy: Schema.optional(AiSessionSortKey),
+	sortDir: Schema.optional(AiSessionSortDir),
 }) {}
 
 export const AiSessionListItem = Schema.Struct({
@@ -52,6 +104,17 @@ export const AiSessionListItem = Schema.Struct({
 	errorSpanCount: Schema.Number,
 	/** Every service touched by the session's traces. */
 	serviceNames: Schema.Array(Schema.String),
+	/** Every model any agent span of the session ran on, dialects coalesced. */
+	models: Schema.Array(Schema.String),
+	/** Every agent named on any agent span of the session. */
+	agentNames: Schema.Array(Schema.String),
+	llmCalls: Schema.Number,
+	toolCalls: Schema.Number,
+	/** Tokens across every bucket, deepest reporter counted, so the number
+	 *  agrees with the detail page's header. */
+	totalTokens: Schema.Number,
+	/** USD as the instrumentation priced it; 0 where nothing reported a cost. */
+	cost: Schema.Number,
 	/** Warehouse datetime literals, e.g. `2026-08-19 10:33:25.825000000`. */
 	startTime: Schema.String,
 	endTime: Schema.String,
@@ -95,6 +158,14 @@ export class ListAiSessionsFacetsResponse extends Schema.Class<ListAiSessionsFac
 	vendors: Schema.Array(AiSessionFacetItem),
 	/** Distinct sessions per service name, matching what `serviceNames` selects. */
 	services: Schema.Array(AiSessionFacetItem),
+	/** …per `deployment.environment(.name)`, matching `deploymentEnvs`. */
+	environments: Schema.Array(AiSessionFacetItem),
+	/** …per model, matching `models`. */
+	models: Schema.Array(AiSessionFacetItem),
+	/** …per agent name, matching `agentNames`. */
+	agents: Schema.Array(AiSessionFacetItem),
+	/** …per tool name, matching `toolNames`. */
+	tools: Schema.Array(AiSessionFacetItem),
 }) {}
 
 export class GetAiSessionSpansRequest extends Schema.Class<GetAiSessionSpansRequest>(

@@ -163,4 +163,22 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		manifestDigest: "65f0bc9e91171fbefd4452373ad15f8139b56111ffff27f65ffa4a09ba82cdb2",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
+	Object.freeze({
+		// `ai_trace_index` widened with the sidebar's filter dimensions
+		// (`DeploymentEnv`, `Model`, `AgentName`, `ToolName`) and the per-span
+		// measures the page ranks on (`IsError`, `IsLlmCall`, `IsToolCall`,
+		// `Tokens`, `Cost`, plus `SpanId`/`ParentSpanId`/`Duration`), and
+		// `ai_trace_index_mv` recreated to fill them (ClickHouse migration
+		// 0026). Metadata-only ALTERs plus a view swap — no part is rewritten and
+		// no row moves. Rows materialized under v15 keep ''/0 in the new columns;
+		// nothing is backfilled.
+		//
+		// projectRevision stays the hardcoded constant, as for v12 to v15 — the
+		// identity this gate compares is the fingerprint/digest pair.
+		version: 16,
+		fingerprint: "d975e674ce66af41",
+		digest: "d975e674ce66af417e4398d8ca336d41340c9c1aa7b26082a6c55ecd02effe38",
+		manifestDigest: "f7d559f0db216379db02bc78c4e50f180f40588e124adf65665bf7eaaf556735",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
 ] as const)

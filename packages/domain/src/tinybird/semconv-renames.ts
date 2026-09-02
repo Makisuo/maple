@@ -83,4 +83,3 @@ export function messagingDestinationExpr(spanAttributes: MapColumnLike): Expr<st
 export const MESSAGING_DESTINATION_SQL = compile(
 	messagingDestinationExpr(mapColumn("SpanAttributes")).toFragment(),
 )
-
