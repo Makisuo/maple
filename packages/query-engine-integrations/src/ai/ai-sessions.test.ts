@@ -150,6 +150,20 @@ describe("aiSessionListQuery", () => {
 		expect(sql).toContain("LIMIT 25")
 	})
 
+	it("skips past the previous pages on the outermost level only", () => {
+		const { sql } = compileUnsafe(aiSessionListQuery({ limit: 50, offset: 100 }), params)
+
+		// The offset must apply to the ordered SESSION rows — the derived per-trace
+		// level has no order to page over.
+		expect(sql).toContain("LIMIT 50\n        OFFSET 100")
+		expect(sql.split("OFFSET").length - 1).toBe(1)
+	})
+
+	it("emits no OFFSET clause for the first page", () => {
+		expect(compileUnsafe(aiSessionListQuery({ offset: 0 }), params).sql).not.toContain("OFFSET")
+		expect(compileUnsafe(aiSessionListQuery(), params).sql).not.toContain("OFFSET")
+	})
+
 	it("pads the fan-out window rather than dropping it", () => {
 		const { sql } = compileUnsafe(aiSessionListQuery(), params)
 		const [fanOut, detection] = sql.split("TraceId IN (SELECT")

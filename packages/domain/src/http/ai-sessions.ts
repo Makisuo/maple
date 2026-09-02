@@ -21,6 +21,14 @@ export class ListAiSessionsRequest extends Schema.Class<ListAiSessionsRequest>("
 	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 100 })),
 	),
+	/**
+	 * Rows to skip, for the list's infinite scroll. Offset-based like the
+	 * replays list: the page re-runs the aggregation and drops the first `offset`
+	 * sessions, which is fine at the volumes an org's agent traffic reaches
+	 * (~10k index rows a day) and lets the client keep a single ordered list
+	 * without a session-keyed cursor the aggregation cannot cheaply seek to.
+	 */
+	offset: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
 	// Both filters land on the session-detection subquery, so `serviceNames`
 	// means "the session-bearing spans came from this service", not "the trace
 	// touched it" — see `aiSessionListQuery`.

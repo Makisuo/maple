@@ -167,6 +167,8 @@ const sessionKey = (rawSessionId: CH.Expr<string>, traceId: CH.Expr<string>): CH
 export interface AiSessionListOpts {
 	/** Sessions returned, most recently started first. */
 	readonly limit?: number
+	/** Sessions skipped before `limit` applies — the list's next page. */
+	readonly offset?: number
 	readonly vendorIds?: readonly string[]
 	readonly serviceNames?: readonly string[]
 }
@@ -231,6 +233,7 @@ export interface AiSessionListOutput {
  */
 export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 	const limit = opts.limit ?? 50
+	const offset = opts.offset ?? 0
 
 	// No vendor-presence predicate: `ai_trace_index_mv` admits only spans with a
 	// non-empty vendor id, so membership in the table IS the detection predicate.
@@ -326,43 +329,43 @@ export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 		])
 		.groupBy("traceId")
 
-	return (
-		fromQuery(perTrace, "session_traces")
-			.select(($) => ({
-				// The grouping key, and the only level that can compute it: the
-				// derived table is one row per trace, so a trace with no session id
-				// of its own becomes a session of one trace here rather than joining
-				// every other sessionless trace under `''`.
-				sessionId: sessionKey($.rawSessionId, $.traceId),
-				vendorId: CH.argMin($.vendorId, $.sessionStart),
-				vendorVersion: CH.argMin($.vendorVersion, $.sessionStart),
-				// `count()`, not `uniq()`: the derived table already emits exactly one
-				// row per trace, so this is exact and cheaper — `uniq` is an
-				// approximate HLL that would start drifting on a very large session.
-				traceCount: CH.count(),
-				spanCount: CH.sum($.spanCount),
-				errorSpanCount: CH.sum($.errorSpanCount),
-				serviceNames: CH.groupUniqArrayArray($.serviceNames),
-				startTime: CH.toString_(CH.min_($.traceStart)),
-				endTime: CH.toString_(fromUnixTimestamp64Nano(CH.max_($.traceEndNanos))),
-				// Nanoseconds first: `Timestamp` is DateTime64(9), and subtracting two
-				// of them yields a Decimal whose scale the wire format then quotes.
-				// Wrapped in `intDiv` because `Expr.sub`/`div` do not parenthesize.
-				durationMs: CH.intDiv(
-					CH.max_($.traceEndNanos).sub(CH.toUnixTimestamp64Nano(CH.min_($.traceStart))),
-					1_000_000,
-				),
-			}))
-			// No `sessionId != ''` guard any more, and none needed: the key is never
-			// empty. It used to keep two unrelated populations apart — a trace whose
-			// session-bearing span has landed in `traces` but not yet in the
-			// `trace_detail_spans` MV read back empty, and every such trace grouped
-			// together under one blank session. Both now key on their own trace id.
-			.groupBy("sessionId")
-			.orderBy(["startTime", "desc"])
-			.limit(limit)
-			.format("JSON")
-	)
+	const sessions = fromQuery(perTrace, "session_traces")
+		.select(($) => ({
+			// The grouping key, and the only level that can compute it: the
+			// derived table is one row per trace, so a trace with no session id
+			// of its own becomes a session of one trace here rather than joining
+			// every other sessionless trace under `''`.
+			sessionId: sessionKey($.rawSessionId, $.traceId),
+			vendorId: CH.argMin($.vendorId, $.sessionStart),
+			vendorVersion: CH.argMin($.vendorVersion, $.sessionStart),
+			// `count()`, not `uniq()`: the derived table already emits exactly one
+			// row per trace, so this is exact and cheaper — `uniq` is an
+			// approximate HLL that would start drifting on a very large session.
+			traceCount: CH.count(),
+			spanCount: CH.sum($.spanCount),
+			errorSpanCount: CH.sum($.errorSpanCount),
+			serviceNames: CH.groupUniqArrayArray($.serviceNames),
+			startTime: CH.toString_(CH.min_($.traceStart)),
+			endTime: CH.toString_(fromUnixTimestamp64Nano(CH.max_($.traceEndNanos))),
+			// Nanoseconds first: `Timestamp` is DateTime64(9), and subtracting two
+			// of them yields a Decimal whose scale the wire format then quotes.
+			// Wrapped in `intDiv` because `Expr.sub`/`div` do not parenthesize.
+			durationMs: CH.intDiv(
+				CH.max_($.traceEndNanos).sub(CH.toUnixTimestamp64Nano(CH.min_($.traceStart))),
+				1_000_000,
+			),
+		}))
+		// No `sessionId != ''` guard any more, and none needed: the key is never
+		// empty. It used to keep two unrelated populations apart — a trace whose
+		// session-bearing span has landed in `traces` but not yet in the
+		// `trace_detail_spans` MV read back empty, and every such trace grouped
+		// together under one blank session. Both now key on their own trace id.
+		.groupBy("sessionId")
+		.orderBy(["startTime", "desc"])
+		.limit(limit)
+	// Only a positive offset is emitted: `OFFSET 0` is a no-op that would still
+	// change the compiled SQL of every first-page read.
+	return (offset > 0 ? sessions.offset(offset) : sessions).format("JSON")
 }
 
 // List facets (UNION ALL — vendor / service)
