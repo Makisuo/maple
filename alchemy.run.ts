@@ -286,6 +286,7 @@ export default Alchemy.Stack(
 			: yield* createMapleWeb({
 					stage,
 					domains,
+					api,
 					apiUrl,
 					ingestUrl,
 					electricSyncUrl,

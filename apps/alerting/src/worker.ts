@@ -42,6 +42,7 @@ import {
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { layerFromEnv, layerFromEnvRecord, runScheduledEffect } from "@maple/effect-cloudflare"
 import { Cause, Effect, Layer, Match } from "effect"
+import type { AlertingWorkerEnv } from "../alchemy.run.ts"
 
 // Module-scope construction; `flush(env)` resolves env on first call. The
 // in-isolate buffers coalesce concurrent scheduled ticks into one POST per
@@ -52,10 +53,6 @@ const telemetry = MapleCloudflareSDK.make({
 	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
 })
-
-interface AlertingWorkerEnv {
-	readonly [key: string]: unknown
-}
 
 export const buildLayer = (env: AlertingWorkerEnv) => {
 	// Keep config and binding services on the same invocation-scoped env record;
