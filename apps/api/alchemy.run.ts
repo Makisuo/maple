@@ -159,6 +159,9 @@ const apiConfiguredEnv = (stage: MapleStage, domains: MapleDomains) =>
 		optionalPlain("CLICKHOUSE_USER"),
 		optionalPlain("CLICKHOUSE_DATABASE"),
 		optionalSecret("CLICKHOUSE_PASSWORD"),
+		// Dev-only escape hatch from per-org BYO rows; the runtime ignores it
+		// outside MAPLE_ENVIRONMENT=development, so binding it everywhere is safe.
+		optionalPlain("MAPLE_IGNORE_ORG_CLICKHOUSE"),
 		authEnv,
 		ingestKeyCryptoEnv,
 		requireSecretEntry("MAPLE_SHARE_TOKEN_HMAC_KEY"),

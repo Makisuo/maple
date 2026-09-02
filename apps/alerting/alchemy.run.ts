@@ -53,6 +53,8 @@ const alertingConfiguredEnv = (stage: MapleStage) =>
 		// Non-prod stages skip all crons (they share live org data via the prod DB);
 		// set to "1" on a stage to deliberately exercise crons there.
 		optionalPlain("MAPLE_ALERTING_ALLOW_NONPROD"),
+		// Dev-only escape hatch from per-org BYO rows (see apps/api/alchemy.run.ts).
+		optionalPlain("MAPLE_IGNORE_ORG_CLICKHOUSE"),
 		optionalSecret("AUTUMN_SECRET_KEY"),
 		optionalSecret("INTERNAL_SERVICE_TOKEN"),
 		// The alerting worker is where incidents open and resolve, so it is the one

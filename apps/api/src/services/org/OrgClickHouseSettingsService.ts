@@ -937,6 +937,12 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		const env = yield* Env
 		const httpClient = yield* HttpClient.HttpClient
 		const encryptionKey = yield* parseEncryptionKey(Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY))
+		// A per-org BYO row normally wins over every env-level warehouse setting, so
+		// a developer whose org has one never reaches the local warehouse. This is
+		// the dev-only way out; the environment gate keeps it off every deploy.
+		const ignoreOrgClickHouse =
+			env.MAPLE_ENVIRONMENT === "development" &&
+			(env.MAPLE_IGNORE_ORG_CLICKHOUSE === "1" || env.MAPLE_IGNORE_ORG_CLICKHOUSE === "true")
 		// Optional: present only inside a Worker isolate. Used to kick off the
 		// background schema-apply Workflow. Read optionally so non-worker/test
 		// contexts (where the binding is absent) still construct the service.
@@ -1741,6 +1747,10 @@ export class OrgClickHouseSettingsService extends Context.Service<
 
 		const resolveRuntimeConfig = Effect.fn("OrgClickHouseSettingsService.resolveRuntimeConfig")(
 			function* (orgId: OrgId) {
+				if (ignoreOrgClickHouse) {
+					yield* Effect.annotateCurrentSpan("clickhouse.config.source", "ignored_dev")
+					return Option.none<RuntimeBackendConfig>()
+				}
 				const cached = yield* resolveCachedSettings(orgId)
 
 				if (cached === null) {
@@ -1798,6 +1808,9 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		// reads it fresh.
 		const isWarehouseWriteReady = Effect.fn("OrgClickHouseSettingsService.isWarehouseWriteReady")(
 			function* (orgId: OrgId) {
+				// Same dev opt-out as `resolveRuntimeConfig`: reads must land where this
+				// process would have written, which is the managed warehouse.
+				if (ignoreOrgClickHouse) return false
 				const row = yield* selectCachedRow(orgId)
 				return (
 					Option.isSome(row) &&
