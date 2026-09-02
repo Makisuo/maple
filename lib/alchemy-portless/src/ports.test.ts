@@ -1,5 +1,6 @@
 import { createServer } from "node:net"
 import { describe, expect, it } from "vitest"
+import * as Effect from "effect/Effect"
 import { choosePort, preferredPort } from "./ports.ts"
 
 describe("preferredPort", () => {
@@ -17,7 +18,7 @@ describe("preferredPort", () => {
 describe("choosePort", () => {
 	it("returns the preferred port when it is free", async () => {
 		const key = "choosePort-free-test"
-		expect(await choosePort(key)).toBe(preferredPort(key))
+		expect(await Effect.runPromise(choosePort(key))).toBe(preferredPort(key))
 	})
 
 	it("walks forward when the preferred port is taken", async () => {
@@ -26,7 +27,7 @@ describe("choosePort", () => {
 		const blocker = createServer()
 		await new Promise<void>((resolve) => blocker.listen({ host: "127.0.0.1", port: preferred }, resolve))
 		try {
-			expect(await choosePort(key)).toBe(preferred + 1)
+			expect(await Effect.runPromise(choosePort(key))).toBe(preferred + 1)
 		} finally {
 			await new Promise<void>((resolve) => blocker.close(() => resolve()))
 		}

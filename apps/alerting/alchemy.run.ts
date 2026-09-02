@@ -29,6 +29,8 @@ export interface CreateAlertingWorkerOptions {
 	mapleDb: Cloudflare.Hyperdrive.Connection | undefined
 	/** Local dev-server block from `Portless.workerDev` under `bun dev`; undefined on a deploy. */
 	dev?: Portless.WorkerDev | undefined
+	/** Inter-app URLs under `bun dev`, spread last so `.env.local` cannot override them. */
+	devEnv?: Record<string, string> | undefined
 }
 
 /**
@@ -66,7 +68,7 @@ const alertingConfiguredEnv = (stage: MapleStage) =>
 		planetScaleOAuthEnv,
 	)
 
-export const createAlertingWorker = ({ stage, mapleDb, dev }: CreateAlertingWorkerOptions) =>
+export const createAlertingWorker = ({ stage, mapleDb, dev, devEnv }: CreateAlertingWorkerOptions) =>
 	Effect.gen(function* () {
 		const configuredEnv = yield* alertingConfiguredEnv(stage)
 		// `alerting` binds its own Hyperdrive config on prd — it issues ~97% of the
@@ -115,6 +117,7 @@ export const createAlertingWorker = ({ stage, mapleDb, dev }: CreateAlertingWork
 						}
 					: undefined),
 				...configuredEnv,
+				...devEnv,
 			},
 		})
 

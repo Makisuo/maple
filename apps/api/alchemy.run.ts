@@ -44,6 +44,8 @@ export interface CreateMapleApiOptions {
 	mapleDb: Cloudflare.Hyperdrive.Connection | undefined
 	/** Local dev-server block from `Portless.workerDev` under `bun dev`; undefined on a deploy. */
 	dev?: Portless.WorkerDev | undefined
+	/** Inter-app URLs under `bun dev`, spread last so `.env.local` cannot override them. */
+	devEnv?: Record<string, string> | undefined
 }
 
 /** R2 credentials for the ingest gateway, when this stage writes replay blobs. */
@@ -271,7 +273,14 @@ export const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleSta
 	})
 })
 
-export const createMapleApi = ({ stage, domains, replayBlobs, mapleDb, dev }: CreateMapleApiOptions) =>
+export const createMapleApi = ({
+	stage,
+	domains,
+	replayBlobs,
+	mapleDb,
+	dev,
+	devEnv,
+}: CreateMapleApiOptions) =>
 	Effect.gen(function* () {
 		// MAPLE_DB Hyperdrive comes in two flavors:
 		//
@@ -421,6 +430,7 @@ export const createMapleApi = ({ stage, domains, replayBlobs, mapleDb, dev }: Cr
 						}
 					: undefined),
 				...configuredEnv,
+				...devEnv,
 			},
 		})) as MapleApiWorker
 

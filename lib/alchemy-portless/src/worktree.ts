@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process"
+import path from "node:path"
 
 const git = (cwd: string, ...args: string[]): string | undefined => {
 	const result = spawnSync("git", args, { cwd, encoding: "utf8" })
@@ -7,14 +8,24 @@ const git = (cwd: string, ...args: string[]): string | undefined => {
 	return value === "" ? undefined : value
 }
 
-/** Portless's worktree rule: empty in the main worktree, `<branch>.` in a linked one. */
+const DEFAULT_BRANCHES = new Set(["main", "master"])
+
+/** Portless's own rule: the branch's last segment as a hostname label, nothing for main/master. */
+const branchToPrefix = (branch: string | undefined): string => {
+	if (!branch || branch === "HEAD" || DEFAULT_BRANCHES.has(branch)) return ""
+	const label = (branch.split("/").pop() ?? "")
+		.toLowerCase()
+		.replaceAll(/[^a-z0-9-]+/g, "-")
+		.replaceAll(/^-+|-+$/g, "")
+	return label ? `${label}.` : ""
+}
+
+/** Empty in the main worktree, `<branch label>.` in a linked one, the way portless names them. */
 export const worktreePrefix = (cwd: string = process.cwd()): string => {
 	const gitDir = git(cwd, "rev-parse", "--git-dir")
 	const commonDir = git(cwd, "rev-parse", "--git-common-dir")
-	if (!gitDir || !commonDir || gitDir === commonDir) return ""
-	const branch = git(cwd, "rev-parse", "--abbrev-ref", "HEAD")
-	if (!branch || branch === "HEAD") return ""
-	return `${branch.replaceAll("/", "-")}.`
+	if (!gitDir || !commonDir || path.resolve(cwd, gitDir) === path.resolve(cwd, commonDir)) return ""
+	return branchToPrefix(git(cwd, "rev-parse", "--abbrev-ref", "HEAD"))
 }
 
 /** The portless hostname a route is registered under. */

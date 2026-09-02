@@ -12,6 +12,22 @@ export const DEV_APPS = [
 
 export type DevApp = (typeof DEV_APPS)[number]
 
+/** Workers are served by alchemy's local runtime; processes run their own `dev` script. */
+export const DEV_APP_KINDS = {
+	api: "worker",
+	alerting: "worker",
+	"electric-sync": "worker",
+	web: "process",
+	landing: "process",
+	ingest: "process",
+	"local-ui": "process",
+	scraper: "process",
+} satisfies Record<DevApp, "worker" | "process">
+
+export const DEV_PROCESS_APPS: ReadonlyArray<DevApp> = DEV_APPS.filter(
+	(app) => DEV_APP_KINDS[app] === "process",
+)
+
 export const isDevApp = (value: string): value is DevApp =>
 	(DEV_APPS as ReadonlyArray<string>).includes(value)
 

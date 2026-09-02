@@ -5,7 +5,8 @@ import * as Output from "alchemy/Output"
 import * as Provider from "alchemy/Provider"
 import { Resource } from "alchemy/Resource"
 import * as Effect from "effect/Effect"
-import { choosePort, preferredPort } from "./ports.ts"
+import * as Schema from "effect/Schema"
+import { choosePort, PortRange, preferredPort } from "./ports.ts"
 import { routeHostname, worktreePrefix } from "./worktree.ts"
 
 export interface RouteProps {
@@ -47,11 +48,12 @@ export type Route = Resource<"Portless.Route", RouteProps, RouteAttributes>
 
 export const Route = Resource<Route>("Portless.Route")
 
-export interface WorkerDev {
-	readonly host: string
-	readonly port: number
-	readonly strictPort: boolean
-}
+/** A served Worker's `dev` block, or `{ mode: "external" }` for one this dev run leaves unserved. */
+export type WorkerDev =
+	| { readonly host: string; readonly port: number; readonly strictPort: boolean }
+	| { readonly mode: "external" }
+
+export const workerUnserved: WorkerDev = { mode: "external" }
 
 /**
  * A Worker's `dev` block: alchemy binds the port in `precreate`, before Outputs
@@ -59,20 +61,33 @@ export interface WorkerDev {
  */
 export const workerDev = (name: string): WorkerDev => ({
 	host: "127.0.0.1",
-	port: preferredPort(`worker:${name}`),
+	port: preferredPort(name, PortRange.worker),
 	strictPort: false,
 })
 
 /** The port a local Worker bound, read from its `url` attribute once it is up. */
-export const workerPort = (
-	url: string | undefined | Output.Output<string | undefined>,
-): Output.Output<number> =>
-	Output.map(Output.asOutput(url), (value) => {
-		if (!value) throw new Error("the Worker has no local URL to route to")
+export class WorkerUrlError extends Schema.TaggedError<WorkerUrlError>()("Portless.WorkerUrlError", {
+	url: Schema.optionalKey(Schema.String),
+	message: Schema.String,
+}) {}
+
+export const workerPort = (url: string | undefined | Output.Output<string | undefined>) =>
+	// `Output.mapEffect` has no failure channel, and a served Worker without a
+	// local URL is a broken stack invariant, so both cases are defects.
+	Output.mapEffect((value: string | undefined) => {
+		if (!value) {
+			// oxlint-disable-next-line maple/no-effect-die -- stack wiring invariant, see above
+			return Effect.die(new WorkerUrlError({ message: "the Worker has no local URL to route to" }))
+		}
 		const port = Number(new URL(value).port)
-		if (!Number.isSafeInteger(port) || port <= 0) throw new Error(`no port in the Worker's URL ${value}`)
-		return port
-	})
+		if (!Number.isSafeInteger(port) || port <= 0) {
+			// oxlint-disable-next-line maple/no-effect-die -- stack wiring invariant, see above
+			return Effect.die(
+				new WorkerUrlError({ url: value, message: `no port in the Worker's URL ${value}` }),
+			)
+		}
+		return Effect.succeed(port)
+	})(Output.asOutput(url))
 
 const portless = (...args: string[]): boolean => {
 	const result = spawnSync("portless", args, { stdio: "ignore" })
@@ -103,7 +118,7 @@ export const RouteProviderLocal = () =>
 				const prefix = news.prefix ?? worktreePrefix()
 				const hostname = routeHostname(news.name, prefix)
 				// Keyed by fqn: two worktrees share a preferred port and the second walks forward.
-				const port = news.port ?? (yield* Effect.promise(() => choosePort(fqn)))
+				const port = news.port ?? (yield* choosePort(fqn))
 				const aliased = portless("alias", hostname, String(port), "--force")
 				if (aliased) {
 					yield* Effect.addFinalizer(() =>

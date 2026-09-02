@@ -28,7 +28,7 @@ import {
 	resolveMapleDomains,
 } from "@maple/infra/cloudflare"
 import * as Portless from "@maple/alchemy-portless"
-import { selectedDevApps, type DevApp } from "@maple/infra/dev-urls"
+import { DEV_PROCESS_APPS, selectedDevApps, type DevApp } from "@maple/infra/dev-urls"
 import { requiredPlain } from "@maple/infra/env"
 import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
 import { createManagedMapleDb, createMapleApi, createReplayBlobStore } from "./apps/api/alchemy.run.ts"
@@ -71,7 +71,6 @@ const isDevServer = process.env.ALCHEMY_DEV === "true"
 
 /** The apps this dev run serves; undefined on a deploy, which is never partial. */
 const devApps = isDevServer ? selectedDevApps() : undefined
-const wanted = (app: DevApp): boolean => devApps === undefined || devApps.has(app)
 
 /**
  * A child process is handed its route's port. A Worker binds its port in
@@ -79,11 +78,23 @@ const wanted = (app: DevApp): boolean => devApps === undefined || devApps.has(ap
  */
 const createDevRoute = (app: DevApp) => Portless.Route(`${app}-route`, { name: app })
 
-const createWorkerRoute = (app: DevApp, worker: Cloudflare.Worker) =>
-	Portless.Route(`${app}-route`, { name: app, port: Portless.workerPort(worker.url) })
+/** Every resource is declared on every run; a subset run only leaves the others unserved. */
+const workerDev = (app: DevApp) =>
+	devApps === undefined ? undefined : devApps.has(app) ? Portless.workerDev(app) : Portless.workerUnserved
 
-/** The Worker's `dev` block under `bun dev`; undefined on a deploy. */
-const workerDev = (app: DevApp) => (devApps ? Portless.workerDev(app) : undefined)
+const serveWorker = (app: DevApp, worker: Cloudflare.Worker) =>
+	devApps?.has(app)
+		? Effect.asVoid(Portless.Route(`${app}-route`, { name: app, port: Portless.workerPort(worker.url) }))
+		: Effect.void
+
+/** Inter-app URLs handed to the Workers as env, so `.env.local` cannot override them. */
+const devEnv = devApps
+	? {
+			MAPLE_API_BASE_URL: Portless.routeUrl("api"),
+			MAPLE_APP_BASE_URL: Portless.routeUrl("web"),
+			MAPLE_ELECTRIC_SYNC_URL: Portless.routeUrl("electric-sync"),
+		}
+	: undefined
 
 /** A non-Worker app's own `dev` script under `Command.Dev`, which is a no-op on deploys. */
 const createDevProcess = (app: DevApp, route: Portless.Route) =>
@@ -94,11 +105,9 @@ const createDevProcess = (app: DevApp, route: Portless.Route) =>
 			PORT: Output.map(Output.asOutput(route.port), String),
 			HOST: "127.0.0.1",
 			PORTLESS_URL: Portless.routeUrl(app),
+			MAPLE_API_URL: Portless.routeUrl("api"),
 		},
 	})
-
-/** Everything `bun dev` runs that is not a Worker. */
-const DEV_PROCESS_APPS: ReadonlyArray<DevApp> = ["web", "landing", "local-ui", "ingest", "scraper"]
 
 const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStage>) =>
 	Effect.gen(function* () {
@@ -185,8 +194,9 @@ export default Alchemy.Stack(
 			if (devApps?.has(app)) routes.set(app, yield* createDevRoute(app))
 		}
 
-		const apiUrl = resolveUrl(domains.api, "MAPLE_API_BASE_URL")
-		const electricSyncUrl = resolveUrl(domains.sync, "MAPLE_ELECTRIC_SYNC_URL")
+		const apiUrl = devEnv?.MAPLE_API_BASE_URL ?? resolveUrl(domains.api, "MAPLE_API_BASE_URL")
+		const electricSyncUrl =
+			devEnv?.MAPLE_ELECTRIC_SYNC_URL ?? resolveUrl(domains.sync, "MAPLE_ELECTRIC_SYNC_URL")
 		// Geographic instance this deploy belongs to. `us` today; an EU instance is
 		// the same stack deployed with MAPLE_REGION=eu against that instance's own
 		// Tinybird workspace and application database. Guarded here because a
@@ -214,14 +224,14 @@ export default Alchemy.Stack(
 		// own it. `credentials` is undefined on stages that keep replay payloads
 		// inline (`stageEnablesReplayBlobs`). Skipped when a dev run leaves the api
 		// out: the bucket is a live account resource even under `alchemy dev`.
-		const replayBlobStore = wanted("api") ? yield* createReplayBlobStore({ stage }) : undefined
+		const replayBlobStore = yield* createReplayBlobStore({ stage })
 
 		const ingest = stageDeploysIngest(stage)
 			? yield* createMapleIngest({
 					stage,
 					domains,
 					region,
-					replayBlobs: replayBlobStore?.credentials,
+					replayBlobs: replayBlobStore.credentials,
 				})
 			: undefined
 
@@ -230,23 +240,19 @@ export default Alchemy.Stack(
 		// Shared by api and alerting. Managed here on dev stages; stg/prd bind a
 		// dashboard config by id in their factories; PR previews get none.
 		const mapleDb =
-			resolveDatabaseMode(stage) === "managed" && (wanted("api") || wanted("alerting"))
-				? yield* createManagedMapleDb(stage)
-				: undefined
+			resolveDatabaseMode(stage) === "managed" ? yield* createManagedMapleDb(stage) : undefined
 
 		// Chat and AI triage run inside the api worker (ChatSession Durable Object),
 		// so there is no separate chat worker to sequence against any more.
-		const api =
-			wanted("api") && replayBlobStore
-				? yield* createMapleApi({
-						stage,
-						domains,
-						mapleDb,
-						replayBlobs: replayBlobStore.bucket,
-						dev: workerDev("api"),
-					})
-				: undefined
-		if (api && devApps) yield* createWorkerRoute("api", api)
+		const api = yield* createMapleApi({
+			stage,
+			domains,
+			mapleDb,
+			replayBlobs: replayBlobStore.bucket,
+			dev: workerDev("api"),
+			devEnv,
+		})
+		yield* serveWorker("api", api)
 
 		// Self-hosted ElectricSQL on ECS Fargate (prd/stg — dev stages use the
 		// docker `electric` service, and PR previews have no database to replicate
@@ -265,10 +271,12 @@ export default Alchemy.Stack(
 
 		// Standalone ElectricSQL shape-proxy worker (DB-free); its public origin is
 		// baked into the web build (VITE_ELECTRIC_SYNC_URL).
-		const electricSync = wanted("electric-sync")
-			? yield* createElectricSyncWorker({ stage, domains, dev: workerDev("electric-sync") })
-			: undefined
-		if (electricSync && devApps) yield* createWorkerRoute("electric-sync", electricSync)
+		const electricSync = yield* createElectricSyncWorker({
+			stage,
+			domains,
+			dev: workerDev("electric-sync"),
+		})
+		yield* serveWorker("electric-sync", electricSync)
 
 		// See `isDevServer`: each of these three is gated on a production
 		// `Command.Build`, so including them would make `alchemy dev` build the
@@ -302,10 +310,14 @@ export default Alchemy.Stack(
 					tracesDestination: shared.tracesDestination,
 				})
 
-		const alerting = wanted("alerting")
-			? yield* createAlertingWorker({ stage, domains, mapleDb, dev: workerDev("alerting") })
-			: undefined
-		if (alerting && devApps) yield* createWorkerRoute("alerting", alerting)
+		const alerting = yield* createAlertingWorker({
+			stage,
+			domains,
+			mapleDb,
+			dev: workerDev("alerting"),
+			devEnv,
+		})
+		yield* serveWorker("alerting", alerting)
 
 		// Dev only: the vite/astro dev servers, `cargo run`, and the scraper.
 		for (const app of DEV_PROCESS_APPS) {
@@ -363,12 +375,12 @@ export default Alchemy.Stack(
 			electricServiceUrl: electric?.serviceUrl,
 			electricCertificateValidation: electric?.certificateValidation,
 			ingestCertificateValidation: ingest?.certificateValidation,
-			apiWorker: api?.workerName,
-			electricSyncWorker: electricSync?.workerName,
+			apiWorker: api.workerName,
+			electricSyncWorker: electricSync.workerName,
 			webWorker: web?.workerName,
 			landingWorker: landing?.workerName,
 			localUiWorker: localUi?.workerName,
-			alertingWorker: alerting?.workerName,
+			alertingWorker: alerting.workerName,
 		}
 	}),
 )

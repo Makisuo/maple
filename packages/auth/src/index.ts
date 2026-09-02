@@ -364,6 +364,8 @@ export interface AuthEnv {
 	readonly MAPLE_AUTH_MODE: string
 	readonly MAPLE_DEFAULT_ORG_ID: string
 	readonly MAPLE_ORG_ID_OVERRIDE: Option.Option<string>
+	/** Only `development` lets a pinned org trust a non-member's session role. */
+	readonly MAPLE_ENVIRONMENT?: string | undefined
 	readonly MAPLE_ROOT_PASSWORD: Option.Option<Redacted.Redacted<string>>
 	readonly CLERK_SECRET_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly CLERK_PUBLISHABLE_KEY: Option.Option<string>
@@ -702,20 +704,24 @@ export const makeResolveTenant = (
 			if (orgIdOverride !== undefined) {
 				const pinnedOrgId = yield* decodeOrgId(orgIdOverride, "Invalid MAPLE_ORG_ID_OVERRIDE value")
 				// The pin wins over a selection header (every web session names its own
-				// org); the role is the verified membership's when there is one.
-				const membership =
-					auth.orgId !== pinnedOrgId && verifyOrgMembership
-						? yield* verifyOrgMembership(userId, pinnedOrgId)
-						: Option.none<VerifiedOrgMembership>()
-				return {
-					orgId: pinnedOrgId,
-					userId,
-					roles: Option.match(membership, {
-						onNone: () => sessionRoles,
-						onSome: (value) => [value.role],
-					}),
-					authMode: "clerk",
+				// org). The role is the verified membership's; a non-member is only let
+				// in with their session's role on a development pin.
+				if (auth.orgId === pinnedOrgId) {
+					return { orgId: pinnedOrgId, userId, roles: sessionRoles, authMode: "clerk" }
 				}
+				const membership = verifyOrgMembership
+					? yield* verifyOrgMembership(userId, pinnedOrgId)
+					: Option.none<VerifiedOrgMembership>()
+				if (Option.isSome(membership)) {
+					return { orgId: pinnedOrgId, userId, roles: [membership.value.role], authMode: "clerk" }
+				}
+				if (env.MAPLE_ENVIRONMENT === "development") {
+					return { orgId: pinnedOrgId, userId, roles: sessionRoles, authMode: "clerk" }
+				}
+				if (verifyOrgMembership) {
+					return yield* Effect.fail(organizationAccessDenied(pinnedOrgId))
+				}
+				return { orgId: pinnedOrgId, userId, roles: [], authMode: "clerk" }
 			}
 
 			if (!auth.orgId) {
