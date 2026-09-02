@@ -387,6 +387,17 @@ export {
 	type ServiceOperationsTimeseriesOutput,
 } from "./queries/service-operations"
 
+// Queries — Service API Endpoints (the HTTP slice of the operations rollup)
+export {
+	serviceEndpointsSummaryQuery,
+	serviceEndpointsSummaryRawQuery,
+	serviceEndpointsSummaryRowSchema,
+	splitEndpointName,
+	type EndpointName,
+	type ServiceEndpointsSummaryOpts,
+	type ServiceEndpointsSummaryOutput,
+} from "./queries/service-endpoints"
+
 // Queries — Alert Checks (historical rule evaluations)
 export {
 	listRuleChecksQuery,
@@ -488,6 +499,9 @@ export {
 	type WorkloadGaugeTimeseriesOpts,
 	type WorkloadFacetsOutput,
 	type WorkloadKind,
+	infraPresenceQuery,
+	type InfraSurface,
+	type InfraPresenceOutput,
 } from "./queries/infra"
 
 // Queries — Containers (Docker, docker_stats receiver)

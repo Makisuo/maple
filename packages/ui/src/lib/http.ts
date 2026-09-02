@@ -69,10 +69,10 @@ const parseSpanName = (name: string): Option.Option<NameInfo> => {
 				}),
 		),
 		Match.when(
-			(p) => p.length === 1 && isHttpMethod(p[0]!),
+			(p): p is [string] => p.length === 1 && isHttpMethod(p[0]),
 			([method]) =>
 				Option.some<NameInfo>({
-					method: method!.toUpperCase(),
+					method: method.toUpperCase(),
 					routeHint: Option.none(),
 				}),
 		),

@@ -66,6 +66,7 @@ import { ApiAuthorizationLayer } from "@/services/auth/ApiAuthorizationLayer"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import { SessionAuthorizationLayer } from "@/services/auth/SessionAuthorizationLayer"
 import { ApiV2RateLimiter } from "@/services/auth/ApiV2RateLimiter"
+import { McpToolRateLimiter } from "@/services/auth/McpToolRateLimiter"
 import { EdgeCacheService } from "@maple/cache"
 import { CacheBackendLive } from "@/platform/CacheBackendLive"
 import { OrgMembershipService } from "@/services/auth/OrgMembershipService"
@@ -183,6 +184,7 @@ export const ApiAuthLive = Layer.mergeAll(
 	SessionAuthorizationLayer,
 ).pipe(
 	Layer.provideMerge(ApiV2RateLimiter.layer),
+	Layer.provideMerge(McpToolRateLimiter.layer),
 	Layer.provideMerge(ApiKeysService.layer),
 	// Membership verification for `x-maple-org-id`. Only the v2 layer asks for
 	// it; without it that layer cannot build, which is deliberate — the header

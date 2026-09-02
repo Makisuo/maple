@@ -18,6 +18,7 @@ import {
 	workloadDetailSummaryQuery,
 	workloadGaugeTimeseriesQuery,
 	workloadFacetsQuery,
+	infraPresenceQuery,
 } from "./infra"
 
 const baseParams = {
@@ -517,4 +518,41 @@ describe("conditional aggregates are NaN-guarded", () => {
 			expect(sql).toMatch(/ifNotFinite\((?:avgIf|maxIf)\(/)
 		})
 	}
+})
+
+// The probe runs on every page load, gating which Infrastructure rows the
+// sidebar shows. Its whole justification is being cheaper than the list
+// queries — an aggregate anywhere in it reads the full match set before the
+// LIMIT can trim anything, which would quietly undo that.
+describe("infraPresenceQuery", () => {
+	const { sql } = compileUnionUnsafe(infraPresenceQuery(), baseParams)
+
+	it("probes every sidebar surface", () => {
+		for (const surface of ["hosts", "containers", "k8sPods", "k8sNodes", "k8sWorkloads"]) {
+			expect(sql).toContain(`'${surface}' AS surface`)
+		}
+		expect(sql).not.toMatch(/__PARAM_\w+__/)
+	})
+
+	it("short-circuits each branch instead of aggregating", () => {
+		expect(sql).not.toMatch(/\b(count|uniq|sum|avg|max|min)\w*\(/)
+		expect(sql.match(/LIMIT 1/g)).toHaveLength(5)
+	})
+
+	it("scopes every branch to the org and the caller's window", () => {
+		expect(sql.match(/OrgId = 'org_1'/g)).toHaveLength(5)
+		expect(sql.match(/TimeUnix >= /g)).toHaveLength(5)
+		expect(sql.match(/TimeUnix <= /g)).toHaveLength(5)
+	})
+
+	it("pins one probe metric per branch rather than the surface's full set", () => {
+		expect(sql.match(/MetricName = /g)).toHaveLength(5)
+		expect(sql).not.toContain("MetricName IN")
+	})
+
+	it("counts a pod's workload present under any of the three owner kinds", () => {
+		for (const key of ["k8s.deployment.name", "k8s.statefulset.name", "k8s.daemonset.name"]) {
+			expect(sql).toContain(`ResourceAttributes['${key}']`)
+		}
+	})
 })

@@ -2,15 +2,14 @@ import { Link } from "@tanstack/react-router"
 
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
-import { cn } from "@maple/ui/lib/utils"
 
 import type { ListContainersResponse } from "@maple/domain/http"
 import type { ContainerSortKey, SortDirection } from "@/api/warehouse/infra"
 
 import { HostStatusBadge } from "./status-badge"
-import { ColumnHead, DataTable, MetaChip, ROW_LINK_CLASS } from "./primitives/data-table"
-import { severityLevel } from "./format"
-import { BAR_FILL, BAR_VALUE_TONE } from "./severity-tokens"
+import { ColumnHead, DataTable, ROW_LINK_CLASS } from "./primitives/data-table"
+import { MeterRows } from "./primitives/meter-rows"
+import { MetaLine } from "./primitives/meta-line"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 export type ContainerRow = ListContainersResponse["data"][number]
@@ -38,27 +37,6 @@ function AvgPeak({ avg, peak, format }: { avg: number; peak: number; format: (n:
 			<span className="mx-1 text-foreground/30">→</span>
 			{format(peak)}
 		</span>
-	)
-}
-
-function MiniBar({ label, fraction }: { label: string; fraction: number }) {
-	const level = severityLevel(fraction)
-	const width = Math.min(Math.max(fraction, 0), 1) * 100
-	return (
-		<div className="flex items-center gap-1.5">
-			<span className="w-6 shrink-0 font-mono text-[9px] text-muted-foreground">{label}</span>
-			<div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
-				<div className={cn("h-full rounded-full", BAR_FILL[level])} style={{ width: `${width}%` }} />
-			</div>
-			<span
-				className={cn(
-					"w-8 shrink-0 text-right font-mono text-[10px] tabular-nums",
-					BAR_VALUE_TONE[level],
-				)}
-			>
-				{formatPct(fraction)}
-			</span>
-		</div>
 	)
 }
 
@@ -162,27 +140,27 @@ export function ContainerTable({
 							<span className="truncate font-mono text-[13px] font-medium text-foreground transition-colors group-hover:text-primary">
 								{container.containerName}
 							</span>
-							<HostStatusBadge lastSeen={container.lastSeen} referenceTime={referenceTime} />
+							<HostStatusBadge
+								quiet
+								lastSeen={container.lastSeen}
+								referenceTime={referenceTime}
+							/>
 						</div>
-						<div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-							{container.imageName && <MetaChip>image {container.imageName}</MetaChip>}
-							{container.hostName && (
-								<>
-									<span className="text-foreground/20">·</span>
-									<MetaChip>host {container.hostName}</MetaChip>
-								</>
-							)}
-							{container.composeProject && (
-								<>
-									<span className="text-foreground/20">·</span>
-									<MetaChip>compose {container.composeProject}</MetaChip>
-								</>
-							)}
-						</div>
+						<MetaLine
+							items={[
+								container.imageName && `image ${container.imageName}`,
+								container.hostName && `host ${container.hostName}`,
+								container.composeProject && `compose ${container.composeProject}`,
+							]}
+						/>
 					</div>
-					<div className="hidden w-[176px] space-y-1 md:block">
-						<MiniBar label="CPU" fraction={container.cpuPctPeak} />
-						<MiniBar label="MEM" fraction={container.memoryPctPeak} />
+					<div className="hidden w-[176px] md:block">
+						<MeterRows
+							meters={[
+								{ label: "CPU", fraction: container.cpuPctPeak },
+								{ label: "MEM", fraction: container.memoryPctPeak },
+							]}
+						/>
 					</div>
 					<div className="hidden w-[132px] text-right lg:block">
 						<AvgPeak avg={container.cpuPct} peak={container.cpuPctPeak} format={formatPct} />

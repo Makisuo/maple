@@ -41,8 +41,10 @@ const rows = [
 
 const definition = defineChart({
 	marks: [lineY(rows, { x: (row: { x: number }) => row.x, y: (row: { y: number }) => row.y })],
-	x: { scale: scaleLinear() },
-	y: { scale: scaleLinear() },
+	scales: {
+		x: { scale: scaleLinear() },
+		y: { scale: scaleLinear() },
+	},
 })
 
 function frame(props: { legendPlacement?: "bottom" | "right"; legend?: boolean; footer?: boolean }) {

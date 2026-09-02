@@ -398,6 +398,38 @@ describe("failing open", () => {
 		})
 	})
 
+	test("a truncated page suspends both bounds even when engagement IS visible", () => {
+		// The page is the oldest-first START of a longer thread, so the bot's
+		// post at its head says nothing about how buried it is now, and the
+		// page's last message is not the reply's predecessor. Computing the
+		// trailing-window bound from this prefix used to drop the follow-up as
+		// "engagement-buried" in a thread whose tail we cannot see.
+		const chatter = Array.from({ length: 48 }, (_, i) =>
+			humanMessage(`chatter ${i}`, `1700000${String(100 + i).padStart(3, "0")}.000100`),
+		)
+		const pending = promote(envelope({ event: { ts: "1700000200.000200" } }))!
+		expect(confirmThreadFollowUp(pending, [botMessage("1700000001.000100"), ...chatter])).toEqual({
+			engaged: true,
+			reason: "page-truncated",
+		})
+	})
+
+	test("a truncated page cannot declare the thread dormant off its stale tail", () => {
+		// The visible page ends days before the reply because the page is full,
+		// not because the thread went quiet — the actual predecessor is past the
+		// page. Measuring dormancy against the prefix's last message dropped
+		// live long threads.
+		const chatter = Array.from({ length: 48 }, (_, i) =>
+			humanMessage(`chatter ${i}`, `1700000${String(100 + i).padStart(3, "0")}.000100`),
+		)
+		// 25h after the last VISIBLE message.
+		const pending = promote(envelope({ event: { ts: "1700090148.000200" } }))!
+		expect(confirmThreadFollowUp(pending, [botMessage("1700000001.000100"), ...chatter])).toEqual({
+			engaged: true,
+			reason: "page-truncated",
+		})
+	})
+
 	test("a short page with no engagement is a real answer, not a missing one", () => {
 		const shortThread = Array.from({ length: 48 }, (_, i) =>
 			humanMessage(`chatter ${i}`, `1700000${String(100 + i).padStart(3, "0")}.000100`),

@@ -82,6 +82,31 @@ const migrateWidget = (widget: unknown): unknown => {
 		next.dataSource = { ...dataSource, transform: migrateTransform(dataSource.transform) }
 	}
 
+	// `display.sparkline.dataSource` embeds a full v1 data source, so its
+	// transform needs the same closing — left open, one legacy sparkline value
+	// (`aggregate: "median"`) keeps the whole document undecodable under v2/v3
+	// and the writable path then refuses the entire dashboard.
+	const display = next.display
+	if (isPlainObject(display)) {
+		const sparkline = display.sparkline
+		if (
+			isPlainObject(sparkline) &&
+			isPlainObject(sparkline.dataSource) &&
+			sparkline.dataSource.transform !== undefined
+		) {
+			next.display = {
+				...display,
+				sparkline: {
+					...sparkline,
+					dataSource: {
+						...sparkline.dataSource,
+						transform: migrateTransform(sparkline.dataSource.transform),
+					},
+				},
+			}
+		}
+	}
+
 	return next
 }
 

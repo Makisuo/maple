@@ -319,6 +319,12 @@ function RangeHistogram({
 	const [hoverIndex, setHoverIndex] = React.useState<number | undefined>(undefined)
 	const [dragStart, setDragStart] = React.useState<number | undefined>(undefined)
 
+	// The caller only renders this for `histogram.length > 1`; establishing the
+	// ends once is what lets every read below be a plain property access.
+	const first = buckets[0]
+	const last = buckets.at(-1)
+	if (first === undefined || last === undefined) return null
+
 	const peak = Math.max(...buckets.map((b) => b.count), 1)
 	const total = buckets.reduce((sum, b) => sum + b.count, 0)
 
@@ -348,12 +354,13 @@ function RangeHistogram({
 		setDragStart(undefined)
 		// A click picks a floor and leaves the top open — "at least this long" is
 		// the dominant intent, and a single bucket is too narrow to be useful.
+		const bottom = buckets[lo] ?? first
 		if (lo === hi) {
-			onSelect(buckets[lo]!.from, undefined)
+			onSelect(bottom.from, undefined)
 			return
 		}
-		const top = buckets[hi]!
-		onSelect(buckets[lo]!.from, top.unbounded ? undefined : top.to)
+		const top = buckets[hi] ?? last
+		onSelect(bottom.from, top.unbounded ? undefined : top.to)
 	}
 
 	// While dragging, preview the pending selection instead of the applied one.
@@ -375,7 +382,6 @@ function RangeHistogram({
 
 	const hasSelection = minValue !== undefined || maxValue !== undefined || previewLo !== undefined
 	const hovered = hoverIndex !== undefined ? buckets[hoverIndex] : undefined
-	const last = buckets[buckets.length - 1]!
 
 	return (
 		<div>
@@ -400,7 +406,7 @@ function RangeHistogram({
 			<div
 				ref={barsRef}
 				role="img"
-				aria-label={`${title} distribution across ${buckets.length} buckets, from ${formatValue(buckets[0]!.from, unit)} to ${last.unbounded ? `over ${formatValue(last.from, unit)}` : formatValue(last.to, unit)}`}
+				aria-label={`${title} distribution across ${buckets.length} buckets, from ${formatValue(first.from, unit)} to ${last.unbounded ? `over ${formatValue(last.from, unit)}` : formatValue(last.to, unit)}`}
 				className="flex h-8 cursor-crosshair touch-none items-end gap-px"
 				onPointerDown={handlePointerDown}
 				onPointerMove={handlePointerMove}
@@ -434,8 +440,8 @@ function RangeHistogram({
 				})}
 			</div>
 			<div className="mt-1 flex justify-between text-[10px] tabular-nums text-muted-foreground/60">
-				<span>{formatValue(buckets[0]!.from, unit)}</span>
-				<span>{formatValue(buckets[Math.floor(buckets.length / 2)]!.from, unit)}</span>
+				<span>{formatValue(first.from, unit)}</span>
+				<span>{formatValue((buckets[Math.floor(buckets.length / 2)] ?? first).from, unit)}</span>
 				<span>
 					{last.unbounded ? `${formatValue(last.from, unit)}+` : formatValue(last.to, unit)}
 				</span>
@@ -465,7 +471,9 @@ export function parseRange(text: string, unit: RangeUnit): number | undefined {
 	if (!/^(\d+(\.\d+)?\s*(ms|s|m|h)\s*)+$/.test(trimmed)) return undefined
 	let totalMs = 0
 	for (const [, amount, suffix] of trimmed.matchAll(/(\d+(?:\.\d+)?)\s*(ms|s|m|h)/g)) {
-		totalMs += Number(amount) * UNIT_MS[suffix!]!
+		const multiplier = suffix === undefined ? undefined : UNIT_MS[suffix]
+		if (multiplier === undefined) continue
+		totalMs += Number(amount) * multiplier
 	}
 	return unit === "ms" ? totalMs : totalMs / 1000
 }

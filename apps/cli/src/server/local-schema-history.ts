@@ -117,18 +117,34 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 	Object.freeze({
-		// `ai_trace_index` + `ai_trace_index_mv` (ClickHouse migration 0023): the
+		// The three discriminator counters on both service-operations rollups
+		// (ClickHouse migration 0023). Additive and metadata-only, exactly like
+		// v11 -> v12: no part is rewritten and no row moves, so the edge is six
+		// `ADD COLUMN` statements, a view recreation and a verify.
+		//
+		// projectRevision stays pinned to the v11/v12 value for the same reason
+		// recorded there — it is a hardcoded constant that no longer tracks the
+		// generator's header, and the identity this gate compares is the
+		// fingerprint/digest pair.
+		version: 13,
+		fingerprint: "7c44772116706420",
+		digest: "7c4477211670642086313b71593d848cbadefc24142a1c6e0fe5fd93a8dd7a6e",
+		manifestDigest: "353715a6b6c7a05f3227215b072ac95a8bd5ee67d5eec35f8c2b4c86839a1187",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
+	Object.freeze({
+		// `ai_trace_index` + `ai_trace_index_mv` (ClickHouse migration 0024): the
 		// filtered projection of GenAI agent spans that serves Agent Sessions
 		// detection and facets. Purely additive — a new empty table and the view
-		// that fills it forward — so the v12 -> v13 edge is two CREATEs and a
+		// that fills it forward — so the v13 -> v14 edge is two CREATEs and a
 		// verify, no data movement.
 		//
-		// projectRevision stays the hardcoded constant, as for v12 — the identity
-		// this gate compares is the fingerprint/digest pair.
-		version: 13,
-		fingerprint: "b0cb5bfd7495f715",
-		digest: "b0cb5bfd7495f715b0c1b028a9881826f5cdea119089c6d0d16461a876fa82a3",
-		manifestDigest: "18fd207ad0705051c7c1c062693e7e716a73c391f430395a435072291562b287",
+		// projectRevision stays the hardcoded constant, as for v12 and v13 — the
+		// identity this gate compares is the fingerprint/digest pair.
+		version: 14,
+		fingerprint: "c46a599e1bfe417c",
+		digest: "c46a599e1bfe417c1e6f50d123779c6ca9c5f5f375ef9c6fe329c8a9676e3b5b",
+		manifestDigest: "faf78f67abd5901351ce6632cee59f22fadb3c1f7eb9b195dc2f9702d4c9c9bd",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 ] as const)

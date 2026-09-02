@@ -351,6 +351,34 @@
       "when": 1788008344968,
       "tag": "0050_cloudflare_grant_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1788201331961,
+      "tag": "0051_digest_subscription_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1788253667237,
+      "tag": "0052_mcp_refresh_family_expiry",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1788259897779,
+      "tag": "0053_digest_opt_out",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1788285534887,
+      "tag": "0054_alert_incident_open_uniqueness",
+      "breakpoints": true
     }
   ]
 }

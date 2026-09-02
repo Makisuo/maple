@@ -171,6 +171,44 @@ export async function notifyMapleRevocation(
 	}
 }
 
+/**
+ * Not inside any webhook ack budget (fired without awaiting from the usage
+ * hook, like `notifyMapleRevocation` from the uninstall path), and the same
+ * cold-Worker considerations apply.
+ */
+const REPORT_USAGE_TIMEOUT_MS = 10_000
+
+/** One turn's token totals, as Maple's usage endpoint expects them. */
+export interface MapleUsageReport {
+	readonly inputTokens: number
+	readonly outputTokens: number
+	/** De-dupe key for Autumn — stable across retries of the same turn. */
+	readonly idempotencyKey: string
+}
+
+/**
+ * Reports one completed turn's token usage to Maple, which meters it into the
+ * bound org's AI usage billing. The org is resolved server-side from the team
+ * binding — this bot never names an orgId. Throws on transport/server errors;
+ * the caller (`agent/hooks/usage-tracking.ts`) catches and logs rather than
+ * letting a billing hiccup surface anywhere near the conversation.
+ */
+export async function reportMapleUsage(teamId: string, usage: MapleUsageReport): Promise<void> {
+	const url = `${mapleApiBaseUrl()}/internal/slack/workspaces/${encodeURIComponent(teamId)}/usage`
+	const res = await fetch(url, {
+		method: "POST",
+		headers: {
+			authorization: `Bearer maple_svc_${mapleServiceToken()}`,
+			"content-type": "application/json",
+		},
+		body: JSON.stringify(usage),
+		signal: AbortSignal.timeout(REPORT_USAGE_TIMEOUT_MS),
+	})
+	if (!res.ok) {
+		throw new Error(`Maple usage report failed for team ${teamId}: HTTP ${res.status}`)
+	}
+}
+
 async function fetchWorkspace(teamId: string): Promise<MapleWorkspace | null> {
 	const url = `${mapleApiBaseUrl()}/internal/slack/workspaces/${encodeURIComponent(teamId)}`
 	const res = await fetch(url, {

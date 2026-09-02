@@ -10,7 +10,7 @@ import {
 	type OrgId,
 } from "@maple/domain/http"
 import { and, eq, inArray } from "drizzle-orm"
-import { Clock, Context, Effect, Layer, Redacted, Schema } from "effect"
+import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { buildAlertChatUrl } from "./AlertDeliveryDispatch"
 import { dispatchDelivery as dispatchDeliveryImpl } from "./delivery/dispatch"
 import type { DispatchContext } from "./delivery/context"
@@ -232,7 +232,7 @@ const make: Effect.Effect<
 		) {
 			if (destinationIds.length === 0) return { delivered: 0, failed: 0, destinations: [] }
 
-			const rows = yield* database
+			const rowsOption = yield* database
 				.execute((db) =>
 					db
 						.select()
@@ -250,12 +250,30 @@ const make: Effect.Effect<
 							Effect.annotateLogs({ orgId, message: error.message }),
 						),
 					),
-					Effect.catchTag("@maple/api/lib/DatabaseError", () =>
-						Effect.succeed<Array<AlertDestinationRow>>([]),
-					),
+					Effect.asSome,
+					// A failed lookup must not masquerade as "these destinations do
+					// not exist": "missing" is terminal to every consumer (escalation
+					// outbox, error policies), while "failed" keeps their retry
+					// machinery in play for what is a transient database error.
+					Effect.catchTag("@maple/api/lib/DatabaseError", () => Effect.succeedNone),
 				)
 
-			const rowsById = new Map(rows.map((row) => [row.id, row]))
+			if (Option.isNone(rowsOption)) {
+				return {
+					delivered: 0,
+					failed: destinationIds.length,
+					destinations: destinationIds.map(
+						(destinationId): NotificationDestinationResult => ({
+							destinationId,
+							destinationName: null,
+							status: "failed",
+							error: "destination_lookup_failed",
+						}),
+					),
+				}
+			}
+
+			const rowsById = new Map(rowsOption.value.map((row) => [row.id, row]))
 			const results = yield* Effect.forEach(
 				destinationIds,
 				(destinationId) => {

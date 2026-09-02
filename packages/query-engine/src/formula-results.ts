@@ -115,6 +115,11 @@ function compileFormula(expression: string): {
 
 	const output: FormulaToken[] = []
 	const operatorStack: FormulaToken[] = []
+	/** Move the top operator to the output; a no-op on an empty stack. */
+	const emitTop = (): void => {
+		const top = operatorStack.pop()
+		if (top !== undefined) output.push(top)
+	}
 	const identifiers = new Set<string>()
 	const precedence: Record<FormulaOperator, number> = {
 		"+": 1,
@@ -148,8 +153,7 @@ function compileFormula(expression: string): {
 		if (token.type === "rightParen") {
 			let foundLeftParen = false
 
-			while (operatorStack.length > 0) {
-				const top = operatorStack.pop()!
+			for (let top = operatorStack.pop(); top !== undefined; top = operatorStack.pop()) {
 				if (top.type === "leftParen") {
 					foundLeftParen = true
 					break
@@ -158,9 +162,7 @@ function compileFormula(expression: string): {
 			}
 			// After the operand inside the parens has been emitted, any unary
 			// operator that was waiting on it should be applied next.
-			while (operatorStack.length > 0 && operatorStack[operatorStack.length - 1].type === "unary") {
-				output.push(operatorStack.pop()!)
-			}
+			while (operatorStack.at(-1)?.type === "unary") emitTop()
 
 			if (!foundLeftParen) {
 				return {
@@ -191,7 +193,7 @@ function compileFormula(expression: string): {
 			while (operatorStack.length > 0) {
 				const top = operatorStack[operatorStack.length - 1]
 				if (top.type === "unary") {
-					output.push(operatorStack.pop()!)
+					emitTop()
 					continue
 				}
 				if (top.type !== "operator") {
@@ -202,7 +204,7 @@ function compileFormula(expression: string): {
 					break
 				}
 
-				output.push(operatorStack.pop()!)
+				emitTop()
 			}
 
 			operatorStack.push(token)
@@ -210,8 +212,7 @@ function compileFormula(expression: string): {
 		}
 	}
 
-	while (operatorStack.length > 0) {
-		const top = operatorStack.pop()!
+	for (let top = operatorStack.pop(); top !== undefined; top = operatorStack.pop()) {
 		if (top.type === "leftParen" || top.type === "rightParen") {
 			return {
 				rpn: [],
@@ -263,7 +264,7 @@ function evaluateCompiledFormula(
 			if (stack.length < 1) {
 				return { value: null, error: "Invalid formula expression", reason: "other" }
 			}
-			const operand = stack.pop()!
+			const operand = stack.pop() ?? 0
 			if (token.value === "u-") {
 				stack.push(-operand)
 				continue
@@ -279,8 +280,10 @@ function evaluateCompiledFormula(
 			return { value: null, error: "Invalid formula expression", reason: "other" }
 		}
 
-		const right = stack.pop()!
-		const left = stack.pop()!
+		// Guarded by the `stack.length < 2` check above; `?? 0` is the arithmetic
+		// identity that keeps the expression total either way.
+		const right = stack.pop() ?? 0
+		const left = stack.pop() ?? 0
 
 		if (token.value === "+") {
 			stack.push(left + right)

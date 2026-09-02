@@ -11,6 +11,8 @@ import {
 	alertNotificationProps,
 	criticalDigestProps,
 	healthyDigestProps,
+	multiEnvDigestProps,
+	scopedDigestProps,
 	watchDigestProps,
 } from "../src/samples"
 import { renderWeeklyDigest } from "../src/weekly-digest"
@@ -21,6 +23,8 @@ const variants: ReadonlyArray<{ name: string; html: string }> = [
 	{ name: "weekly-digest-healthy", html: renderWeeklyDigest(healthyDigestProps) },
 	{ name: "weekly-digest-watch", html: renderWeeklyDigest(watchDigestProps) },
 	{ name: "weekly-digest-critical", html: renderWeeklyDigest(criticalDigestProps) },
+	{ name: "weekly-digest-multi-env", html: renderWeeklyDigest(multiEnvDigestProps) },
+	{ name: "weekly-digest-scoped", html: renderWeeklyDigest(scopedDigestProps) },
 	{ name: "alert-notification", html: renderAlertNotification(alertNotificationProps) },
 ]
 

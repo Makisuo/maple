@@ -26,6 +26,16 @@ expectTypeOf(CH.min(CH.lit("a"))).toMatchTypeOf<Expr<string>>()
 expectTypeOf(CH.max(CH.lit(1))).toMatchTypeOf<Expr<number>>()
 expectTypeOf(CH.min(CH.lit(1))).toMatchTypeOf<Expr<number>>()
 
+// min/max preserve nullability: over a Nullable column ClickHouse returns NULL
+// when every contributing value is NULL, so the result must not narrow to the
+// non-null type.
+declare const nullableNum: Expr<number | null>
+expectTypeOf(CH.min(nullableNum)).toEqualTypeOf<Expr<number | null>>()
+expectTypeOf(CH.max(nullableNum)).toEqualTypeOf<Expr<number | null>>()
+
+// ifNull with a non-nullable fallback strips the null the aggregate kept
+expectTypeOf(CH.ifNull(nullableNum, CH.lit(0))).toEqualTypeOf<Expr<number>>()
+
 // any_ preserves generic
 expectTypeOf(CH.any(CH.lit("x"))).toMatchTypeOf<Expr<string>>()
 expectTypeOf(CH.any(CH.lit(1))).toMatchTypeOf<Expr<number>>()

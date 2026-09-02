@@ -16,14 +16,22 @@ export function makeDirectRouteCachePolicy(
 		readonly version?: number
 	} = {},
 ): DirectRouteCachePolicy {
-	const ttlSeconds = Number.isFinite(options.ttlSeconds)
-		? Math.max(1, Math.floor(options.ttlSeconds!))
-		: DEFAULT_CACHE_SECONDS
+	// `Number.isFinite` narrows nothing on an optional field — bind the value and
+	// test the binding so the branch and the type agree.
+	const requestedTtl = options.ttlSeconds
+	const ttlSeconds =
+		requestedTtl !== undefined && Number.isFinite(requestedTtl)
+			? Math.max(1, Math.floor(requestedTtl))
+			: DEFAULT_CACHE_SECONDS
 	const requestedSnap = options.snapWindowSeconds ?? ttlSeconds
 	const snapWindowSeconds = Number.isFinite(requestedSnap)
 		? Math.min(3600, Math.max(1, Math.floor(requestedSnap)))
 		: DEFAULT_CACHE_SECONDS
-	const version = Number.isFinite(options.version) ? Math.max(1, Math.floor(options.version!)) : 1
+	const requestedVersion = options.version
+	const version =
+		requestedVersion !== undefined && Number.isFinite(requestedVersion)
+			? Math.max(1, Math.floor(requestedVersion))
+			: 1
 	return { version, ttlSeconds, snapWindowSeconds }
 }
 

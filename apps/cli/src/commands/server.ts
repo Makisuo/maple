@@ -3,7 +3,7 @@ import { FileSystem } from "effect/FileSystem"
 import * as Command from "effect/unstable/cli/Command"
 import * as Flag from "effect/unstable/cli/Flag"
 import { HttpClient } from "effect/unstable/http"
-import { openSync } from "node:fs"
+import { closeSync, openSync, writeSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { startServer } from "../server/serve"
@@ -153,6 +153,24 @@ const startBanner = (
 // PID file lives one level above the data dir (e.g. ~/.maple/maple.pid) so
 // `maple stop` finds it without knowing the full data path.
 const pidFilePath = (dataDir: string): string => join(dirname(dataDir), "maple.pid")
+
+/** Exclusively create the PID file (O_EXCL) so exactly one `maple start` can
+ * proceed past the liveness guard. Exported for the start-serialization test. */
+export const claimPidFileExclusive = (pidPath: string): Effect.Effect<void, ServerStateError> =>
+	Effect.try({
+		try: () => {
+			const fd = openSync(pidPath, "wx", 0o600)
+			writeSync(fd, String(process.pid))
+			closeSync(fd)
+		},
+		catch: (error) =>
+			new ServerStateError({
+				message:
+					(error as NodeJS.ErrnoException).code === "EEXIST"
+						? "maple is already running or starting — stop it with `maple stop`"
+						: `could not claim the PID file at ${pidPath}: ${error instanceof Error ? error.message : String(error)}`,
+			}),
+	})
 
 /** Read the PID file, returning `none` when it is missing or unparseable. */
 const readPid = (fs: FileSystem, pidPath: string): Effect.Effect<Option.Option<number>> =>
@@ -351,9 +369,7 @@ const BACKGROUND_READY_TIMEOUT_MS = BACKGROUND_READY_POLL_MS * BACKGROUND_READY_
  * because a typo that quietly turned checkpointing off would reintroduce exactly
  * the data loss this exists to prevent.
  */
-export const parseCheckpointInterval = (
-	value: string,
-): Duration.Duration | undefined | "invalid" => {
+export const parseCheckpointInterval = (value: string): Duration.Duration | undefined | "invalid" => {
 	const raw = value.trim().toLowerCase()
 	if (raw === "off" || raw === "0" || raw === "none") return undefined
 	const match = raw.match(/^(\d+)\s*(s|m|h)$/)
@@ -383,20 +399,15 @@ export const parseCheckpointInterval = (
  * and has never been checkpointed, which is every existing install on the first
  * start after upgrading.
  */
-export const needsInitialCheckpoint = (
-	availability: CheckpointAvailability,
-	hasLiveData: boolean,
-): boolean => hasLiveData && !availability.available && availability.reason === "none"
+export const needsInitialCheckpoint = (availability: CheckpointAvailability, hasLiveData: boolean): boolean =>
+	hasLiveData && !availability.available && availability.reason === "none"
 
 /**
  * Does the store hold live data, as opposed to just the preserved checkpoint
  * registry? `backups` is skipped for the same reason it is skipped when the
  * live store is reset — it is not part of the data being protected.
  */
-const storeHasLiveData = (
-	fs: FileSystem,
-	dataDir: string,
-): Effect.Effect<boolean> =>
+const storeHasLiveData = (fs: FileSystem, dataDir: string): Effect.Effect<boolean> =>
 	fs.readDirectory(dataDir).pipe(
 		Effect.map((entries) => entries.some((entry) => entry !== "backups")),
 		Effect.orElseSucceed(() => false),
@@ -500,7 +511,7 @@ const takeCheckpointQuietly = (
 					process.stderr.write(
 						reason === "initial"
 							? `${green("✓")} checkpoint taken — recover an unclean shutdown with ` +
-								`${bold("maple restore --yes")}\n`
+									`${bold("maple restore --yes")}\n`
 							: dim("◌ checkpoint refreshed\n"),
 					),
 				),
@@ -509,7 +520,9 @@ const takeCheckpointQuietly = (
 					debugLog(`checkpoint (${reason}) failed`, error.message)
 					process.stderr.write(
 						reason === "initial"
-							? dim(`◌ could not take an initial checkpoint — run ${bold("maple checkpoint")} to retry\n`)
+							? dim(
+									`◌ could not take an initial checkpoint — run ${bold("maple checkpoint")} to retry\n`,
+								)
 							: dim("◌ could not refresh the checkpoint — the previous one still stands\n"),
 					)
 				}),
@@ -883,6 +896,16 @@ export const start = Command.make("start", {
 						}),
 					)
 
+					// Claim the PID file EXCLUSIVELY before chDB or the listener opens.
+					// The liveness guard above is check-then-act: two concurrent starts
+					// could both pass it and open the same store natively, and the
+					// second would read the first's open sentinel as an unclean
+					// shutdown. O_EXCL makes exactly one start win; the loser exits
+					// with the ordinary already-running error before touching the store.
+					yield* Effect.acquireRelease(claimPidFileExclusive(pidPath), () =>
+						fs.remove(pidPath, { force: true }).pipe(Effect.ignore),
+					)
+
 					const { port: boundPort } = yield* startServer({
 						hostname: bindHost,
 						browserHosts: Array.from(
@@ -900,10 +923,6 @@ export const start = Command.make("start", {
 						assets,
 					})
 					started = true
-
-					yield* Effect.acquireRelease(fs.writeFileString(pidPath, String(process.pid)), () =>
-						fs.remove(pidPath, { force: true }).pipe(Effect.ignore),
-					)
 
 					const bindAddr = serverUrl(bindHost, boundPort)
 					const connectAddr = serverUrl(advertiseHost, boundPort)

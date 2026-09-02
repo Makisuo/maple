@@ -3,9 +3,12 @@ import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import type { Log } from "@/api/warehouse/logs"
 import { LogAttributesPanel } from "./log-attributes-panel"
 import { buildLogJsonPayload } from "./log-raw-panel"
+import { HighlightedText } from "./highlighted-text"
 
 interface LogRowExpandedProps {
 	log: Log
+	/** Text to mark in the message, when the search box holds a text search. */
+	highlight?: string
 	/** Opens the full detail drawer (Attributes / Trace / Raw tabs). */
 	onOpenDetail: () => void
 }
@@ -16,7 +19,7 @@ interface LogRowExpandedProps {
  * height-bounded, vertically scrollable panel so a wide event reads in place
  * without leaving the stream.
  */
-export function LogRowExpanded({ log, onOpenDetail }: LogRowExpandedProps) {
+export function LogRowExpanded({ log, highlight, onOpenDetail }: LogRowExpandedProps) {
 	return (
 		<div className="border-t border-border/60 bg-muted/15 px-3 py-2.5 font-mono">
 			<div className="mb-2 flex items-center justify-end gap-3">
@@ -44,7 +47,7 @@ export function LogRowExpanded({ log, onOpenDetail }: LogRowExpandedProps) {
 			    wide event stays a predictable size and scrolls vertically in place. */}
 			<div className="max-h-[60vh] space-y-2.5 overflow-auto">
 				<p className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground">
-					{log.body}
+					<HighlightedText text={log.body} query={highlight} />
 				</p>
 				<LogAttributesPanel log={log} />
 			</div>

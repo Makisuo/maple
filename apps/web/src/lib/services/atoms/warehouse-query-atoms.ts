@@ -18,6 +18,7 @@ import { getErrorsByType, getErrorsFacets, getErrorsSpark, getErrorsSummary } fr
 import {
 	getLog,
 	getLogAttributeKeys,
+	getLogsCount,
 	getLogsFacetValues,
 	getLogsFacets,
 	listLogs,
@@ -41,6 +42,7 @@ import {
 	listContainers,
 	hostDetailSummary,
 	hostInfraTimeseries,
+	infraPresence,
 	listHosts,
 	listPods,
 	podsSummary,
@@ -54,6 +56,7 @@ import {
 	workloadInfraTimeseries,
 } from "@/api/warehouse/infra"
 import { getServiceUsage } from "@/api/warehouse/service-usage"
+import { getServiceEndpoints } from "@/api/warehouse/service-endpoints"
 import { getServiceOperations } from "@/api/warehouse/service-operations"
 import {
 	getServiceDependenciesBundle,
@@ -264,6 +267,10 @@ export const getServiceOperationsResultAtom = makeQueryAtomFamily(getServiceOper
 	staleTime: 30_000,
 })
 
+export const getServiceEndpointsResultAtom = makeQueryAtomFamily(getServiceEndpoints, {
+	staleTime: 30_000,
+})
+
 export const getServicesFacetsResultAtom = makeQueryAtomFamily(getServicesFacets, {
 	// 5 min idle TTL — environments / commit SHAs / service names move slowly,
 	// and the dashboard route now reuses this atom for demo-detection (was a
@@ -424,6 +431,11 @@ export const getLogResultAtom = makeQueryAtomFamily(getLog, {
 	staleTime: 60_000,
 })
 
+export const getLogsCountResultAtom = makeQueryAtomFamily(getLogsCount, {
+	staleTime: 60_000,
+	globalNamespace: "top",
+})
+
 export const getLogsFacetsResultAtom = makeQueryAtomFamily(getLogsFacets, {
 	staleTime: 30_000,
 	globalNamespace: "top",
@@ -471,6 +483,13 @@ export const getMetricAttributeKeysResultAtom = makeQueryAtomFamily(getMetricAtt
 
 export const getMetricAttributeValuesResultAtom = makeQueryAtomFamily(getMetricAttributeValues, {
 	staleTime: 60_000,
+})
+
+// Long idle TTL on purpose: this gates the sidebar, so it is mounted on every
+// page, and an org growing a new infra surface is not something the nav has to
+// notice within the minute. Matches the 300s server-side cache on the query.
+export const infraPresenceResultAtom = makeQueryAtomFamily(infraPresence, {
+	staleTime: 300_000,
 })
 
 export const listHostsResultAtom = makeQueryAtomFamily(listHosts, {

@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { Env } from "@/platform/Env"
 import {
 	MCP_OAUTH_SCOPE,
 	McpOAuthProtocolError,
@@ -19,12 +20,6 @@ const RegistrationRequest = Schema.Struct({
 const decodeRegistrationRequest = Schema.decodeUnknownEffect(RegistrationRequest)
 
 const forwardedValue = (value: string | undefined) => value?.split(",")[0]?.trim()
-
-export const requestOrigin = (request: HttpServerRequest.HttpServerRequest) => {
-	const proto = forwardedValue(request.headers["x-forwarded-proto"]) ?? "https"
-	const host = forwardedValue(request.headers["x-forwarded-host"]) ?? request.headers.host
-	return host ? `${proto}://${host}` : ""
-}
 
 const requesterKey = (request: HttpServerRequest.HttpServerRequest) =>
 	request.headers["cf-connecting-ip"] ?? forwardedValue(request.headers["x-forwarded-for"]) ?? "unknown"
@@ -120,20 +115,21 @@ const rateLimitResponse = (error: McpOAuthRateLimitError) =>
 export const OAuthDiscoveryRouter = HttpRouter.use((router) =>
 	Effect.gen(function* () {
 		const oauth = yield* McpOAuthService
+		// This server's identity — issuer, endpoints, and the resource indicator
+		// callers are held to — comes from configuration, never from the request:
+		// `Host`/`X-Forwarded-*` are client-controlled, and these documents are
+		// served publicly cacheable and tell clients where to send credentials.
+		const env = yield* Env
+		const origin = env.MAPLE_API_BASE_URL.replace(/\/+$/, "")
 
-		const authorizationServerMetadata = (request: HttpServerRequest.HttpServerRequest) =>
-			Effect.succeed(
-				HttpServerResponse.jsonUnsafe(metadata(requestOrigin(request)), {
-					headers: { "cache-control": "public, max-age=300" },
-				}),
-			)
+		const publicCache = { "cache-control": "public, max-age=300" }
+		const authorizationServerMetadata = Effect.succeed(
+			HttpServerResponse.jsonUnsafe(metadata(origin), { headers: publicCache }),
+		)
 
-		const protectedResource = (request: HttpServerRequest.HttpServerRequest) =>
-			Effect.succeed(
-				HttpServerResponse.jsonUnsafe(protectedResourceMetadata(requestOrigin(request)), {
-					headers: { "cache-control": "public, max-age=300" },
-				}),
-			)
+		const protectedResource = Effect.succeed(
+			HttpServerResponse.jsonUnsafe(protectedResourceMetadata(origin), { headers: publicCache }),
+		)
 
 		const register = (request: HttpServerRequest.HttpServerRequest) =>
 			Effect.gen(function* () {
@@ -205,7 +201,11 @@ export const OAuthDiscoveryRouter = HttpRouter.use((router) =>
 						...(url.searchParams.get("scope")
 							? { scope: url.searchParams.get("scope")! }
 							: undefined),
-						expectedResource: `${requestOrigin(request)}/mcp`,
+						// RFC 8707 audience binding: the token minted from this grant is
+						// bound to `resource`, so it must be Maple's canonical server
+						// identity — the same value `/.well-known/oauth-protected-resource`
+						// advertises — not a host the caller chose.
+						expectedResource: `${origin}/mcp`,
 					},
 					requesterKey(request),
 				)

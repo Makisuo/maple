@@ -243,22 +243,24 @@ export function SpendChart({ model, daily }: { model: SpendModel; daily: DailySp
 					: []),
 				focusCrosshair(chromeColors),
 			],
-			x: {
-				scale: scalePoint,
-				axis: {
-					line: false,
-					ticks: { size: 0, padding: 8, format: dateLabel },
-					tickLabels: { thin: { minGap: 12 } },
+			scales: {
+				x: {
+					scale: scalePoint,
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 8, format: dateLabel },
+						tickLabels: { thin: { minGap: 12 } },
+					},
 				},
-			},
-			y: {
-				scale: scaleLinear().domain([0, yMax]),
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 8,
-						format: (value: number) => `$${Math.round(value)}`,
+				y: {
+					scale: scaleLinear().domain([0, yMax]),
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 8,
+							format: (value: number) => `$${Math.round(value)}`,
+						},
 					},
 				},
 			},

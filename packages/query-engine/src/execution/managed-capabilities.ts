@@ -55,9 +55,9 @@ const parseTableDdl = (table: string, ddl: string): TableMetadata => {
 	for (const line of body) {
 		const entry = line.trim().replace(/,$/, "")
 		if (entry === "") continue
-		const index = INDEX_LINE.exec(entry)
-		if (index) {
-			indexes.push({ table, name: index[1]!, type: index[3]!, expression: index[2]! })
+		const [, indexName, indexExpression, indexType] = INDEX_LINE.exec(entry) ?? []
+		if (indexName !== undefined && indexExpression !== undefined && indexType !== undefined) {
+			indexes.push({ table, name: indexName, type: indexType, expression: indexExpression })
 			continue
 		}
 		const name = entry.split(/\s+/)[0]

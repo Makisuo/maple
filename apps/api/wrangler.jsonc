@@ -26,6 +26,14 @@
 				"period": 60,
 			},
 		},
+		{
+			"name": "MCP_TOOLS_RATE_LIMITER",
+			"namespace_id": "2026082901",
+			"simple": {
+				"limit": 120,
+				"period": 10,
+			},
+		},
 	],
 	// Cron schedules — handler: worker.ts `scheduled`, dispatched on `event.cron`.
 	// "0 */12 * * *" = VCS sync backstop; "0 * * * *" = scrape_target_checks

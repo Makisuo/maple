@@ -4,6 +4,10 @@
  * insecure-origin fallback instead of keeping their own copy of it.
  */
 
+import { Option } from "effect"
+
+import { tryPromise, trySync } from "./try-sync"
+
 /**
  * Last-resort clipboard write for insecure origins and embedded contexts where
  * `navigator.clipboard` is missing or rejects. Restores the user's selection so
@@ -25,12 +29,12 @@ export function writeClipboardFallback(text: string): boolean {
 	const previous = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
 
 	area.select()
-	let ok = false
-	try {
-		ok = document.execCommand("copy")
-	} catch {
-		ok = false
-	}
+	// `execCommand` throws outright in a sandboxed frame rather than returning
+	// false, so an unavailable command and a refused one are one answer.
+	const ok = Option.getOrElse(
+		trySync(() => document.execCommand("copy")),
+		() => false,
+	)
 
 	document.body.removeChild(area)
 	if (selection && previous) {
@@ -49,14 +53,12 @@ export function writeClipboardFallback(text: string): boolean {
 export async function writeClipboardText(text: string): Promise<boolean> {
 	if (!text) return false
 
-	try {
-		if (navigator.clipboard?.writeText) {
-			await navigator.clipboard.writeText(text)
-			return true
-		}
-	} catch {
-		// fall through to the legacy path
+	if (navigator.clipboard?.writeText) {
+		const written = await tryPromise(() => navigator.clipboard.writeText(text))
+		if (Option.isSome(written)) return true
 	}
 
+	// The API is missing, or it rejected — an insecure origin, a denied
+	// permission, a document that was not focused. The textarea covers all three.
 	return writeClipboardFallback(text)
 }

@@ -35,11 +35,16 @@ import {
 	ServiceMapBundleResponse,
 	ServiceWorkloadsResponse,
 	ServiceUsageResponse,
+	ServiceEndpointsRequest,
+	ServiceEndpointsResponse,
+	ServiceOperationsRequest,
 	ServiceOperationsResponse,
 	ListLogsResponse,
 	GetLogResponse,
 	ListMetricsResponse,
 	MetricsSummaryResponse,
+	InfraPresenceResponse,
+	InfraSurfaceLiteral,
 	ListHostsResponse,
 	HostDetailSummaryResponse,
 	HostInfraTimeseriesResponse,
@@ -106,7 +111,7 @@ import {
 	workloadMetricSpec,
 } from "@/routes/query-helpers"
 import { Queries } from "@/routes/queries"
-import { productEventsFunnelOpts } from "@maple/query-engine/registry"
+import { productEventsFunnelOpts, type QueryDefinition } from "@maple/query-engine/registry"
 import { makeQueryRunners } from "@/routes/query-runner"
 import { runQueryEngineBatch } from "@/routes/query-engine-batch"
 import type { ExecutionTenant, WarehouseExecutionError } from "@maple/query-engine/execution"
@@ -183,6 +188,11 @@ const withServiceOperationsFallback = makeRollupFallback(
 	"service_operations rollup is absent on this cluster; reading raw traces. Apply ClickHouse schema to restore the fast path.",
 )
 
+interface SparklinePoint {
+	readonly bucket: string
+	readonly count: number
+}
+
 const decodeTraceId = Schema.decodeSync(TraceId)
 const decodeSpanId = Schema.decodeSync(SpanId)
 const decodeServiceName = Schema.decodeUnknownSync(ServiceName)
@@ -254,6 +264,102 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 		const queryEngine = yield* QueryEngineService
 		const warehouse = yield* WarehouseQueryService
 		const { runQuery, runQueryFirst } = makeQueryRunners({ warehouse, queryEngine })
+
+		/**
+		 * Summary + per-row sparkline for the operation rollup, shared by the
+		 * Operations tab (every span) and the API tab (HTTP endpoints only).
+		 *
+		 * Both reads try `service_operations_minutely`/`_hourly` and degrade
+		 * per-org on UNKNOWN_TABLE. The timeseries read repeats the probe rather
+		 * than inheriting the summary's verdict: one extra failed query on a
+		 * cluster that never applied migration 0008 is cheaper than the mutable
+		 * flag this replaced.
+		 */
+		const operationRowsWithSparklines = (
+			tenant: TenantContext,
+			payload: ServiceOperationsRequest | ServiceEndpointsRequest,
+			queries: {
+				readonly summary: QueryDefinition<ServiceOperationsRequest, CH.ServiceOperationsSummaryOutput>
+				readonly summaryRaw: QueryDefinition<
+					ServiceOperationsRequest,
+					CH.ServiceOperationsSummaryOutput
+				>
+				readonly label: string
+				/**
+				 * The Operations tab draws a sparkline per row; the API tab does not,
+				 * and issuing its timeseries anyway cost a second warehouse query whose
+				 * result was discarded — and capped the summary at ~50 rows, since the
+				 * timeseries returns `rows × buckets` against a 10k limit.
+				 */
+				readonly sparklines: boolean
+			},
+		) =>
+			Effect.gen(function* () {
+				const toNumber = (value: unknown) => Number(value ?? 0)
+				const summaryRows = yield* mapExecError(
+					withServiceOperationsFallback(
+						(t, pl) => runQuery(queries.summary, t, pl),
+						(t, pl) => runQuery(queries.summaryRaw, t, pl),
+						tenant,
+						payload,
+					),
+					`${queries.label} query failed`,
+				)
+				if (summaryRows.length === 0) {
+					return []
+				}
+
+				const toRow = (row: (typeof summaryRows)[number], sparkline: SparklinePoint[]) => ({
+					spanName: String(row.spanName),
+					spanCount: toNumber(row.spanCount),
+					estimatedSpanCount: toNumber(row.estimatedSpanCount),
+					errorCount: toNumber(row.errorCount),
+					estimatedErrorCount: toNumber(row.estimatedErrorCount),
+					errorRate: toNumber(row.errorRate),
+					avgDurationMs: toNumber(row.avgDurationMs),
+					p50DurationMs: toNumber(row.p50DurationMs),
+					p95DurationMs: toNumber(row.p95DurationMs),
+					p99DurationMs: toNumber(row.p99DurationMs),
+					sparkline,
+				})
+
+				if (!queries.sparklines) {
+					return summaryRows.map((row) => toRow(row, []))
+				}
+
+				const spanNames = summaryRows.map((row) => String(row.spanName))
+				// The rollup is minute-grain, so every sparkline interval must be
+				// a whole-minute multiple. Nearest-minute rounding keeps ~50 points.
+				const windowSeconds = Math.max(
+					0,
+					(Date.parse(`${payload.endTime.replace(" ", "T")}Z`) -
+						Date.parse(`${payload.startTime.replace(" ", "T")}Z`)) /
+						1000,
+				)
+				const requestedBucketSeconds =
+					("bucketSeconds" in payload ? payload.bucketSeconds : undefined) ?? windowSeconds / 50
+				const bucketSeconds = Math.max(1, Math.round(requestedBucketSeconds / 60)) * 60
+				const timeseriesInput = { ...payload, spanNames, bucketSeconds }
+				const timeseriesRows = yield* mapExecError(
+					withServiceOperationsFallback(
+						(t, pl) => runQuery(Queries.serviceOperationsTimeseries, t, pl),
+						(t, pl) => runQuery(Queries.serviceOperationsTimeseriesRaw, t, pl),
+						tenant,
+						timeseriesInput,
+					),
+					"serviceOperationsTimeseries query failed",
+				)
+
+				const sparklines = new Map<string, SparklinePoint[]>()
+				for (const row of timeseriesRows) {
+					const key = String(row.spanName)
+					const points = sparklines.get(key) ?? []
+					points.push({ bucket: String(row.bucket), count: toNumber(row.count) })
+					sparklines.set(key, points)
+				}
+
+				return summaryRows.map((row) => toRow(row, sparklines.get(String(row.spanName)) ?? []))
+			})
 
 		const executeRawSql = makeExecuteRawSql<
 			ExecutionTenant,
@@ -1070,77 +1176,43 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 				.handle("serviceOperations", ({ payload }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const toNumber = (value: unknown) => Number(value ?? 0)
 						const data = yield* queryEngine.cachedDirect(
 							tenant,
 							"serviceOperations",
 							payload,
-							Effect.gen(function* () {
-								// Both reads try `service_operations_minutely`/`_hourly` and
-								// degrade per-org on UNKNOWN_TABLE. The timeseries read repeats
-								// the probe rather than inheriting the summary's verdict: one
-								// extra failed query on a cluster that never applied migration
-								// 0008 is cheaper than the mutable flag this replaced.
-								const summaryRows = yield* mapExecError(
-									withServiceOperationsFallback(
-										(t, pl) => runQuery(Queries.serviceOperationsSummary, t, pl),
-										(t, pl) => runQuery(Queries.serviceOperationsSummaryRaw, t, pl),
-										tenant,
-										payload,
-									),
-									"serviceOperations query failed",
-								)
-								if (summaryRows.length === 0) {
-									return []
-								}
-
-								const spanNames = summaryRows.map((row) => String(row.spanName))
-								// The rollup is minute-grain, so every sparkline interval must be
-								// a whole-minute multiple. Nearest-minute rounding keeps ~50 points.
-								const windowSeconds = Math.max(
-									0,
-									(Date.parse(`${payload.endTime.replace(" ", "T")}Z`) -
-										Date.parse(`${payload.startTime.replace(" ", "T")}Z`)) /
-										1000,
-								)
-								const requestedBucketSeconds = payload.bucketSeconds ?? windowSeconds / 50
-								const bucketSeconds =
-									Math.max(1, Math.round(requestedBucketSeconds / 60)) * 60
-								const timeseriesInput = { ...payload, spanNames, bucketSeconds }
-								const timeseriesRows = yield* mapExecError(
-									withServiceOperationsFallback(
-										(t, pl) => runQuery(Queries.serviceOperationsTimeseries, t, pl),
-										(t, pl) => runQuery(Queries.serviceOperationsTimeseriesRaw, t, pl),
-										tenant,
-										timeseriesInput,
-									),
-									"serviceOperationsTimeseries query failed",
-								)
-
-								const sparklines = new Map<string, Array<{ bucket: string; count: number }>>()
-								for (const row of timeseriesRows) {
-									const key = String(row.spanName)
-									const points = sparklines.get(key) ?? []
-									points.push({ bucket: String(row.bucket), count: toNumber(row.count) })
-									sparklines.set(key, points)
-								}
-
-								return summaryRows.map((row) => ({
-									spanName: String(row.spanName),
-									spanCount: toNumber(row.spanCount),
-									estimatedSpanCount: toNumber(row.estimatedSpanCount),
-									errorCount: toNumber(row.errorCount),
-									estimatedErrorCount: toNumber(row.estimatedErrorCount),
-									errorRate: toNumber(row.errorRate),
-									avgDurationMs: toNumber(row.avgDurationMs),
-									p50DurationMs: toNumber(row.p50DurationMs),
-									p95DurationMs: toNumber(row.p95DurationMs),
-									sparkline: sparklines.get(String(row.spanName)) ?? [],
-								}))
+							operationRowsWithSparklines(tenant, payload, {
+								summary: Queries.serviceOperationsSummary,
+								summaryRaw: Queries.serviceOperationsSummaryRaw,
+								label: "serviceOperations",
+								sparklines: true,
 							}),
 							30,
 						)
 						return new ServiceOperationsResponse({ data })
+					}),
+				)
+				.handle("serviceEndpoints", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const rows = yield* queryEngine.cachedDirect(
+							tenant,
+							"serviceEndpoints",
+							payload,
+							operationRowsWithSparklines(tenant, payload, {
+								summary: Queries.serviceEndpointsSummary,
+								summaryRaw: Queries.serviceEndpointsSummaryRaw,
+								label: "serviceEndpoints",
+								sparklines: false,
+							}),
+							30,
+						)
+						// The split is display-only, so it happens after the cache read
+						// rather than being baked into the cached payload.
+						const data = rows.map((row) => ({
+							...row,
+							...CH.splitEndpointName(row.spanName),
+						}))
+						return new ServiceEndpointsResponse({ data })
 					}),
 				)
 				.handle("listLogs", ({ payload }) =>
@@ -1174,6 +1246,19 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								metricCount: Number(row.metricCount),
 								dataPointCount: Number(row.dataPointCount),
 							})),
+						})
+					}),
+				)
+				.handle("infraPresence", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const rows = yield* runQuery(Queries.infraPresence, tenant, payload)
+						// The union emits at most one row per surface, and only for
+						// surfaces that reported — the row set IS the answer.
+						return new InfraPresenceResponse({
+							surfaces: rows.flatMap((row) =>
+								Schema.is(InfraSurfaceLiteral)(row.surface) ? [row.surface] : [],
+							),
 						})
 					}),
 				)

@@ -3903,3 +3903,139 @@ describe("AlertsService.previewRule", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(breachedGroups), { fetch: okFetch })))
 	})
 })
+
+describe("AlertsService delivery lease freshness", () => {
+	it.effect("claims later rows with a fresh timestamp, not the batch head's", () => {
+		const fixedTime = 1_710_000_400_000
+		const testDb = createTestDb(trackedDbs)
+		// Virtual scheduler clock: the first delivery "takes" longer than the
+		// lease TTL, so a claim dated from the batch-head timestamp would be
+		// born expired and an overlapping tick could re-send the event.
+		let virtualNow = fixedTime
+		let call = 0
+		let laterRowLeaseExpiry: number | null = null
+		const fetchImpl = (async () => {
+			call += 1
+			if (call === 1) {
+				virtualNow += 31_000
+			} else {
+				const row = await queryFirstRow<{ claimExpiresAt: Date | null }>(
+					testDb,
+					`select claim_expires_at as "claimExpiresAt"
+					 from alert_delivery_events where delivery_key = 'lease-2'`,
+					[],
+				)
+				laterRowLeaseExpiry = row?.claimExpiresAt?.getTime() ?? null
+			}
+			return new Response("ok", { status: 200 })
+		}) as typeof fetch
+
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(fixedTime)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_lease_fresh")
+			const userId = asUserId("user_lease_fresh")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+			// Break the rule's stored query so the tick's evaluation half queues
+			// nothing of its own.
+			yield* Effect.promise(() =>
+				executeSql(testDb, "update alert_rules set query_spec_json = $1::jsonb where id = $2", [
+					"{}",
+					rule.id,
+				]),
+			)
+
+			for (const n of [1, 2]) {
+				yield* Effect.promise(() =>
+					insertDeliveryEventRow(testDb, {
+						id: `00000000-0000-4000-8000-00000000030${n}`,
+						orgId,
+						incidentId: null,
+						ruleId: rule.id,
+						destinationId: destination.id,
+						deliveryKey: `lease-${n}`,
+						eventType: "test",
+						attemptNumber: 1,
+						status: "queued",
+						// Row 1 first: rows are processed in scheduledAt order.
+						scheduledAt: fixedTime - 10 + n,
+						payloadJson: JSON.stringify({
+							eventType: "test",
+							incidentId: null,
+							incidentStatus: "resolved",
+							dedupeKey: `lease-${n}`,
+							observed: { value: 0, sampleCount: 0 },
+						}),
+					}),
+				)
+			}
+			yield* alerts.runSchedulerTick()
+
+			assert.strictEqual(call, 2)
+			// The second claim must be dated from its own claim time (after the
+			// 31s "slow" first delivery), so its lease is still alive while the
+			// delivery is in flight. A batch-head lease would already be expired.
+			assert.isNotNull(laterRowLeaseExpiry)
+			assert.isAbove(laterRowLeaseExpiry ?? 0, fixedTime + 31_000)
+		}).pipe(
+			Effect.provide(
+				makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
+					fetch: fetchImpl,
+					now: Effect.sync(() => virtualNow),
+				}),
+			),
+		)
+	})
+})
+
+describe("alert incident open uniqueness", () => {
+	const insertOpenIncident = (testDb: TestDb, id: string, status = "open") =>
+		executeSql(
+			testDb,
+			`
+        insert into alert_incidents (
+          id, org_id, rule_id, incident_key, rule_name, group_key, signal_type,
+          severity, status, comparator, threshold, first_triggered_at,
+          last_triggered_at, dedupe_key, created_at, updated_at
+        ) values (
+          $1, 'org_unique', 'rule_unique', $1, 'Rule', 'checkout', 'error_rate',
+          'critical', $2, 'gt', 5, now(), now(), 'org_unique:rule_unique:checkout',
+          now(), now()
+        )
+      `,
+			[id, status],
+		)
+
+	it.effect("rejects a second open incident for the same (rule, group)", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => insertOpenIncident(testDb, "inc-open-1"))
+			// The partial unique index is the backstop for an expired scheduler
+			// claim: two overlapping ticks can both decide to open, but only one
+			// row can exist.
+			const second = yield* Effect.promise(() =>
+				insertOpenIncident(testDb, "inc-open-2").then(
+					() => "inserted" as const,
+					() => "conflict" as const,
+				),
+			)
+			assert.strictEqual(second, "conflict")
+
+			// Resolved history does not participate: after resolving the first,
+			// a new open incident for the same key is legal again.
+			yield* Effect.promise(() =>
+				executeSql(testDb, "update alert_incidents set status = 'resolved' where id = $1", [
+					"inc-open-1",
+				]),
+			)
+			const third = yield* Effect.promise(() =>
+				insertOpenIncident(testDb, "inc-open-3").then(
+					() => "inserted" as const,
+					() => "conflict" as const,
+				),
+			)
+			assert.strictEqual(third, "inserted")
+		})
+	})
+})

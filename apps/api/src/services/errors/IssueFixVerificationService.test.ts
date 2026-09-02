@@ -4,8 +4,9 @@ import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effe
 import { OrgId, type PullRequestSummary, type WorkflowState } from "@maple/domain/http"
 import { ErrorIssueId } from "@maple/domain/primitives"
 import { errorIssues, errorIssueEvents, errorIssueVerifications } from "@maple/db"
+import type { MapleDatabaseTransaction } from "@maple/db/client"
 import { eq } from "drizzle-orm"
-import { Database } from "@/platform/DatabaseLive"
+import { Database, type DatabaseApi, type DatabaseClient } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { ErrorActorsService } from "./ErrorActorsService"
@@ -55,12 +56,15 @@ const testConfig = () =>
  * integration does — so every test written before hydration existed keeps
  * exercising the unenriched path.
  */
-const makeLayer = (lookup?: {
-	readonly pullRequest?: () => PullRequestSummary | undefined
-	readonly repositories?: ReadonlyArray<string>
-}) => {
-	const testDb = createTestDb(createdDbs)
-	const databaseLive = testDb.layer
+const makeLayer = (
+	lookup?: {
+		readonly pullRequest?: () => PullRequestSummary | undefined
+		readonly repositories?: ReadonlyArray<string>
+	},
+	// Overridable so a test can build two service instances over one database —
+	// one healthy, one with a sabotaged client — and observe the same rows.
+	databaseLive: Layer.Layer<Database> = createTestDb(createdDbs).layer,
+) => {
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 	const actorsLive = ErrorActorsService.layer.pipe(Layer.provide(databaseLive))
 	const workflowLive = ErrorIssueWorkflowService.layer.pipe(
@@ -355,8 +359,7 @@ describe("linkPullRequest hydration", () => {
 		Effect.gen(function* () {
 			const mergedAtMs = Date.now() - HOUR
 			const layer = makeLayer({
-				pullRequest: () =>
-					summary({ state: "merged", mergedAtMs, mergeCommitSha: "a".repeat(40) }),
+				pullRequest: () => summary({ state: "merged", mergedAtMs, mergeCommitSha: "a".repeat(40) }),
 			})
 			yield* Effect.gen(function* () {
 				const service = yield* IssueFixVerificationService
@@ -509,7 +512,6 @@ describe("unlinkPullRequest", () => {
 		}),
 	)
 
-
 	it.effect("removes the link and abandons any verification riding on it", () =>
 		Effect.gen(function* () {
 			const layer = makeLayer()
@@ -635,6 +637,29 @@ describe("onPullRequestEvent — merge", () => {
 
 				const links = yield* service.listPullRequests(ORG, issueId)
 				expect(links.pullRequests[0]?.state).toBe("closed")
+			}).pipe(Effect.provide(layer))
+		}),
+	)
+
+	// Queue deliveries are unordered: a pre-merge event (opened/edited/synchronize)
+	// can land after the merged one. A GitHub merge is irreversible, so it must
+	// never regress the link's state or null the merge metadata the verification
+	// window was opened from.
+	it.effect("a stale non-merged event cannot regress a merged link", () =>
+		Effect.gen(function* () {
+			const layer = makeLayer()
+			yield* Effect.gen(function* () {
+				const service = yield* IssueFixVerificationService
+				const issueId = yield* seedIssue()
+				yield* service.linkPullRequest(ORG, null, issueId, PR_URL, "agent")
+				yield* service.onPullRequestEvent(mergeEvent())
+				// The out-of-order "edited" from before the merge arrives late.
+				yield* service.onPullRequestEvent(
+					mergeEvent({ action: "edited", merged: false, mergedAtMs: null, mergeCommitSha: null }),
+				)
+				const links = yield* service.listPullRequests(ORG, issueId)
+				expect(links.pullRequests[0]?.state).toBe("merged")
+				expect(links.pullRequests[0]?.mergeCommitSha).toBe("abc123")
 			}).pipe(Effect.provide(layer))
 		}),
 	)
@@ -879,6 +904,134 @@ describe("dueVerifications", () => {
 				yield* service.markRunning(verification!, null, Date.now())
 				expect(yield* service.dueVerifications(dueAtMs + 1000, 10)).toHaveLength(0)
 			}).pipe(Effect.provide(layer))
+		}),
+	)
+})
+
+/**
+ * The client with one table's inserts sabotaged, inside and outside
+ * transactions — a stand-in for the connection dying mid-write, which
+ * `applyVerdict` must survive without settling a row it did not fully record.
+ */
+const failInsertOf = <T extends object>(client: T, failTable: unknown): T =>
+	new Proxy(client, {
+		get(target, property) {
+			// SAFETY: a Proxy get trap receives a key for its target; indexed access preserves
+			// the target's own property type while the runtime branch below validates callability.
+			const value = target[property as keyof T]
+			if (typeof value !== "function") return value
+			if (property === "insert") {
+				return (table: unknown) => {
+					if (table === failTable) throw new Error("injected insert failure")
+					return value.call(target, table)
+				}
+			}
+			if (property === "transaction") {
+				return <Result>(
+					callback: (tx: MapleDatabaseTransaction) => Promise<Result>,
+					...rest: ReadonlyArray<unknown>
+				) =>
+					value.call(
+						target,
+						(tx: MapleDatabaseTransaction) => callback(failInsertOf(tx, failTable)),
+						...rest,
+					)
+			}
+			return value.bind(target)
+		},
+	})
+
+const failingEventInsertLayer = (base: Layer.Layer<Database>) =>
+	Layer.effect(
+		Database,
+		Effect.gen(function* () {
+			const real = yield* Database
+			return {
+				execute: <T>(fn: (db: DatabaseClient) => Promise<T>) =>
+					real.execute((db) => fn(failInsertOf(db, errorIssueEvents))),
+			} satisfies DatabaseApi
+		}),
+	).pipe(Layer.provide(base))
+
+describe("applyVerdict — race and failure discipline", () => {
+	it.effect("a stale verified verdict cannot overwrite a decisive refutation", () =>
+		Effect.gen(function* () {
+			const layer = makeLayer()
+			yield* Effect.gen(function* () {
+				const service = yield* IssueFixVerificationService
+				const issueId = yield* seedIssue({ severity: "low", seenVersions: ["v1", "v2"] })
+				yield* service.linkPullRequest(ORG, null, issueId, PR_URL, "agent")
+				yield* service.onPullRequestEvent(mergeEvent())
+
+				// The tick read the row while it was still waiting…
+				const stale = yield* readVerification(issueId)
+				assert.isDefined(stale)
+				// …and the error tick refuted it before the tick's verdict landed.
+				expect(yield* service.refuteOnPostMergeOccurrence(ORG, issueId, ["v3"], Date.now())).toBe(
+					true,
+				)
+
+				yield* service.applyVerdict(stale, "verified", "computed from a stale window", Date.now())
+
+				// The refutation must stand: no overwrite, no auto-close.
+				expect((yield* readVerification(issueId))?.status).toBe("not_fixed")
+				expect((yield* readIssueState(issueId))?.workflowState).toBe("in_progress")
+			}).pipe(Effect.provide(layer))
+		}),
+	)
+
+	it.effect("markRunning cannot resurrect a refuted verification", () =>
+		Effect.gen(function* () {
+			const layer = makeLayer()
+			yield* Effect.gen(function* () {
+				const service = yield* IssueFixVerificationService
+				const issueId = yield* seedIssue({ seenVersions: ["v1", "v2"] })
+				yield* service.linkPullRequest(ORG, null, issueId, PR_URL, "agent")
+				yield* service.onPullRequestEvent(mergeEvent())
+
+				const stale = yield* readVerification(issueId)
+				assert.isDefined(stale)
+				expect(yield* service.refuteOnPostMergeOccurrence(ORG, issueId, ["v3"], Date.now())).toBe(
+					true,
+				)
+
+				yield* service.markRunning(stale, null, Date.now())
+				expect((yield* readVerification(issueId))?.status).toBe("not_fixed")
+			}).pipe(Effect.provide(layer))
+		}),
+	)
+
+	it.effect("keeps the row due when its verdict event cannot commit", () =>
+		Effect.gen(function* () {
+			const base = createTestDb(createdDbs).layer
+			const healthy = makeLayer(undefined, base)
+			const faulty = makeLayer(undefined, failingEventInsertLayer(base))
+
+			const issueId = yield* Effect.gen(function* () {
+				const service = yield* IssueFixVerificationService
+				const id = yield* seedIssue({ severity: "low" })
+				yield* service.linkPullRequest(ORG, null, id, PR_URL, "agent")
+				yield* service.onPullRequestEvent(mergeEvent())
+				return id
+			}).pipe(Effect.provide(healthy))
+
+			yield* Effect.gen(function* () {
+				const service = yield* IssueFixVerificationService
+				const row = yield* readVerification(issueId)
+				assert.isDefined(row)
+				const failure = yield* Effect.flip(
+					service.applyVerdict(row, "verified", "No occurrences.", Date.now()),
+				)
+				assert.strictEqual(failure._tag, "@maple/http/errors/ErrorPersistenceError")
+			}).pipe(Effect.provide(faulty))
+
+			// The terminal status must not commit without its event: settled alone,
+			// the row leaves `waiting`/`running` for good while the issue stays in
+			// `verifying`, and no later tick can ever pick it back up.
+			yield* Effect.gen(function* () {
+				expect((yield* readVerification(issueId))?.status).toBe("waiting")
+				expect((yield* readIssueState(issueId))?.workflowState).toBe("verifying")
+			}).pipe(Effect.provide(healthy))
 		}),
 	)
 })

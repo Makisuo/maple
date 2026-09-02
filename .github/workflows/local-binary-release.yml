@@ -44,13 +44,21 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                # No x86_64-apple-darwin: GitHub retired the macos-13 Intel image
-                # (Dec 2025), so that job sat queued forever. The next Intel label
-                # would be macos-15-intel, but Intel macOS is EOL on GitHub in Fall
-                # 2027 — not worth carrying. Intel-Mac users build from source.
+                # x86_64-apple-darwin builds on macos-15-intel. The previous Intel
+                # label (macos-13) was retired in Dec 2025 and its job sat queued
+                # forever, which is why the target was dropped; macos-15-intel is the
+                # supported replacement and is available now. Intel macOS is EOL on
+                # GitHub in Fall 2027 — drop this entry then, not before.
+                #
+                # Intel runners are the scarcest capacity in the pool, so this job can
+                # sit queued far longer than the others. Publishing is per-job (see the
+                # header), so a slow Intel build delays only its own tarball.
                 include:
                     - target: aarch64-apple-darwin
                       runner: macos-14
+                      os: macos
+                    - target: x86_64-apple-darwin
+                      runner: macos-15-intel
                       os: macos
                     - target: x86_64-unknown-linux-gnu
                       runner: ubuntu-22.04

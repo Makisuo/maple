@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 // TEST-SEAM: This focused test replaces process-global modules that have no instance-level injection seam.
-import { trace } from "@opentelemetry/api"
+import {
+	INVALID_SPAN_CONTEXT,
+	type Span as ApiSpan,
+	trace,
+	type Tracer,
+	type TracerProvider,
+} from "@opentelemetry/api"
 import type { ReadableSpan, Span } from "@opentelemetry/sdk-trace-base"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -125,6 +131,40 @@ describe("setupTracing unload flush", () => {
 		document.dispatchEvent(new Event("visibilitychange"))
 		await Promise.resolve()
 		expect(exported).toHaveLength(0)
+	})
+
+	it("exports spans again after init → shutdown → init, without a manual trace.disable", async () => {
+		// The global OTel registration is first-write-wins: unless shutdown
+		// releases it, the proxy keeps delegating to the shut-down provider and a
+		// second SDK session silently exports nothing.
+		const first = setupTracing(CONFIG)
+		endOneSpan()
+		window.dispatchEvent(new Event("pagehide"))
+		await vi.waitFor(() => expect(exported).toHaveLength(1))
+		await first()
+
+		shutdown = setupTracing(CONFIG)
+		endOneSpan()
+		window.dispatchEvent(new Event("pagehide"))
+		await vi.waitFor(() => expect(exported).toHaveLength(2))
+	})
+
+	it("leaves a host app's earlier provider registration alone on shutdown", async () => {
+		// A host that registered its own provider owns the globals; losing them
+		// (trace.disable) would break the host's tracing, not just ours.
+		const hostSpan: ApiSpan = trace.wrapSpanContext(INVALID_SPAN_CONTEXT)
+		const hostTracer: Tracer = {
+			startSpan: vi.fn(() => hostSpan),
+			startActiveSpan: vi.fn(),
+		}
+		const hostProvider: TracerProvider = { getTracer: () => hostTracer }
+		trace.setGlobalTracerProvider(hostProvider)
+
+		const teardown = setupTracing(CONFIG)
+		await teardown()
+
+		expect(trace.getTracer("host").startSpan("still-host")).toBeDefined()
+		expect(hostTracer.startSpan).toHaveBeenCalledWith("still-host")
 	})
 
 	it("removes its listeners on shutdown", async () => {

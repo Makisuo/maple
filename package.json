@@ -41,6 +41,7 @@
 		"tinybird:manifest:check": "bun run ./scripts/generate-tinybird-project-manifest.ts --check",
 		"clickhouse:schema": "bun run ./scripts/generate-clickhouse-schema.ts && bun run ./scripts/generate-clickhouse-schema-sql.ts && bun run ./scripts/generate-clickhouse-insert-mappings.ts && bun run ./scripts/lint-clickhouse-schema.ts",
 		"clickhouse:schema:check": "bun run ./scripts/generate-clickhouse-schema.ts --check && bun run ./scripts/generate-clickhouse-schema-sql.ts --check && bun run ./scripts/generate-clickhouse-insert-mappings.ts --check && bun run ./scripts/lint-clickhouse-schema.ts && bun run ./scripts/check-local-schema-manifest.ts",
+		"local-schema:bump": "bun run ./scripts/bump-local-schema.ts",
 		"clickhouse:schema:lint": "bun run ./scripts/lint-clickhouse-schema.ts",
 		"check:tokens": "bun run ./scripts/check-token-drift.ts",
 		"ios:openapi": "bun run ./scripts/generate-ios-openapi.ts",
@@ -78,6 +79,10 @@
 		"vitest": "^4.1.9"
 	},
 	"catalogs": {
+		"charts": {
+			"@tanstack/charts": "0.16.0",
+			"@tanstack/charts-scales": "0.16.0"
+		},
 		"clickhouse": {
 			"@clickhouse/client-web": "^1.21.0"
 		},

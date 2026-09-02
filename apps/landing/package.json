@@ -28,7 +28,7 @@
 		"@maple/ui": "workspace:*",
 		"@shikijs/transformers": "^4.4.1",
 		"@tailwindcss/vite": "catalog:tailwind",
-		"@tanstack/charts": "0.14.0",
+		"@tanstack/charts": "catalog:charts",
 		"@types/react": "catalog:react",
 		"@types/react-dom": "catalog:react",
 		"astro": "^7.2.8",

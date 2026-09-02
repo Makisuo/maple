@@ -15,7 +15,7 @@ import { aliased } from "./expr"
 import { raw, ident, escapeClickHouseString, compile as compileSqlFragment } from "../sql/sql-fragment"
 import { splitTerminalClauses } from "../sql/terminal-clauses"
 import { compileQuery, type SqlQuery } from "../sql/sql-query"
-import { PARAM_PLACEHOLDER_PATTERN, paramSchema, type ParamKind } from "./param"
+import { PARAM_MARKER_PREFIX, PARAM_PLACEHOLDER_PATTERN, paramSchema, type ParamKind } from "./param"
 import { encodeLiteral } from "./literal"
 import { Effect, Option, Schema } from "effect"
 import { QueryBuilderDefect, QueryBuilderError } from "./errors"
@@ -250,8 +250,9 @@ export interface RowSchemaMismatch {
 const structFieldNames = (schema: unknown): ReadonlyArray<string> | undefined => {
 	const ast = (schema as { readonly ast?: { readonly _tag?: string } } | undefined)?.ast
 	if (ast?._tag !== "Objects") return undefined
-	const signatures = (ast as { readonly propertySignatures?: ReadonlyArray<{ readonly name: PropertyKey }> })
-		.propertySignatures
+	const signatures = (
+		ast as { readonly propertySignatures?: ReadonlyArray<{ readonly name: PropertyKey }> }
+	).propertySignatures
 	return signatures?.map((signature) => String(signature.name))
 }
 
@@ -434,6 +435,10 @@ const asEffect = <A>(compile: () => A): Effect.Effect<A, QueryBuilderError> =>
 		try: compile,
 		catch: (cause): QueryBuilderError | UnexpectedCompileFailure =>
 			cause instanceof QueryBuilderError ? cause : { _tag: "UnexpectedCompileFailure" as const, cause },
+		// `UnexpectedCompileFailure` is this builder's own "cannot happen" tag: a query
+		// is built from typed definitions, so a compile that throws is a bug in this
+		// file rather than a failure a call site could handle.
+		// oxlint-disable-next-line maple/no-effect-die
 	}).pipe(Effect.catchTag("UnexpectedCompileFailure", ({ cause }) => Effect.die(cause)))
 
 /**
@@ -865,7 +870,8 @@ const deriveUnionRowSchema = (
 
 	const fields: Record<string, Schema.Codec<any, any>> = {}
 	for (const [alias, schemas] of perColumn) {
-		fields[alias] = schemas.length === 1 ? schemas[0]! : Schema.Union(schemas)
+		const only = schemas.length === 1 ? schemas[0] : undefined
+		fields[alias] = only ?? Schema.Union(schemas)
 	}
 	return { schema: Schema.Struct(fields) }
 }
@@ -967,6 +973,17 @@ function resolveParams(sql: string, params: Record<string, unknown>): string {
 			message: `compile: no value given for param${missing.length > 1 ? "s" : ""} ${missing
 				.map((n) => `'${n}'`)
 				.join(", ")}`,
+		})
+	}
+
+	// Nothing placeholder-shaped may survive a resolved compile. The loop above
+	// only reports the names it recognised, so a marker naming a kind the pattern
+	// matches but `paramSchema` cannot resolve — or one a value smuggled past the
+	// escaper — would otherwise reach the warehouse as query text.
+	if (resolved.includes(PARAM_MARKER_PREFIX)) {
+		throw new QueryBuilderError({
+			code: "UnresolvedParam",
+			message: "compile: unresolved param placeholder remains in the compiled SQL",
 		})
 	}
 

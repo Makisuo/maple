@@ -115,9 +115,9 @@ export const ListOf = <S extends Schema.Top>(item: S) =>
 export const encodeOffsetCursor = (offset: number): string => `off_${offset.toString(36)}`
 
 export const decodeOffsetCursor = (cursor: string): number | null => {
-	const match = /^off_([0-9a-z]+)$/.exec(cursor)
-	if (match === null) return null
-	const offset = Number.parseInt(match[1]!, 36)
+	const [, digits] = /^off_([0-9a-z]+)$/.exec(cursor) ?? []
+	if (digits === undefined) return null
+	const offset = Number.parseInt(digits, 36)
 	return Number.isSafeInteger(offset) && offset >= 0 ? offset : null
 }
 

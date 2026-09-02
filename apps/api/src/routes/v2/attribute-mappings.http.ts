@@ -3,12 +3,14 @@ import type { IngestAttributeMapping, IngestAttributeMappingId, OrgId } from "@m
 import {
 	CreateIngestAttributeMappingRequest,
 	CurrentTenant,
+	IngestAttributeMappingForbiddenError,
 	IngestAttributeMappingNotFoundError,
 	UpdateIngestAttributeMappingRequest,
 } from "@maple/domain/http"
 import { MapleApiV2, paginateArray } from "@maple/domain/http/v2"
 import type { V2AttributeMapping } from "@maple/domain/http/v2"
 import { Array as Arr, Effect, Option } from "effect"
+import { requireAdmin } from "@/services/auth/auth"
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
 
 const toV2AttributeMapping = (mapping: IngestAttributeMapping): V2AttributeMapping => ({
@@ -27,6 +29,18 @@ const toV2AttributeMapping = (mapping: IngestAttributeMapping): V2AttributeMappi
 export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "attributeMappings", (handlers) =>
 	Effect.gen(function* () {
 		const service = yield* IngestAttributeMappingService
+
+		// A mapping rewrites every ingested span for the whole org, so the writes
+		// are admin-only; the reads stay open to any member.
+		const requireMappingAdmin = (tenant: CurrentTenant.TenantSchema, action: string) =>
+			requireAdmin(
+				tenant.roles,
+				() =>
+					new IngestAttributeMappingForbiddenError({
+						message: `Only org admins can ${action} attribute mappings`,
+						...(tenant.roles.length > 0 ? { roles: [...tenant.roles] } : undefined),
+					}),
+			)
 
 		const listMappings = (orgId: OrgId) => service.list(orgId)
 
@@ -68,6 +82,7 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 			.handle("create", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					yield* requireMappingAdmin(tenant, "create")
 					const created = yield* service.create(
 						tenant.orgId,
 						new CreateIngestAttributeMappingRequest({
@@ -86,6 +101,7 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					yield* requireMappingAdmin(tenant, "update")
 					const updated = yield* service.update(
 						tenant.orgId,
 						params.id,
@@ -115,6 +131,7 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 			.handle("delete", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					yield* requireMappingAdmin(tenant, "delete")
 					const deleted = yield* service.delete(tenant.orgId, params.id)
 
 					return { id: deleted.id, object: "attribute_mapping" as const, deleted: true as const }

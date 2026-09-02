@@ -35,6 +35,14 @@ export function multiIf<T>(cases: Array<[Condition, Expr<T>]>, else_: Expr<T>): 
 export const coalesce = <T>(...exprs: Expr<T>[]): Expr<T> =>
 	defineFn<Expr<T>[], T>("coalesce", firstTypedNonNull())(...exprs)
 
+/**
+ * `ifNull(expr, fallback)` — `expr` unless it is NULL, else `fallback`. The
+ * two-argument coalesce, typed so a non-nullable fallback strips the `| null`
+ * that {@link coalesce}'s single `T` cannot.
+ */
+export const ifNull = <T>(expr: Expr<T | null>, fallback: Expr<T>): Expr<T> =>
+	defineFn<[Expr<T | null>, Expr<T>], T>("ifNull", firstTypedNonNull())(expr, fallback)
+
 export function nullIf<T>(expr: Expr<T>, value: Expr<T> | string): Expr<T> {
 	// The result is `expr` or NULL, so it decodes as `expr` does — nullably.
 	const schema = schemaOf<T>(expr)

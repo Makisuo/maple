@@ -383,15 +383,17 @@ export const HeatmapSpike = memo(function HeatmapSpike({
 		return defineChart({
 			// Paint order is mark order: grout slots first, then the data over them.
 			marks: [holes, data],
-			x: {
-				// Pinned instance: an inferred domain would drop a fully-empty
-				// column, turning a hole into a missing axis slot.
-				scale: scaleBand<string>(model.xDomain, [0, 1]).paddingInner(padding),
-				grid: false,
-			},
-			y: {
-				scale: scaleBand<string>(model.yDomain, [0, 1]).paddingInner(padding),
-				grid: false,
+			scales: {
+				x: {
+					// Pinned instance: an inferred domain would drop a fully-empty
+					// column, turning a hole into a missing axis slot.
+					scale: scaleBand<string>(model.xDomain, [0, 1]).paddingInner(padding),
+					grid: false,
+				},
+				y: {
+					scale: scaleBand<string>(model.yDomain, [0, 1]).paddingInner(padding),
+					grid: false,
+				},
 			},
 			color: {
 				scale: colorScale,

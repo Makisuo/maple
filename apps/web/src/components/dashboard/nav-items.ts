@@ -2,7 +2,6 @@ import {
 	BellIcon,
 	ChartBarHorizontalIcon,
 	ChartLineIcon,
-	ChatBubbleSparkleIcon,
 	CircleWarningIcon,
 	CloudflareIcon,
 	ComputerIcon,
@@ -18,9 +17,25 @@ import {
 	PlayRotateClockwiseIcon,
 	PulseIcon,
 	ServerIcon,
+	SquareSparkleIcon,
 } from "@/components/icons"
+import { KUBERNETES_ROOT, KUBERNETES_VIEWS } from "@/components/infra/kubernetes/views"
 import { PLANETSCALE_COLOR } from "@/components/infra/planetscale/metrics"
 import type { OrganizationFeatureFlags } from "@/lib/organization-feature-flags"
+
+/**
+ * What a nav child needs from the org before it's worth a row. The five OTel
+ * surfaces come from the warehouse presence probe; Cloudflare and PlanetScale
+ * are integration pages, so their gate is whether the integration is connected.
+ */
+export type NavSurface =
+	| "hosts"
+	| "containers"
+	| "k8sPods"
+	| "k8sNodes"
+	| "k8sWorkloads"
+	| "cloudflare"
+	| "planetscale"
 
 export interface NavSubItem {
 	title: string
@@ -33,6 +48,18 @@ export interface NavSubItem {
 	 * to sit beside them rather than reading as a disabled sibling.
 	 */
 	iconColor?: string
+	/**
+	 * Gate for this row: it shows when the org reports ANY of these. A child
+	 * with no `surfaces` is unconditional. See `partitionInfraSubItems` for what
+	 * happens when the gate says no.
+	 */
+	surfaces?: ReadonlyArray<NavSurface>
+	/**
+	 * Pages folded behind this row. They get no sidebar row of their own — that
+	 * is the point of folding — but each stays typeable in ⌘K, prefixed with the
+	 * row's title so "pods" still finds Kubernetes Pods.
+	 */
+	views?: ReadonlyArray<{ title: string; href: string }>
 }
 
 export interface NavItem {
@@ -47,6 +74,12 @@ export interface NavItem {
 	 */
 	subItems?: NavSubItem[]
 	badge?: string
+	/**
+	 * Where the section sends you for the children it isn't showing. Present only
+	 * on sections whose hidden children are offers rather than destinations — a
+	 * page you don't have yet is a setup step, and a page is where that belongs.
+	 */
+	discoverTo?: "/infra/discover"
 }
 
 export interface NavGroup {
@@ -67,32 +100,106 @@ const overviewItem: NavItem = {
  * Every child carries an icon for the same two reasons as Explore: the closed
  * row previews what's inside it (see `NavRow`), and the expanded sub-list stops
  * being ragged — before this only Cloudflare and PlanetScale had marks, so the
- * four host/k8s rows sat text-only beside two brand glyphs.
+ * host/k8s rows sat text-only beside two brand glyphs.
  *
- * The three k8s pages deliberately share one mark: their labels already
- * separate them, and the preview dedupes by icon. With Containers this section
- * now carries five unique glyphs, which is past `NavRow`'s all-or-nothing
- * preview cap (each glyph costs the label ~14px) — so the closed row shows no
- * miniatures until the icon variety shrinks again.
+ * Kubernetes is one row. It used to be four (Pods, Nodes, Workloads, Services)
+ * and the section read as a Kubernetes menu with some other things in it; the
+ * four are views of one section now, switched by tabs on the page, and the
+ * palette keeps each one typeable through `views`. Five children means five
+ * unique glyphs — exactly `NavRow`'s all-or-nothing preview cap (each glyph
+ * costs the label ~14px), so a sixth would drop the miniatures entirely. The
+ * preview reads this whole list, not the org's pruned one: it advertises what
+ * the section covers, which is the part `partitionInfraSubItems` hides.
  */
 const infrastructureItem: NavItem = {
 	title: "Infrastructure",
 	href: "/infra",
 	icon: ComputerIcon,
+	discoverTo: "/infra/discover",
 	subItems: [
-		{ title: "Hosts", href: "/infra", icon: ServerIcon },
-		{ title: "Containers", href: "/infra/containers", icon: DockerIcon },
-		{ title: "K8s Pods", href: "/infra/kubernetes/pods", icon: KubernetesIcon },
-		{ title: "K8s Nodes", href: "/infra/kubernetes/nodes", icon: KubernetesIcon },
-		{ title: "K8s Workloads", href: "/infra/kubernetes/workloads", icon: KubernetesIcon },
-		{ title: "Cloudflare", href: "/infra/cloudflare", icon: CloudflareIcon },
+		{ title: "Hosts", href: "/infra", icon: ServerIcon, surfaces: ["hosts"] },
+		{ title: "Containers", href: "/infra/containers", icon: DockerIcon, surfaces: ["containers"] },
+		{
+			title: "Kubernetes",
+			href: KUBERNETES_ROOT,
+			icon: KubernetesIcon,
+			// Any of the three: a cluster that only ships node metrics is still a
+			// cluster, and the section's tabs handle the views that are empty.
+			surfaces: ["k8sPods", "k8sNodes", "k8sWorkloads"],
+			views: KUBERNETES_VIEWS,
+		},
+		{ title: "Cloudflare", href: "/infra/cloudflare", icon: CloudflareIcon, surfaces: ["cloudflare"] },
 		{
 			title: "PlanetScale",
 			href: "/infra/planetscale",
 			icon: PlanetScaleIcon,
 			iconColor: PLANETSCALE_COLOR,
+			surfaces: ["planetscale"],
 		},
 	],
+}
+
+/**
+ * The section never renders fewer rows than this. An org reporting one source
+ * gets its row plus three suggestions; the padding is what turns "you have
+ * hosts" into "you have hosts, and here is what else you could plug in".
+ */
+export const INFRA_MIN_ROWS = 4
+
+export interface InfraSubItemSplit {
+	/** What the org has — rendered directly under the section. */
+	readonly shown: NavSubItem[]
+	/**
+	 * Padding up to `INFRA_MIN_ROWS`: sources the org doesn't report yet, offered
+	 * as rows to explore. Rendered after `shown`, muted, so they read as an
+	 * invitation rather than a claim.
+	 */
+	readonly suggested: NavSubItem[]
+	/** Behind the section's reveal — reachable, just not by default. */
+	readonly hidden: NavSubItem[]
+}
+
+/**
+ * Splits Infrastructure's children into what an org has, what it's offered,
+ * and what it isn't shown.
+ *
+ * Five rows is the whole section, and almost nobody runs all five — a Docker
+ * shop scrolls past Kubernetes every time. So the ones reporting telemetry (or
+ * connected, for the two integration pages) render first, and the rest wait
+ * behind the reveal.
+ *
+ * But a section with one row under it looks like a product with one feature.
+ * So the list is padded to `INFRA_MIN_ROWS` with `suggested` rows — the
+ * sources the org doesn't have, in the order they appear in the section, which
+ * runs from the broadest collector targets to the two that need an OAuth
+ * handshake first. Suggestions are still real links: each lands on the page's
+ * own empty state, which is where the install instructions live.
+ *
+ * Two rules keep that from ever costing someone a page:
+ *
+ *  - `present: null` means the probe hasn't answered or has failed. Everything
+ *    shows. A nav that hides rows because a query 500'd is worse than one
+ *    listing a page you don't use.
+ *  - The route you're on always shows, gate or no gate. Otherwise you land on
+ *    /infra/kubernetes/pods and the section has no row for where you are.
+ */
+export function partitionInfraSubItems(
+	subItems: ReadonlyArray<NavSubItem>,
+	present: ReadonlySet<NavSurface> | null,
+	currentPath: string,
+): InfraSubItemSplit {
+	if (present === null) return { shown: [...subItems], suggested: [], hidden: [] }
+
+	const reports = (sub: NavSubItem) => sub.surfaces?.some((surface) => present.has(surface)) ?? false
+	const keep = (sub: NavSubItem): boolean =>
+		isPathActive(currentPath, sub.href) || !sub.surfaces || reports(sub)
+
+	const shown: NavSubItem[] = []
+	const rest: NavSubItem[] = []
+	for (const sub of subItems) (keep(sub) ? shown : rest).push(sub)
+
+	const room = Math.max(0, INFRA_MIN_ROWS - shown.length)
+	return { shown, suggested: rest.slice(0, room), hidden: rest.slice(room) }
 }
 
 /**
@@ -119,7 +226,7 @@ const exploreItem = (flags?: OrganizationFeatureFlags): NavItem => ({
 		// purpose: a caller with no organization context yet hides the row rather
 		// than flashing it (see `navGroups`).
 		...(flags?.agentTracing
-			? [{ title: "Agent Sessions", href: "/agent-sessions", icon: ChatBubbleSparkleIcon }]
+			? [{ title: "Agent Sessions", href: "/agent-sessions", icon: SquareSparkleIcon }]
 			: []),
 	],
 })
@@ -192,10 +299,10 @@ export interface PaletteNavEntry {
 }
 
 /**
- * Flattened nav for ⌘K: every section *and* every child. Collapsing four rows
- * into Explore must not cost a user the ability to type "logs" — the children
- * are the entries that keep muscle memory working, and they were never in the
- * palette before this.
+ * Flattened nav for ⌘K: every section, every child, and every view a child
+ * folds. Collapsing four rows into Explore must not cost a user the ability to
+ * type "logs", and collapsing four Kubernetes rows into one must not cost them
+ * "pods" — the entries here are what keep muscle memory working.
  */
 export function paletteNavItems(flags?: OrganizationFeatureFlags): PaletteNavEntry[] {
 	const entries: PaletteNavEntry[] = []
@@ -217,6 +324,14 @@ export function paletteNavItems(flags?: OrganizationFeatureFlags): PaletteNavEnt
 					href: sub.href,
 					icon: sub.icon ?? item.icon,
 				})
+				for (const view of sub.views ?? []) {
+					push({
+						id: `nav:${item.title}:${sub.title}:${view.title}`,
+						title: `${sub.title} ${view.title}`,
+						href: view.href,
+						icon: sub.icon ?? item.icon,
+					})
+				}
 			}
 		}
 	}

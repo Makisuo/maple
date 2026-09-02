@@ -144,10 +144,13 @@ like a real alert rule, not just a dashboard query.
    missing target and wedges ingest with `Code: 60 UNKNOWN_TABLE`.
 6. Set `requiredForIngest: false` unless the Rust gateway writes the table directly.
    Bumping `clickHouseSchemaVersion` un-readies ingest routing for every BYO-ClickHouse org.
-7. Bump `LOCAL_SCHEMA_VERSION`, retain the snapshot, and add the local-store migration edge —
-   including explicit drops, because `assertPhysicalSchema` fails on leftover objects too.
+7. `bun run local-schema:bump <slug>` to bump `LOCAL_SCHEMA_VERSION`, retain the snapshot,
+   append the history identity, and scaffold the local-store migration edge from the previous
+   one. It writes every mechanical edit — including the pinned literals in the bun test and the
+   native probe — and leaves the edge's `apply` for you. Write the DDL there, including explicit
+   drops, because `assertPhysicalSchema` fails on leftover objects too.
 
-Because step 5–7 are expensive, **batch removals into one migration** rather than shipping
+Because step 5–6 are expensive, **batch removals into one migration** rather than shipping
 them one at a time. Migration `0019_mv_sweep` is the worked example.
 
 ---

@@ -176,19 +176,21 @@ export function CloudflareZoneChart({
 				...series.map((name) => focusDot(data, at, valueOf(name), colorOf(name), chromeColors)),
 				focusCrosshair(chromeColors),
 			],
-			x: {
-				scale: scalePoint,
-				axis: {
-					line: false,
-					ticks: { size: 0, padding: 8 },
-					tickLabels: { thin: { minGap: 12 } },
+			scales: {
+				x: {
+					scale: scalePoint,
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 8 },
+						tickLabels: { thin: { minGap: 12 } },
+					},
 				},
-			},
-			y: {
-				scale: scaleLinear().domain(yDomain),
-				axis: {
-					line: false,
-					ticks: { size: 0, padding: 8, format: (v: number) => formatMetricValue(v, metric) },
+				y: {
+					scale: scaleLinear().domain(yDomain),
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 8, format: (v: number) => formatMetricValue(v, metric) },
+					},
 				},
 			},
 			margin: { top: 12, right: 12, bottom: 4, left: 52 },

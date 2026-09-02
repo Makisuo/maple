@@ -1,0 +1,740 @@
+{
+  "version": 1,
+  "projectId": "maple",
+  "targetRoot": "/Users/makisuo/Documents/GitHub/maple",
+  "phases": {
+    "scaffold": {
+      "status": "complete",
+      "inputDigest": "2135e1f2d009d4037768972bb0241caa638ab1c86d6cd7ab3bfb2db73d965c90",
+      "operationKey": "maple:scaffold:2135e1f2d009",
+      "startedAt": "2026-08-31T17:23:28.710Z",
+      "outputDigest": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+      "completedAt": "2026-08-31T17:23:28.710Z"
+    },
+    "install": {
+      "status": "complete",
+      "inputDigest": "5f2a9cb522cbd44bace0f03afc7c85f420dd2f227e499e0dbb7580905e51ff8b",
+      "operationKey": "maple:install:5f2a9cb522cb",
+      "startedAt": "2026-08-31T17:23:28.711Z",
+      "outputDigest": "2643bea7d5deb566b933a25999377fd2921719b4787154d552678c2fad25cae3",
+      "completedAt": "2026-08-31T17:23:50.853Z"
+    },
+    "login": {
+      "status": "complete",
+      "inputDigest": "b8581afe0aac2fbfbe7164fa976a7f707f5a390c5e975bac1e45985e681c05b8",
+      "operationKey": "maple:login:b8581afe0aac",
+      "startedAt": "2026-08-31T18:11:35.856Z",
+      "outputDigest": "1a25140e2c632500206f39a508b2f6c863dba561f2f6378ade32401189fba5af",
+      "completedAt": "2026-08-31T18:11:35.857Z"
+    },
+    "info": {
+      "status": "complete",
+      "inputDigest": "e38b19068c1f73004a5c425294b3b88883efafec98f34d3d0f6b5af7bee10005",
+      "operationKey": "maple:info:e38b19068c1f",
+      "startedAt": "2026-08-31T18:47:02.544Z",
+      "outputDigest": "400b24fd15def8a6f582d750df8ea1811deb9be4e05e1cbd4e0adf6a9a5b6b6d",
+      "completedAt": "2026-08-31T19:27:11.294Z"
+    },
+    "baseline-scan": {
+      "status": "complete",
+      "inputDigest": "cb9023530e9003b4c4ff33b9393e97b010421626faafd06fe018bbb418abf048",
+      "operationKey": "maple:baseline-scan:cb9023530e90",
+      "startedAt": "2026-08-31T19:28:37.910Z",
+      "outputDigest": "71caaefc60b5485076fe4fbc4e8de986eff0388484c94d157ab97efee0a82195",
+      "completedAt": "2026-08-31T19:29:22.746Z"
+    },
+    "coverage": {
+      "status": "complete",
+      "inputDigest": "681b9b668f58b1d1d00fe8a0dda2bd69269fb9f48434adcc2a7e4cbed4acbb01",
+      "operationKey": "maple:coverage:681b9b668f58",
+      "startedAt": "2026-08-31T19:29:22.865Z",
+      "outputDigest": "b8e842662c8d59481d1aa2b02db2a2574449ba7c180cdb5d3c412756c25dcd35",
+      "completedAt": "2026-08-31T19:29:22.865Z"
+    },
+    "matchers": {
+      "status": "complete",
+      "inputDigest": "511c5fef1aadb41e6b03830103c2636a1cce54aa9f34ceed1496c52b390946fb",
+      "operationKey": "maple:matchers:511c5fef1aad",
+      "startedAt": "2026-08-31T19:29:22.907Z",
+      "outputDigest": "077a6b216a55bf4cb58b9266e5f6812cb214ba2a19847afe48c3f16b128f61e1",
+      "completedAt": "2026-08-31T19:40:00.778Z"
+    },
+    "final-scan": {
+      "status": "complete",
+      "inputDigest": "5988bf04c738637bb5edc9d836655dabde2b4a82ba46e59dd096c51f6da58a33",
+      "operationKey": "maple:final-scan:5988bf04c738",
+      "startedAt": "2026-08-31T19:40:00.780Z",
+      "outputDigest": "033488432b8fef18118856f0222283f55421323287fe6c924f810be23c214361",
+      "completedAt": "2026-08-31T19:40:45.085Z"
+    },
+    "process": {
+      "status": "running",
+      "inputDigest": "4ceae5ce37b008cca8fa914247bd65b46d00dbbdb6889e2e79841fedec261cdd",
+      "operationKey": "maple:process:4ceae5ce37b0",
+      "startedAt": "2026-08-31T19:40:45.172Z"
+    }
+  },
+  "matcherAttempts": [
+    {
+      "proposedSlugs": [
+        "effect-maple-internal-api-group",
+        "cloudflare-worker-queue-dispatch",
+        "cloudflare-durable-workflow-entrypoint",
+        "maple-otlp-axum-routes",
+        "maple-otlp-tonic-services",
+        "electric-sync-worker-entry",
+        "eve-mcp-approval-policy",
+        "eve-disabled-framework-tool"
+      ],
+      "proposedSpecs": [
+        {
+          "version": 1,
+          "slug": "effect-maple-internal-api-group",
+          "description": "Detects Effect HttpApi handler groups registered specifically against MapleInternalApi.",
+          "noiseTier": "precise",
+          "filePatterns": [
+            "apps/api/src/routes/internal/*.http.ts"
+          ],
+          "patterns": [
+            {
+              "source": "^export const Http[A-Za-z0-9]+Live\\s*=\\s*HttpApiBuilder\\.group\\(\\s*MapleInternalApi\\s*,",
+              "flags": "m",
+              "label": "Maple internal Effect HttpApi group registration"
+            }
+          ],
+          "examples": [
+            "export const HttpAiTriageLive = HttpApiBuilder.group(MapleInternalApi, \"aiTriage\", (handlers) =>",
+            "export const HttpAiSessionsInternalLive = HttpApiBuilder.group(\n  MapleInternalApi,\n  \"aiSessionsInternal\","
+          ],
+          "closesSurfaceIds": [
+            "dashboard-internal-http"
+          ]
+        },
+        {
+          "version": 1,
+          "slug": "cloudflare-worker-queue-dispatch",
+          "description": "Detects the API Worker's Cloudflare queue entrypoint and its binding-name dispatch primitive.",
+          "noiseTier": "precise",
+          "filePatterns": [
+            "apps/api/src/worker.ts",
+            "apps/api/src/queue-dispatch.ts"
+          ],
+          "patterns": [
+            {
+              "source": "^export const classifyWorkerQueue = \\(queueName: string, env: Record<string, unknown>\\): WorkerQueueKind => \\{$",
+              "flags": "m",
+              "label": "Cloudflare queue binding classifier"
+            },
+            {
+              "source": "^\\s*override queue\\(batch: MessageBatch<unknown>\\): Promise<void> \\{$",
+              "flags": "m",
+              "label": "Cloudflare Worker queue entrypoint"
+            }
+          ],
+          "examples": [
+            "export const classifyWorkerQueue = (queueName: string, env: Record<string, unknown>): WorkerQueueKind => {",
+            "  override queue(batch: MessageBatch<unknown>): Promise<void> {"
+          ],
+          "closesSurfaceIds": [
+            "api-queue-consumers"
+          ]
+        },
+        {
+          "version": 1,
+          "slug": "cloudflare-durable-workflow-entrypoint",
+          "description": "Detects concrete Cloudflare WorkflowEntrypoint subclasses exported as durable workflow handlers.",
+          "noiseTier": "precise",
+          "filePatterns": [
+            "apps/api/src/workflows/*Workflow.ts"
+          ],
+          "patterns": [
+            {
+              "source": "^export class [A-Za-z][A-Za-z0-9]*Workflow extends WorkflowEntrypoint<$",
+              "flags": "m",
+              "label": "Cloudflare durable workflow entrypoint"
+            }
+          ],
+          "examples": [
+            "export class ClickHouseSchemaApplyWorkflow extends WorkflowEntrypoint<",
+            "export class InvestigationFanoutWorkflow extends WorkflowEntrypoint<"
+          ],
+          "closesSurfaceIds": [
+            "cloudflare-workflows"
+          ]
+        },
+        {
+          "version": 1,
+          "slug": "maple-otlp-axum-routes",
+          "description": "Detects Maple ingest HTTP endpoints at their concrete Axum Router registrations.",
+          "noiseTier": "precise",
+          "filePatterns": [
+            "apps/ingest/src/main.rs"
+          ],
+          "patterns": [
+            {
+              "source": "^\\s*\\.route\\(\"/(?:health|ready)\", get\\((?:health|ready)\\)\\)$",
+              "flags": "m",
+              "label": "Axum ingest health registration"
+            },
+            {
+              "source": "^\\s*\\.route\\(\"/v1/(?:traces|logs|metrics)\", post\\(handle_(?:traces|logs|metrics)\\)\\)$",
+              "flags": "m",
+              "label": "Axum OTLP HTTP registration"
+            },
+            {
+              "source": "^\\s*\\.route\\(\"/v1/sessionReplays/(?:meta|blob)\", post\\(handle_replay_(?:meta|blob)\\)\\)$",
+              "flags": "m",
+              "label": "Axum session replay registration"
+            },
+            {
+              "source": "^\\s*\\.route\\(\"/v1/(?:sessionEvents|events)\", post\\(handle_(?:session_events|product_events)\\)\\)$",
+              "flags": "m",
+              "label": "Axum product or session event registration"
+            },
+            {
+              "source": "^\\s*\\.route\\(\\s*\\n\\s*\"/v1/logpush/cloudflare/http_requests/\\{connector_id\\}\",\\s*\\n\\s*post\\(handle_cloudflare_logpush_http_requests\\),\\s*\\n\\s*\\)$",
+              "flags": "m",
+              "label": "Axum Cloudflare Logpush registration"
+            }
+          ],
+          "examples": [
+            "        .route(\"/health\", get(health))",
+            "        .route(\"/v1/traces\", post(handle_traces))",
+            "        .route(\"/v1/sessionReplays/blob\", post(handle_replay_blob))",
+            "        .route(\"/v1/events\", post(handle_product_events))",
+            "        .route(\n            \"/v1/logpush/cloudflare/http_requests/{connector_id}\",\n            post(handle_cloudflare_logpush_http_requests),\n        )"
+          ],
+          "closesSurfaceIds": [
+            "ingest-http"
+          ]
+        },
+        {
+          "version": 1,
+          "slug": "maple-otlp-tonic-services",
+          "description": "Detects OTLP trace, log, and metric services at their concrete Tonic server registrations.",
+          "noiseTier": "precise",
+          "filePatterns": [
+            "apps/ingest/src/main.rs"
+          ],
+          "patterns": [
+            {
+              "source": "^\\s*\\.add_service\\((?:TraceServiceServer::new\\(GrpcTraceService|LogsServiceServer::new\\(GrpcLogsService|MetricsServiceServer::new\\(GrpcMetricsService)\\b",
+              "flags": "m",
+              "label": "Tonic OTLP service registration"
+            }
+          ],
+          "examples": [
+            "        .add_service(TraceServiceServer::new(GrpcTraceService {",
+            "        .add_service(LogsServiceServer::new(GrpcLogsService {",
+            "        .add_service(MetricsServiceServer::new(GrpcMetricsService { state }));"
+          ],
+          "closesSurfaceIds": [
+            "ingest-otlp-grpc"
+          ]
+        },
+        {
+          "version": 1,
+          "slug": "electric-sync-worker-entry",
+          "description": "Detects the Electric synchronization router's Effect web-handler construction and Cloudflare fetch export.",
+          "noiseTier": "precise",
+          "filePatterns": [
+            "apps/electric-sync/src/worker.ts"
+          ],
+          "patterns": [
+            {
+              "source": "^\\s*return HttpRouter\\.toWebHandler\\($",
+              "flags": "m",
+              "label": "Effect router web-handler registration"
+            },
+            {
+              "source": "^export default \\{\\s*fetch: \\(request: Request, env: Record<string, unknown>, ctx: ExecutionContext\\) =>\\s*handle\\(request, env, ctx\\),\\s*\\}$",
+              "flags": "m",
+              "label": "Electric sync Cloudflare fetch entrypoint"
+            }
+          ],
+          "examples": [
+            "  return HttpRouter.toWebHandler(",
+            "export default {\n  fetch: (request: Request, env: Record<string, unknown>, ctx: ExecutionContext) =>\n    handle(request, env, ctx),\n}"
+          ],
+          "closesSurfaceIds": [
+            "electric-shape-proxy"
+          ]
+        },
+        {
+          "version": 1,
+          "slug": "eve-mcp-approval-policy",
+          "description": "Detects the Slack agent's Eve MCP approval callback and its registration on the Maple connection.",
+          "noiseTier": "precise",
+          "filePatterns": [
+            "apps/slack-agent/agent/connections/maple.ts",
+            "apps/slack-agent/agent/lib/approval.ts"
+          ],
+          "patterns": [
+            {
+              "source": "^export function mapleToolApproval\\(ctx: ApprovalContext\\): ApprovalStatus \\{$",
+              "flags": "m",
+              "label": "Eve MCP approval callback"
+            },
+            {
+              "source": "^\\s*approval: mapleToolApproval,$",
+              "flags": "m",
+              "label": "Eve MCP connection approval hook registration"
+            }
+          ],
+          "examples": [
+            "export function mapleToolApproval(ctx: ApprovalContext): ApprovalStatus {",
+            "  approval: mapleToolApproval,"
+          ],
+          "closesSurfaceIds": [
+            "slack-agent-tools"
+          ]
+        },
+        {
+          "version": 1,
+          "slug": "eve-disabled-framework-tool",
+          "description": "Detects Eve framework tools explicitly registered as disabled at the Slack agent tool boundary.",
+          "noiseTier": "precise",
+          "filePatterns": [
+            "apps/slack-agent/agent/tools/*.ts"
+          ],
+          "patterns": [
+            {
+              "source": "^export default disableTool\\(\\)$",
+              "flags": "m",
+              "label": "Disabled Eve framework tool registration"
+            }
+          ],
+          "excludeFilePatterns": [
+            "**/*.test.ts",
+            "**/*.spec.ts"
+          ],
+          "examples": [
+            "export default disableTool()"
+          ],
+          "closesSurfaceIds": [
+            "slack-agent-tools"
+          ]
+        }
+      ],
+      "acceptedSlugs": [
+        "effect-maple-internal-api-group",
+        "cloudflare-worker-queue-dispatch",
+        "cloudflare-durable-workflow-entrypoint",
+        "maple-otlp-axum-routes",
+        "maple-otlp-tonic-services",
+        "electric-sync-worker-entry",
+        "eve-mcp-approval-policy",
+        "eve-disabled-framework-tool"
+      ],
+      "rejected": [],
+      "outcome": "rescanned",
+      "scanRunId": "20260831194000-cc99ff319c579687"
+    }
+  ],
+  "agent": {
+    "type": "codex",
+    "model": "gpt-5.6-sol"
+  },
+  "updatedAt": "2026-08-31T19:40:45.172Z",
+  "setupLogPath": "data/maple/setup/setup-20260831184633-47045.jsonl",
+  "connection": {
+    "route": {
+      "mode": "local",
+      "provider": "local"
+    },
+    "agentTypes": [
+      "codex"
+    ],
+    "modelVerifiedAt": "2026-08-31T18:46:34.240Z"
+  },
+  "sourceFingerprint": "6d0e3474dce31422bcafa2f421d99ac891ba2627c71864a9fefae092885e2279",
+  "infoDigest": "bbc302b19d18506d13dab4d9a4ade8f3f15a401eb0e5af93e4f4173ba449f814",
+  "inventoryDigest": "4abcee670fd2818a23ab558f0a2c6a185eb28159444a58cb26eadf3ede02f196",
+  "currentPhase": "process",
+  "baselineScanRunId": "20260831192837-ffb9d642d549b85e",
+  "baselineScanSummary": {
+    "runId": "20260831192837-ffb9d642d549b85e",
+    "languageStats": [
+      {
+        "language": "typescript",
+        "scannedFiles": 2729,
+        "candidates": 1567,
+        "matchRate": 0.5742030047636497
+      },
+      {
+        "language": "javascript",
+        "scannedFiles": 18,
+        "candidates": 9,
+        "matchRate": 0.5
+      },
+      {
+        "language": "python",
+        "scannedFiles": 1,
+        "candidates": 0,
+        "matchRate": 0
+      },
+      {
+        "language": "go",
+        "scannedFiles": 18,
+        "candidates": 0,
+        "matchRate": 0
+      },
+      {
+        "language": "rust",
+        "scannedFiles": 18,
+        "candidates": 0,
+        "matchRate": 0
+      }
+    ]
+  },
+  "finalScanRunId": "20260831194000-cc99ff319c579687",
+  "finalScanSummary": {
+    "runId": "20260831194000-cc99ff319c579687",
+    "languageStats": [
+      {
+        "language": "typescript",
+        "scannedFiles": 2729,
+        "candidates": 1577,
+        "matchRate": 0.577867350677904
+      },
+      {
+        "language": "javascript",
+        "scannedFiles": 18,
+        "candidates": 9,
+        "matchRate": 0.5
+      },
+      {
+        "language": "python",
+        "scannedFiles": 1,
+        "candidates": 0,
+        "matchRate": 0
+      },
+      {
+        "language": "go",
+        "scannedFiles": 18,
+        "candidates": 0,
+        "matchRate": 0
+      },
+      {
+        "language": "rust",
+        "scannedFiles": 18,
+        "candidates": 1,
+        "matchRate": 0.05555555555555555
+      }
+    ]
+  },
+  "matcherDigest": "40cb1f305876eb442cbe7fc7213f7d136064e2d637a097038a265f08c2c86317",
+  "coverageReport": {
+    "policyVersion": 1,
+    "passed": true,
+    "sourceFileCount": 106519,
+    "candidateFileCount": 1625,
+    "surfaces": [
+      {
+        "id": "api-v1-http",
+        "kind": "http",
+        "exposure": "mixed",
+        "fileCount": 57,
+        "coveredFileCount": 37,
+        "fileCoverageRatio": 0.6491228070175439,
+        "representativeFileCount": 3,
+        "coveredRepresentativeFileCount": 3,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [
+          "apps/api/src/routes/v1/billing-public.http.ts",
+          "apps/api/src/routes/v1/errors.http.ts",
+          "apps/api/src/routes/v1/org-clickhouse-settings.http.ts",
+          "apps/api/src/routes/v1/organizations.http.ts",
+          "packages/domain/src/http/anomalies.ts"
+        ],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "api-v2-http",
+        "kind": "http",
+        "exposure": "mixed",
+        "fileCount": 58,
+        "coveredFileCount": 46,
+        "fileCoverageRatio": 0.7931034482758621,
+        "representativeFileCount": 2,
+        "coveredRepresentativeFileCount": 2,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [
+          "apps/api/src/routes/v2/alert-incidents.http.ts",
+          "apps/api/src/routes/v2/anomalies.http.ts",
+          "apps/api/src/routes/v2/error-issues.http.ts",
+          "apps/api/src/routes/v2/ingest-keys.http.ts",
+          "apps/api/src/routes/v2/organization.http.ts"
+        ],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "dashboard-internal-http",
+        "kind": "http",
+        "exposure": "authenticated",
+        "fileCount": 9,
+        "coveredFileCount": 9,
+        "fileCoverageRatio": 1,
+        "representativeFileCount": 2,
+        "coveredRepresentativeFileCount": 2,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "scraper-service-http",
+        "kind": "http",
+        "exposure": "internal",
+        "fileCount": 3,
+        "coveredFileCount": 3,
+        "fileCoverageRatio": 1,
+        "representativeFileCount": 2,
+        "coveredRepresentativeFileCount": 2,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "slack-integration-http",
+        "kind": "http",
+        "exposure": "mixed",
+        "fileCount": 2,
+        "coveredFileCount": 2,
+        "fileCoverageRatio": 1,
+        "representativeFileCount": 1,
+        "coveredRepresentativeFileCount": 1,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "api-webhooks",
+        "kind": "webhook",
+        "exposure": "public",
+        "fileCount": 5,
+        "coveredFileCount": 5,
+        "fileCoverageRatio": 1,
+        "representativeFileCount": 3,
+        "coveredRepresentativeFileCount": 3,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "api-mcp-agent-tools",
+        "kind": "agent-tool",
+        "exposure": "authenticated",
+        "fileCount": 8,
+        "coveredFileCount": 7,
+        "fileCoverageRatio": 0.875,
+        "representativeFileCount": 3,
+        "coveredRepresentativeFileCount": 3,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [
+          "apps/api/src/mcp/tools/mutating.ts"
+        ],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "cloudflare-rpc-and-durable-objects",
+        "kind": "rpc",
+        "exposure": "internal",
+        "fileCount": 5,
+        "coveredFileCount": 5,
+        "fileCoverageRatio": 1,
+        "representativeFileCount": 3,
+        "coveredRepresentativeFileCount": 3,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "api-queue-consumers",
+        "kind": "queue",
+        "exposure": "internal",
+        "fileCount": 7,
+        "coveredFileCount": 7,
+        "fileCoverageRatio": 1,
+        "representativeFileCount": 3,
+        "coveredRepresentativeFileCount": 3,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "api-cron-jobs",
+        "kind": "cron",
+        "exposure": "internal",
+        "fileCount": 6,
+        "coveredFileCount": 6,
+        "fileCoverageRatio": 1,
+        "representativeFileCount": 3,
+        "coveredRepresentativeFileCount": 3,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "alerting-cron-worker",
+        "kind": "cron",
+        "exposure": "internal",
+        "fileCount": 1,
+        "coveredFileCount": 1,
+        "fileCoverageRatio": 1,
+        "representativeFileCount": 1,
+        "coveredRepresentativeFileCount": 1,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "cloudflare-workflows",
+        "kind": "other",
+        "exposure": "internal",
+        "fileCount": 4,
+        "coveredFileCount": 4,
+        "fileCoverageRatio": 1,
+        "representativeFileCount": 2,
+        "coveredRepresentativeFileCount": 2,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "ingest-http",
+        "kind": "http",
+        "exposure": "mixed",
+        "fileCount": 1,
+        "coveredFileCount": 1,
+        "fileCoverageRatio": 1,
+        "representativeFileCount": 1,
+        "coveredRepresentativeFileCount": 1,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "ingest-otlp-grpc",
+        "kind": "rpc",
+        "exposure": "authenticated",
+        "fileCount": 1,
+        "coveredFileCount": 1,
+        "fileCoverageRatio": 1,
+        "representativeFileCount": 1,
+        "coveredRepresentativeFileCount": 1,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "electric-shape-proxy",
+        "kind": "http",
+        "exposure": "authenticated",
+        "fileCount": 5,
+        "coveredFileCount": 4,
+        "fileCoverageRatio": 0.8,
+        "representativeFileCount": 2,
+        "coveredRepresentativeFileCount": 2,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [
+          "apps/electric-sync/src/auth/TenantResolver.ts"
+        ],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "maple-cli",
+        "kind": "cli",
+        "exposure": "internal",
+        "fileCount": 18,
+        "coveredFileCount": 16,
+        "fileCoverageRatio": 0.8888888888888888,
+        "representativeFileCount": 2,
+        "coveredRepresentativeFileCount": 2,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [
+          "apps/cli/src/commands/server-args.ts",
+          "apps/cli/src/commands/server-errors.ts"
+        ],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "local-query-and-otlp-server",
+        "kind": "http",
+        "exposure": "internal",
+        "fileCount": 3,
+        "coveredFileCount": 3,
+        "fileCoverageRatio": 1,
+        "representativeFileCount": 1,
+        "coveredRepresentativeFileCount": 1,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "prometheus-scraper-job",
+        "kind": "cron",
+        "exposure": "mixed",
+        "fileCount": 5,
+        "coveredFileCount": 3,
+        "fileCoverageRatio": 0.6,
+        "representativeFileCount": 2,
+        "coveredRepresentativeFileCount": 2,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [
+          "apps/scraper/src/ApiClient.ts",
+          "apps/scraper/src/OtlpIngest.ts"
+        ],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "slack-agent-webhook",
+        "kind": "webhook",
+        "exposure": "mixed",
+        "fileCount": 4,
+        "coveredFileCount": 4,
+        "fileCoverageRatio": 1,
+        "representativeFileCount": 3,
+        "coveredRepresentativeFileCount": 3,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [],
+        "passed": true,
+        "reasons": []
+      },
+      {
+        "id": "slack-agent-tools",
+        "kind": "agent-tool",
+        "exposure": "authenticated",
+        "fileCount": 12,
+        "coveredFileCount": 12,
+        "fileCoverageRatio": 1,
+        "representativeFileCount": 2,
+        "coveredRepresentativeFileCount": 2,
+        "representativeCoverageRatio": 1,
+        "uncoveredExamples": [],
+        "passed": true,
+        "reasons": []
+      }
+    ],
+    "languageWarnings": [],
+    "explosionWarnings": [],
+    "reasons": []
+  }
+}

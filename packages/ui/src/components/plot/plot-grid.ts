@@ -10,7 +10,7 @@ import type { ChartMark, ChartTick, SceneRule } from "@tanstack/charts"
 const GRID_DASHARRAY = "3 3"
 
 /**
- * The library's own grid paint (`dist/scene.js:670-676`), kept verbatim so
+ * The library's own grid paint (`dist/scene.js:815-823` at 0.16.0), kept verbatim so
  * swapping the built-in grid for this mark changes the dash and nothing else.
  */
 const GRID_STROKE_OPACITY = 0.11

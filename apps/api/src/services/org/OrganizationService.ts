@@ -15,8 +15,10 @@ import {
 	alertRuleStates,
 	alertRules,
 	apiKeys,
+	cliDeviceAuthorizations,
 	cloudflareLogpushConnectors,
 	dashboards,
+	dashboardShares,
 	dashboardVersions,
 	digestSubscriptions,
 	errorIncidents,
@@ -24,10 +26,15 @@ import {
 	errorIssueStates,
 	errorIssues,
 	errorNotificationPolicies,
+	liveActivities,
+	mcpOAuthAuthorizations,
+	mcpOAuthRefreshTokens,
+	mobileDevices,
 	oauthAuthStates,
 	oauthConnections,
 	orgClickHouseSettings,
 	orgIngestKeys,
+	planetscaleConnections,
 	scrapeTargets,
 	slackWorkspaces,
 	vcsCommits,
@@ -85,7 +92,77 @@ const ORG_SCOPED_TABLES = [
 	vcsInstallations,
 	vcsRepositories,
 	vcsCommits,
+	// Credentials that outlive the org unless they are purged here. `api_keys`
+	// alone was not enough: an MCP grant's refresh family re-mints its key
+	// hourly, so a deleted org's MCP client kept working for up to 30 days.
+	mcpOAuthRefreshTokens,
+	mobileDevices,
+	// A share link is a public bearer credential: `resolveByToken` matches the
+	// token hash and `revoked_at is null` and nothing else, then queries the
+	// warehouse as the org. It only went dead on deletion by accident of a
+	// downstream `dashboards` lookup, which is not a guarantee.
+	dashboardShares,
+	// Holds the encrypted per-connection webhook HMAC secret — standing
+	// authority to have inbound writes attributed to an org that is gone.
+	planetscaleConnections,
+	// APNs update tokens for running Live Activities. `mobile_devices` is purged
+	// here already; leaving these behind keeps a live push channel open.
+	liveActivities,
 ] as const
+
+/**
+ * Same purge, different column: these two record an *approval* rather than
+ * ownership, so the org they belong to is `approved_org_id`.
+ */
+const APPROVED_ORG_SCOPED_TABLES = [mcpOAuthAuthorizations, cliDeviceAuthorizations] as const
+
+/**
+ * Org-scoped tables deliberately left behind by `delete`. Every table with an
+ * `org_id` must appear in exactly one of these three lists — the registry test
+ * in `OrganizationService.org-scoped-tables.test.ts` fails on a new one that
+ * appears in none, so "we forgot to register it" cannot happen silently again.
+ *
+ * Every name below has been read against its schema: none holds a token, hash,
+ * ciphertext or other secret, and none is resolved by anything to grant access.
+ * They are analytics, settings and history — retained data, which is a
+ * retention question and a defensible follow-up, not a live-credential gap.
+ * The three that failed that read (`dashboardShares`, `planetscaleConnections`,
+ * `liveActivities`) were moved into the purge above rather than excused here.
+ */
+export const UNPURGED_ORG_SCOPED_TABLES = [
+	"aiTriageSettings",
+	"alertRuleClaims",
+	"anomalyDetectorSettings",
+	"anomalyDetectorStates",
+	"anomalyIncidents",
+	"cloudflareAnalyticsState",
+	"cloudflareHyperdriveConfigs",
+	"errorFingerprintCandidates",
+	"errorIssuePullRequests",
+	"errorIssueVerifications",
+	"errorNotificationDeliveries",
+	"errorTickStates",
+	"investigationLensRuns",
+	"investigations",
+	"issueEscalationPolicies",
+	"issueEscalations",
+	"orgClickHouseSchemaApplyRuns",
+	"orgIngestAttributeMappings",
+	"orgIngestSamplingPolicies",
+	"orgOnboardingState",
+	"orgRecommendationIssues",
+	"planetscaleDatabases",
+	"planetscaleEvents",
+	"planetscalePollState",
+	"scrapeTargetChecks",
+	"vcsRepositoryBranches",
+] as const
+
+export const ORG_DELETE_REGISTRY = {
+	orgScoped: ORG_SCOPED_TABLES,
+	approvedOrgScoped: APPROVED_ORG_SCOPED_TABLES,
+	unpurged: UNPURGED_ORG_SCOPED_TABLES,
+} as const
 
 /** Read model for the org identity — sourced from Clerk when available. */
 export interface OrganizationInfo {
@@ -141,6 +218,14 @@ export class OrganizationService extends Context.Service<OrganizationService, Or
 					(table) =>
 						database
 							.execute((db) => db.delete(table).where(eq(table.orgId, orgId)))
+							.pipe(Effect.mapError(toPersistenceError)),
+					{ discard: true },
+				)
+				yield* Effect.forEach(
+					APPROVED_ORG_SCOPED_TABLES,
+					(table) =>
+						database
+							.execute((db) => db.delete(table).where(eq(table.approvedOrgId, orgId)))
 							.pipe(Effect.mapError(toPersistenceError)),
 					{ discard: true },
 				)

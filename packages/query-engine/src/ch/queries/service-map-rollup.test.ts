@@ -3,6 +3,7 @@ import { Effect } from "effect"
 import {
 	serviceMapEdgesExistingHoursSQL,
 	serviceMapEdgesRollupSQL,
+	serviceMapResolutionsExistingHoursSQL,
 	serviceMapResolutionsRollupSQL,
 } from "./service-map-rollup"
 
@@ -95,5 +96,35 @@ describe("service-map rollup compiled row schemas", () => {
 					},
 				])
 			}),
+	)
+})
+
+describe("service-map rollup routing", () => {
+	const windowParams = {
+		orgId: "org_1",
+		startTime: "2024-01-01 00:00:00",
+		endTime: "2024-01-02 00:00:00",
+	}
+
+	it.effect("pins both seal probes to the ingest backend the rollup writes", () =>
+		Effect.gen(function* () {
+			// The rollup ingests into Tinybird unconditionally. A probe resolved as
+			// an ordinary read hits a BYO org's own (never-written) ClickHouse table,
+			// judges every hour missing, and re-ingests the same additive edge rows
+			// into Tinybird every tick — permanent double counting.
+			const edges = yield* serviceMapEdgesExistingHoursSQL(windowParams)
+			const resolutions = yield* serviceMapResolutionsExistingHoursSQL(windowParams)
+			expect(edges.route).toBe("ingest")
+			expect(resolutions.route).toBe("ingest")
+		}),
+	)
+
+	it.effect("leaves the compute rollups on the org backend where raw spans live", () =>
+		Effect.gen(function* () {
+			const edges = yield* serviceMapEdgesRollupSQL(hourParams)
+			const resolutions = yield* serviceMapResolutionsRollupSQL(hourParams)
+			expect(edges.route).toBeUndefined()
+			expect(resolutions.route).toBeUndefined()
+		}),
 	)
 })

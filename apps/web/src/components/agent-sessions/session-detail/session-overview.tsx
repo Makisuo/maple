@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react"
 
-import { ArrowRightIcon, ChevronRightIcon } from "@/components/icons"
+import { ArrowRightIcon, ChevronRightIcon, CircleXmarkIcon } from "@/components/icons"
 import { Button } from "@maple/ui/components/ui/button"
 import { formatNumber, formatPercent } from "@maple/ui/lib/format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
@@ -59,6 +59,7 @@ export function SessionOverview({
 	onSpanTabChange,
 	toolResults,
 	onOpenTraceView,
+	onOpenTurnInTraceView,
 }: {
 	turns: readonly SessionTurn[]
 	summary: SessionSummary
@@ -73,6 +74,8 @@ export function SessionOverview({
 	toolResults?: SessionToolResults
 	/** The popover's "Open in Traces view": same span, sibling view. */
 	onOpenTraceView: () => void
+	/** A session-shape cell: cross to Traces and land on that whole turn. */
+	onOpenTurnInTraceView: (turnId: string) => void
 }) {
 	const report = useMemo(() => buildSessionFindings(turns, summary), [turns, summary])
 	const spansById = useMemo(
@@ -97,7 +100,7 @@ export function SessionOverview({
 						turns={turns}
 						health={report.turnHealth}
 						summary={summary}
-						onOpenSpan={openSpan}
+						onOpenTurn={onOpenTurnInTraceView}
 					/>
 					<TimeComposition summary={summary} turns={turns} />
 				</div>
@@ -291,12 +294,14 @@ function TurnHealthStrip({
 	turns,
 	health,
 	summary,
-	onOpenSpan,
+	onOpenTurn,
 }: {
 	turns: readonly SessionTurn[]
 	health: readonly TurnHealth[]
 	summary: SessionSummary
-	onOpenSpan: OpenSpan
+	/** A cell is a whole turn, so it opens the turn in Traces rather than one
+	 *  span in the overlay: the reader asking about turn 7 wants what it did. */
+	onOpenTurn: (turnId: string) => void
 }) {
 	// "with errors", not "failed": a red cell marks a turn something went wrong
 	// INSIDE — the turn itself may have closed cleanly, and calling it failed
@@ -326,11 +331,10 @@ function TurnHealthStrip({
 					<button
 						key={turn.id}
 						type="button"
-						aria-haspopup="dialog"
-						onClick={() => onOpenSpan(turn.anchor.spanId)}
-						title={`${turnOrdinal(turn)}${turn.label === undefined ? "" : ` — ${turn.label}`}`}
+						onClick={() => onOpenTurn(turn.id)}
+						title={`${turnOrdinal(turn)}${turn.label === undefined ? "" : ` — ${turn.label}`} — open in Traces`}
 						className={cn(
-							"flex size-8 items-center justify-center rounded-sm border font-mono text-[11px] tabular-nums",
+							"flex size-8 cursor-pointer items-center justify-center rounded-sm border font-mono text-[11px] tabular-nums",
 							HEALTH_CELL[health[index] ?? "clean"],
 						)}
 					>
@@ -586,11 +590,39 @@ function ToolUsageRow({ tool, topToolCalls }: { tool: SessionToolUsage; topToolC
 					{tool.name}
 				</span>
 			</span>
-			<span className="h-1 min-w-0 flex-1 overflow-hidden rounded-xs bg-muted">
-				<span
-					className="block h-full bg-chart-4"
-					style={{ width: `${sharePercent(tool.calls, topToolCalls)}%` }}
-				/>
+			{/* One bar, two parts: the length is how often the tool was reached
+			    for, the red head how much of that failed. A tool called twenty
+			    times and failing every time reads nothing like one that never
+			    failed, and the bar is where that difference belongs. */}
+			<span
+				className="h-1 min-w-0 flex-1 overflow-hidden rounded-xs bg-muted"
+				title={`${tool.calls - tool.failed} ok · ${tool.failed} errored`}
+			>
+				<span className="flex h-full" style={{ width: `${sharePercent(tool.calls, topToolCalls)}%` }}>
+					<span
+						className="h-full bg-chart-4"
+						style={{ width: `${sharePercent(tool.calls - tool.failed, tool.calls)}%` }}
+					/>
+					<span
+						className="h-full bg-destructive"
+						style={{ width: `${sharePercent(tool.failed, tool.calls)}%` }}
+					/>
+				</span>
+			</span>
+			{/* A fixed slot, empty on a tool that never failed: a count only some
+			    rows carry would shorten their bars, and bar lengths across the
+			    rail are the whole reason the bars are there. */}
+			<span
+				className="flex w-8 shrink-0 items-center justify-end gap-0.5 font-mono text-destructive text-[11px] tabular-nums"
+				title={tool.failed > 0 ? `${tool.failed} failed` : undefined}
+			>
+				{tool.failed > 0 && (
+					<>
+						<CircleXmarkIcon aria-hidden size={10} className="shrink-0" />
+						{tool.failed}
+						<span className="sr-only"> failed</span>
+					</>
+				)}
 			</span>
 			<span className="w-6 shrink-0 text-right font-mono text-muted-foreground text-xs tabular-nums">
 				{tool.calls}

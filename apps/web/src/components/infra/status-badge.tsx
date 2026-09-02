@@ -17,11 +17,22 @@ interface HostStatusBadgeProps {
 	 * badges reflect data freshness at fetch time — not the user's idle clock.
 	 */
 	referenceTime?: string | number
+	/**
+	 * Render nothing while the resource is active.
+	 *
+	 * For a badge sitting INLINE beside a name, "Active" on every row is not a
+	 * status, it is wallpaper — the Last seen column already carries freshness.
+	 * Quiet mode turns it back into what a badge is for: the exception. A badge
+	 * filling a dedicated Status COLUMN stays loud, because a column with a
+	 * header needs a value in every cell.
+	 */
+	quiet?: boolean
 	className?: string
 }
 
-export function HostStatusBadge({ lastSeen, referenceTime, className }: HostStatusBadgeProps) {
+export function HostStatusBadge({ lastSeen, referenceTime, quiet, className }: HostStatusBadgeProps) {
 	const status = deriveHostStatus(lastSeen, referenceTime ?? Date.now())
+	if (quiet && status === "active") return null
 	return (
 		<span
 			className={cn(

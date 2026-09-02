@@ -4,7 +4,10 @@ import { Separator } from "@maple/ui/components/ui/separator"
 import { Toggle } from "@maple/ui/components/ui/toggle"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 
+import { LabDials } from "@/lab/dials"
+
 import { healthColor, nodeColor, type ColorMode3D } from "./color"
+import { useServiceMap3DTuning } from "./dials"
 import { SERVICE_MAP_3D_TOPOLOGY } from "./fixture"
 import { computeTiers, type Layout3DMode } from "./layout"
 import { ServiceMap3D } from "./scene"
@@ -22,7 +25,8 @@ import { ServiceMap3D } from "./scene"
 const formatRate = (value: number): string =>
 	value >= 100 ? `${Math.round(value)}/s` : `${value.toFixed(1)}/s`
 
-const formatMs = (value: number): string => (value >= 100 ? `${Math.round(value)}ms` : `${value.toFixed(1)}ms`)
+const formatMs = (value: number): string =>
+	value >= 100 ? `${Math.round(value)}ms` : `${value.toFixed(1)}ms`
 
 const formatPct = (value: number): string => `${(value * 100).toFixed(value < 0.01 ? 2 : 1)}%`
 
@@ -33,6 +37,9 @@ export function ServiceMap3DLab() {
 	const [autoRotate, setAutoRotate] = useState(false)
 	const [selectedId, setSelectedId] = useState<string | null>(null)
 	const [hoveredId, setHoveredId] = useState<string | null>(null)
+	// Storey spacing, lens and traffic speed: the numbers this experiment exists
+	// to argue about, so they live on a dial rather than in a rebuild.
+	const tuning = useServiceMap3DTuning()
 
 	const topology = SERVICE_MAP_3D_TOPOLOGY
 	const tiers = useMemo(() => computeTiers(topology.nodes, topology.edges), [topology])
@@ -115,6 +122,8 @@ export function ServiceMap3DLab() {
 							</span>
 						</div>
 
+						<LabDials theme="dark" />
+
 						<div className="relative min-h-0 flex-1">
 							<ServiceMap3D
 								topology={topology}
@@ -122,6 +131,7 @@ export function ServiceMap3DLab() {
 								colorMode={colorMode}
 								flowing={flowing}
 								autoRotate={autoRotate}
+								tuning={tuning}
 								selectedId={selectedId}
 								onSelect={setSelectedId}
 								onHover={setHoveredId}
@@ -154,8 +164,8 @@ export function ServiceMap3DLab() {
 											{active.system ? ` · ${active.system}` : ""}
 										</div>
 										<div>
-											{activeEdges.upstream.length} inbound · {activeEdges.downstream.length}{" "}
-											outbound
+											{activeEdges.upstream.length} inbound ·{" "}
+											{activeEdges.downstream.length} outbound
 										</div>
 									</div>
 									{activeEdges.downstream.length > 0 && (

@@ -675,6 +675,14 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 
 		return {
 			serviceUrl: service.url,
+			// Shared with `apps/electric`, which runs in THIS VPC rather than one of
+			// its own. Two `AWS.EC2.Network`s in one stack fight over the internet
+			// gateway: under `--adopt` the second one's IGW resolves to this one's
+			// and tries to detach it, which AWS refuses because these tasks hold
+			// public IPs ("DependencyViolation: … has some mapped public
+			// address(es)"). The two want the same network anyway — public subnets,
+			// public IPs, no NAT.
+			network,
 			// `http://otel-collector.<namespace>:4318` — resolvable only inside the
 			// VPC; surfaced so a preview's logs say where the gateway is pointing.
 			collectorEndpoint,

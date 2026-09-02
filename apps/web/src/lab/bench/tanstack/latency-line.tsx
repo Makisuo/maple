@@ -97,25 +97,27 @@ export const TanstackLatencyLineChart = memo(function TanstackLatencyLineChart({
 				),
 				focusCrosshair(chromeColors),
 			],
-			x: {
-				scale: scalePoint,
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 8,
-						spacing: 72,
-						format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+			scales: {
+				x: {
+					scale: scalePoint,
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 8,
+							spacing: 72,
+							format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+						},
 					},
 				},
-			},
-			y: {
-				scale: scaleLinear().domain([0, dataMax]),
-				nice: true,
-				grid: true,
-				axis: {
-					line: false,
-					ticks: { size: 0, padding: 6, format: (value: number) => formatLatency(value) },
+				y: {
+					scale: scaleLinear().domain([0, dataMax]),
+					nice: true,
+					grid: true,
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 6, format: (value: number) => formatLatency(value) },
+					},
 				},
 			},
 			// Recharts draws no dots on these lines; `whenFocused(dot(...))` renders

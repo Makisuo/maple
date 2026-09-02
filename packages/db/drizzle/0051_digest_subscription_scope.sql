@@ -1,0 +1,2 @@
+ALTER TABLE "digest_subscriptions" ADD COLUMN "namespaces_json" text DEFAULT '[]' NOT NULL;--> statement-breakpoint
+ALTER TABLE "digest_subscriptions" ADD COLUMN "environments_json" text DEFAULT '[]' NOT NULL;

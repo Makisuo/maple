@@ -19,6 +19,8 @@
 // build. `process.getBuiltinModule` (Node ≥ 20.16, Bun) loads them lazily and
 // synchronously; when it's absent, detection just reports nothing.
 
+import { trySyncOrUndefined } from "../shared/try-sync.js"
+
 const CONTAINER_ID_RE = /\/docker\/containers\/([0-9a-f]{64})\//
 const CGROUP_ID_RE = /([0-9a-f]{64})/
 const SHORT_ID_HOSTNAME_RE = /^[0-9a-f]{12}$/
@@ -35,7 +37,7 @@ export interface ContainerProbe {
  * guarded by the caller (`getContainerAttributes` wraps the whole thing).
  */
 export const deriveContainerAttributes = (probe: ContainerProbe): Record<string, string> => {
-	const inDocker = safe(() => probe.exists("/.dockerenv")) ?? false
+	const inDocker = trySyncOrUndefined(() => probe.exists("/.dockerenv")) ?? false
 
 	const attrs: Record<string, string> = {}
 	if (inDocker) attrs["container.runtime"] = "docker"
@@ -44,24 +46,16 @@ export const deriveContainerAttributes = (probe: ContainerProbe): Record<string,
 	// and mountinfo can run to hundreds of KB, so later probes only fire when
 	// the earlier ones miss.
 	const containerId =
-		safe(() => probe.readFile("/proc/self/mountinfo").match(CONTAINER_ID_RE)?.[1]) ??
-		safe(() => probe.readFile("/proc/self/cgroup").match(CGROUP_ID_RE)?.[1]) ??
+		trySyncOrUndefined(() => probe.readFile("/proc/self/mountinfo").match(CONTAINER_ID_RE)?.[1]) ??
+		trySyncOrUndefined(() => probe.readFile("/proc/self/cgroup").match(CGROUP_ID_RE)?.[1]) ??
 		(inDocker
-			? safe(() => {
+			? trySyncOrUndefined(() => {
 					const name = probe.hostname()
 					return SHORT_ID_HOSTNAME_RE.test(name) ? name : undefined
 				})
 			: undefined)
 	if (containerId) attrs["container.id"] = containerId
 	return attrs
-}
-
-const safe = <A>(fn: () => A): A | undefined => {
-	try {
-		return fn()
-	} catch {
-		return undefined
-	}
 }
 
 type FsModule = { existsSync: (path: string) => boolean; readFileSync: (path: string, enc: string) => string }
@@ -91,8 +85,8 @@ export const getContainerAttributes = (): Record<string, string> => {
 	if (proc?.platform !== "linux" || typeof loadBuiltin !== "function") {
 		return (cached = {})
 	}
-	const fs = safe(() => loadBuiltin("node:fs"))
-	const os = safe(() => loadBuiltin("node:os"))
+	const fs = trySyncOrUndefined(() => loadBuiltin("node:fs"))
+	const os = trySyncOrUndefined(() => loadBuiltin("node:os"))
 	if (!fs || !os) return (cached = {})
 
 	return (cached = deriveContainerAttributes({

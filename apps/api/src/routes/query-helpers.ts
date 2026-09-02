@@ -257,17 +257,22 @@ const isProductEventsFunnelError = Schema.is(CH.ProductEventsFunnelError)
 export const validateFunnelDefinition = (
 	opts: CH.ProductEventsFunnelOpts | CH.ProductEventsFunnelBreakdownOpts,
 ): Effect.Effect<void, QueryEngineValidationError> =>
-	Effect.suspend(() => {
-		try {
+	Effect.try({
+		try: () => {
 			if ("breakdownBy" in opts) CH.productEventsFunnelBreakdownQuery(opts)
 			else CH.productEventsFunnelQuery(opts)
-			return Effect.void
-		} catch (error) {
-			if (isProductEventsFunnelError(error)) {
-				return Effect.fail(
-					new QueryEngineValidationError({ message: error.message, details: [error.reason] }),
-				)
-			}
-			return Effect.die(error)
-		}
-	})
+		},
+		catch: (error) => error,
+	}).pipe(
+		Effect.catch((error) =>
+			// The builder throws its own tagged error for a definition it cannot
+			// compile, which is the caller's 400. Anything else is a bug in the
+			// builder rather than something the request could be rewritten to avoid.
+			isProductEventsFunnelError(error)
+				? Effect.fail(
+						new QueryEngineValidationError({ message: error.message, details: [error.reason] }),
+					)
+				: // oxlint-disable-next-line maple/no-effect-die
+					Effect.die(error),
+		),
+	)

@@ -31,6 +31,7 @@ import * as metricQueries from "./ch/queries/metrics"
 import * as serviceInfraQueries from "./ch/queries/service-infra"
 import * as serviceMapRollupQueries from "./ch/queries/service-map-rollup"
 import * as serviceMapQueries from "./ch/queries/service-map"
+import * as serviceEndpointQueries from "./ch/queries/service-endpoints"
 import * as serviceOperationQueries from "./ch/queries/service-operations"
 import * as serviceQueries from "./ch/queries/services"
 import * as sessionEventQueries from "./ch/queries/session-events"
@@ -247,6 +248,7 @@ const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 	"service-infra": serviceInfraQueries,
 	"service-map-rollup": serviceMapRollupQueries,
 	"service-map": serviceMapQueries,
+	"service-endpoints": serviceEndpointQueries,
 	"service-operations": serviceOperationQueries,
 	services: serviceQueries,
 	"session-events": sessionEventQueries,
@@ -346,6 +348,7 @@ const EXEMPT_BUILDERS: ReadonlySet<string> = new Set([
 
 	// todo batch ④ — remainder (billing, service detail, operations, stray trace/log lookups)
 	"logs/getLogByKeyQuery",
+	"service-endpoints/serviceEndpointsSummaryRawQuery",
 	"service-operations/serviceOperationsSummaryRawQuery",
 	"service-operations/serviceOperationsTimeseriesRawQuery",
 	"services/serviceHealthSnapshotQuery",

@@ -2,6 +2,7 @@ import { GitCommitSha } from "@maple/domain/http"
 import { Clock, Context, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { Env } from "@/platform/Env"
 import { GithubHttp } from "./GithubHttp"
+import { githubWebBaseUrl } from "./github-hosts"
 
 // GitHub App REST client. Vendor-specific: mints a short-lived App JWT (RS256,
 // Web Crypto), exchanges it for per-installation tokens, and calls the GitHub
@@ -24,9 +25,6 @@ export class GithubAppError extends Schema.TaggedError<GithubAppError>()("@maple
 
 const GITHUB_API_VERSION = "2022-11-28"
 const USER_AGENT = "maple-vcs-integration"
-// The user-facing OAuth host (NOT the REST API host): the App's web OAuth leg
-// exchanges the install-callback `code` for a user access token here.
-const GITHUB_OAUTH_BASE_URL = "https://github.com"
 const PER_PAGE = 100
 // Paginate effectively to the end (up to 100k items) while still bounding a
 // pathological loop. Hitting this cap is logged — truncation is never silent.
@@ -803,7 +801,7 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 				})
 				const response = yield* rateLimitedFetch(
 					tracedFetch(
-						`${GITHUB_OAUTH_BASE_URL}/login/oauth/access_token`,
+						`${githubWebBaseUrl(env.GITHUB_API_BASE_URL)}/login/oauth/access_token`,
 						{
 							method: "POST",
 							headers: {

@@ -2610,6 +2610,17 @@ async fn accept_grpc_decoded(
     resolved: &ResolvedIngestKey,
     decoded_bytes: usize,
 ) -> Result<(), tonic::Status> {
+    // The sentinel token is a PUBLIC constant, so anything it carries is
+    // attacker-authored and must never be stored. Discarded here for the same
+    // reasons and with the same shape as `handle_signal_inner`'s HTTP
+    // short-circuit: success to the client, nothing resolved, nothing forwarded.
+    if resolved.org_id == SENTINEL_ORG_ID {
+        metrics::sentinel(signal.path());
+        Span::current().record("maple.ingest.key_type", "sentinel");
+        debug!("Sentinel token; skipping forward");
+        return Ok(());
+    }
+
     let _org_inflight_permit = state
         .org_inflight_limiter
         .try_acquire(&resolved.org_id)
@@ -8426,6 +8437,97 @@ mod tests {
                 error.kind()
             );
         }
+    }
+
+    /// `MAPLE_TEST` is a PUBLIC constant, so a sentinel export is
+    /// attacker-authored: it must look successful and store nothing. The HTTP
+    /// path discards in `handle_signal_inner`; this pins the gRPC twin, which
+    /// used to run `process_decoded_payload` unconditionally.
+    #[tokio::test]
+    async fn sentinel_grpc_export_writes_nothing() {
+        let (forward_tx, mut forward_rx) = tokio::sync::mpsc::unbounded_channel();
+        let forward_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let forward_addr = forward_listener.local_addr().unwrap();
+        let forward_app = Router::new()
+            .route("/v1/logs", post(fake_forward_collector))
+            .with_state(forward_tx);
+        tokio::spawn(async move {
+            axum::serve(forward_listener, forward_app).await.unwrap();
+        });
+
+        let queue_dir = unique_main_test_dir("grpc-sentinel");
+        let store = Arc::new(FakeKeyStore::default());
+        let raw_key = "maple_sk_test_grpc_sentinel";
+        store.insert_private(
+            raw_key,
+            KeyRow {
+                org_id: "org_grpc_sentinel".to_owned(),
+                self_managed: false,
+                clickhouse_ready: false,
+            },
+        );
+        let state = test_app_state(
+            Arc::clone(&store),
+            queue_dir.clone(),
+            format!("http://{forward_addr}"),
+            Duration::from_millis(5),
+        )
+        .await;
+
+        let mut metadata = tonic::metadata::MetadataMap::new();
+        metadata.insert("authorization", "Bearer MAPLE_TEST".parse().unwrap());
+        let sentinel = resolve_grpc_ingest_key(&state, &metadata)
+            .await
+            .expect("the sentinel token authenticates");
+        assert_eq!(sentinel.org_id, SENTINEL_ORG_ID);
+
+        let payload = test_log_request("sentinel over grpc");
+        let decoded_bytes = payload.encoded_len();
+        accept_grpc_decoded(
+            &state,
+            Signal::Logs,
+            DecodedPayload::Logs(payload),
+            &sentinel,
+            decoded_bytes,
+        )
+        .await
+        .expect("a sentinel export must look successful to the client");
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), forward_rx.recv())
+                .await
+                .is_err(),
+            "the sentinel org must not write telemetry"
+        );
+
+        // The same harness with a real key, so the assertion above cannot pass
+        // because nothing was ever wired up.
+        let resolved = state
+            .resolver
+            .resolve_ingest_key(raw_key)
+            .await
+            .expect("resolution should not fail")
+            .expect("the test key resolves");
+        let real = test_log_request("real key over grpc");
+        let real_bytes = real.encoded_len();
+        accept_grpc_decoded(
+            &state,
+            Signal::Logs,
+            DecodedPayload::Logs(real),
+            &resolved,
+            real_bytes,
+        )
+        .await
+        .expect("a real export is accepted");
+        let forwarded = tokio::time::timeout(Duration::from_secs(2), forward_rx.recv())
+            .await
+            .expect("a real key forwards")
+            .expect("forward channel should stay open");
+        assert!(forwarded.body_len > 0);
+
+        drop(std::fs::remove_dir_all(&queue_dir));
     }
 
     #[tokio::test]

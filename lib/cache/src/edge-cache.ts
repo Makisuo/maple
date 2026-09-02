@@ -114,8 +114,8 @@ const sha256Hex = async (input: string): Promise<string> => {
 	const digest = await crypto.subtle.digest("SHA-256", bytes)
 	const view = new Uint8Array(digest)
 	let out = ""
-	for (let i = 0; i < view.length; i++) {
-		out += view[i]!.toString(16).padStart(2, "0")
+	for (const byte of view) {
+		out += byte.toString(16).padStart(2, "0")
 	}
 	return out
 }

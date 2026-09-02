@@ -461,10 +461,12 @@ export const selectScheduledProgram = <R>(
 		Match.when("*/15 * * * *", () => ticks.digest),
 		Match.when("0 * * * *", () => ticks.serviceMapRollup),
 		Match.when("* * * * *", () =>
-			// `fixVerification` runs after `error` in the same group so a window that
-			// this minute's error tick just refuted is already settled when the
-			// verification tick looks at it — one fewer wasted agent start.
-			Effect.all([ticks.alert, ticks.error, ticks.escalation, ticks.fixVerification], {
+			// `fixVerification` is chained onto `error` rather than listed beside it:
+			// a window this minute's error tick just refuted must already be settled
+			// when the verification tick looks at it, and array order under bounded
+			// concurrency does not promise that — alert and escalation finishing
+			// first would have started fixVerification while error still ran.
+			Effect.all([ticks.alert, Effect.andThen(ticks.error, ticks.fixVerification), ticks.escalation], {
 				concurrency: 2,
 				discard: true,
 			}),

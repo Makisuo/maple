@@ -63,6 +63,7 @@ import { Env } from "@/platform/Env"
 import { dateToMs, msToDate } from "@/platform/time"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import {
+	capBusiestLogSeries,
 	ERROR_SPIKE_MIN_COUNT,
 	evaluateErrorSpike,
 	evaluateGoldenSignals,
@@ -1024,7 +1025,7 @@ const make = Effect.gen(function* () {
 				baseline: baseline.get(key) ?? [],
 			})
 		}
-		return series.slice(0, MAX_SERIES_PER_ORG)
+		return capBusiestLogSeries(series, MAX_SERIES_PER_ORG)
 	})
 
 	const fetchErrorSpikes = Effect.fn("AnomalyDetectionService.fetchErrorSpikes")(function* (
@@ -1647,7 +1648,22 @@ const make = Effect.gen(function* () {
 							createdAt: new Date(nowMs),
 							updatedAt: new Date(nowMs),
 						}
-						yield* dbExecute((db) => db.insert(anomalyIncidents).values(insertValues))
+						// `anomaly_incidents_open_detector_idx` allows one open incident
+						// per detector. The org claim is a bare TTL CAS, so a tick that
+						// outruns ORG_LOCK_TTL_MS can overlap the next one and both can
+						// reach here for the same detector; the loser must not create a
+						// second incident or enqueue a second triage.
+						const insertedIncident = yield* dbExecute((db) =>
+							db.insert(anomalyIncidents).values(insertValues).onConflictDoNothing().returning({
+								id: anomalyIncidents.id,
+							}),
+						)
+						if (insertedIncident.length === 0) {
+							yield* Effect.logWarning(
+								"Skipped duplicate anomaly incident open: another tick won the race",
+							).pipe(Effect.annotateLogs({ orgId, detectorKey: evaluation.detectorKey }))
+							return
+						}
 						const runtime: IncidentRuntime = {
 							row: { ...insertValues, resolvedAt: null, resolveReason: null },
 							entries,

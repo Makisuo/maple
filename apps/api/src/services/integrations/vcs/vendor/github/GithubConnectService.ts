@@ -22,6 +22,7 @@ import { VcsRepository } from "@/services/integrations/vcs/VcsRepository"
 import { BACKFILL_WINDOW_MS } from "@/services/integrations/vcs/VcsSyncService"
 import { VcsSyncQueue } from "@/services/integrations/vcs/VcsSyncQueue"
 import { GithubAppClient, type GithubAppError } from "./GithubAppClient"
+import { githubWebBaseUrl } from "./github-hosts"
 
 // The dashboard connect flow for the GitHub App. Bridges a real GitHub
 // installation into a `vcs_installations` row owned by a Maple org, then hands
@@ -39,7 +40,6 @@ import { GithubAppClient, type GithubAppError } from "./GithubAppClient"
 // installation that already belongs to a different org.
 
 const GITHUB_PROVIDER = "github" as const
-const GITHUB_WEB_BASE = "https://github.com"
 const STATE_TTL_MS = 10 * 60_000 // 10 minutes
 
 interface GithubBranchStatus {
@@ -194,7 +194,7 @@ export class GithubConnectService extends Context.Service<GithubConnectService, 
 				})
 				const params = new URLSearchParams({ state })
 				return {
-					redirectUrl: `${GITHUB_WEB_BASE}/apps/${slug}/installations/new?${params.toString()}`,
+					redirectUrl: `${githubWebBaseUrl(env.GITHUB_API_BASE_URL)}/apps/${slug}/installations/new?${params.toString()}`,
 					state,
 				}
 			})

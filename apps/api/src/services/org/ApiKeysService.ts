@@ -20,6 +20,7 @@ import { Database } from "@/platform/DatabaseLive"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
 import { Env } from "@/platform/Env"
 import { dateToMs, msToDate } from "@/platform/time"
+import { revokeFamiliesForAccessKeys } from "@/services/auth/mcp-oauth-family"
 
 export interface ResolvedApiKey {
 	readonly orgId: OrgId
@@ -534,13 +535,26 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 			// (which would also replicate a pointless row out through Electric).
 			const revokedRows = yield* database
 				.execute((db) =>
-					db
-						.update(apiKeys)
-						.set({ revoked: true, revokedAt: msToDate(now) })
-						.where(
-							and(eq(apiKeys.id, keyId), eq(apiKeys.orgId, orgId), eq(apiKeys.revoked, false)),
-						)
-						.returning({ ...getTableColumns(apiKeys), ...txidColumn }),
+					db.transaction(async (tx) => {
+						const claimed = await tx
+							.update(apiKeys)
+							.set({ revoked: true, revokedAt: msToDate(now) })
+							.where(
+								and(
+									eq(apiKeys.id, keyId),
+									eq(apiKeys.orgId, orgId),
+									eq(apiKeys.revoked, false),
+								),
+							)
+							.returning({ ...getTableColumns(apiKeys), ...txidColumn })
+						// An MCP key is the visible face of an OAuth grant whose refresh
+						// family re-mints it hourly. Flipping `revoked` here alone was a
+						// no-op the next rotation undid, so the family goes with it.
+						if (claimed[0]?.kind === "mcp") {
+							await revokeFamiliesForAccessKeys(tx, [claimed[0].id], msToDate(now))
+						}
+						return claimed
+					}),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
 

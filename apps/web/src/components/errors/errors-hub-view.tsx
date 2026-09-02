@@ -1,0 +1,536 @@
+import { useCallback, useMemo, useReducer } from "react"
+import { useNavigate } from "@tanstack/react-router"
+
+import type { ErrorIssueId, WorkflowState } from "@maple/domain/http"
+import { Button } from "@maple/ui/components/ui/button"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
+import { ExcludedEmptyHint } from "@maple/ui/components/filters/excluded-empty-hint"
+import { cn } from "@maple/ui/lib/utils"
+
+import { CircleCheckIcon, HistoryIcon, MagnifierIcon } from "@/components/icons"
+import { ErrorState } from "@/components/common/error-state"
+import { ListToolbar } from "@/components/common/list-toolbar"
+import { useListNavigation } from "@/hooks/use-list-navigation"
+import type { ErrorSignal } from "@/lib/models/error-signal"
+import {
+	clearedSelection,
+	type IssueSelectionMsg,
+	type IssueSelectionState,
+	initialIssueSelection,
+	toggledSelection,
+	updateIssueSelection,
+} from "@/lib/models/issue-selection"
+
+import { ErrorSignalHeader, ErrorSignalRow, ErrorSignalRowSkeleton } from "./error-signal-row"
+import { IssuesBulkBar } from "./issues-bulk-bar"
+import { SEVERITY_FILL, SEVERITY_ORDER, SeverityDot, severityRank } from "./severity-badge"
+import { useIssueMutations } from "./use-issue-mutations"
+
+/**
+ * Everything the errors list renders, with none of what it fetches.
+ *
+ * `ErrorsHub` owns the warehouse-first/issue-first join and the URL; this owns
+ * the toolbar, the column header, the rows, selection and the empty states. The
+ * split is what `/lab/errors` renders over fixtures — a design pass on the list
+ * happens here, and the real page inherits it, rather than being eyeballed
+ * against whatever the dev org happens to be erroring on today.
+ */
+
+/** Enough to fill the fold without pretending to know the page size. */
+const SKELETON_ROWS = 8
+
+export const HUB_VIEWS = ["open", "triage", "active", "resolved", "all"] as const
+export type HubView = (typeof HUB_VIEWS)[number]
+
+const VIEW_LABEL: Record<HubView, string> = {
+	open: "Open",
+	triage: "Triage",
+	active: "Active",
+	resolved: "Resolved",
+	all: "All",
+} satisfies Record<HubView, string>
+
+/**
+ * Which workflow states each view covers. `triage` is the untouched queue,
+ * `active` is everything someone has picked up, `resolved` is closed work.
+ * `regressed` sits in triage because a fix that did not hold is untriaged
+ * again, not in-progress.
+ *
+ * `open` is the union of triage and active, spelled out rather than left as
+ * `"all"`. The SERVER already narrows it — `actionable=true` maps to exactly
+ * these five states — so on the real page the client filter passes every row it
+ * is given and discards nothing. Spelling it out is what lets the view be
+ * rendered off a fixture (`/lab/errors`) and still show the set the server
+ * would have returned.
+ */
+const VIEW_STATES = {
+	open: ["triage", "regressed", "todo", "in_progress", "in_review"],
+	triage: ["triage", "regressed"],
+	active: ["todo", "in_progress", "in_review"],
+	resolved: ["done", "cancelled", "wontfix"],
+	all: "all",
+} satisfies Record<HubView, ReadonlyArray<WorkflowState> | "all">
+
+/** Views the server can narrow with `actionable=true`, so the page it returns
+ *  is already the right one. */
+export const ACTIONABLE_VIEWS: ReadonlyArray<HubView> = ["open", "triage", "active"]
+
+/** Membership against the view's state set. The literal tuples above keep their
+ *  inferred element types, which do not accept an arbitrary `WorkflowState` as
+ *  an `includes` argument — widening happens here, once. */
+export function viewCovers(view: HubView, state: WorkflowState): boolean {
+	const states: ReadonlyArray<string> | "all" = VIEW_STATES[view]
+	return states === "all" || states.includes(state)
+}
+
+export const HUB_SORTS = ["volume", "severity", "last_seen"] as const
+export type HubSort = (typeof HUB_SORTS)[number]
+
+const SORT_LABEL: Record<HubSort, string> = {
+	volume: "Most errors",
+	severity: "Severity",
+	last_seen: "Last seen",
+} satisfies Record<HubSort, string>
+
+export const SEVERITY_FILTERS = ["all", "critical", "high", "medium", "low", "unset"] as const
+export type SeverityFilter = (typeof SEVERITY_FILTERS)[number]
+
+const SEVERITY_FILTER_LABEL: Record<SeverityFilter, string> = {
+	all: "All severities",
+	critical: "Critical",
+	high: "High",
+	medium: "Medium",
+	low: "Low",
+	unset: "Unset",
+} satisfies Record<SeverityFilter, string>
+
+/**
+ * What the closed trigger shows. Shorter than the menu labels because the
+ * trigger has ~122px to work with and "All severities" truncated to
+ * "All sever:" — and the stacked blob beside it already says "all of them", so
+ * the word was doing no work. The menu keeps the long forms, where they read as
+ * options rather than as a current state.
+ */
+const SEVERITY_TRIGGER_LABEL: Record<SeverityFilter, string> = {
+	all: "Severity",
+	critical: "Critical",
+	high: "High",
+	medium: "Medium",
+	low: "Low",
+	unset: "Unset",
+} satisfies Record<SeverityFilter, string>
+
+/** Base UI renders the raw value in the trigger unless it is given a renderer,
+ *  and these guards are what let that renderer index the label maps. */
+const isHubSort = (value: string | null): value is HubSort => HUB_SORTS.includes(value as HubSort)
+
+const isSeverityFilter = (value: string | null): value is SeverityFilter =>
+	SEVERITY_FILTERS.includes(value as SeverityFilter)
+
+/**
+ * The blob beside a severity option. "All severities" gets the four real levels
+ * stacked into one mark rather than a fifth invented colour, so the menu shows
+ * exactly the palette it filters on; "Unset" reuses the hollow ring.
+ */
+function SeverityFilterDot({ value }: { value: SeverityFilter }) {
+	if (value === "all") {
+		return (
+			<span aria-hidden="true" className="flex shrink-0 -space-x-1">
+				{SEVERITY_ORDER.map((severity) => (
+					<span
+						key={severity}
+						className={cn("size-2 rounded-full ring-1 ring-popover", SEVERITY_FILL[severity])}
+					/>
+				))}
+			</span>
+		)
+	}
+	return <SeverityDot severity={value === "unset" ? null : value} />
+}
+
+export function sortSignals(signals: ReadonlyArray<ErrorSignal>, sort: HubSort): ReadonlyArray<ErrorSignal> {
+	const sorted = [...signals]
+	if (sort === "volume") {
+		// Quiet fingerprints sink rather than sorting as zero among real counts.
+		sorted.sort((a, b) => (b.windowCount ?? -1) - (a.windowCount ?? -1))
+	} else if (sort === "severity") {
+		sorted.sort((a, b) => {
+			const diff = severityRank(a.severity) - severityRank(b.severity)
+			return diff !== 0 ? diff : (b.windowCount ?? -1) - (a.windowCount ?? -1)
+		})
+	} else {
+		sorted.sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt))
+	}
+	return sorted
+}
+
+/**
+ * What an empty view says, and what it offers to do about it.
+ *
+ * Most of these are good news — an empty Open queue means the errors are all
+ * closed out — so they read as an all-clear rather than as a failure, and the
+ * icon carries that before the sentence does. The exception is a view emptied
+ * by a filter the reader chose, which is not news at all: that gets the
+ * magnifier and a button that undoes the filter, because an empty list whose
+ * cause is one control away should not be a dead end.
+ */
+const EMPTY_COPY = {
+	open: {
+		icon: CircleCheckIcon,
+		title: "Nothing open",
+		description:
+			"Every error in this window is closed out. Widen the range, or check Resolved to see recent fixes.",
+	},
+	triage: {
+		icon: CircleCheckIcon,
+		title: "Nothing waiting on triage",
+		description: "Every error in this window has been picked up. Widen the range to see more.",
+	},
+	active: {
+		icon: CircleCheckIcon,
+		title: "Nothing in progress",
+		description: "No one has claimed an error in this window yet. Start from the triage queue.",
+	},
+	all: {
+		icon: CircleCheckIcon,
+		title: "No errors in this window",
+		description: "Nothing was recorded here. Widen the time range or clear the service filters.",
+	},
+	resolved: {
+		icon: HistoryIcon,
+		title: "Nothing resolved yet",
+		description: "Errors you close land here, so you can check whether a fix held.",
+	},
+} satisfies Record<HubView, { icon: typeof CircleCheckIcon; title: string; description: string }>
+
+export interface ErrorsHubViewProps {
+	/** `loading` draws row skeletons, `failed` the retry card. Both keep the
+	 *  toolbar, so the controls never move between states. */
+	status: "loading" | "failed" | "ready"
+	/** Unsorted; the view applies `sort` itself so the lab and the page cannot
+	 *  disagree about what "Most errors" means. */
+	signals: ReadonlyArray<ErrorSignal>
+	sparkWindow: { readonly startMs: number; readonly endMs: number; readonly bucketMs: number }
+	view: HubView
+	sort: HubSort
+	severity: SeverityFilter
+	onViewChange: (view: HubView) => void
+	onSortChange: (sort: HubSort) => void
+	onSeverityChange: (severity: SeverityFilter) => void
+	/** The window totals above the toolbar. A slot rather than a component
+	 *  because it is the one part of the list that fetches for itself. */
+	stats?: React.ReactNode
+	/** Flattened active exclusions, for the empty state's hint. */
+	excludedValues?: ReadonlyArray<string>
+	onClearExclusions: () => void
+	onRetry: () => void
+}
+
+export function ErrorsHubView({
+	status,
+	signals,
+	sparkWindow,
+	view,
+	sort,
+	severity,
+	onViewChange,
+	onSortChange,
+	onSeverityChange,
+	stats,
+	excludedValues = [],
+	onClearExclusions,
+	onRetry,
+}: ErrorsHubViewProps) {
+	const sorted = useMemo(() => sortSignals(signals, sort), [signals, sort])
+
+	const toolbar = (
+		<>
+			{stats}
+			<ListToolbar
+				tabs={HUB_VIEWS.map((value) => ({ value, label: VIEW_LABEL[value] }))}
+				active={view}
+				label="Filter errors"
+				countNoun={["error", "errors"]}
+				/* No count until there is one to state. "0 errors" under a spinner is
+				   a claim about the data, and it is wrong every time. */
+				totalCount={status === "ready" ? sorted.length : undefined}
+				onChange={onViewChange}
+				trailing={
+					<>
+						<Select
+							value={sort}
+							onValueChange={(value) => {
+								if (isHubSort(value)) onSortChange(value)
+							}}
+						>
+							<SelectTrigger size="sm" className="h-7 w-[126px] text-xs">
+								<SelectValue placeholder="Sort">
+									{(value: string | null) =>
+										isHubSort(value) ? SORT_LABEL[value] : "Sort"
+									}
+								</SelectValue>
+							</SelectTrigger>
+							<SelectContent>
+								{HUB_SORTS.map((value) => (
+									<SelectItem key={value} value={value}>
+										{SORT_LABEL[value]}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+						<Select
+							value={severity}
+							onValueChange={(value) => {
+								if (isSeverityFilter(value)) onSeverityChange(value)
+							}}
+						>
+							<SelectTrigger size="sm" className="h-7 w-[122px] text-xs">
+								<SelectValue placeholder="Severity">
+									{(value: string | null) =>
+										isSeverityFilter(value) ? (
+											<span className="flex items-center gap-2">
+												<SeverityFilterDot value={value} />
+												{SEVERITY_TRIGGER_LABEL[value]}
+											</span>
+										) : (
+											"Severity"
+										)
+									}
+								</SelectValue>
+							</SelectTrigger>
+							<SelectContent>
+								{SEVERITY_FILTERS.map((value) => (
+									<SelectItem key={value} value={value}>
+										<span className="flex items-center gap-2">
+											<SeverityFilterDot value={value} />
+											{SEVERITY_FILTER_LABEL[value]}
+										</span>
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</>
+				}
+			/>
+		</>
+	)
+
+	if (status === "loading") {
+		return (
+			<div>
+				{toolbar}
+				{/* The real column header, not a placeholder for it: it is already
+				    known, it explains what is loading, and keeping it means the rows
+				    land in the columns the eye is already resting on. */}
+				<ErrorSignalHeader />
+				<div className="divide-y divide-border/40">
+					{Array.from({ length: SKELETON_ROWS }).map((_, index) => (
+						<ErrorSignalRowSkeleton key={index} index={index} />
+					))}
+				</div>
+			</div>
+		)
+	}
+
+	if (status === "failed") {
+		return (
+			<div>
+				{toolbar}
+				<div className="p-4">
+					<ErrorState
+						error="The errors list could not be loaded."
+						title="Failed to load errors"
+						onRetry={onRetry}
+					/>
+				</div>
+			</div>
+		)
+	}
+
+	return (
+		<HubList
+			signals={sorted}
+			sparkWindow={sparkWindow}
+			toolbar={toolbar}
+			view={view}
+			severity={severity}
+			onViewChange={onViewChange}
+			onSeverityChange={onSeverityChange}
+			excludedValues={excludedValues}
+			onClearExclusions={onClearExclusions}
+		/>
+	)
+}
+
+const selectionReducer = (state: IssueSelectionState, message: IssueSelectionMsg): IssueSelectionState =>
+	updateIssueSelection(state, message)[0]
+
+function HubList({
+	signals,
+	sparkWindow,
+	toolbar,
+	view,
+	severity,
+	onViewChange,
+	onSeverityChange,
+	excludedValues,
+	onClearExclusions,
+}: {
+	signals: ReadonlyArray<ErrorSignal>
+	sparkWindow: { startMs: number; endMs: number; bucketMs: number }
+	toolbar: React.ReactNode
+	view: HubView
+	severity: SeverityFilter
+	onViewChange: (view: HubView) => void
+	onSeverityChange: (severity: SeverityFilter) => void
+	/** Flattened active exclusions, for the empty state's hint. */
+	excludedValues: ReadonlyArray<string>
+	onClearExclusions: () => void
+}) {
+	const [selection, dispatchSelection] = useReducer(selectionReducer, initialIssueSelection)
+	const selectedIds = selection.selectedIds
+	const mutations = useIssueMutations(() => dispatchSelection(clearedSelection))
+	const navigate = useNavigate()
+
+	const ids = useMemo(() => signals.map((signal) => signal.id), [signals])
+
+	const toggleSelection = useCallback(
+		(id: ErrorIssueId, event: { shiftKey: boolean }) => {
+			dispatchSelection(toggledSelection(id, event.shiftKey, ids))
+		},
+		[ids],
+	)
+
+	const clearSelection = useCallback(() => dispatchSelection(clearedSelection), [])
+
+	const { focusedId, setFocusedId } = useListNavigation({
+		ids,
+		onOpen: (id) => navigate({ to: "/errors/issues/$issueId", params: { issueId: id } }),
+		// Selection is keyboard-only now that rows carry no checkbox: "x" on the
+		// focused row, shift+"x" to extend. Per-row actions moved to the right-click
+		// menu, which is also where a single-row transition belongs.
+		onToggleSelect: toggleSelection,
+		onEscape: () => {
+			if (selectedIds.size === 0) return false
+			clearSelection()
+			return true
+		},
+		scrollTo: (id) => scrollIntoView(id),
+	})
+
+	const selectedIssues = useMemo(
+		() =>
+			signals
+				.filter((signal) => selectedIds.has(signal.id))
+				.map((signal) => ({ id: signal.id, state: signal.issue.workflowState })),
+		[signals, selectedIds],
+	)
+
+	return (
+		<div>
+			{toolbar}
+			{signals.length === 0 ? (
+				<HubEmpty
+					view={view}
+					severity={severity}
+					onViewChange={onViewChange}
+					onSeverityChange={onSeverityChange}
+					excludedValues={excludedValues}
+					onClearExclusions={onClearExclusions}
+				/>
+			) : (
+				/* The header labels the columns; it is not one of the items, so it
+				   sits outside the list rather than inside it. */
+				<div>
+					<ErrorSignalHeader />
+					<div role="list" className="divide-y divide-border/40">
+						{signals.map((signal) => (
+							<div role="listitem" key={signal.id}>
+								<ErrorSignalRow
+									signal={signal}
+									sparkWindow={sparkWindow}
+									mutations={mutations}
+									selected={selectedIds.has(signal.id)}
+									focused={focusedId === signal.id}
+									onFocus={setFocusedId}
+								/>
+							</div>
+						))}
+					</div>
+				</div>
+			)}
+			<IssuesBulkBar selected={selectedIssues} mutations={mutations} onClear={clearSelection} />
+		</div>
+	)
+}
+
+function HubEmpty({
+	view,
+	severity,
+	onViewChange,
+	onSeverityChange,
+	excludedValues,
+	onClearExclusions,
+}: {
+	view: HubView
+	severity: SeverityFilter
+	onViewChange: (view: HubView) => void
+	onSeverityChange: (severity: SeverityFilter) => void
+	excludedValues: ReadonlyArray<string>
+	onClearExclusions: () => void
+}) {
+	const empty = EMPTY_COPY[view]
+	// A severity filter is the one narrowing the reader can see in the toolbar
+	// and undo from here, so an empty list under one is its own state rather
+	// than the view's all-clear.
+	const filtered = severity !== "all"
+	const Icon = filtered ? MagnifierIcon : empty.icon
+
+	return (
+		<Empty className="py-12">
+			<EmptyHeader>
+				<EmptyMedia variant="icon">
+					<Icon size={18} />
+				</EmptyMedia>
+				<EmptyTitle>
+					{filtered
+						? `No ${SEVERITY_FILTER_LABEL[severity].toLowerCase()} errors here`
+						: empty.title}
+				</EmptyTitle>
+				<EmptyDescription>
+					{filtered
+						? `Nothing in ${VIEW_LABEL[view]} matches that severity in this window. Other severities may have plenty.`
+						: empty.description}
+				</EmptyDescription>
+			</EmptyHeader>
+			{filtered || view !== "all" ? (
+				<div className="flex flex-wrap items-center justify-center gap-2">
+					{filtered ? (
+						<Button size="sm" variant="outline" onClick={() => onSeverityChange("all")}>
+							Show all severities
+						</Button>
+					) : null}
+					{view !== "all" ? (
+						<Button
+							size="sm"
+							variant={filtered ? "ghost" : "outline"}
+							onClick={() => onViewChange("all")}
+						>
+							See every error
+						</Button>
+					) : null}
+				</div>
+			) : null}
+			{/* The copy above says "clear the service filters", which an exclusion is
+			    not — it is the filter you cannot see in the results. */}
+			<ExcludedEmptyHint excluded={excludedValues} onClear={onClearExclusions} className="max-w-lg" />
+		</Empty>
+	)
+}
+
+function scrollIntoView(issueId: string) {
+	if (typeof document === "undefined") return
+	const el = document.querySelector<HTMLElement>(`[data-issue-id="${CSS.escape(issueId)}"]`)
+	el?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+}

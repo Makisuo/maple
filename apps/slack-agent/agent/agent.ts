@@ -33,8 +33,8 @@ if (missingModelEnv.length > 0 && !isEveBuildInvocation) {
  * Must support tool calling **while streaming** — eve's harness is tool-driven and
  * always streams.
  */
-const modelId = process.env.OPENROUTER_MODEL ?? "openai/gpt-5.6-luna"
-const contextWindowTokens = Number(process.env.OPENROUTER_CONTEXT_WINDOW ?? 400_000)
+const modelId = process.env.OPENROUTER_MODEL ?? "z-ai/glm-5.3-flash:nitro"
+const contextWindowTokens = Number(process.env.OPENROUTER_CONTEXT_WINDOW ?? 130_000)
 
 /**
  * Durable workflow state ("world").

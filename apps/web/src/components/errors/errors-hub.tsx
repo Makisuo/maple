@@ -1,17 +1,9 @@
-import { useCallback, useMemo, useReducer } from "react"
+import { useMemo } from "react"
 import { useNavigate } from "@tanstack/react-router"
 
-import type { ErrorIssueDocument, ErrorIssueId, WorkflowState } from "@maple/domain/http"
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
-
-import { cn } from "@maple/ui/lib/utils"
+import type { ErrorIssueDocument } from "@maple/domain/http"
 import { warehouseDateTimeToIso } from "@maple/query-engine"
 
-import { ErrorState } from "@/components/common/error-state"
-import { ListToolbar } from "@/components/common/list-toolbar"
-import { useListNavigation } from "@/hooks/use-list-navigation"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import {
@@ -19,37 +11,34 @@ import {
 	getErrorsSparkResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
-import { ExcludedEmptyHint } from "@maple/ui/components/filters/excluded-empty-hint"
 import { errorIssueFromV2 } from "@/lib/services/error-issues"
 import {
 	buildErrorSignals,
 	indexInvestigationsByIssue,
 	sparkFingerprintHashes,
-	type ErrorSignal,
 } from "@/lib/models/error-signal"
-import {
-	clearedSelection,
-	type IssueSelectionMsg,
-	type IssueSelectionState,
-	initialIssueSelection,
-	toggledSelection,
-	updateIssueSelection,
-} from "@/lib/models/issue-selection"
 
-import { ErrorSignalHeader, ErrorSignalRow } from "./error-signal-row"
+import {
+	ACTIONABLE_VIEWS,
+	ErrorsHubView,
+	type HubSort,
+	type HubView,
+	type SeverityFilter,
+	viewCovers,
+} from "./errors-hub-view"
 import { ErrorsStatStrip } from "./errors-stat-strip"
-import { IssuesBulkBar } from "./issues-bulk-bar"
-import { SEVERITY_FILL, SEVERITY_ORDER, SeverityDot, severityRank } from "./severity-badge"
-import { useIssueMutations } from "./use-issue-mutations"
 
 /**
- * The unified errors list.
+ * The unified errors list, and what feeds it.
  *
  * `/errors` grouped error events by fingerprint and knew nothing about triage;
  * `/errors/issues` listed the same fingerprints from Postgres and knew nothing
  * about volume; investigations sat on a third route. This joins them, so one
  * row answers the whole triage question. See `lib/models/error-signal.ts` for
  * why the fingerprint is the join key and why the issue table is the spine.
+ *
+ * Everything the join produces is handed to `ErrorsHubView`, which is also what
+ * `/lab/errors` renders over fixtures.
  */
 
 /** How many buckets the row sparkline gets. Enough to show a shape, few enough
@@ -57,115 +46,14 @@ import { useIssueMutations } from "./use-issue-mutations"
 const SPARK_BUCKETS = 32
 const PAGE_LIMIT = 100
 
-export const HUB_VIEWS = ["open", "triage", "active", "resolved", "all"] as const
-export type HubView = (typeof HUB_VIEWS)[number]
-
-const VIEW_LABEL: Record<HubView, string> = {
-	open: "Open",
-	triage: "Triage",
-	active: "Active",
-	resolved: "Resolved",
-	all: "All",
-} satisfies Record<HubView, string>
-
-/**
- * Which workflow states each view covers. `triage` is the untouched queue,
- * `active` is everything someone has picked up, `resolved` is closed work.
- * `regressed` sits in triage because a fix that did not hold is untriaged
- * again, not in-progress.
- *
- * `open` is the union of triage and active, and it is `"all"` here because the
- * SERVER already narrows it: `actionable=true` maps to exactly
- * `ACTIONABLE_WORKFLOW_STATES` (triage, regressed, todo, in_progress,
- * in_review). That makes the default view a pure server query — worth having,
- * because every client-narrowed view fetches a page of actionable issues and
- * then discards part of it, so it can render far fewer rows than the page size
- * and paginate against a count that is not what you see.
- */
-const VIEW_STATES = {
-	open: "all",
-	triage: ["triage", "regressed"],
-	active: ["todo", "in_progress", "in_review"],
-	resolved: ["done", "cancelled", "wontfix"],
-	all: "all",
-} satisfies Record<HubView, ReadonlyArray<WorkflowState> | "all">
-
-/** Views the server can narrow with `actionable=true`, so the page it returns
- *  is already the right one. */
-const ACTIONABLE_VIEWS: ReadonlyArray<HubView> = ["open", "triage", "active"]
-
-/** Membership against the view's state set. The literal tuples above keep their
- *  inferred element types, which do not accept an arbitrary `WorkflowState` as
- *  an `includes` argument — widening happens here, once. */
-function viewCovers(view: HubView, state: WorkflowState): boolean {
-	const states: ReadonlyArray<string> | "all" = VIEW_STATES[view]
-	return states === "all" || states.includes(state)
-}
-
-export const HUB_SORTS = ["volume", "severity", "last_seen"] as const
-export type HubSort = (typeof HUB_SORTS)[number]
-
-const SORT_LABEL: Record<HubSort, string> = {
-	volume: "Most errors",
-	severity: "Severity",
-	last_seen: "Last seen",
-} satisfies Record<HubSort, string>
-
-export const SEVERITY_FILTERS = ["all", "critical", "high", "medium", "low", "unset"] as const
-export type SeverityFilter = (typeof SEVERITY_FILTERS)[number]
-
-const SEVERITY_FILTER_LABEL: Record<SeverityFilter, string> = {
-	all: "All severities",
-	critical: "Critical",
-	high: "High",
-	medium: "Medium",
-	low: "Low",
-	unset: "Unset",
-} satisfies Record<SeverityFilter, string>
-
-/**
- * What the closed trigger shows. Shorter than the menu labels because the
- * trigger has ~122px to work with and "All severities" truncated to
- * "All sever:" — and the stacked blob beside it already says "all of them", so
- * the word was doing no work. The menu keeps the long forms, where they read as
- * options rather than as a current state.
- */
-const SEVERITY_TRIGGER_LABEL: Record<SeverityFilter, string> = {
-	all: "Severity",
-	critical: "Critical",
-	high: "High",
-	medium: "Medium",
-	low: "Low",
-	unset: "Unset",
-} satisfies Record<SeverityFilter, string>
-
-/** Base UI renders the raw value in the trigger unless it is given a renderer,
- *  and these guards are what let that renderer index the label maps. */
-const isHubSort = (value: string | null): value is HubSort => HUB_SORTS.includes(value as HubSort)
-
-const isSeverityFilter = (value: string | null): value is SeverityFilter =>
-	SEVERITY_FILTERS.includes(value as SeverityFilter)
-
-/**
- * The blob beside a severity option. "All severities" gets the four real levels
- * stacked into one mark rather than a fifth invented colour, so the menu shows
- * exactly the palette it filters on; "Unset" reuses the hollow ring.
- */
-function SeverityFilterDot({ value }: { value: SeverityFilter }) {
-	if (value === "all") {
-		return (
-			<span aria-hidden="true" className="flex shrink-0 -space-x-1">
-				{SEVERITY_ORDER.map((severity) => (
-					<span
-						key={severity}
-						className={cn("size-2 rounded-full ring-1 ring-popover", SEVERITY_FILL[severity])}
-					/>
-				))}
-			</span>
-		)
-	}
-	return <SeverityDot severity={value === "unset" ? null : value} />
-}
+export {
+	HUB_SORTS,
+	HUB_VIEWS,
+	SEVERITY_FILTERS,
+	type HubSort,
+	type HubView,
+	type SeverityFilter,
+} from "./errors-hub-view"
 
 export interface ErrorsHubProps {
 	view: HubView
@@ -186,9 +74,6 @@ export interface ErrorsHubProps {
 	rootOnly?: boolean
 	showSpam?: boolean
 }
-
-const selectionReducer = (state: IssueSelectionState, message: IssueSelectionMsg): IssueSelectionState =>
-	updateIssueSelection(state, message)[0]
 
 export function ErrorsHub(props: ErrorsHubProps) {
 	// Volume-ranked lists run warehouse-first: rank fingerprints by occurrences
@@ -356,17 +241,18 @@ export function ErrorsHub(props: ErrorsHubProps) {
 		}),
 	)
 
-	const signals = useMemo(() => {
-		const built = buildErrorSignals({
-			issues,
-			warehouse: volumeRows,
-			spark: Result.isSuccess(sparkResult) ? (sparkResult.value.data ?? []) : [],
-			investigations: indexInvestigationsByIssue(
-				Result.isSuccess(investigationsResult) ? investigationsResult.value.data : [],
-			),
-		})
-		return sortSignals(built, props.sort)
-	}, [issues, volumeRows, sparkResult, investigationsResult, props.sort])
+	const signals = useMemo(
+		() =>
+			buildErrorSignals({
+				issues,
+				warehouse: volumeRows,
+				spark: Result.isSuccess(sparkResult) ? (sparkResult.value.data ?? []) : [],
+				investigations: indexInvestigationsByIssue(
+					Result.isSuccess(investigationsResult) ? investigationsResult.value.data : [],
+				),
+			}),
+		[issues, volumeRows, sparkResult, investigationsResult],
+	)
 
 	const sparkWindow = useMemo(() => {
 		const startMs = Date.parse(props.range.startTime.replace(" ", "T") + "Z")
@@ -379,267 +265,31 @@ export function ErrorsHub(props: ErrorsHubProps) {
 	}, [props.range.startTime, props.range.endTime, bucketSeconds])
 
 	const navigate = useNavigate()
-	const setSearch = useCallback(
-		(patch: Record<string, unknown>) => {
-			navigate({ to: "/errors", search: (prev: Record<string, unknown>) => ({ ...prev, ...patch }) })
-		},
-		[navigate],
-	)
-
-	const toolbar = (
-		<>
-			<ErrorsStatStrip filters={warehouseFilters} />
-			<ListToolbar
-				tabs={HUB_VIEWS.map((value) => ({ value, label: VIEW_LABEL[value] }))}
-				active={props.view}
-				label="Filter errors"
-				countNoun={["error", "errors"]}
-				totalCount={signals.length}
-				onChange={(value) => setSearch({ view: value === "open" ? undefined : value })}
-				trailing={
-					<>
-						<Select
-							value={props.sort}
-							onValueChange={(value) =>
-								setSearch({ sort: value === "volume" ? undefined : value })
-							}
-						>
-							<SelectTrigger size="sm" className="h-7 w-[126px] text-xs">
-								<SelectValue placeholder="Sort">
-									{(value: string | null) =>
-										isHubSort(value) ? SORT_LABEL[value] : "Sort"
-									}
-								</SelectValue>
-							</SelectTrigger>
-							<SelectContent>
-								{HUB_SORTS.map((value) => (
-									<SelectItem key={value} value={value}>
-										{SORT_LABEL[value]}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-						<Select
-							value={props.severity}
-							onValueChange={(value) =>
-								setSearch({ severity: value === "all" ? undefined : value })
-							}
-						>
-							<SelectTrigger size="sm" className="h-7 w-[122px] text-xs">
-								<SelectValue placeholder="Severity">
-									{(value: string | null) =>
-										isSeverityFilter(value) ? (
-											<span className="flex items-center gap-2">
-												<SeverityFilterDot value={value} />
-												{SEVERITY_TRIGGER_LABEL[value]}
-											</span>
-										) : (
-											"Severity"
-										)
-									}
-								</SelectValue>
-							</SelectTrigger>
-							<SelectContent>
-								{SEVERITY_FILTERS.map((value) => (
-									<SelectItem key={value} value={value}>
-										<span className="flex items-center gap-2">
-											<SeverityFilterDot value={value} />
-											{SEVERITY_FILTER_LABEL[value]}
-										</span>
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-					</>
-				}
-			/>
-		</>
-	)
-
-	if (Result.isInitial(issuesResult)) {
-		return (
-			<div>
-				{toolbar}
-				<div className="space-y-px p-2">
-					{Array.from({ length: 6 }).map((_, index) => (
-						<Skeleton key={index} className="h-11 w-full" />
-					))}
-				</div>
-			</div>
-		)
-	}
-
-	if (Result.isFailure(issuesResult)) {
-		return (
-			<div>
-				{toolbar}
-				<div className="p-4">
-					<ErrorState
-						error="The errors list could not be loaded."
-						title="Failed to load errors"
-						onRetry={() => window.location.reload()}
-					/>
-				</div>
-			</div>
-		)
+	const setSearch = (patch: Record<string, unknown>) => {
+		navigate({ to: "/errors", search: (prev: Record<string, unknown>) => ({ ...prev, ...patch }) })
 	}
 
 	return (
-		<HubList
+		<ErrorsHubView
+			status={
+				Result.isInitial(issuesResult)
+					? "loading"
+					: Result.isFailure(issuesResult)
+						? "failed"
+						: "ready"
+			}
 			signals={signals}
 			sparkWindow={sparkWindow}
-			toolbar={toolbar}
 			view={props.view}
+			sort={props.sort}
+			severity={props.severity}
+			onViewChange={(value) => setSearch({ view: value === "open" ? undefined : value })}
+			onSortChange={(value) => setSearch({ sort: value === "volume" ? undefined : value })}
+			onSeverityChange={(value) => setSearch({ severity: value === "all" ? undefined : value })}
+			stats={<ErrorsStatStrip filters={warehouseFilters} />}
 			excludedValues={excludedValues}
 			onClearExclusions={props.onClearExclusions}
+			onRetry={() => window.location.reload()}
 		/>
 	)
-}
-
-function sortSignals(signals: ReadonlyArray<ErrorSignal>, sort: HubSort): ReadonlyArray<ErrorSignal> {
-	const sorted = [...signals]
-	if (sort === "volume") {
-		// Quiet fingerprints sink rather than sorting as zero among real counts.
-		sorted.sort((a, b) => (b.windowCount ?? -1) - (a.windowCount ?? -1))
-	} else if (sort === "severity") {
-		sorted.sort((a, b) => {
-			const diff = severityRank(a.severity) - severityRank(b.severity)
-			return diff !== 0 ? diff : (b.windowCount ?? -1) - (a.windowCount ?? -1)
-		})
-	} else {
-		sorted.sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt))
-	}
-	return sorted
-}
-
-const EMPTY_COPY = {
-	open: {
-		title: "Nothing open",
-		description:
-			"Every error in this window is closed out. Widen the range, or check Resolved to see recent fixes.",
-	},
-	triage: {
-		title: "Nothing waiting on triage",
-		description: "Every error in this window has been picked up. Widen the range to see more.",
-	},
-	active: {
-		title: "Nothing in progress",
-		description: "No one has claimed an error in this window yet. Start from the triage queue.",
-	},
-	all: {
-		title: "No errors in this window",
-		description: "Nothing was recorded here. Widen the time range or clear the service filters.",
-	},
-	resolved: {
-		title: "Nothing resolved yet",
-		description: "Errors you close land here, so you can check whether a fix held.",
-	},
-} satisfies Record<HubView, { title: string; description: string }>
-
-function HubList({
-	signals,
-	sparkWindow,
-	toolbar,
-	view,
-	excludedValues,
-	onClearExclusions,
-}: {
-	signals: ReadonlyArray<ErrorSignal>
-	sparkWindow: { startMs: number; endMs: number; bucketMs: number }
-	toolbar: React.ReactNode
-	view: HubView
-	/** Flattened active exclusions, for the empty state's hint. */
-	excludedValues: ReadonlyArray<string>
-	onClearExclusions: () => void
-}) {
-	const [selection, dispatchSelection] = useReducer(selectionReducer, initialIssueSelection)
-	const selectedIds = selection.selectedIds
-	const mutations = useIssueMutations(() => dispatchSelection(clearedSelection))
-	const navigate = useNavigate()
-
-	const ids = useMemo(() => signals.map((signal) => signal.id), [signals])
-
-	const toggleSelection = useCallback(
-		(id: ErrorIssueId, event: { shiftKey: boolean }) => {
-			dispatchSelection(toggledSelection(id, event.shiftKey, ids))
-		},
-		[ids],
-	)
-
-	const clearSelection = useCallback(() => dispatchSelection(clearedSelection), [])
-
-	const { focusedId, setFocusedId } = useListNavigation({
-		ids,
-		onOpen: (id) => navigate({ to: "/errors/issues/$issueId", params: { issueId: id } }),
-		// Selection is keyboard-only now that rows carry no checkbox: "x" on the
-		// focused row, shift+"x" to extend. Per-row actions moved to the right-click
-		// menu, which is also where a single-row transition belongs.
-		onToggleSelect: toggleSelection,
-		onEscape: () => {
-			if (selectedIds.size === 0) return false
-			clearSelection()
-			return true
-		},
-		scrollTo: (id) => scrollIntoView(id),
-	})
-
-	const selectedIssues = useMemo(
-		() =>
-			signals
-				.filter((signal) => selectedIds.has(signal.id))
-				.map((signal) => ({ id: signal.id, state: signal.issue.workflowState })),
-		[signals, selectedIds],
-	)
-
-	const empty = EMPTY_COPY[view]
-
-	return (
-		<div>
-			{toolbar}
-			{signals.length === 0 ? (
-				<div className="p-4">
-					<Empty>
-						<EmptyHeader>
-							<EmptyTitle>{empty.title}</EmptyTitle>
-							<EmptyDescription>{empty.description}</EmptyDescription>
-						</EmptyHeader>
-						{/* The copy above says "clear the service filters", which an exclusion is
-						    not — it is the filter you cannot see in the results. */}
-						<ExcludedEmptyHint
-							excluded={excludedValues}
-							onClear={onClearExclusions}
-							className="max-w-lg"
-						/>
-					</Empty>
-				</div>
-			) : (
-				/* The header labels the columns; it is not one of the items, so it
-				   sits outside the list rather than inside it. */
-				<div>
-					<ErrorSignalHeader />
-					<div role="list" className="divide-y divide-border/40">
-						{signals.map((signal) => (
-							<div role="listitem" key={signal.id}>
-								<ErrorSignalRow
-									signal={signal}
-									sparkWindow={sparkWindow}
-									mutations={mutations}
-									selected={selectedIds.has(signal.id)}
-									focused={focusedId === signal.id}
-									onFocus={setFocusedId}
-								/>
-							</div>
-						))}
-					</div>
-				</div>
-			)}
-			<IssuesBulkBar selected={selectedIssues} mutations={mutations} onClear={clearSelection} />
-		</div>
-	)
-}
-
-function scrollIntoView(issueId: string) {
-	if (typeof document === "undefined") return
-	const el = document.querySelector<HTMLElement>(`[data-issue-id="${CSS.escape(issueId)}"]`)
-	el?.scrollIntoView({ block: "nearest", behavior: "smooth" })
 }

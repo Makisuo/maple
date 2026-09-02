@@ -35,6 +35,7 @@ import {
 	tracesBaseWhereConditions,
 	type TracesBaseWhereOpts,
 	matchOrIn,
+	soleValue,
 } from "./query-helpers"
 
 /**
@@ -227,7 +228,8 @@ function buildMvGroupNameExpr(
 	}
 
 	if (parts.length === 0) return CH.lit("all")
-	if (parts.length === 1) return CH.coalesce(CH.nullIf(parts[0]!, ""), CH.lit("all"))
+	const onlyPart = soleValue(parts)
+	if (onlyPart !== undefined) return CH.coalesce(CH.nullIf(onlyPart, ""), CH.lit("all"))
 	const filtered = CH.arrayFilter("x -> x != ''", CH.arrayOf(...parts))
 	return CH.coalesce(CH.nullIf(CH.arrayStringConcat(filtered, " \u00b7 "), ""), CH.lit("all"))
 }
@@ -256,7 +258,8 @@ function buildAggregatesGroupNameExpr(
 	}
 
 	if (parts.length === 0) return CH.lit("all")
-	if (parts.length === 1) return CH.coalesce(CH.nullIf(parts[0]!, ""), CH.lit("all"))
+	const onlyPart = soleValue(parts)
+	if (onlyPart !== undefined) return CH.coalesce(CH.nullIf(onlyPart, ""), CH.lit("all"))
 	const filtered = CH.arrayFilter("x -> x != ''", CH.arrayOf(...parts))
 	return CH.coalesce(CH.nullIf(CH.arrayStringConcat(filtered, " \u00b7 "), ""), CH.lit("all"))
 }
@@ -267,8 +270,22 @@ function buildBreakdownGroupExpr(
 	groupByAttributeKey: string | undefined,
 ): CH.Expr<string> {
 	switch (groupBy) {
+		// One row for the whole window — the same "no dimension" shape the
+		// timeseries builder emits for an empty `groupBy`. Lets a caller take a
+		// real merged quantile over every span instead of averaging per-service
+		// quantiles, which is not a quantile.
+		case "all":
+			return CH.lit("all")
 		case "service":
 			return $.ServiceName
+		// Raw `traces` has no extracted namespace/environment columns — those live
+		// only on the MVs. Read the resource attributes so this route stays valid;
+		// a root-only breakdown routes to `service_overview_spans` anyway, which
+		// has the real columns (see buildMvBreakdownGroupExpr).
+		case "namespace":
+			return $.ResourceAttributes.get("service.namespace")
+		case "environment":
+			return $.ResourceAttributes.get("deployment.environment")
 		case "span_name":
 			return $.SpanName
 		case "status_code":
@@ -287,6 +304,12 @@ function buildMvBreakdownGroupExpr(
 	groupBy: string,
 ): CH.Expr<string> {
 	switch (groupBy) {
+		case "all":
+			return CH.lit("all")
+		case "namespace":
+			return $.ServiceNamespace
+		case "environment":
+			return $.DeploymentEnv
 		case "status_code":
 			return $.StatusCode
 		case "service":

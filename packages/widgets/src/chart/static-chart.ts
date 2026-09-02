@@ -192,8 +192,10 @@ export function downsample(
 ): ReadonlyArray<ChartPoint> {
 	if (points.length <= max || max < 3) return points
 	const sorted = [...points].sort((a, b) => a[0] - b[0])
-	const first = sorted[0]!
-	const last = sorted[sorted.length - 1]!
+	const first = sorted[0]
+	const last = sorted.at(-1)
+	// `points.length <= max` returned above and `max >= 3`, so both ends exist.
+	if (first === undefined || last === undefined) return points
 	const inner = sorted.slice(1, -1)
 	const buckets = max - 2
 	const size = Math.ceil(inner.length / buckets)
@@ -220,7 +222,11 @@ export function downsample(
  */
 export function renderPlotSvg(spec: StaticChartSpec): PlotRender {
 	const points = [...spec.points].sort((a, b) => a[0] - b[0])
-	if (points.length === 0) throw new Error("renderPlotSvg needs at least one data point.")
+	const firstPoint = points[0]
+	const lastPoint = points.at(-1)
+	if (firstPoint === undefined || lastPoint === undefined) {
+		throw new Error("renderPlotSvg needs at least one data point.")
+	}
 
 	const threshold = spec.threshold ?? null
 	const breachSide = spec.breachSide ?? "none"
@@ -230,10 +236,11 @@ export function renderPlotSvg(spec: StaticChartSpec): PlotRender {
 	// chart whose breach line sits off the top edge is worse than no chart.
 	const domain = threshold === null ? values : [...values, threshold]
 	const ticks = niceTicks(Math.min(...domain), Math.max(...domain))
-	const yMin = ticks[0]!
-	const yMax = ticks[ticks.length - 1]!
-	const tMin = points[0]![0]
-	const tMax = points[points.length - 1]![0]
+	// `niceTicks` always returns at least a `[min, max]` pair.
+	const yMin = ticks[0] ?? 0
+	const yMax = ticks.at(-1) ?? yMin
+	const tMin = firstPoint[0]
+	const tMax = lastPoint[0]
 	const tRange = Math.max(1, tMax - tMin)
 
 	const plotW = PLOT_WIDTH - PAD * 2
@@ -311,7 +318,7 @@ export function renderPlotSvg(spec: StaticChartSpec): PlotRender {
 		)
 		// The latest value gets a dot with a 2px surface ring; its *number* is a
 		// label the caller draws, because this SVG cannot.
-		const [lt, lv] = points[points.length - 1]!
+		const [lt, lv] = lastPoint
 		parts.push(
 			`<circle cx="${x(lt).toFixed(1)}" cy="${y(lv).toFixed(1)}" r="4" fill="${series}" stroke="${COLORS.surface}" stroke-width="2"/>`,
 		)
@@ -330,7 +337,7 @@ export function renderPlotSvg(spec: StaticChartSpec): PlotRender {
 	return {
 		svg: parts.join("\n"),
 		title: spec.title,
-		latest: formatValue(points[points.length - 1]![1], spec.unit),
+		latest: formatValue(lastPoint[1], spec.unit),
 		threshold:
 			threshold === null
 				? null

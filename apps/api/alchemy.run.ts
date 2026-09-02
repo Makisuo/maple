@@ -22,6 +22,7 @@ import {
 	appUrlsEnv,
 	authEnv,
 	cloudflareOAuthEnv,
+	derived,
 	ingestKeyCryptoEnv,
 	merge,
 	optionalPlain,
@@ -145,7 +146,7 @@ export const createReplayBlobStore = ({ stage }: { stage: MapleStage }) =>
  * reports all of them at once, and so `.env` / `--env-file` reach it — see
  * `@maple/infra/env`.
  */
-const apiConfiguredEnv = (stage: MapleStage) =>
+const apiConfiguredEnv = (stage: MapleStage, domains: MapleDomains) =>
 	merge(
 		tinybirdEnv,
 		// ClickHouse (BYO warehouse); `tinybird` unless an org config overrides it.
@@ -158,6 +159,13 @@ const apiConfiguredEnv = (stage: MapleStage) =>
 		ingestKeyCryptoEnv,
 		requireSecretEntry("MAPLE_SHARE_TOKEN_HMAC_KEY"),
 		appUrlsEnv,
+		// The worker's own canonical origin — everything it publishes about itself
+		// (MCP `server.json`, the discovery index) is built from this rather than
+		// from client-controlled forwarded headers. Stages with a real domain
+		// derive it; the rest fall back to production, overridable per deploy.
+		domains.api
+			? derived("MAPLE_API_BASE_URL", `https://${domains.api}`)
+			: plainWithDefault("MAPLE_API_BASE_URL", "https://api.maple.dev"),
 		// Bucket-cache knobs: on by default in deployed stages. Override via
 		// deploy-time env (e.g. `QE_BUCKET_CACHE_ENABLED=false`) if needed.
 		plainWithDefault("QE_BUCKET_CACHE_ENABLED", "true"),
@@ -274,7 +282,7 @@ export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOp
 
 		// Resolved before any resource is created, so a misconfigured deploy fails
 		// with the full list of missing vars rather than part-way through applying.
-		const configuredEnv = yield* apiConfiguredEnv(stage)
+		const configuredEnv = yield* apiConfiguredEnv(stage, domains)
 
 		const mcpSessions = yield* Cloudflare.KV.Namespace("MCP_SESSIONS", {
 			title: resolveWorkerName("mcp-sessions", stage),
@@ -382,6 +390,12 @@ export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOp
 				MCP_OAUTH_RATE_LIMITER: Cloudflare.RateLimit("MCP_OAUTH_RATE_LIMITER", {
 					namespaceId: 2026072102,
 					simple: { limit: 60, period: 60 },
+				}),
+				// Authenticated POST /mcp, per credential. A short window so a runaway
+				// agent loop is cut off in seconds, at twice the v2 API's throughput.
+				MCP_TOOLS_RATE_LIMITER: Cloudflare.RateLimit("MCP_TOOLS_RATE_LIMITER", {
+					namespaceId: 2026082901,
+					simple: { limit: 120, period: 10 },
 				}),
 				API_V2_RATE_LIMIT_PARTITION: formatMapleStage(stage),
 				// Production only: preview/stg workers run the same email crons against

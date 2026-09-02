@@ -1,5 +1,5 @@
 /**
- * Migration 0023 — `ai_trace_index`, the Agent Sessions detection surface.
+ * Migration 0024 — `ai_trace_index`, the Agent Sessions detection surface.
  *
  * Detecting agent traces by `mapContains(SpanAttributes, 'maple_ai.vendor.id')`
  * on raw `traces` cannot be indexed at production shape: GenAI spans are ~0.01%
@@ -28,10 +28,10 @@
  * addition.
  *
  * The CREATE statements below are the verbatim DDL as the schema emitter
- * produced it at v23. Frozen history: never re-derive it from a later snapshot.
+ * produced it at v24. Frozen history: never re-derive it from a later snapshot.
  */
-export const migration_0023_ai_trace_index = {
-	version: 23,
+export const migration_0024_ai_trace_index = {
+	version: 24,
 	description:
 		"Create ai_trace_index + ai_trace_index_mv: filtered projection of GenAI agent spans for Agent Sessions detection and facets",
 	requiredForIngest: false,

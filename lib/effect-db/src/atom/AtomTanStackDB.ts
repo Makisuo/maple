@@ -122,7 +122,7 @@ export const makeSingleCollectionAtom = <T extends object, TKey extends string |
 			}
 
 			const entries = Array.from(collection.entries())
-			const newData = entries.length > 0 ? entries[0]![1] : undefined
+			const newData = entries[0]?.[1]
 			get.setSelf(AsyncResult.success(newData))
 		})
 
@@ -149,7 +149,7 @@ export const makeSingleCollectionAtom = <T extends object, TKey extends string |
 		}
 
 		const entries = Array.from(collection.entries())
-		const initialData = entries.length > 0 ? entries[0]![1] : undefined
+		const initialData = entries[0]?.[1]
 
 		return AsyncResult.success(initialData)
 	})

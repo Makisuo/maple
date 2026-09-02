@@ -9,7 +9,7 @@
 // `spanPopover()` below rather than the render's own container.
 
 import { useState, type ReactNode } from "react"
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 vi.mock("@tanstack/react-router", () => ({
@@ -299,6 +299,8 @@ function Waterfall(props: {
 	collapsedTurns?: ReadonlySet<string>
 	onToggleTurn?: (turnId: string) => void
 	selectedSpanId?: string
+	revealedSpanId?: string
+	revealedTurnId?: string
 	onSelectSpan?: (spanId: string | undefined) => void
 	spanTab?: SpanDetailTab
 }) {
@@ -312,6 +314,8 @@ function Waterfall(props: {
 			collapsedTurns={props.collapsedTurns ?? EMPTY}
 			onToggleTurn={props.onToggleTurn ?? noop}
 			selectedSpanId={props.selectedSpanId}
+			revealedSpanId={props.revealedSpanId}
+			revealedTurnId={props.revealedTurnId}
 			onSelectSpan={props.onSelectSpan ?? noop}
 			spanTab={props.spanTab}
 			onSpanTabChange={noop}
@@ -377,6 +381,7 @@ describe("SessionOverview", () => {
 		initialSpanId?: string
 		onSelectSpan?: (spanId: string | undefined) => void
 		onOpenTraceView?: () => void
+		onOpenTurnInTraceView?: (turnId: string) => void
 	}) {
 		const [selectedSpanId, setSelectedSpanId] = useState<string | undefined>(props.initialSpanId)
 		return (
@@ -391,6 +396,7 @@ describe("SessionOverview", () => {
 				spanTab={undefined}
 				onSpanTabChange={noop}
 				onOpenTraceView={props.onOpenTraceView ?? noop}
+				onOpenTurnInTraceView={props.onOpenTurnInTraceView ?? noop}
 			/>
 		)
 	}
@@ -478,14 +484,29 @@ describe("SessionOverview", () => {
 	})
 
 	// The shape strip replaces the turn digest: one cell per turn, colored by
-	// what the findings attribute to it, each opening the turn's anchor span.
-	it("draws one cell per turn and opens the turn's anchor from a click", () => {
+	// what the findings attribute to it. A cell is a whole turn, so it crosses to
+	// Traces and lands on that turn — opening its root span in the overlay
+	// answered a question nobody asked of a strip of turns.
+	it("draws one cell per turn and sends a click to that turn in Traces", () => {
 		const onSelectSpan = vi.fn()
-		render(<Overview onSelectSpan={onSelectSpan} />)
+		const onOpenTurnInTraceView = vi.fn()
+		render(<Overview onSelectSpan={onSelectSpan} onOpenTurnInTraceView={onOpenTurnInTraceView} />)
 
-		const cellTwo = screen.getByRole("button", { name: "2" })
-		fireEvent.click(cellTwo)
-		expect(onSelectSpan).toHaveBeenCalledWith("agent-2")
+		fireEvent.click(screen.getByRole("button", { name: "2" }))
+		expect(onOpenTurnInTraceView).toHaveBeenCalledWith(turns[1]!.id)
+		expect(onSelectSpan).not.toHaveBeenCalled()
+	})
+
+	// A tool called ten times and failing every time reads nothing like one that
+	// never failed; the rail used to draw both as the same bar.
+	it("separates a tool's failed calls from its successful ones", () => {
+		render(<Overview />)
+
+		// run_tests: one call, and it errored.
+		expect(screen.getByTitle("1 failed")).toBeTruthy()
+		expect(screen.getByTitle("0 ok · 1 errored")).toBeTruthy()
+		// read_file and grep_repo ran clean, and say so by having nothing to say.
+		expect(screen.getAllByTitle("1 ok · 0 errored").length).toBe(2)
 	})
 
 	it("says no cost was reported rather than pricing tokens itself", () => {
@@ -541,6 +562,16 @@ describe("SessionOverview", () => {
 })
 
 describe("SessionWaterfall", () => {
+	// The Overview's session shape sends the reader here by turn, not by span:
+	// the header is what they were sent to, so it wears the mark.
+	it("marks the turn header the reader was sent to", () => {
+		render(<Waterfall revealedTurnId={turns[1]!.id} />)
+
+		const marked = document.querySelectorAll("[data-revealed]")
+		expect(marked.length).toBe(1)
+		expect(marked[0]!.textContent).toContain("Turn 2")
+	})
+
 	it("groups spans under their turn and marks the idle between them", () => {
 		render(<Waterfall />)
 
@@ -675,10 +706,11 @@ describe("SessionWaterfall", () => {
 		expect(within(spanPopover()).getAllByText("grep_repo").length).toBeGreaterThan(0)
 	})
 
-	// A call and its result are one event: the panel shows them as one card
-	// whose selector flips between the halves, instead of two stacked cards the
-	// reader has to pair by eye.
-	it("groups a tool call and its result into one card behind a selector", () => {
+	// A call and its result are one event: the panel draws both halves of one
+	// card at once, joined by the direction gutter. The selector that used to
+	// show one at a time made a result nobody captured read exactly like a half
+	// nobody had clicked.
+	it("draws a tool call and its result as both halves of one card", () => {
 		const { turns: toolTurns, summary: toolSummary } = sessionOf([
 			agentSpan({ spanId: "tc-agent", startMs: 0, durationMs: 4 * SECOND }),
 			toolSpan({
@@ -696,14 +728,64 @@ describe("SessionWaterfall", () => {
 		])
 		render(<Waterfall turns={toolTurns} summary={toolSummary} selectedSpanId="tc-tool" spanTab="tools" />)
 
-		// Arguments first, pretty-printed; the result is a click away, not a scroll.
+		// Both halves, pretty-printed and named by direction — and nothing to click
+		// to see the other one.
 		const detail = spanPopover()
 		expect(detail.textContent).toContain('"sql"')
-		expect(detail.textContent).not.toContain('"rows"')
-
-		fireEvent.click(within(detail).getByRole("button", { name: "result" }))
 		expect(detail.textContent).toContain('"rows"')
-		expect(detail.textContent).not.toContain('"sql"')
+		expect(detail.textContent).toContain("Sent")
+		expect(detail.textContent).toContain("Returned")
+		expect(within(detail).queryByRole("button", { name: "result" })).toBeNull()
+		expect(within(detail).queryByRole("button", { name: "arguments" })).toBeNull()
+	})
+
+	// A failed tool span condemns the call it EXECUTED. Without that, the Tool
+	// calls tab dressed a failed return in the success styling and dropped its
+	// error label — the tab said the call came back fine.
+	it("marks the executed call's return as the failure on the Tool calls tab", () => {
+		const { turns: toolTurns, summary: toolSummary } = sessionOf([
+			agentSpan({ spanId: "ft-agent", startMs: 0, durationMs: 4 * SECOND }),
+			toolSpan({
+				spanId: "ft-tool",
+				parentSpanId: "ft-agent",
+				startMs: SECOND,
+				durationMs: SECOND,
+				toolName: "run_tests",
+				statusCode: "Error",
+				statusMessage: "exit 1",
+				genAi: {
+					toolCallId: "call_11",
+					toolCallArguments: { suite: "webhooks" },
+					toolCallResult: "exit 1 · 2 failing",
+				},
+			}),
+		])
+		render(<Waterfall turns={toolTurns} summary={toolSummary} selectedSpanId="ft-tool" spanTab="tools" />)
+
+		const detail = spanPopover()
+		expect(detail.textContent).toContain("Returned · error")
+		expect(detail.textContent).toContain("span status Error")
+	})
+
+	// A half nobody recorded keeps its place: dropping it would leave a card that
+	// reads as a call which returned nothing.
+	it("keeps the returned half when no result was captured", () => {
+		const { turns: toolTurns, summary: toolSummary } = sessionOf([
+			agentSpan({ spanId: "nr-agent", startMs: 0, durationMs: 4 * SECOND }),
+			toolSpan({
+				spanId: "nr-tool",
+				parentSpanId: "nr-agent",
+				startMs: SECOND,
+				durationMs: SECOND,
+				toolName: "write_file",
+				genAi: { toolCallId: "call_10", toolCallArguments: { path: "a.ts" } },
+			}),
+		])
+		render(<Waterfall turns={toolTurns} summary={toolSummary} selectedSpanId="nr-tool" spanTab="tools" />)
+
+		const detail = spanPopover()
+		expect(detail.textContent).toContain("Returned")
+		expect(detail.textContent).toContain("whether the call succeeded is unknown")
 	})
 
 	// The panel is a dialog, so the page-level keys stand down while it is open:
@@ -1048,6 +1130,27 @@ describe("SessionViews", () => {
 		expect(screen.queryByText(/of idle removed/)).toBeNull()
 	})
 
+	// The Overview has no filter box, so a query left behind in Traces is
+	// invisible from where a session-shape cell is clicked — and one matching
+	// nothing in that turn would drop the very row the reader was sent to.
+	it("clears a stale span filter when a session-shape cell crosses to Traces", () => {
+		render(<Views />)
+
+		fireEvent.change(screen.getByPlaceholderText("Filter spans"), {
+			target: { value: "no span says this" },
+		})
+		expect(screen.getByText("No spans match this filter.")).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("tab", { name: /Overview/ }))
+		fireEvent.click(screen.getByRole("button", { name: "2" }))
+
+		// Back in Traces, on the turn that was clicked, with the filter gone.
+		expect(screen.getByPlaceholderText("Filter spans").getAttribute("value")).toBe("")
+		const marked = document.querySelectorAll("[data-revealed]")
+		expect(marked.length).toBe(1)
+		expect(marked[0]!.textContent).toContain("Turn 2")
+	})
+
 	// The state lives in SessionViews rather than the views precisely so a look
 	// at Flow doesn't cost the reader the place they found in a long session.
 	it("survives a Trace → Flow → Trace round trip with the turn still collapsed", () => {
@@ -1064,23 +1167,73 @@ describe("SessionViews", () => {
 		expect(screen.getByRole("button", { name: /Turn 1/ }).getAttribute("aria-expanded")).toBe("false")
 	})
 
-	// One panel for the whole page, and the page behind it is scrimmed, so the
-	// way to cross views with a span still open is the panel's own door — which
-	// keeps both the span and the reader's tab.
-	it("carries the open span and its tab through the panel's door into Traces", () => {
+	// The panel's door exists to show the span in its waterfall, so the panel
+	// closes on the way through: crossing views only to find the same overlay
+	// still covering the rows was the one thing the door could not do.
+	it("closes the panel and marks the row it sent the reader to", () => {
 		render(<Views view="flow" />)
 
 		fireEvent.click(screen.getByText("grep_repo"))
-		fireEvent.click(within(spanPopover()).getByRole("button", { name: "Details" }))
-
 		fireEvent.click(within(spanPopover()).getByRole("button", { name: "Open in Traces view" }))
 
 		// The waterfall's own column header: the Traces view is what is on screen.
 		expect(screen.getByText("Model / target")).toBeTruthy()
-		expect(spanPopoverCount()).toBe(1)
-		expect(
-			within(spanPopover()).getByRole("button", { name: "Details" }).getAttribute("aria-pressed"),
-		).toBe("true")
+		expect(spanPopoverCount()).toBe(0)
+
+		// And the row the reader crossed for is the one carrying the mark.
+		const marked = document.querySelectorAll("[data-revealed]")
+		expect(marked.length).toBe(1)
+		expect(marked[0]!.textContent).toContain("grep_repo")
+	})
+
+	// The mark says "this is the row you were sent to", so it comes off the
+	// moment the reader goes somewhere else themselves.
+	it("takes the mark off once the reader opens another span", () => {
+		render(<Views view="flow" />)
+
+		fireEvent.click(screen.getByText("grep_repo"))
+		fireEvent.click(within(spanPopover()).getByRole("button", { name: "Open in Traces view" }))
+
+		fireEvent.click(screen.getAllByText("read_file")[0]!)
+		expect(document.querySelector("[data-revealed]")).toBeNull()
+	})
+
+	// The mark alone is not the landing: the row has to be brought on screen, and
+	// the aim the virtualizer makes on mount is made against a page that is still
+	// settling into the switch. The row corrects it a frame later, from where it
+	// actually is — which is also the only part of the landing jsdom can observe.
+	it("brings the row it sent the reader to on screen, from the row's own position", async () => {
+		const scrollIntoView = vi.fn()
+		const original = Element.prototype.scrollIntoView
+		Element.prototype.scrollIntoView = scrollIntoView
+		try {
+			render(<Views view="flow" />)
+
+			fireEvent.click(screen.getByText("grep_repo"))
+			fireEvent.click(within(spanPopover()).getByRole("button", { name: "Open in Traces view" }))
+
+			await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+
+			expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" })
+			// On the marked row itself, not on whatever happened to be first.
+			expect((scrollIntoView.mock.instances[0] as HTMLElement).dataset.revealed).toBe("true")
+		} finally {
+			Element.prototype.scrollIntoView = original
+		}
+	})
+
+	// A view left behind is not just invisible, it is out of the page: the
+	// waterfall measures its own offset inside the page scroller as it mounts,
+	// and a view still standing above it moves that measurement by its whole
+	// height — which is what sent "Open in Traces view" nowhere near its row.
+	it("takes the view being left out of the page, not just out of sight", () => {
+		render(<Views view="overview" />)
+		expect(screen.getByText(/Completed, with/)).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("tab", { name: /Traces/ }))
+
+		expect(screen.getByText("Model / target")).toBeTruthy()
+		expect(screen.queryByText(/Completed, with/)).toBeNull()
 	})
 
 	// The tab choice lives beside the other cross-view state in SessionViews:

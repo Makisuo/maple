@@ -32,6 +32,15 @@ import { Env } from "@/platform/Env"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 
 const DEVICE_TTL_SECONDS = 15 * 60
+/**
+ * How long the credential `maple auth login` mints is good for.
+ *
+ * It used to be forever: a `standard` key with no `expiresAt`, sitting in a
+ * dotfile on a laptop, outliving the login, the laptop and the membership.
+ * 90 days matches the MCP grant's absolute ceiling and is long enough that a
+ * working developer re-runs `maple auth login` about once a quarter.
+ */
+const CLI_KEY_TTL_MS = 90 * 24 * 60 * 60 * 1000
 const POLL_INTERVAL_SECONDS = 5
 const USER_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 const CLI_AUTH_RATE_LIMIT_BINDING = "CLI_AUTH_RATE_LIMITER"
@@ -388,6 +397,7 @@ export class CliDeviceAuthService extends Context.Service<
 								roles: row.approvedRoles,
 								deviceName: row.deviceName,
 							},
+							expiresAt: new Date(now + CLI_KEY_TTL_MS),
 							createdAt: new Date(now),
 							createdBy: row.approvedUserId!,
 							createdByEmail: row.approvedUserEmail,

@@ -96,6 +96,25 @@ describe("Tinybird retention matrix", () => {
 		}
 	})
 
+	/**
+	 * A materialized view whose target outlives its source cannot be rebuilt.
+	 *
+	 * Tinybird's default for a changed MV node is to REPLAY the source into the
+	 * target. For these two that means `traces` (30 days) into a 90-day rollup,
+	 * and that 90-day rollup into a 365-day one — so the deploy warns and then
+	 * drops history that no longer exists anywhere to be reconstructed from.
+	 * `DEPLOYMENT_METHOD alter` applies additive column changes in place with no
+	 * data movement, which is the only correct shape here. Migration 0023's first
+	 * deploy attempt failed on exactly this.
+	 */
+	it("applies service-operations rollup changes by ALTER, never by rebuild", () => {
+		for (const name of ["service_operations_minutely_mv", "service_operations_hourly_mv"]) {
+			const pipe = tinybirdProjectManifest.pipes.find((candidate) => candidate.name === name)
+			expect(pipe, name).toBeDefined()
+			expect(pipe?.content, name).toContain("DEPLOYMENT_METHOD alter")
+		}
+	})
+
 	it("preserves longer-lived aggregates while raw logs are rebuilt", () => {
 		const migrationForwardQueries = [
 			"logs",

@@ -1,4 +1,5 @@
 import type { Edge3D, Node3D, Topology3D } from "./fixture"
+import { SERVICE_MAP_3D_TUNING, type Layout3DTuning } from "./tuning"
 
 /**
  * Pure layout math for the 3D map — no `three` import, so it unit-tests in
@@ -17,23 +18,22 @@ export interface Layout3D {
 	namespaceAngles: ReadonlyMap<string, number>
 	tierCount: number
 	radius: number
+	/** The storey drop this layout was built with — what the tier planes sit on. */
+	floorGap: number
 	/** Centre of the laid-out graph, and the radius of the sphere enclosing it. */
 	center: Vec3
 	extent: number
 }
-
-const FLOOR_GAP = 7
-const FLOOR_RADIUS = 13
-const CLUSTER_SPACING = 4.4
-const RING_INNER = 7
-const RING_GAP = 6.5
 
 /**
  * Longest-path depth from every entry node (in-degree 0), which is what makes
  * a request read top-to-bottom. Cycles can't extend a node past `nodes.length`,
  * so the relaxation loop is bounded rather than trusting the graph to be a DAG.
  */
-export function computeTiers(nodes: ReadonlyArray<Node3D>, edges: ReadonlyArray<Edge3D>): Map<string, number> {
+export function computeTiers(
+	nodes: ReadonlyArray<Node3D>,
+	edges: ReadonlyArray<Edge3D>,
+): Map<string, number> {
 	const ids = new Set(nodes.map((node) => node.id))
 	const real = edges.filter((e) => ids.has(e.source) && ids.has(e.target))
 	const indegree = new Map<string, number>(nodes.map((node) => [node.id, 0]))
@@ -68,7 +68,9 @@ const namespaceOrder = (nodes: ReadonlyArray<Node3D>, tiers: ReadonlyMap<string,
 		const current = minTier.get(node.namespace)
 		if (current === undefined || tier < current) minTier.set(node.namespace, tier)
 	}
-	return [...minTier.keys()].sort((a, b) => (minTier.get(a) ?? 0) - (minTier.get(b) ?? 0) || a.localeCompare(b))
+	return [...minTier.keys()].sort(
+		(a, b) => (minTier.get(a) ?? 0) - (minTier.get(b) ?? 0) || a.localeCompare(b),
+	)
 }
 
 /**
@@ -79,7 +81,11 @@ const namespaceOrder = (nodes: ReadonlyArray<Node3D>, tiers: ReadonlyMap<string,
  * `rings`: concentric rings, tier → radius, a shallow cone. Reads better for
  * fan-out breadth, worse for depth.
  */
-export function layoutGraph(topology: Topology3D, mode: Layout3DMode): Layout3D {
+export function layoutGraph(
+	topology: Topology3D,
+	mode: Layout3DMode,
+	tuning: Layout3DTuning = SERVICE_MAP_3D_TUNING,
+): Layout3D {
 	const { nodes, edges } = topology
 	const tiers = computeTiers(nodes, edges)
 	const tierCount = nodes.reduce((max, node) => Math.max(max, tiers.get(node.id) ?? 0), 0) + 1
@@ -102,15 +108,15 @@ export function layoutGraph(topology: Topology3D, mode: Layout3DMode): Layout3D 
 		for (const [key, group] of groups) {
 			const tier = Number(key.split("::")[0])
 			const angle = namespaceAngles.get(group[0]!.namespace) ?? 0
-			const cx = Math.cos(angle) * FLOOR_RADIUS
-			const cz = Math.sin(angle) * FLOOR_RADIUS
+			const cx = Math.cos(angle) * tuning.floorRadius
+			const cz = Math.sin(angle) * tuning.floorRadius
 			// Spread the cluster along the tangent so it faces the centre.
 			const tx = -Math.sin(angle)
 			const tz = Math.cos(angle)
 			const span = (group.length - 1) / 2
 			group.forEach((node, index) => {
-				const offset = (index - span) * CLUSTER_SPACING
-				positions.set(node.id, [cx + tx * offset, -tier * FLOOR_GAP, cz + tz * offset])
+				const offset = (index - span) * tuning.clusterSpacing
+				positions.set(node.id, [cx + tx * offset, -tier * tuning.floorGap, cz + tz * offset])
 			})
 		}
 	} else {
@@ -125,7 +131,7 @@ export function layoutGraph(topology: Topology3D, mode: Layout3DMode): Layout3D 
 			const sorted = [...list].sort(
 				(a, b) => a.namespace.localeCompare(b.namespace) || a.label.localeCompare(b.label),
 			)
-			const radius = RING_INNER + tier * RING_GAP
+			const radius = tuning.ringInner + tier * tuning.ringGap
 			sorted.forEach((node, index) => {
 				const angle = (index / sorted.length) * Math.PI * 2 + tier * 0.35
 				positions.set(node.id, [
@@ -142,7 +148,8 @@ export function layoutGraph(topology: Topology3D, mode: Layout3DMode): Layout3D 
 		tiers,
 		namespaceAngles,
 		tierCount,
-		radius: mode === "floors" ? FLOOR_RADIUS : RING_INNER + (tierCount - 1) * RING_GAP,
+		radius: mode === "floors" ? tuning.floorRadius : tuning.ringInner + (tierCount - 1) * tuning.ringGap,
+		floorGap: tuning.floorGap,
 		...bounds(positions),
 	}
 }

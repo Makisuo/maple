@@ -221,7 +221,8 @@ Short list; each has a comment at the site.
   `/apps/ingest/target` becomes the glob `apps/ingest/target/**` evaluated with
   `cwd=apps/ingest`, matching nothing. The whole target dir would be walked and hashed on
   every deploy.
-- **A first deploy of a new stage with the AWS half on.** The ACM certificate lands
-  `PENDING_VALIDATION` and the 443 listener fails. The workflows recover by creating the
-  validation CNAME (`scripts/ingest-cert-validate.sh`) and redeploying; the script is a
-  no-op on an ISSUED certificate.
+- **A first deploy of a new stage with the AWS half on.** Each service's ACM certificate
+  lands `PENDING_VALIDATION` and its 443 listener fails. The workflows recover by creating
+  the validation CNAMEs (`scripts/acm-cert-validate.sh <domain>...`) and redeploying; the
+  script is a no-op on an ISSUED certificate. Every certificate-bearing service has to be
+  named in that call — a new one that is not cannot complete its first deploy unattended.

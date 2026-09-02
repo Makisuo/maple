@@ -8,14 +8,7 @@ describe("Drain TemplateMiner", () => {
 		tm.addLogMessage("user 99 logged in")
 		tm.addLogMessage("user 4321 logged in")
 		expect(tm.drain.clusterCount).toBe(1)
-		// SAFETY: the test inspects Drain's known internal store solely to verify cluster aggregation.
-		const [cluster] = Array.from(
-			(
-				tm.drain as unknown as {
-					unlimitedStore: Map<number, { size: number; getTemplate(): string }>
-				}
-			).unlimitedStore?.values() ?? [],
-		)
+		const [cluster] = tm.drain.clusters()
 		expect(cluster?.size).toBe(3)
 		expect(cluster?.getTemplate()).toContain("logged")
 	})

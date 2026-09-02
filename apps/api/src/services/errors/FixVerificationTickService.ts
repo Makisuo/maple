@@ -27,6 +27,45 @@ const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const MAX_VERIFICATIONS_PER_TICK = 20
 
 /**
+ * Distinct versions read per occurrence scan. Membership against the baseline
+ * is the decision, so a build dropped from the result could be the single
+ * post-merge build that refutes the fix — a full page is treated as incomplete
+ * evidence below rather than silently classified from the head.
+ */
+const VERSION_SCAN_LIMIT = 1000
+
+/**
+ * Split one window's version rows against the merge-time baseline.
+ *
+ * Occurrences with no reported build cannot be attributed either way: counting
+ * one as post-merge would refute every fix from a service that does not report
+ * `service.version`, and counting it as a stale client would hide a real
+ * failure. They are tallied as `unattributed`, and any nonzero tally (or a
+ * truncated scan) must force the verdict toward `inconclusive` — evidence that
+ * exists but cannot be read is not a clean window.
+ */
+export const splitVersionRows = (
+	rows: ReadonlyArray<{ readonly serviceVersion: string; readonly count: number }>,
+	baselineVersions: ReadonlyArray<string>,
+	scanLimit: number,
+): { postMerge: number; staleClients: number; unattributed: number } => {
+	const baseline = new Set(baselineVersions)
+	let postMerge = 0
+	let staleClients = 0
+	let unattributed = 0
+	for (const entry of rows) {
+		if (entry.serviceVersion === "") unattributed += entry.count
+		else if (baseline.has(entry.serviceVersion)) staleClients += entry.count
+		else postMerge += entry.count
+	}
+	// A full page means versions beyond the cap were dropped, and any one of
+	// them could be decisive. Marked unattributed so the verdict cannot claim
+	// the window was clean.
+	if (rows.length >= scanLimit) unattributed += 1
+	return { postMerge, staleClients, unattributed }
+}
+
+/**
  * Turn a finished verification investigation into a verdict.
  *
  * The mapping reads backwards until you hold the question the run was asked.
@@ -119,7 +158,7 @@ const make: Effect.Effect<
 		nowMs: number,
 	) {
 		const mergedAtMs = dateToMs(row.mergedAt) ?? nowMs
-		const compiled = CH.compile(CH.errorIssueVersionsSinceQuery(), {
+		const compiled = CH.compile(CH.errorIssueVersionsSinceQuery({ limit: VERSION_SCAN_LIMIT }), {
 			orgId: row.orgId,
 			fingerprintHash,
 			startTime: formatWarehouseDateTime(mergedAtMs),
@@ -128,20 +167,7 @@ const make: Effect.Effect<
 		const rows = yield* warehouse.compiledQuery(systemTenant(row.orgId), compiled, {
 			context: "errorIssueVersionsSince",
 		})
-		const baseline = new Set(row.baselineVersionsJson)
-		let postMerge = 0
-		let staleClients = 0
-		for (const entry of rows) {
-			// An occurrence with no reported build cannot be attributed either way.
-			// Counting it as post-merge would refute every fix from a service that
-			// does not report `service.version`; counting it as a stale client would
-			// hide a real failure. It is counted as neither, and its absence is what
-			// makes the verdict "inconclusive" rather than confidently wrong.
-			if (entry.serviceVersion === "") continue
-			if (baseline.has(entry.serviceVersion)) staleClients += entry.count
-			else postMerge += entry.count
-		}
-		return { postMerge, staleClients }
+		return splitVersionRows(rows, row.baselineVersionsJson, VERSION_SCAN_LIMIT)
 	})
 
 	const verdictFromRun = verdictFromInvestigationStatus
@@ -233,7 +259,13 @@ const make: Effect.Effect<
 									error: summarizeCause(cause),
 								}),
 								// Leave the row waiting; the warehouse being down is not a verdict.
-								Effect.as(Option.none<{ postMerge: number; staleClients: number }>()),
+								Effect.as(
+									Option.none<{
+										postMerge: number
+										staleClients: number
+										unattributed: number
+									}>(),
+								),
 							),
 				),
 			)
@@ -251,6 +283,23 @@ const make: Effect.Effect<
 					`${split.value.postMerge} occurrence(s) since the merge came from builds that were not running when the fix landed.`,
 				)
 				if (applied) refuted += 1
+				else failedRows += 1
+				continue
+			}
+
+			// Occurrences that could not be attributed to a build make the window
+			// unreadable: proceeding as though they did not happen is how an error
+			// still firing from a version-less service gets `verified` and
+			// auto-closed. Inconclusive, not a refutation — those occurrences may
+			// equally be old clients — and `applyVerdict` re-arms one longer window
+			// before handing the issue back to a human.
+			if (split.value.unattributed > 0) {
+				const applied = yield* applyVerdictGuarded(
+					row,
+					"inconclusive",
+					"Occurrences since the merge carried no service.version (or the version scan was truncated), so they cannot be attributed to a pre- or post-merge build.",
+				)
+				if (applied) verdictsApplied += 1
 				else failedRows += 1
 				continue
 			}

@@ -103,27 +103,29 @@ export default function LiveLogsVolumeChart() {
 						layout: stack({ order: [...STACK_ORDER] }),
 					}),
 				],
-				x: {
-					// A continuous time scale, as the app's bar chart uses — a band scale
-					// over bucket strings puts ticks on arbitrary buckets rather than on
-					// clock boundaries.
-					scale: scaleTime,
-					axis: {
-						line: false,
-						ticks: {
-							size: 0,
-							padding: 6,
-							spacing: 50,
-							format: (value: Date) => formatBucketTick(value.toISOString()),
+				scales: {
+					x: {
+						// A continuous time scale, as the app's bar chart uses — a band scale
+						// over bucket strings puts ticks on arbitrary buckets rather than on
+						// clock boundaries.
+						scale: scaleTime,
+						axis: {
+							line: false,
+							ticks: {
+								size: 0,
+								padding: 6,
+								spacing: 50,
+								format: (value: Date) => formatBucketTick(value.toISOString()),
+							},
 						},
 					},
-				},
-				y: {
-					scale: scaleLinear().domain([0, yMax]),
-					nice: true,
-					axis: {
-						line: false,
-						ticks: { size: 0, padding: 4, format: (value: number) => formatNumber(value) },
+					y: {
+						scale: scaleLinear().domain([0, yMax]),
+						nice: true,
+						axis: {
+							line: false,
+							ticks: { size: 0, padding: 4, format: (value: number) => formatNumber(value) },
+						},
 					},
 				},
 				// The landing chart is a still life: no hover, no tooltip, no focus ring.

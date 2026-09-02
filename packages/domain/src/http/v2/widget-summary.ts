@@ -15,7 +15,7 @@ import { ErrorIssuePublicId } from "./resource-ids"
  * + `/v2/services` + `/v2/traces/timeseries`, for two reasons that are not
  * "three requests is more than one":
  *
- * 1. **It is the credential's fence.** `requiredScopeForRequest` derives an API
+ * 1. **It is the credential's fence.** `requiredScopeForRoute` derives an API
  *    key's required scope from the first path segment, so a key scoped
  *    `widget_summary:read` can reach exactly this endpoint and nothing else.
  *    Composed from the generic endpoints, the same widget would need
