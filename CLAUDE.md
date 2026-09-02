@@ -28,14 +28,14 @@ Sign in at `https://web.localhost` with the Clerk test account `david+clerk_test
 `Maple-Dev-Kx92qZ!` when you need an authenticated browser session.
 
 ```bash
-bun dev                        # all apps via turbo → https://[<worktree>.]<app>.localhost
-bun run dev:workers            # api + alerting + electric-sync under ONE `alchemy dev`
-bun --filter=@maple/web dev:app # single app, raw port, no portless proxy
+bun dev                        # everything, ONE `alchemy dev` stack → https://[<worktree>.]<app>.localhost
+bun dev api web                # a subset (api, alerting, electric-sync, web, landing, ingest, local-ui, scraper)
+bun --filter=@maple/web dev    # single app on its raw port, no portless proxy
 bun run test                   # Vitest via turbo (NOT `bun test` — that's Bun's own runner)
 bun typecheck
 bun run tinybird:manifest      # regenerate after editing datasources.ts
 bun run local-schema:bump <slug>   # scaffold the local chDB schema bump a datasources.ts change needs
-bun db:up && bun db:migrate:local   # docker Postgres for wrangler dev (vitest uses embedded PGlite)
+bun db:up && bun db:migrate:local   # docker Postgres for `alchemy dev` (vitest uses embedded PGlite)
 bun run --cwd apps/api tinybird:deploy   # tinybird:dev / :build / :deploy live in apps/api
 ```
 

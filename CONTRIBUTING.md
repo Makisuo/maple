@@ -87,8 +87,8 @@ CLICKHOUSE_USER=maple
 CLICKHOUSE_PASSWORD=maple
 CLICKHOUSE_DATABASE=default
 
-# App database (wrangler dev uses Hyperdrive → docker Postgres on 5499)
-# MAPLE_DB_URL is intentionally blank for wrangler; see db:migrate:local below.
+# App database (`alchemy dev` binds MAPLE_DB to the docker Postgres on 5499)
+# MAPLE_DB_URL is intentionally blank for the Workers; see db:migrate:local below.
 
 # Auth — self-hosted mode (no Clerk account required)
 MAPLE_AUTH_MODE=self_hosted
@@ -133,7 +133,7 @@ This starts:
 
 | Service          | Ports                   | Purpose                                      |
 | ---------------- | ----------------------- | -------------------------------------------- |
-| `postgres`       | `5499 → 5432`           | App DB for `wrangler dev` (Hyperdrive local) |
+| `postgres`       | `5499 → 5432`           | App DB for `alchemy dev` (Hyperdrive origin) |
 | `clickhouse`     | `8123`, `9000`          | Telemetry warehouse                          |
 | `otel-collector` | `4317`, `4318`, `13133` | OTLP ingest → ClickHouse via mapleexporter   |
 
@@ -165,18 +165,21 @@ Remove volumes with `down -v` for a clean slate.
 
 ## Running application services
 
-`development.mprocs.yaml` (local only, not committed) runs the core apps in one terminal
-via [mprocs](https://github.com/pvolok/mprocs). Equivalent manual commands:
+`bun dev` runs every app below as one `alchemy dev` stack behind `https://<app>.localhost`,
+and `bun dev api web` runs a subset — see [All at once](#all-at-once). The per-app sections
+describe what each one needs and how to run it alone on its raw port.
 
-Open **one terminal per service** (order matters: start `api` before dependents).
-
-### 1. API (`apps/api`)
+### 1. Workers: API, alerting, electric-sync
 
 ```bash
-cd apps/api && bun dev:app
+bun dev api alerting electric-sync
 ```
 
-Default URL: `http://localhost:3472`
+The three Cloudflare Workers are served by alchemy's local runtime from the same
+`alchemy.run.ts` that deploys them, reachable at `https://api.localhost`,
+`https://alerting.localhost` and `https://electric-sync.localhost` through the portless
+proxy (branch-prefixed in a linked worktree). Ports are ephemeral; `bun dev` prints them.
+The variables below are the API's:
 
 | Variable                                                          | Required              | Notes                                                                                                |
 | ----------------------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------- |
@@ -196,16 +199,17 @@ Default URL: `http://localhost:3472`
 | `SD_INTERNAL_TOKEN`                                               | optional              | Prometheus scraper internal API auth                                                                 |
 | `CLERK_*`                                                         | clerk mode            | See `.env.example`                                                                                   |
 
-Loads env via `--env-file ../../.env.local` (wrangler). Requires docker Postgres running
-(`bun run db:migrate:local`).
+Loads env via `alchemy dev --env-file .env.local`; a changed variable needs a restart.
+Requires docker Postgres running (`bun run db:migrate:local`).
 
 ### 2. Web (`apps/web`)
 
 ```bash
-cd apps/web && bun dev:app
+bun dev web                    # in the stack: https://web.localhost
+bun --filter=@maple/web dev    # alone, raw port
 ```
 
-Default URL: `http://localhost:3471`
+Default raw URL: `http://localhost:3471`
 
 | Variable                | Required   | Notes                                                         |
 | ----------------------- | ---------- | ------------------------------------------------------------- |
@@ -221,26 +225,27 @@ Clerk dev login: see [CLAUDE.md](CLAUDE.md).
 ### 3. Ingest (`apps/ingest`)
 
 ```bash
-cd apps/ingest && bun dev:app
+bun dev ingest                    # in the stack: https://ingest.localhost
+bun --filter=@maple/ingest dev    # alone, raw port
 ```
 
 Default port: `3473` (`INGEST_PORT` / `PORT` override). `.env.example` uses `3474`; pick one
 port and keep `VITE_*` / `MAPLE_INGEST_PUBLIC_URL` consistent.
 
-| Variable                           | Required       | Notes                                                                   |
-| ---------------------------------- | -------------- | ----------------------------------------------------------------------- |
-| `INGEST_FORWARD_OTLP_ENDPOINT`     | yes            | `http://127.0.0.1:4318` for local collector                             |
-| `INGEST_WRITE_MODE`                | recommended    | `forward` for ClickHouse stack (default `tinybird`)                     |
-| `MAPLE_INTERNAL_ORG_ID`            | yes            | Org the gateway files its OWN telemetry under; no default               |
-| `MAPLE_INGEST_KEY_ENCRYPTION_KEY`  | yes\*          | \*Required for postgres key store / ClickHouse direct path              |
-| `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY` | yes            | Same value as API                                                       |
-| `MAPLE_SELF_HOSTED_MODE`           | recommended    | `single_tenant` → static key store (no DB)                              |
-| `MAPLE_ORG_ID_OVERRIDE`            | with static    | Must match `MAPLE_DEFAULT_ORG_ID`                                       |
-| `MAPLE_PG_URL`                     | postgres store | `postgres://maple:maple@localhost:5499/maple` if not using static store |
-| `TINYBIRD_HOST` / `TINYBIRD_TOKEN` | tinybird mode  | When `INGEST_WRITE_MODE=tinybird` or `dual`                             |
+| Variable                           | Required       | Notes                                                                    |
+| ---------------------------------- | -------------- | ------------------------------------------------------------------------ |
+| `INGEST_FORWARD_OTLP_ENDPOINT`     | yes            | `http://127.0.0.1:4318` for local collector                              |
+| `INGEST_WRITE_MODE`                | recommended    | `forward` for ClickHouse stack (default `tinybird`)                      |
+| `MAPLE_INTERNAL_ORG_ID`            | yes            | Org the gateway files its OWN telemetry under; no default                |
+| `MAPLE_INGEST_KEY_ENCRYPTION_KEY`  | yes\*          | \*Required for postgres key store / ClickHouse direct path               |
+| `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY` | yes            | Same value as API                                                        |
+| `MAPLE_SELF_HOSTED_MODE`           | recommended    | `single_tenant` → static key store (no DB)                               |
+| `MAPLE_ORG_ID_OVERRIDE`            | with static    | Must match `MAPLE_DEFAULT_ORG_ID`                                        |
+| `MAPLE_PG_URL`                     | postgres store | `postgres://maple:maple@localhost:5499/maple` if not using static store  |
+| `TINYBIRD_HOST` / `TINYBIRD_TOKEN` | tinybird mode  | When `INGEST_WRITE_MODE=tinybird` or `dual`                              |
 | `TINYBIRD_MIRROR_HOST` / `_TOKEN`  | migration only | Mirrors writes into a second workspace; best-effort, set both or neither |
-| `INGEST_PORT`                      | optional       | Default from port / env                                                 |
-| `INGEST_REQUIRE_TLS`               | optional       | `false` locally                                                         |
+| `INGEST_PORT`                      | optional       | Default from port / env                                                  |
+| `INGEST_REQUIRE_TLS`               | optional       | `false` locally                                                          |
 
 Sources `../../.env.local` automatically. Requires Rust toolchain.
 
@@ -269,12 +274,13 @@ Loads `../../.env.local` via `bun --env-file`.
 `/chat` and `/investigations/*` are served by `apps/api` itself: the `ChatSession` Durable
 Object owns each transcript and the agent turn runs in-process on `@opencode-ai/ai` against the
 Workers AI `AI` binding. There is no second worker to start — but the chat routes only work
-when `apps/api` is running **under wrangler** (`cd apps/api && bun dev:app`), because a plain
+when `apps/api` is running **under `alchemy dev`** (`bun dev api`), because a plain
 `bun` process has neither the Durable Object namespace nor the `AI` binding.
 
-The `AI` binding needs a Cloudflare account with Workers AI (`wrangler login`). Confirm the
-default model id in `apps/api/src/lib/Llm.ts` is still in the catalog — `bunx wrangler ai
-models list`; a retired id returns `410`. Override it with `MAPLE_TRIAGE_MODEL`.
+The `AI` binding needs a Cloudflare account with Workers AI, through an alchemy profile
+(`bunx alchemy login`). Confirm the default model id in `apps/api/src/lib/Llm.ts` is still in
+the catalog — `cd apps/api && bunx wrangler ai models list`; a retired id returns `410`.
+Override it with `MAPLE_TRIAGE_MODEL`.
 
 > **`MAPLE_ORG_ID_OVERRIDE` breaks the investigation chat.** It pins every API request to
 > one org, but the browser addresses the session as `<clerk org>:<tab>`. With the
@@ -284,41 +290,24 @@ models list`; a retired id returns `410`. Override it with `MAPLE_TRIAGE_MODEL`.
 
 When an autonomous investigation fails to start, the `investigations.error` column names it:
 
-| `error` value                                                    | Cause                                                                          |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `agent_unavailable: …`                                           | `apps/api` isn't running under wrangler, so there is no `CHAT_SESSION` binding |
-| `start_failed: a turn is already running for this investigation` | The session is busy; retry                                                     |
-| `diagnosis_timeout: …`                                           | The turn ran but never called `submit_diagnosis` within 15 minutes             |
+| `error` value                                                    | Cause                                                                               |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `agent_unavailable: …`                                           | `apps/api` isn't running under `alchemy dev`, so there is no `CHAT_SESSION` binding |
+| `start_failed: a turn is already running for this investigation` | The session is busy; retry                                                          |
+| `diagnosis_timeout: …`                                           | The turn ran but never called `submit_diagnosis` within 15 minutes                  |
 
-### All-in-one alternatives
-
-**Turbo + portless** (HTTPS `*.localhost` URLs, runs every app's `dev` script):
+### All at once
 
 ```bash
-bun dev
+bun dev             # everything
+bun dev api web     # a subset
 ```
 
-**mprocs** (local convenience — create `development.mprocs.yaml` yourself):
-
-```yaml
-proc_list_title: Maple
-
-procs:
-    web:
-        shell: bun dev:app
-        cwd: apps/web
-    api:
-        shell: bun dev:app
-        cwd: apps/api
-    ingest:
-        shell: bun dev:app
-        cwd: apps/ingest
-    scraper:
-        shell: bun dev
-        cwd: apps/scraper
-```
-
-Run with `mprocs development.mprocs.yaml`.
+One `alchemy dev` stack: the Workers (api, alerting, electric-sync) on alchemy's local
+runtime, everything else (web, landing, local-ui, ingest, scraper) as child processes of the
+same stack, each behind `https://<app>.localhost` (branch-prefixed in a linked worktree).
+Ctrl-C stops all of it. Logs share the one terminal. See `docs/infra.md` for how the ports
+and routes are handed out.
 
 ## Verify the stack
 

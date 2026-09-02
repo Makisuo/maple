@@ -49,7 +49,7 @@ export class EmailService extends Context.Service<EmailService, EmailServiceApi>
 			// (branched DBs, Clerk members), so a live binding there would deliver
 			// duplicate copies of every cron-driven email. The alchemy configs no
 			// longer attach EMAIL outside prd; this guard covers any binding that
-			// still reaches a non-prod worker (wrangler dev, manual deploys).
+			// still reaches a non-prod worker (`alchemy dev`, manual deploys).
 			const emailAllowed =
 				env.MAPLE_ENVIRONMENT === "production" || env.MAPLE_EMAIL_ALLOW_NONPROD === "true"
 			const isConfigured = binding !== undefined && emailAllowed

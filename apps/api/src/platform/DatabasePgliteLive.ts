@@ -60,7 +60,7 @@ const makeFromInstance = (pglite: PGlite) =>
 
 /**
  * Embedded-Postgres Database layer for everything that is not a deployed
- * Worker: vitest, MCP evals, and local non-wrangler entrypoints. Resolves the
+ * Worker: vitest, MCP evals, and local non-Worker entrypoints. Resolves the
  * PGlite data dir from MAPLE_DB_URL (`memory://` for ephemeral instances —
  * each layer build gets a fresh database — or a directory for persistence)
  * and applies the bundled drizzle migrations on startup.

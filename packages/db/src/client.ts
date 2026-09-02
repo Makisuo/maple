@@ -59,7 +59,7 @@ const toDrizzleLogger = (onQuery: ((query: string) => void) | undefined) =>
 
 /**
  * Create one postgres.js client, for real Postgres (PlanetScale via Hyperdrive
- * in Workers, docker-compose Postgres in `wrangler dev`, direct URLs in
+ * in Workers, docker-compose Postgres under `alchemy dev`, direct URLs in
  * scripts).
  *
  * Creating one costs nothing: postgres.js connects lazily on the first query,

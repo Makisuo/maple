@@ -6,7 +6,7 @@
 	"workspaces": {
 		".": {
 			"entry": ["alchemy.run.ts", "scripts/**/*.ts", "scripts/oxlint-plugins/*.mjs"],
-			"ignoreBinaries": ["wrangler", "tb", "pscale"]
+			"ignoreBinaries": ["tb", "pscale"]
 		},
 		"apps/web": {
 			"entry": [
@@ -23,11 +23,18 @@
 			"ignoreDependencies": ["@paper-design/shaders"]
 		},
 		"apps/api": {
-			"entry": ["alchemy.run.ts", "autumn.config.ts", "scripts/cold-path/*.mjs"],
-			"ignoreDependencies": ["cloudflare"]
+			// src/worker.ts was auto-detected from wrangler.jsonc's `main` until the
+			// wrangler configs were deleted; the Worker entries are now named here.
+			"entry": ["src/worker.ts", "alchemy.run.ts", "autumn.config.ts", "scripts/cold-path/*.mjs"],
+			// `wrangler` is only shelled out to by scripts/bench-startup-cpu.ts
+			// (`wrangler check startup`); nothing imports it.
+			"ignoreDependencies": ["cloudflare", "wrangler"]
 		},
 		"apps/alerting": {
-			"entry": ["alchemy.run.ts"]
+			"entry": ["src/worker.ts", "alchemy.run.ts"]
+		},
+		"apps/electric-sync": {
+			"entry": ["src/worker.ts", "alchemy.run.ts"]
 		},
 		"apps/local-ui": {
 			"entry": ["src/worker.ts", "alchemy.run.ts"]
