@@ -43,8 +43,8 @@ function legacySearch(search: Record<string, unknown>): Record<string, unknown> 
 		// to what the unfiltered issues list used to show.
 		...(view && view !== "open" ? { view } : undefined),
 		...(severity && severity !== "all" ? { severity } : undefined),
-		// The old list had no time range and showed all-time issues; 7d is the
-		// closest honest default for a window-scoped list.
-		timePreset: "7d",
+		// The old list had no time range and showed all-time issues. The hub's
+		// list is the same — the range only scopes its window counts — so the
+		// redirect carries no time preset.
 	}
 }
