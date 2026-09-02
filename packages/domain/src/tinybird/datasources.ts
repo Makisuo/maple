@@ -1594,7 +1594,8 @@ export const auditLog = defineDatasource("audit_log", {
 		DenialReason: t.string(),
 		ResourceType: t.string().lowCardinality(),
 		ResourceId: t.string(),
-		ChangedFields: t.array(t.string()),
+		// `[:]` is what lets the Events API map a JSON array onto Array(String).
+		ChangedFields: column(t.array(t.string()), { jsonPath: "$.ChangedFields[:]" }),
 		Changes: t.string(),
 		Metadata: t.string(),
 		RequestId: t.string(),
@@ -1602,8 +1603,9 @@ export const auditLog = defineDatasource("audit_log", {
 		OriginCountry: t.string().lowCardinality(),
 	},
 	// ReplacingMergeTree keyed on the entry id makes queue redelivery idempotent:
-	// a second delivery of the same event collapses at merge time instead of
-	// showing as a duplicate row. Reads dedupe the (rare) pre-merge window too.
+	// a second delivery of the same event collapses at the next merge. Until
+	// then a page can carry both copies; `AuditLogService.list` drops the
+	// repeat by id.
 	engine: engine.replacingMergeTree({
 		partitionKey: "toYYYYMM(OccurredAt)",
 		sortingKey: ["OrgId", "OccurredAt", "Id"],

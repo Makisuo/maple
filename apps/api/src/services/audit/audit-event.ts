@@ -34,7 +34,7 @@ export class AuditLogEvent extends Schema.Class<AuditLogEvent>("AuditLogEvent")(
 	requestId: Schema.optionalKey(Schema.String),
 	originIp: Schema.optionalKey(Schema.String),
 	originCountry: Schema.optionalKey(Schema.String),
-	occurredAtMs: Schema.Number,
+	occurredAtMs: Schema.Finite,
 }) {}
 
 export const decodeAuditLogEvent = Schema.decodeUnknownEffect(AuditLogEvent)
@@ -142,12 +142,15 @@ const nullableText = emptyAsNull(Schema.String)
 /** JSON document columns: `''` when absent, otherwise a JSON string of `schema`. */
 const jsonDocument = <S extends Schema.Top>(schema: S) => emptyAsNull(Schema.fromJsonString(schema))
 
-/** `YYYY-MM-DD HH:mm:ss.SSS` (UTC, as the warehouse emits DateTime64) ⇄ `Date`. */
+/**
+ * `YYYY-MM-DD HH:mm:ss.SSS` (UTC, as the warehouse emits DateTime64) ⇄ `Date`;
+ * an ISO rendering with `T`/`Z` is accepted as-is should a backend emit one.
+ */
 const warehouseDateTime = Schema.String.pipe(
 	Schema.decodeTo(
 		Schema.Date,
 		SchemaTransformation.transform({
-			decode: (value: string) => new Date(`${value.replace(" ", "T")}Z`),
+			decode: (value: string) => new Date(/[TZ]/.test(value) ? value : `${value.replace(" ", "T")}Z`),
 			encode: (value: Date) => msToWarehouseDateTime64(value.getTime()),
 		}),
 	),

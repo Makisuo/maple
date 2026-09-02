@@ -507,8 +507,11 @@ const make: Effect.Effect<
 					},
 				})
 			}).pipe(
-				Effect.catchCause((cause) =>
-					Effect.logWarning("Issue event audit write failed", { issueId, cause }),
+				// Typed failures and defects only — an interrupt must propagate so
+				// fiber teardown never triggers a stray write.
+				Effect.catch((error) => Effect.logWarning("Issue event audit write failed", { issueId, cause: error })),
+				Effect.catchDefect((defect) =>
+					Effect.logWarning("Issue event audit write failed", { issueId, cause: defect }),
 				),
 			)
 

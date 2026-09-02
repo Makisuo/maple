@@ -3,9 +3,9 @@
  *
  * Written only by the API worker through the managed Tinybird pipeline and read
  * only by the admin-gated `GET /v2/audit_log`. It ships in the migration set so
- * self-hosted deployments (where the "managed" pipeline IS this ClickHouse) have
- * the table; a BYO-ClickHouse org never reads or writes it — reads are pinned to
- * the managed route (`INGEST_PINNED_TABLES`).
+ * every ClickHouse the schema is applied to mirrors the managed table; a
+ * BYO-ClickHouse org never reads or writes it — reads are pinned to the managed
+ * route (`INGEST_PINNED_TABLES`).
  *
  * `requiredForIngest: false`: the ingest gateway writes nothing here, so the
  * table's presence must not gate an org's ingest readiness.

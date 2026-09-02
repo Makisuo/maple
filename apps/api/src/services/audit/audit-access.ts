@@ -98,7 +98,11 @@ export const withAuditedRead =
 	<E, R>(
 		httpEffect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
 	): Effect.Effect<HttpServerResponse.HttpServerResponse, E, R> => {
-		const action = Context.get(options.endpoint.annotations, AuditedRead)
+		// A group-level `.annotate` lands on the group only (endpoint propagation
+		// is `annotateEndpoints`), so both are consulted; the endpoint wins.
+		const action =
+			Context.get(options.endpoint.annotations, AuditedRead) ??
+			Context.get(options.group.annotations, AuditedRead)
 		if (action === undefined) return httpEffect
 		const record = (status: number) =>
 			Effect.gen(function* () {
@@ -114,7 +118,7 @@ export const withAuditedRead =
 					source: subject.source,
 					action,
 					metadata: {
-						endpoint: `${options.group.identifier}.${options.endpoint.name}`,
+						endpoint: `${options.group.identifier}.${options.endpoint.identifier}`,
 						method: request.method,
 						path: request.url,
 						status,

@@ -25,12 +25,10 @@ export interface AuditLogEntriesOpts {
 }
 
 /**
- * One org's audit log, newest first, offset-paginated.
- *
- * `LIMIT … BY Id` collapses a redelivered entry that ReplacingMergeTree has not
- * merged yet, so a page never shows the same entry twice. Pinned to the managed
+ * One org's audit log, newest first, offset-paginated. Pinned to the managed
  * route: the table is written through `ingest` and does not exist in a BYO
- * ClickHouse.
+ * ClickHouse. A redelivered entry ReplacingMergeTree has not merged yet can
+ * appear twice here; the service collapses it by id.
  */
 export function auditLogEntriesQuery(opts: AuditLogEntriesOpts) {
 	return from(AuditLog)

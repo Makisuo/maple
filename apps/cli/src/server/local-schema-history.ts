@@ -152,6 +152,6 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		fingerprint: "9dcc61f3d2522826",
 		digest: "9dcc61f3d2522826070ac2063c777d34ec4b1f4492d4ac6663729c21c29a4495",
 		manifestDigest: "f7f9bf825e84924e9d6e0c86712eba5db249db9b8ceb07010d6926ad736bc5e7",
-		projectRevision: "6530ae04f3c8560e07eabf4644ec16e32cc54c14eacdfebe52c40dbb58943748",
+		projectRevision: "20753c5593ff6ab808b536d455b944d5cc300ae0eed841dfa951ff998dcefbaf",
 	}),
 ] as const)

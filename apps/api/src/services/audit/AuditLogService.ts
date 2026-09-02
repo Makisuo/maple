@@ -279,7 +279,7 @@ export class AuditLogService extends Context.Service<AuditLogService, AuditLogSe
 						{ profile: "list", context: "auditLog.list" },
 					)
 					.pipe(Effect.mapError(toPersistenceError))
-				return yield* Effect.forEach(rows, (row) =>
+				const entries = yield* Effect.forEach(rows, (row) =>
 					decodeStoredAuditLogEntry(row).pipe(
 						Effect.map((decoded) => storedRowToEntry(orgId, decoded)),
 						Effect.mapError((error) =>
@@ -290,6 +290,10 @@ export class AuditLogService extends Context.Service<AuditLogService, AuditLogSe
 						),
 					),
 				)
+				// A redelivered event the ReplacingMergeTree has not merged yet is
+				// the same entry twice; one copy is enough.
+				const seen = new Set<string>()
+				return entries.filter((entry) => !seen.has(entry.id) && seen.add(entry.id) !== undefined)
 			})
 
 			return { record, list }
