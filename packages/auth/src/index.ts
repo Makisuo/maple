@@ -364,6 +364,8 @@ export interface AuthEnv {
 	readonly MAPLE_AUTH_MODE: string
 	readonly MAPLE_DEFAULT_ORG_ID: string
 	readonly MAPLE_ORG_ID_OVERRIDE: Option.Option<string>
+	/** Only `development` lets a pinned org trust a non-member's session role. */
+	readonly MAPLE_ENVIRONMENT?: string | undefined
 	readonly MAPLE_ROOT_PASSWORD: Option.Option<Redacted.Redacted<string>>
 	readonly CLERK_SECRET_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly CLERK_PUBLISHABLE_KEY: Option.Option<string>
@@ -688,18 +690,8 @@ export const makeResolveTenant = (
 			const orgIdOverride = getOptionalString(env.MAPLE_ORG_ID_OVERRIDE)
 			const userId = yield* decodeUserId(auth.userId, "Invalid user in Clerk session token")
 
-			// Two credentials must not be allowed to select an organization, and in
-			// both cases the header is a rejection rather than a silent ignore:
-			//
-			// - an API key is already organization-bound, so a selection could only
-			//   ever widen it (`acceptsToken` is what admits keys here — the MCP
-			//   resolver — and that path passes no verifier anyway);
-			// - `MAPLE_ORG_ID_OVERRIDE` pins a deployment to one organization, and
-			//   honouring a selection would defeat the pin.
-			const selectable =
-				auth.tokenType === "session_token" && orgIdOverride === undefined
-					? verifyOrgMembership
-					: undefined
+			// An API key is organization-bound; for keys the header is a rejection.
+			const selectable = auth.tokenType === "session_token" ? verifyOrgMembership : undefined
 
 			const sessionRoles: ReadonlyArray<RoleName> =
 				typeof auth.orgRole === "string"
@@ -711,35 +703,25 @@ export const makeResolveTenant = (
 
 			if (orgIdOverride !== undefined) {
 				const pinnedOrgId = yield* decodeOrgId(orgIdOverride, "Invalid MAPLE_ORG_ID_OVERRIDE value")
-				// The pin replaces the organization, so it must replace the role with
-				// it — same invariant as `applyRequestedOrg`. Carrying `auth.orgRole`
-				// across made an admin of their own organization an admin of the
-				// pinned one. Naming your own organization is still free; anything
-				// else takes its role from a verified membership, and where there is
-				// no membership directory to ask, the pin grants no role at all.
+				// The pin wins over a selection header (every web session names its own
+				// org). The role is the verified membership's; a non-member is only let
+				// in with their session's role on a development pin.
 				if (auth.orgId === pinnedOrgId) {
-					return yield* applyRequestedOrg(
-						{ orgId: pinnedOrgId, userId, roles: sessionRoles, authMode: "clerk" },
-						headers,
-						selectable,
-					)
+					return { orgId: pinnedOrgId, userId, roles: sessionRoles, authMode: "clerk" }
+				}
+				const membership = verifyOrgMembership
+					? yield* verifyOrgMembership(userId, pinnedOrgId)
+					: Option.none<VerifiedOrgMembership>()
+				if (Option.isSome(membership)) {
+					return { orgId: pinnedOrgId, userId, roles: [membership.value.role], authMode: "clerk" }
+				}
+				if (env.MAPLE_ENVIRONMENT === "development") {
+					return { orgId: pinnedOrgId, userId, roles: sessionRoles, authMode: "clerk" }
 				}
 				if (verifyOrgMembership) {
-					const membership = yield* verifyOrgMembership(userId, pinnedOrgId)
-					if (Option.isNone(membership)) {
-						return yield* Effect.fail(organizationAccessDenied(pinnedOrgId))
-					}
-					return yield* applyRequestedOrg(
-						{ orgId: pinnedOrgId, userId, roles: [membership.value.role], authMode: "clerk" },
-						headers,
-						selectable,
-					)
+					return yield* Effect.fail(organizationAccessDenied(pinnedOrgId))
 				}
-				return yield* applyRequestedOrg(
-					{ orgId: pinnedOrgId, userId, roles: [], authMode: "clerk" },
-					headers,
-					selectable,
-				)
+				return { orgId: pinnedOrgId, userId, roles: [], authMode: "clerk" }
 			}
 
 			if (!auth.orgId) {

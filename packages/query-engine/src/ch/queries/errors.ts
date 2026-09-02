@@ -305,7 +305,7 @@ const TREE_SPAN_ATTR_KEYS = [
  * Resource attribute keys the trace-detail header reads (deployment env + commit).
  * Everything else in `ResourceAttributes` is loaded lazily by `spanDetailQuery`.
  */
-const TREE_RESOURCE_ATTR_KEYS = ["deployment.environment", "deployment.commit_sha"] as const
+const TREE_RESOURCE_ATTR_KEYS = ["deployment.environment", "vcs.ref.head.revision"] as const
 
 /**
  * Hard cap on spans returned for one trace. A waterfall with more than a few

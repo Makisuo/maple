@@ -12,10 +12,11 @@
  * `ai_trace_index` is a filtered projection (the `error_events` shape): only
  * the vendor-stamped spans, with the `maple_ai.*` identity pre-extracted to
  * plain columns. Roughly 10k narrow rows per day at current volume, against
- * 70M raw spans. `aiSessionListQuery`'s detection subquery and
- * `aiSessionFacetsQuery` read it; the per-trace fan-out still reads
- * `trace_detail_spans`, which is where every other fact about an agent span
- * (its status, its failure attributes, its vendor version) is read from.
+ * 70M raw spans. `aiSessionPageQuery` (which ranks a page of sessions),
+ * `aiSessionListQuery`'s index levels and `aiSessionFacetsQuery` read it; the
+ * per-trace fan-out reads `trace_detail_spans` for the page's traces alone,
+ * which is where every other fact about an agent span (its status, its failure
+ * attributes, its vendor version) is read from.
  *
  * NOTHING IS BACKFILLED here: a materialized view sees inserts from creation
  * forward, so windows predating this migration under-report until the raw

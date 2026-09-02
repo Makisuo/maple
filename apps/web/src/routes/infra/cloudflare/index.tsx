@@ -10,7 +10,6 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { CloudflareIcon, MagnifierIcon, XmarkIcon } from "@/components/icons"
 import type { CloudflareZoneRow } from "@/api/warehouse/cloudflare-infra"
-import { PageHero } from "@/components/infra/primitives/page-hero"
 import {
 	CloudflareKpiCards,
 	CloudflareKpiCardsLoading,
@@ -101,10 +100,6 @@ function CloudflarePage() {
 						</DashboardLayout.Sticky>
 						<DashboardLayout.Scroll>
 							<div className="space-y-6">
-								<PageHero
-									title="Cloudflare"
-									description="Edge analytics from the Cloudflare integration — per-zone HTTP traffic, cache performance, and Workers invocations."
-								/>
 								{Result.builder(statusResult)
 									.onInitial(() => (
 										<div className="space-y-4">

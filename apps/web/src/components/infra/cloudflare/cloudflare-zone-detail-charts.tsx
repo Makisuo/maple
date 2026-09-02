@@ -101,8 +101,15 @@ interface BreakdownCell {
 	row: Record<string, unknown>
 	time: string
 	name: string
-	value: number | null
+	value: number
 }
+
+/**
+ * A key absent from a bucket row is a zero count (the API only writes keys it
+ * saw), and `stack()` starts a new segment at a null — so the band would tear
+ * wherever one status class went quiet for a bucket.
+ */
+const cellValue = (value: unknown): number => (typeof value === "number" ? value : 0)
 
 export function StackedBreakdownChart({
 	title,
@@ -177,7 +184,7 @@ export function StackedBreakdownChart({
 				row,
 				time: String(row.time),
 				name,
-				value: typeof row[name] === "number" ? (row[name] as number) : null,
+				value: cellValue(row[name]),
 			})),
 		)
 
@@ -217,7 +224,9 @@ export function StackedBreakdownChart({
 					},
 				},
 			},
-			margin: { top: 12, right: 12, bottom: 4, left: 52 },
+			// `bottom` unset on purpose: a set side is a hard lock, and only a measured
+			// side reserves the x tick labels' height.
+			margin: { top: 12, right: 12, left: 60 },
 			focus: "group-x",
 			focusRing: false,
 			tooltip: cursorTooltip(focusStore.anchor),
@@ -452,7 +461,9 @@ export function CloudflareZoneLatencyChart({
 					},
 				},
 			},
-			margin: { top: 12, right: 12, bottom: 4, left: 52 },
+			// `bottom` unset on purpose: a set side is a hard lock, and only a measured
+			// side reserves the x tick labels' height.
+			margin: { top: 12, right: 12, left: 60 },
 			focus: "group-x",
 			focusRing: false,
 			tooltip: cursorTooltip(focusStore.anchor),

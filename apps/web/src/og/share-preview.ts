@@ -22,6 +22,7 @@
 import { ogCardNode } from "./card"
 import { renderOgCard, type AssetFetcher, type EmbeddedImage } from "./render"
 import { ogMetaAdditions, ogMetaReplacements, type ShareOgMeta } from "./share-links"
+import type { ApiTarget } from "../worker-env"
 
 /**
  * The slice of Cloudflare's `HTMLRewriter` this module uses.
@@ -53,13 +54,15 @@ const META_CACHE_SECONDS = 300
  */
 const API_TIMEOUT_MS = 1500
 
-const postJson = (apiBaseUrl: string, path: string, body: unknown): Promise<Response> =>
-	fetch(new URL(path, apiBaseUrl), {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(body),
-		signal: AbortSignal.timeout(API_TIMEOUT_MS),
-	})
+const postJson = (api: ApiTarget, path: string, body: unknown): Promise<Response> =>
+	api.fetch(
+		new Request(new URL(path, api.baseUrl), {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(body),
+			signal: AbortSignal.timeout(API_TIMEOUT_MS),
+		}),
+	)
 
 const digest = async (value: string): Promise<string> => {
 	const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))
@@ -80,10 +83,7 @@ interface CachedMeta {
  * a synthetic host built from a digest of the token, so the token is never a
  * cache key and cannot be read back out of one.
  */
-export const fetchShareOgMeta = async (
-	apiBaseUrl: string,
-	token: string,
-): Promise<ShareOgMeta | undefined> => {
+export const fetchShareOgMeta = async (api: ApiTarget, token: string): Promise<ShareOgMeta | undefined> => {
 	const cache = await caches.open("share-og-meta")
 	const key = new Request(`https://share-og-meta.invalid/${await digest(token)}`)
 
@@ -92,7 +92,7 @@ export const fetchShareOgMeta = async (
 
 	let meta: ShareOgMeta | undefined
 	try {
-		const response = await postJson(apiBaseUrl, "/v2/share/og-meta", { token })
+		const response = await postJson(api, "/v2/share/og-meta", { token })
 		meta = response.ok ? ((await response.json()) as ShareOgMeta) : undefined
 	} catch {
 		// A timeout or a network failure is not cached: the next request should
@@ -179,7 +179,7 @@ const fetchOrgLogo = async (url: string): Promise<EmbeddedImage | undefined> => 
  * revoked.
  */
 export const renderShareOgImage = async (
-	apiBaseUrl: string,
+	api: ApiTarget,
 	ogId: string,
 	assets: AssetFetcher,
 ): Promise<Response> => {
@@ -187,7 +187,7 @@ export const renderShareOgImage = async (
 
 	let card: Parameters<typeof ogCardNode>[0]
 	try {
-		const response = await postJson(apiBaseUrl, "/v2/share/og-card", { ogId })
+		const response = await postJson(api, "/v2/share/og-card", { ogId })
 		if (!response.ok) return notFound
 		card = (await response.json()) as typeof card
 	} catch {

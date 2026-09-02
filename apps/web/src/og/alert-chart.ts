@@ -14,6 +14,7 @@
 import { alertChartCardNode, ALERT_CARD_HEIGHT, ALERT_CARD_WIDTH } from "./alert-chart-card"
 import { renderNode, type AssetFetcher } from "./render"
 import type { StaticChartSpec } from "@maple/widgets/chart/static-chart"
+import type { ApiTarget } from "../worker-env"
 
 /** The API has to answer before an image request is worth abandoning. */
 const API_TIMEOUT_MS = 4000
@@ -34,7 +35,7 @@ interface AlertChartSeriesResponse {
  * a copy of the URL which of those it was.
  */
 export const renderAlertChartImage = async (
-	apiBaseUrl: string,
+	api: ApiTarget,
 	chartId: string,
 	assets: AssetFetcher,
 ): Promise<Response> => {
@@ -42,12 +43,14 @@ export const renderAlertChartImage = async (
 
 	let series: AlertChartSeriesResponse
 	try {
-		const response = await fetch(new URL("/v2/share/alert-chart", apiBaseUrl), {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ chartId }),
-			signal: AbortSignal.timeout(API_TIMEOUT_MS),
-		})
+		const response = await api.fetch(
+			new Request(new URL("/v2/share/alert-chart", api.baseUrl), {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ chartId }),
+				signal: AbortSignal.timeout(API_TIMEOUT_MS),
+			}),
+		)
 		if (!response.ok) return notFound
 		series = (await response.json()) as AlertChartSeriesResponse
 	} catch {

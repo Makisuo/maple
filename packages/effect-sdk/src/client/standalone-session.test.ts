@@ -59,7 +59,7 @@ const baseConfig = {
 	endpoint: "https://collector.test",
 	ingestKey: "secret",
 	environment: "test",
-	serviceVersion: "abc123",
+	serviceVersion: "63c0c0321644dce742e92dfd09fb96e907649bc4",
 	autoFlushInterval: false as const,
 	flushOnUnload: false as const,
 }
@@ -95,7 +95,9 @@ describe("standalone session emission (client)", () => {
 		expect(row.service_name).toBe("unit-test")
 		expect(row.url_initial).toBe("https://app.example.com/dashboard")
 		expect(row.resource_attributes["deployment.environment"]).toBe("test")
-		expect(row.resource_attributes["deployment.commit_sha"]).toBe("abc123")
+		expect(row.resource_attributes["vcs.ref.head.revision"]).toBe(
+			"63c0c0321644dce742e92dfd09fb96e907649bc4",
+		)
 		// This path posts metadata only — no rrweb chunks follow it. The marker is
 		// what lets the Sessions UI say "not recorded" instead of rendering a
 		// player over nothing.

@@ -34,26 +34,65 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-						const compiled = CH.compile(
-							Integrations.aiSessionListQuery({
-								limit: payload.limit,
-								offset: payload.offset,
-								vendorIds: payload.vendorIds,
-								serviceNames: payload.serviceNames,
-							}),
-							{
-								orgId: tenant.orgId,
-								startTime: payload.startTime,
-								endTime: payload.endTime,
-							},
+						const filters = { vendorIds: payload.vendorIds, serviceNames: payload.serviceNames }
+						const window = { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime }
+						// Two reads, not one: the page is ranked on `ai_trace_index` over the
+						// caller's whole window, and only then is that page aggregated over
+						// `trace_detail_spans` — inside the hours its own agent spans cover,
+						// never the caller's window. See `aiSessionListQuery` for what the
+						// single-read shape cost.
+						const page = yield* warehouse.compiledQuery(
+							tenant,
+							CH.compile(
+								Integrations.aiSessionPageQuery({
+									...filters,
+									limit: payload.limit,
+									offset: payload.offset,
+								}),
+								window,
+							),
+							{ profile: "list", context: "aiSessionsPage" },
 						)
+						if (page.length === 0) {
+							return new ListAiSessionsResponse({ data: [] })
+						}
+						// Fixed-width warehouse literals, so they sort as the instants do.
+						const fanOutStart = page.map((row) => row.agentStart).reduce((a, b) => (a < b ? a : b))
+						const fanOutEnd = page.map((row) => row.agentEnd).reduce((a, b) => (a < b ? b : a))
 						// The row schema already coerces the UInt64 aggregates and decodes
 						// exactly the response's fields, so rows pass through unmapped.
-						const rows = yield* warehouse.compiledQuery(tenant, compiled, {
-							profile: "list",
-							context: "listAiSessions",
+						const rows = yield* warehouse.compiledQuery(
+							tenant,
+							CH.compile(
+								Integrations.aiSessionListQuery({
+									...filters,
+									sessionIds: page.map((row) => row.sessionId),
+								}),
+								{ orgId: tenant.orgId, fanOutStart, fanOutEnd },
+							),
+							{ profile: "list", context: "listAiSessions" },
+						)
+						// The page's order is the order that was paged, so it is the order
+						// shown: the aggregation sorts by the true first span, which leads
+						// the first agent span the page ranked on by under a second.
+						//
+						// A session the aggregation did not return is dropped rather than
+						// shown blank, and `ranked` tells the client the page was still a
+						// full one. It happens: `ai_trace_index` and `trace_detail_spans`
+						// are two materialized views written one after the other from the
+						// same `traces` insert, so the newest session — ranked first — can
+						// have index rows a moment before it has span rows, and at the far
+						// end of retention the two tables' TTL merges run on their own
+						// clocks. The two counts on the span are how often.
+						yield* Effect.annotateCurrentSpan({
+							"maple.ai.page_size": page.length,
+							"maple.ai.aggregated": rows.length,
 						})
-						return new ListAiSessionsResponse({ data: rows })
+						const byId = new Map(rows.map((row) => [row.sessionId, row]))
+						return new ListAiSessionsResponse({
+							data: page.flatMap((row) => byId.get(row.sessionId) ?? []),
+							ranked: page.length,
+						})
 					}),
 				)
 				.handle("facets", ({ payload }) =>

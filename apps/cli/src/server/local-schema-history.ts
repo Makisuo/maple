@@ -148,16 +148,32 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 	Object.freeze({
-		// TODO(v15): what changed, whether any part is rewritten or any row
-		// moves, and what this edge does NOT backfill.
+		// v15 rebuilds the three service-overview views so `CommitSha` reads the
+		// semconv `vcs.ref.head.revision` instead of the retired vendor key
+		// `deployment.commit_sha` (ClickHouse migration 0025). View bodies only:
+		// no table or column changes, no row moves, and nothing is backfilled —
+		// rollup rows materialized with an empty commit age out with their TTL.
 		//
 		// projectRevision is carried forward deliberately — it is a hardcoded
 		// constant that no longer tracks the generator's header, and the identity
 		// this gate compares is the fingerprint/digest pair.
 		version: 15,
-		fingerprint: "9c8d377e9709d823",
-		digest: "9c8d377e9709d82319807cd7fe7510a25f5385e91a2b08f2e4f93dbbb37ac510",
-		manifestDigest: "16620c2585833543b890fc606882fd679649cc13ffac7600c5611dfec5fb4ebd",
+		fingerprint: "24710426938d7b4a",
+		digest: "24710426938d7b4adf615f87f78315c2a5c6145a0029c4f244a339888b25f6d3",
+		manifestDigest: "65f0bc9e91171fbefd4452373ad15f8139b56111ffff27f65ffa4a09ba82cdb2",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
+	Object.freeze({
+		// TODO(v16): what changed, whether any part is rewritten or any row
+		// moves, and what this edge does NOT backfill.
+		//
+		// projectRevision is carried forward deliberately — it is a hardcoded
+		// constant that no longer tracks the generator's header, and the identity
+		// this gate compares is the fingerprint/digest pair.
+		version: 16,
+		fingerprint: "3cfe5f649a11853a",
+		digest: "3cfe5f649a11853ae87021dfb611b0ef76cbd6be4a597d247fb2dff4e717c59c",
+		manifestDigest: "91ef0f362cc378f3e83dec0cd40065506b36d0447487dab1d0e6887e5c660bad",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 ] as const)

@@ -103,7 +103,7 @@ describe("isTrustedCallbackOrigin", () => {
 			["https://api.localhost", "https://web.localhost"],
 			// Worktree dev hosts nest another label under *.localhost.
 			["https://wt.api.localhost", "https://wt.web.localhost"],
-			// `bun dev:app` serves web and api on different loopback ports.
+			// Raw-port dev servers put web and api on different loopback ports.
 			["http://127.0.0.1:3472", "http://127.0.0.1:3471"],
 		] as const) {
 			assert.isTrue(isTrustedCallbackOrigin(origin, appBaseUrl), `${origin} vs ${appBaseUrl}`)

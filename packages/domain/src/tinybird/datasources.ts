@@ -730,7 +730,7 @@ export type ServicePlatformsHourlyRow = InferRow<typeof servicePlatformsHourly>
 
 /**
  * Lightweight projection of service entry point spans for service overview queries.
- * Pre-extracts deployment.environment and deployment.commit_sha from ResourceAttributes.
+ * Pre-extracts deployment.environment(.name) and vcs.ref.head.revision from ResourceAttributes.
  * Stores Server/Consumer spans (service entry points) plus root spans as fallback.
  * Populated by materialized view, not direct ingestion.
  */
@@ -1082,7 +1082,8 @@ export type TraceDetailSpansRow = InferRow<typeof traceDetailSpans>
 /**
  * Filtered projection of GenAI agent spans — every span the ingest gateway
  * stamped with `maple_ai.vendor.id` — for the Agent Sessions read path
- * (`aiSessionListQuery` detection + `aiSessionFacetsQuery`).
+ * (`aiSessionPageQuery`, `aiSessionListQuery`'s index levels, and
+ * `aiSessionFacetsQuery`).
  *
  * Why it exists: detecting agent traces by `mapContains(SpanAttributes, …)` on
  * raw `traces` cannot be indexed at this shape. GenAI spans are ~0.01% of rows
@@ -1092,10 +1093,11 @@ export type TraceDetailSpansRow = InferRow<typeof traceDetailSpans>
  * one hour, timeout at a day). This table holds only those spans, pre-extracted
  * to plain columns, so the same detection is a scan of ~10k narrow rows per day.
  *
- * The columns are exactly what the two readers need — the trace-id set, the
- * grouping key, and the two filter dimensions. Everything else about an agent
- * span (its failure attributes, its vendor version) is read per-trace off
- * `trace_detail_spans`, which the fan-out already touches.
+ * The columns are exactly what its readers need — the trace-id set, the
+ * grouping key, the two filter dimensions, and the agent-span bounds that tell
+ * the fan-out which hours to read. Everything else about an agent span (its
+ * failure attributes, its vendor version) is read per-trace off
+ * `trace_detail_spans`, over the page's bounds rather than the caller's window.
  *
  * Session ids live only on the turn-owning spans, so `SessionId` is '' for most
  * rows — resolution to a session key stays per-TRACE at read time, exactly as
