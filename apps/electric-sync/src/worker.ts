@@ -9,9 +9,8 @@
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import * as Cloudflare from "alchemy/Cloudflare"
-import { type Cause, Effect, Layer } from "effect"
+import { Effect, Layer } from "effect"
 import { FetchHttpClient, HttpMiddleware, HttpRouter } from "effect/unstable/http"
-import * as HttpServerError from "effect/unstable/http/HttpServerError"
 
 // Module scope stays near empty (fixed ~1s startup CPU budget); `layer` is
 // stable, `flush(env)` resolves env lazily on first call.
@@ -73,19 +72,11 @@ export const impl = Effect.gen(function* () {
 	const exec = yield* Cloudflare.WorkerExecutionContext
 	const router = yield* HttpRouter.HttpRouter
 
-	// Failures become responses BEFORE the tracer, as `toWebHandler` did: a 404
-	// records an Ok span (effect's RouteNotFound is not a Maple anticipated
-	// error, so letting it escape would error-mark every bot scan). 5xx
-	// residuals log through the OTLP logger; expected 4xx stay quiet.
-	const respond = Effect.fnUntraced(function* (cause: Cause.Cause<unknown>) {
-		const [response, residual] = yield* HttpServerError.causeResponse(cause)
-		if (response.status >= 500) {
-			yield* Effect.logError("electric-sync handler failed", residual)
-		}
-		return response
-	})
-
-	const app = HttpMiddleware.tracer(router.asHttpEffect().pipe(Effect.catchCause(respond)))
+	// `orDie` only narrows the router's `unknown` error channel for alchemy's
+	// fetch type; the bridge's own failure boundary turns Respondable defects
+	// into their responses (RouteNotFound → 404), and the tracer records the
+	// failure exactly as `toWebHandler` did.
+	const app = HttpMiddleware.tracer(router.asHttpEffect().pipe(Effect.orDie))
 
 	return {
 		fetch: Effect.gen(function* () {

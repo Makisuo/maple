@@ -201,8 +201,11 @@ jobs:
             fail-fast: false
             matrix:
                 include:
+                    # electric-sync's closure too: its Effect-native factory imports
+                    # the runtime impl, so the Alchemy-entrypoints typecheck resolves
+                    # that worker graph through apps/electric-sync/node_modules.
                     - shard: quality
-                      install-filters: "@maple/api"
+                      install-filters: "@maple/api @maple/electric-sync"
                     - shard: effect-lint
                       install-filters: ""
                     - shard: build-web
