@@ -23,7 +23,7 @@ export { summarizeCause } from "@/platform/describe-cause"
 export { Database } from "@/platform/DatabaseLive"
 export { layerPg } from "@/platform/DatabasePgLive"
 export { withPgConnectionScope } from "@/platform/pg-connection-scope"
-// No `layerPglite`: the alerting Worker imports this barrel and must not bundle PGlite.
+// Nothing PGlite-backed here: the alerting Worker imports this barrel and must not bundle PGlite.
 export { DigestService } from "./services/digest/DigestService"
 export { EdgeCacheService } from "@maple/cache"
 export { EmailService } from "@/platform/EmailService"
