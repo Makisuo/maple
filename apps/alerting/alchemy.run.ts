@@ -1,7 +1,7 @@
 import path from "node:path"
 import * as Cloudflare from "alchemy/Cloudflare"
 import * as Effect from "effect/Effect"
-import { devServer } from "@maple/infra/dev-urls"
+import * as Portless from "@maple/alchemy-portless"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
@@ -25,8 +25,12 @@ import {
 export interface CreateAlertingWorkerOptions {
 	stage: MapleStage
 	domains: MapleDomains
-	/** Managed per-branch Hyperdrive from the api factory; undefined on ref stages (stg/prd). */
+	/** The managed application database from the root (`createManagedMapleDb`); undefined on ref stages (stg/prd). */
 	mapleDb: Cloudflare.Hyperdrive.Connection | undefined
+	/** Local dev-server block from `Portless.workerDev` under `bun dev`; undefined on a deploy. */
+	dev?: Portless.WorkerDev | undefined
+	/** Inter-app URLs under `bun dev`, spread last so `.env.local` cannot override them. */
+	devEnv?: Record<string, string> | undefined
 }
 
 /**
@@ -51,6 +55,8 @@ const alertingConfiguredEnv = (stage: MapleStage) =>
 		// Non-prod stages skip all crons (they share live org data via the prod DB);
 		// set to "1" on a stage to deliberately exercise crons there.
 		optionalPlain("MAPLE_ALERTING_ALLOW_NONPROD"),
+		// Dev-only escape hatch from per-org BYO rows (see apps/api/alchemy.run.ts).
+		optionalPlain("MAPLE_IGNORE_ORG_CLICKHOUSE"),
 		optionalSecret("AUTUMN_SECRET_KEY"),
 		optionalSecret("INTERNAL_SERVICE_TOKEN"),
 		// The alerting worker is where incidents open and resolve, so it is the one
@@ -62,7 +68,7 @@ const alertingConfiguredEnv = (stage: MapleStage) =>
 		planetScaleOAuthEnv,
 	)
 
-export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOptions) =>
+export const createAlertingWorker = ({ stage, mapleDb, dev, devEnv }: CreateAlertingWorkerOptions) =>
 	Effect.gen(function* () {
 		const configuredEnv = yield* alertingConfiguredEnv(stage)
 		// `alerting` binds its own Hyperdrive config on prd — it issues ~97% of the
@@ -89,9 +95,8 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
-			// Port comes from `bun run dev:workers`, which reserved it and pointed a
-			// portless route at it; undefined outside that (alchemy picks one).
-			dev: devServer("alerting"),
+			// Under `bun dev`: a sticky port the app's route follows.
+			dev,
 			workersDev: false,
 			// `0 9 * * *` (the onboarding drip) was retired when that sequence moved to
 			// maple-portal's campaign system. Removing it here is what stops the two
@@ -112,6 +117,7 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 						}
 					: undefined),
 				...configuredEnv,
+				...devEnv,
 			},
 		})
 

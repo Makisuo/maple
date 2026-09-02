@@ -7,7 +7,7 @@ import type { Rpc } from "alchemy/Rpc"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import type { MapleApiRpcContract } from "@maple/domain/internal-rpc"
-import { devServer } from "@maple/infra/dev-urls"
+import * as Portless from "@maple/alchemy-portless"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
@@ -42,6 +42,10 @@ export interface CreateMapleApiOptions {
 	replayBlobs: Cloudflare.R2.Bucket
 	/** The managed application database from `createManagedMapleDb`; undefined on ref stages (stg/prd) and PR previews. */
 	mapleDb: Cloudflare.Hyperdrive.Connection | undefined
+	/** Local dev-server block from `Portless.workerDev` under `bun dev`; undefined on a deploy. */
+	dev?: Portless.WorkerDev | undefined
+	/** Inter-app URLs under `bun dev`, spread last so `.env.local` cannot override them. */
+	devEnv?: Record<string, string> | undefined
 }
 
 /** R2 credentials for the ingest gateway, when this stage writes replay blobs. */
@@ -157,6 +161,11 @@ const apiConfiguredEnv = (stage: MapleStage, domains: MapleDomains) =>
 		optionalPlain("CLICKHOUSE_USER"),
 		optionalPlain("CLICKHOUSE_DATABASE"),
 		optionalSecret("CLICKHOUSE_PASSWORD"),
+		// Dev-only; the runtime ignores it outside MAPLE_ENVIRONMENT=development.
+		optionalPlain("MAPLE_IGNORE_ORG_CLICKHOUSE"),
+		// Dev stages only: alchemy binds only what is declared here, and on a
+		// deploy a pin would point the whole API at one tenant.
+		...(stage.kind === "dev" ? [optionalPlain("MAPLE_ORG_ID_OVERRIDE")] : []),
 		authEnv,
 		ingestKeyCryptoEnv,
 		requireSecretEntry("MAPLE_SHARE_TOKEN_HMAC_KEY"),
@@ -230,15 +239,8 @@ const apiConfiguredEnv = (stage: MapleStage, domains: MapleDomains) =>
 export type MapleApiWorker = Cloudflare.Worker & Rpc<MapleApiRpcContract>
 
 /**
- * The alchemy-MANAGED application database of a dev stage: a Hyperdrive whose
- * origin is pushed from MAPLE_PG_URL (a standard Postgres connection string,
- * direct port 5432) — the same env var the CI `drizzle-kit migrate` step and
- * the import scripts use. Cloudflare Hyperdrive needs a STRUCTURED origin
- * (discrete host/user/…), not a URL, so it is parsed here. Schema migrations
- * run in CI before deploy, never at boot.
- *
- * Created once at the root and handed to both the api and alerting Workers;
- * stg/prd bind a dashboard-managed config by id instead (see `createMapleApi`).
+ * A dev stage's managed Hyperdrive, origin parsed from MAPLE_PG_URL (Hyperdrive
+ * wants a structured origin). Created once at the root for api and alerting.
  */
 export const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleStage) {
 	const pgUrl = new URL(yield* requiredPlain("MAPLE_PG_URL"))
@@ -264,15 +266,21 @@ export const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleSta
 			database: "maple",
 			user: "maple",
 			password: Redacted.make("maple"),
-			// The local Hyperdrive shim defaults dev origins to `sslmode=prefer`, which
-			// makes the driver attempt TLS against the docker Postgres (SSL off) and
-			// stall until the dial timeout. Be explicit.
+			// Alchemy defaults dev origins to `sslmode=prefer`; the docker Postgres has
+			// no TLS and the dial would stall until the timeout.
 			sslmode: "disable",
 		},
 	})
 })
 
-export const createMapleApi = ({ stage, domains, replayBlobs, mapleDb }: CreateMapleApiOptions) =>
+export const createMapleApi = ({
+	stage,
+	domains,
+	replayBlobs,
+	mapleDb,
+	dev,
+	devEnv,
+}: CreateMapleApiOptions) =>
 	Effect.gen(function* () {
 		// MAPLE_DB Hyperdrive comes in two flavors:
 		//
@@ -343,9 +351,8 @@ export const createMapleApi = ({ stage, domains, replayBlobs, mapleDb }: CreateM
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
-			// Port comes from `bun run dev:workers`, which reserved it and pointed a
-			// portless route at it; undefined outside that (alchemy picks one).
-			dev: devServer("api"),
+			// Under `bun dev`: a sticky port the app's route follows.
+			dev,
 			workersDev: true,
 			// alchemy ≥ beta.70 sets rolldown `strictExecutionOrder: true`, which wraps
 			// ~every chunk in a lazy `__esmMin` initializer. The DB module graph (drizzle
@@ -423,6 +430,7 @@ export const createMapleApi = ({ stage, domains, replayBlobs, mapleDb }: CreateM
 						}
 					: undefined),
 				...configuredEnv,
+				...devEnv,
 			},
 		})) as MapleApiWorker
 

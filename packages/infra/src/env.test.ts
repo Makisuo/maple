@@ -240,6 +240,7 @@ describe("parity with the pre-refactor per-worker expressions", () => {
 				const old = {
 					MAPLE_AUTH_MODE: env.MAPLE_AUTH_MODE?.trim() || "self_hosted",
 					MAPLE_DEFAULT_ORG_ID: env.MAPLE_DEFAULT_ORG_ID?.trim() || "default",
+					CLERK_TELEMETRY_DISABLED: "1",
 					...oldOptionalSecret(env, "MAPLE_ROOT_PASSWORD"),
 					...oldOptionalSecret(env, "CLERK_SECRET_KEY"),
 					...oldOptionalPlain(env, "CLERK_PUBLISHABLE_KEY"),

@@ -48,15 +48,29 @@ and local-ui (vite/astro dev servers), ingest (`cargo run`) and scraper — runs
 stack. `Command.Dev` is a no-op on a deploy, so this is dev-only by construction; the asset
 Workers' deploy shape (`Command.Build` + assets Worker) never runs in dev.
 
-Portless is the one thing alchemy cannot provide: named HTTPS hosts that several worktrees
-share without anyone caring about ports. So `scripts/dev.ts` reserves a free port per app,
-registers a static portless route at it (`portless alias <name> <port>`), and passes ports
-and URLs into the stack through `MAPLE_DEV_PORT_<APP>` / `MAPLE_DEV_URL_<APP>`
-(`@maple/infra/dev-urls`). **Ports are ephemeral by design** — a pinned port would
-reintroduce exactly the collision portless removes. Linked worktrees get the same
-branch-prefixed hostnames portless itself produces (`fix-ui.api.localhost`), and each
-non-Worker child is told its own name through `PORTLESS_URL`, which is how the vite/astro
-configs find the api and ingest (`siblingUrl`).
+Portless provides what alchemy's local runtime does not: named HTTPS hosts that several
+worktrees share without anyone caring about ports. The routes are alchemy resources —
+`Portless.Route` from `lib/alchemy-portless`, one per app the run serves (`createDevRoute`).
+A route reserves a loopback port, registers `portless alias <hostname> <port>`, and removes
+the route again when it is torn down: with the dev session, on a config change, or on
+`alchemy destroy`. Its `port` attribute feeds a child process's `PORT` like any other Output;
+a Worker binds its port at plan time (`Portless.workerDev`) and its route follows the Worker. The
+provider lives in alchemy's dev sidecar, so a route survives a hot reload of the stack file.
+
+**Ports are sticky, not pinned.** A route prefers a port derived from its identity (a hash
+into 40000–49999; Workers use 50000–59999 so the two can never collide), walks forward if that
+one is held (a second worktree running the same app), and only then takes an OS-chosen port. So `api` lands on the same port run after run
+without anyone writing it down, and two checkouts never fight over one. Linked worktrees get
+the branch-prefixed hostnames portless itself produces (last branch segment, none for `main`:
+`fix-ui.api.localhost`), and
+each non-Worker child is told its own name through `PORTLESS_URL`, which is how the
+vite/astro configs find the api and ingest (`siblingUrl`).
+
+What is left in `scripts/dev.ts` is a shim: `bun dev api web` → `MAPLE_DEV_APPS=api,web`, then
+`alchemy dev`. A subset run still declares every resource (a resource absent from the plan
+would be deleted from the account); it only leaves the other Workers unserved
+(`dev: { mode: "external" }`) and starts no child process for them. The inter-app URLs are
+handed to the Workers as env by the stack itself, so `.env.local` cannot override them.
 
 `isDevServer` (`ALCHEMY_DEV=true`, set by `alchemy dev`) is what switches the stack into this
 shape, and `MAPLE_DEV_APPS` narrows it to the requested apps. Neither is stage-derived: a dev
@@ -92,12 +106,14 @@ Gotchas worth knowing:
 - Dev stacks run with `ALCHEMY_LOCAL_STATE=1`, so they never touch the account state store.
 - `--env-file .env.local` is read once at start: a changed variable needs a restart.
 - The children's logs share one terminal. There are no per-app panes as under turbo's TUI.
-- A harness that cannot resolve `*.localhost` (the browser-verification preview) can pin a
-  port by pre-setting the variable the script would otherwise publish:
-  `MAPLE_DEV_PORT_API=3472 bun dev api`.
-- Ctrl-C stops the whole tree: the script runs alchemy in its own process group and forwards
+- A harness that cannot resolve `*.localhost` (the browser-verification preview) uses the
+  sticky raw ports `bun dev` prints; `Portless.Route`'s `port` prop pins one outright.
+- Ctrl-C stops the whole tree: the shim runs alchemy in its own process group and forwards
   the signal to the group, because alchemy's CLI is several node processes deep and a signal
-  to any one of them stops nothing. On exit it removes the routes it registered.
+  to any one of them stops nothing. The routes come off as alchemy tears the session down.
+- If portless is not installed or its proxy is down, a route logs a warning and the app is
+  reachable on `127.0.0.1:<port>` only; the inter-app URLs still name the `*.localhost`
+  hosts, so start the proxy (`portless proxy start`) rather than work around it.
 
 ## The retired AWS opt-in flag (`MAPLE_DEPLOY_AWS_INGEST`)
 

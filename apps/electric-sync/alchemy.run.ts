@@ -1,7 +1,7 @@
 import path from "node:path"
 import * as Cloudflare from "alchemy/Cloudflare"
 import * as Effect from "effect/Effect"
-import { devServer } from "@maple/infra/dev-urls"
+import * as Portless from "@maple/alchemy-portless"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import { CLOUDFLARE_WORKER_PLACEMENT, resolveWorkerName } from "@maple/infra/cloudflare"
 import { authEnv, merge, optionalPlain, optionalSecret, selfObservabilityEnv } from "@maple/infra/env"
@@ -9,6 +9,8 @@ import { authEnv, merge, optionalPlain, optionalSecret, selfObservabilityEnv } f
 export interface CreateElectricSyncWorkerOptions {
 	stage: MapleStage
 	domains: MapleDomains
+	/** Local dev-server block from `Portless.workerDev` under `bun dev`; undefined on a deploy. */
+	dev?: Portless.WorkerDev | undefined
 }
 
 // Standalone ElectricSQL shape-proxy worker. Deliberately DB-free: it authenticates
@@ -41,7 +43,7 @@ const electricSyncConfiguredEnv = (stage: MapleStage) =>
 		selfObservabilityEnv(stage),
 	)
 
-export const createElectricSyncWorker = ({ stage, domains }: CreateElectricSyncWorkerOptions) =>
+export const createElectricSyncWorker = ({ stage, domains, dev }: CreateElectricSyncWorkerOptions) =>
 	Effect.gen(function* () {
 		const configuredEnv = yield* electricSyncConfiguredEnv(stage)
 		const worker = yield* Cloudflare.Worker("electric-sync", {
@@ -49,9 +51,8 @@ export const createElectricSyncWorker = ({ stage, domains }: CreateElectricSyncW
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
-			// Port comes from `bun run dev:workers`, which reserved it and pointed a
-			// portless route at it; undefined outside that (alchemy picks one).
-			dev: devServer("electric-sync"),
+			// Under `bun dev`: a sticky port the app's route follows.
+			dev,
 			workersDev: true,
 			// Custom domain (not a zone route): routes don't create DNS records, so
 			// pr-stage hostnames would be authoritative NXDOMAIN. Custom domains

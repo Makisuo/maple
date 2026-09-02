@@ -16,7 +16,8 @@
 			"@maple/infra": ["./packages/infra/src/index.ts"],
 			"@maple/infra/aws": ["./packages/infra/src/aws/index.ts"],
 			"@maple/infra/cloudflare": ["./packages/infra/src/cloudflare/index.ts"],
-			"@maple/infra/env": ["./packages/infra/src/env.ts"]
+			"@maple/infra/env": ["./packages/infra/src/env.ts"],
+			"@maple/alchemy-portless": ["./lib/alchemy-portless/src/index.ts"]
 		}
 	},
 	"include": ["alchemy.run.ts", "apps/*/alchemy.run.ts", "scripts/aws-probe.run.ts"]

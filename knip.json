@@ -26,8 +26,7 @@
 			// src/worker.ts was auto-detected from wrangler.jsonc's `main` until the
 			// wrangler configs were deleted; the Worker entries are now named here.
 			"entry": ["src/worker.ts", "alchemy.run.ts", "autumn.config.ts", "scripts/cold-path/*.mjs"],
-			// `wrangler` is only shelled out to by scripts/bench-startup-cpu.ts
-			// (`wrangler check startup`); nothing imports it.
+			// Shelled out to by scripts/bench-startup-cpu.ts, never imported.
 			"ignoreDependencies": ["cloudflare", "wrangler"]
 		},
 		"apps/alerting": {
@@ -60,6 +59,10 @@
 		},
 		"lib/effect-cloudflare": {
 			"ignoreDependencies": ["cloudflare"]
+		},
+		"lib/alchemy-portless": {
+			// The dev-sidecar entry alchemy loads by URL, not by import.
+			"entry": ["src/Local.ts"]
 		},
 		"packages/query-engine": {
 			"entry": ["src/drain/index.ts"]
