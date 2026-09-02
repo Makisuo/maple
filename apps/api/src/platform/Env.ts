@@ -52,11 +52,7 @@ export interface EnvConfig {
 	readonly MAPLE_ENVIRONMENT: string
 	/** Escape hatch: allow real email sends outside production (e.g. a dedicated stg test run). */
 	readonly MAPLE_EMAIL_ALLOW_NONPROD: string
-	/**
-	 * Local dev only: route every org to the managed warehouse even when it has a
-	 * BYO `org_clickhouse_settings` row. Honoured solely when `MAPLE_ENVIRONMENT` is
-	 * `development`, so a deploy cannot be pointed away from a customer's cluster.
-	 */
+	/** Route every org to the managed warehouse; honoured only in development. */
 	readonly MAPLE_IGNORE_ORG_CLICKHOUSE: string
 	readonly CLERK_SECRET_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly CLERK_PUBLISHABLE_KEY: Option.Option<string>

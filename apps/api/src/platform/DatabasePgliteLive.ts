@@ -1,5 +1,5 @@
 import { PGlite } from "@electric-sql/pglite"
-import { createMaplePgliteClient } from "@maple/db/client"
+import { createMaplePgliteClient } from "@maple/db/pglite"
 import { ensureMapleDbDirectory, resolveMapleDbConfig } from "@maple/db/config"
 import { runMigrations } from "@maple/db/migrate"
 import { Effect, Layer } from "effect"

@@ -159,14 +159,10 @@ const apiConfiguredEnv = (stage: MapleStage, domains: MapleDomains) =>
 		optionalPlain("CLICKHOUSE_USER"),
 		optionalPlain("CLICKHOUSE_DATABASE"),
 		optionalSecret("CLICKHOUSE_PASSWORD"),
-		// Dev-only escape hatch from per-org BYO rows; the runtime ignores it
-		// outside MAPLE_ENVIRONMENT=development, so binding it everywhere is safe.
+		// Dev-only; the runtime ignores it outside MAPLE_ENVIRONMENT=development.
 		optionalPlain("MAPLE_IGNORE_ORG_CLICKHOUSE"),
-		// Pins every request to one org (`resolve-tenant.ts`), which is how a
-		// developer's Clerk session reaches the org that holds the local data.
-		// Dev stages ONLY: wrangler used to hand the Worker every `.env.local` key,
-		// alchemy binds only what is declared here — and on a deploy an override
-		// would point the whole API at a single tenant.
+		// Dev stages only: alchemy binds only what is declared here, and on a
+		// deploy a pin would point the whole API at one tenant.
 		...(stage.kind === "dev" ? [optionalPlain("MAPLE_ORG_ID_OVERRIDE")] : []),
 		authEnv,
 		ingestKeyCryptoEnv,
@@ -241,15 +237,8 @@ const apiConfiguredEnv = (stage: MapleStage, domains: MapleDomains) =>
 export type MapleApiWorker = Cloudflare.Worker & Rpc<MapleApiRpcContract>
 
 /**
- * The alchemy-MANAGED application database of a dev stage: a Hyperdrive whose
- * origin is pushed from MAPLE_PG_URL (a standard Postgres connection string,
- * direct port 5432) — the same env var the CI `drizzle-kit migrate` step and
- * the import scripts use. Cloudflare Hyperdrive needs a STRUCTURED origin
- * (discrete host/user/…), not a URL, so it is parsed here. Schema migrations
- * run in CI before deploy, never at boot.
- *
- * Created once at the root and handed to both the api and alerting Workers;
- * stg/prd bind a dashboard-managed config by id instead (see `createMapleApi`).
+ * A dev stage's managed Hyperdrive, origin parsed from MAPLE_PG_URL (Hyperdrive
+ * wants a structured origin). Created once at the root for api and alerting.
  */
 export const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleStage) {
 	const pgUrl = new URL(yield* requiredPlain("MAPLE_PG_URL"))
@@ -275,9 +264,8 @@ export const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleSta
 			database: "maple",
 			user: "maple",
 			password: Redacted.make("maple"),
-			// The local Hyperdrive shim defaults dev origins to `sslmode=prefer`, which
-			// makes the driver attempt TLS against the docker Postgres (SSL off) and
-			// stall until the dial timeout. Be explicit.
+			// Alchemy defaults dev origins to `sslmode=prefer`; the docker Postgres has
+			// no TLS and the dial would stall until the timeout.
 			sslmode: "disable",
 		},
 	})
@@ -354,8 +342,7 @@ export const createMapleApi = ({ stage, domains, replayBlobs, mapleDb, dev }: Cr
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
-			// Under `bun dev`: a sticky local port the app's portless route follows; undefined
-			// outside the dev server (and under a bare `alchemy dev`, where alchemy picks one).
+			// Under `bun dev`: a sticky port the app's route follows.
 			dev,
 			workersDev: true,
 			// alchemy ≥ beta.70 sets rolldown `strictExecutionOrder: true`, which wraps

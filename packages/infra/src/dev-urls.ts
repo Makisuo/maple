@@ -1,14 +1,4 @@
-/**
- * Which apps `bun dev` runs, and how they find each other.
- *
- * Under `bun dev` every app sits behind a portless route
- * (`https://[<worktree>.]<app>.localhost`, a `Portless.Route` in the stack),
- * so apps reach each other by name and nobody cares about ports. The vite and
- * astro configs derive their siblings' URLs from their own `PORTLESS_URL`
- * (`siblingUrl`); the Workers get theirs from the environment `bun dev` sets.
- */
-
-/** Every app `bun dev` can run, in the order the script lists them. */
+/** Every app `bun dev` can run. */
 export const DEV_APPS = [
 	"api",
 	"alerting",
@@ -28,11 +18,7 @@ export const isDevApp = (value: string): value is DevApp =>
 /** Comma-separated subset of `DEV_APPS` this `alchemy dev` run was asked for; unset = all. */
 export const DEV_APPS_ENV_KEY = "MAPLE_DEV_APPS"
 
-/**
- * The apps this `alchemy dev` run serves. Every app unless `bun dev` was given
- * a subset (`bun dev api web`); names the script does not know never reach
- * here, so an unknown entry is simply dropped.
- */
+/** The apps this dev run serves: all of them unless `bun dev` named a subset. */
 export const selectedDevApps = (): ReadonlySet<DevApp> => {
 	const raw = process.env[DEV_APPS_ENV_KEY]?.trim()
 	if (!raw) return new Set(DEV_APPS)
@@ -43,11 +29,7 @@ export const selectedDevApps = (): ReadonlySet<DevApp> => {
 	return selected.length > 0 ? new Set(selected) : new Set(DEV_APPS)
 }
 
-/**
- * The URL of a sibling app, derived from this app's own `PORTLESS_URL`
- * (`https://web.localhost` → `https://api.localhost`, branch prefix included).
- * How vite/astro configs find the api and ingest without anyone pinning ports.
- */
+/** A sibling app's URL from this app's own `PORTLESS_URL`, branch prefix included. */
 export const siblingUrl = (target: string): string | undefined => {
 	const self = process.env.PORTLESS_URL
 	if (!self) return undefined

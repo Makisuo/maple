@@ -688,18 +688,8 @@ export const makeResolveTenant = (
 			const orgIdOverride = getOptionalString(env.MAPLE_ORG_ID_OVERRIDE)
 			const userId = yield* decodeUserId(auth.userId, "Invalid user in Clerk session token")
 
-			// Two credentials must not be allowed to select an organization, and in
-			// both cases the header is a rejection rather than a silent ignore:
-			//
-			// - an API key is already organization-bound, so a selection could only
-			//   ever widen it (`acceptsToken` is what admits keys here — the MCP
-			//   resolver — and that path passes no verifier anyway);
-			// - `MAPLE_ORG_ID_OVERRIDE` pins a deployment to one organization, and
-			//   honouring a selection would defeat the pin.
-			const selectable =
-				auth.tokenType === "session_token" && orgIdOverride === undefined
-					? verifyOrgMembership
-					: undefined
+			// An API key is organization-bound; for keys the header is a rejection.
+			const selectable = auth.tokenType === "session_token" ? verifyOrgMembership : undefined
 
 			const sessionRoles: ReadonlyArray<RoleName> =
 				typeof auth.orgRole === "string"
@@ -711,35 +701,21 @@ export const makeResolveTenant = (
 
 			if (orgIdOverride !== undefined) {
 				const pinnedOrgId = yield* decodeOrgId(orgIdOverride, "Invalid MAPLE_ORG_ID_OVERRIDE value")
-				// The pin replaces the organization, so it must replace the role with
-				// it — same invariant as `applyRequestedOrg`. Carrying `auth.orgRole`
-				// across made an admin of their own organization an admin of the
-				// pinned one. Naming your own organization is still free; anything
-				// else takes its role from a verified membership, and where there is
-				// no membership directory to ask, the pin grants no role at all.
-				if (auth.orgId === pinnedOrgId) {
-					return yield* applyRequestedOrg(
-						{ orgId: pinnedOrgId, userId, roles: sessionRoles, authMode: "clerk" },
-						headers,
-						selectable,
-					)
+				// The pin wins over a selection header (every web session names its own
+				// org); the role is the verified membership's when there is one.
+				const membership =
+					auth.orgId !== pinnedOrgId && verifyOrgMembership
+						? yield* verifyOrgMembership(userId, pinnedOrgId)
+						: Option.none<VerifiedOrgMembership>()
+				return {
+					orgId: pinnedOrgId,
+					userId,
+					roles: Option.match(membership, {
+						onNone: () => sessionRoles,
+						onSome: (value) => [value.role],
+					}),
+					authMode: "clerk",
 				}
-				if (verifyOrgMembership) {
-					const membership = yield* verifyOrgMembership(userId, pinnedOrgId)
-					if (Option.isNone(membership)) {
-						return yield* Effect.fail(organizationAccessDenied(pinnedOrgId))
-					}
-					return yield* applyRequestedOrg(
-						{ orgId: pinnedOrgId, userId, roles: [membership.value.role], authMode: "clerk" },
-						headers,
-						selectable,
-					)
-				}
-				return yield* applyRequestedOrg(
-					{ orgId: pinnedOrgId, userId, roles: [], authMode: "clerk" },
-					headers,
-					selectable,
-				)
 			}
 
 			if (!auth.orgId) {

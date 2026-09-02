@@ -511,6 +511,8 @@ interface ExecutionContextLike {
 	waitUntil(promise: Promise<unknown>): void
 }
 
+let loggedNonProdSkip = false
+
 export default {
 	async scheduled(
 		event: ScheduledEventLike,
@@ -527,9 +529,13 @@ export default {
 		const allowNonProd =
 			env.MAPLE_ALERTING_ALLOW_NONPROD === "1" || env.MAPLE_ALERTING_ALLOW_NONPROD === "true"
 		if (environment !== "production" && !allowNonProd) {
-			console.log(
-				`Skipping alerting cron on non-production stage (MAPLE_ENVIRONMENT=${environment || "unset"}, cron=${event.cron}); set MAPLE_ALERTING_ALLOW_NONPROD=1 to run crons here`,
-			)
+			// Once per isolate, not once per tick.
+			if (!loggedNonProdSkip) {
+				loggedNonProdSkip = true
+				console.log(
+					`Skipping alerting crons on non-production stage (MAPLE_ENVIRONMENT=${environment || "unset"}); set MAPLE_ALERTING_ALLOW_NONPROD=1 to run them here`,
+				)
+			}
 			return
 		}
 		const program = selectScheduledProgram(event.cron, scheduledTicks)

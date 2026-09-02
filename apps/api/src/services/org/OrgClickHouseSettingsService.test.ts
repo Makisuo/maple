@@ -365,10 +365,6 @@ describe("resolveRuntimeConfig caching", () => {
 		return (o as Option.Some<A>).value
 	}
 
-	// A BYO row wins over every env-level warehouse setting, so a developer whose
-	// org has one never reaches the local warehouse. MAPLE_IGNORE_ORG_CLICKHOUSE is
-	// the dev-only way out — and only in development, so it can never point a
-	// deploy away from a customer's cluster.
 	const buildLayerIgnoring = (testDb: TestDb, environment: string) => {
 		const ignoringConfig = ConfigProvider.layer(
 			ConfigProvider.fromUnknown({

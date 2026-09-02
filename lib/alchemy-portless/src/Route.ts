@@ -11,16 +11,9 @@ import { routeHostname, worktreePrefix } from "./worktree.ts"
 export interface RouteProps {
 	/** The app's name in the hostname: `api` → `https://api.localhost`. */
 	name: string
-	/**
-	 * Hostname prefix. Defaults to the portless worktree rule: empty in the main
-	 * worktree, `<branch>.` in a linked one.
-	 */
+	/** Hostname prefix; defaults to portless's worktree rule (`<branch>.` in a linked worktree). */
 	prefix?: string
-	/**
-	 * Pin the port. By default a route gets a sticky port derived from its
-	 * identity, so the same route lands on the same port run after run unless
-	 * something else holds it.
-	 */
+	/** Pin the port; by default it is sticky, derived from the route's identity. */
 	port?: number
 }
 
@@ -28,36 +21,27 @@ export interface RouteAttributes {
 	name: string
 	/** The registered hostname, without `.localhost`. */
 	hostname: string
-	/** Loopback host the app should bind — the address portless proxies to. */
+	/** Loopback host the app binds, which portless proxies to. */
 	host: string
 	port: number
 	/** The route's URL when portless registered it; the raw loopback URL when it could not. */
 	url: string
-	/** Whether portless accepted the route. False when portless is missing or its proxy is down. */
+	/** False when portless is missing or its proxy is down. */
 	aliased: boolean
 }
 
 /**
- * A static portless route (`portless alias <hostname> <port>`) for something
- * `alchemy dev` runs on a loopback port.
- *
- * Reserves a free, sticky port (or takes the one it is given), registers the
- * route, and removes it again when the resource is torn down — with the dev
- * session, on a config change, or on `alchemy destroy`.
- *
- * Two orders of use:
+ * A static portless route for something `alchemy dev` runs on a loopback port:
+ * reserves a sticky port (or takes the one given), registers the route, removes
+ * it on teardown. A no-op on deploys.
  *
  * ```ts
- * // A child process is handed the route's port.
  * const web = yield* Portless.Route("web-route", { name: "web" })
  * yield* Command.Dev("web-dev", { command: "bun run dev", env: { PORT: web.port } })
- *
- * // A Worker binds its port at plan time, so the route follows the Worker.
+ * // A Worker binds its port at plan time, so its route follows the Worker:
  * const api = yield* Cloudflare.Worker("api", { dev: Portless.workerDev("api"), … })
  * yield* Portless.Route("api-route", { name: "api", port: Portless.workerPort(api.url) })
  * ```
- *
- * On a deploy the provider is a no-op: routes only exist in dev mode.
  */
 export type Route = Resource<"Portless.Route", RouteProps, RouteAttributes>
 
@@ -70,15 +54,8 @@ export interface WorkerDev {
 }
 
 /**
- * The `dev` block of a `Cloudflare.Worker` that a route will front.
- *
- * A Worker's port has to be known at plan time — alchemy starts the Worker's
- * local proxy in `precreate`, before any dependency's Output resolves — so
- * the route cannot hand the Worker a port the way it hands one to a child
- * process. Instead the Worker gets the same sticky preferred port a route
- * would choose, not strict (alchemy walks forward if it is taken), and the
- * route follows whatever the Worker actually bound: `Route(id, { name,
- * port: workerPort(worker.url) })`.
+ * A Worker's `dev` block: alchemy binds the port in `precreate`, before Outputs
+ * resolve, so it gets a sticky port up front and its route follows it (`workerPort`).
  */
 export const workerDev = (name: string): WorkerDev => ({
 	host: "127.0.0.1",
@@ -116,10 +93,7 @@ export const RouteProviderLive = () =>
 		list: () => Effect.succeed([]),
 	})
 
-/**
- * Dev-mode provider. Lives in alchemy's dev sidecar, so the route survives a
- * hot reload of the stack file and its finalizer runs at session shutdown.
- */
+/** Dev-mode provider, in alchemy's sidecar so the route survives stack-file reloads. */
 export const RouteProviderLocal = () =>
 	LocalProvider.make(
 		Route,
@@ -128,8 +102,7 @@ export const RouteProviderLocal = () =>
 			start: Effect.fn(function* ({ news, fqn }) {
 				const prefix = news.prefix ?? worktreePrefix()
 				const hostname = routeHostname(news.name, prefix)
-				// Keyed by the resource's fully-qualified name: two worktrees running the
-				// same app share a preferred port and the second walks forward from it.
+				// Keyed by fqn: two worktrees share a preferred port and the second walks forward.
 				const port = news.port ?? (yield* Effect.promise(() => choosePort(fqn)))
 				const aliased = portless("alias", hostname, String(port), "--force")
 				if (aliased) {

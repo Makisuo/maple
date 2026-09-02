@@ -937,9 +937,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		const env = yield* Env
 		const httpClient = yield* HttpClient.HttpClient
 		const encryptionKey = yield* parseEncryptionKey(Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY))
-		// A per-org BYO row normally wins over every env-level warehouse setting, so
-		// a developer whose org has one never reaches the local warehouse. This is
-		// the dev-only way out; the environment gate keeps it off every deploy.
+		// Dev-only way past a per-org BYO row; the environment gate keeps it off deploys.
 		const ignoreOrgClickHouse =
 			env.MAPLE_ENVIRONMENT === "development" &&
 			(env.MAPLE_IGNORE_ORG_CLICKHOUSE === "1" || env.MAPLE_IGNORE_ORG_CLICKHOUSE === "true")
@@ -1808,8 +1806,6 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		// reads it fresh.
 		const isWarehouseWriteReady = Effect.fn("OrgClickHouseSettingsService.isWarehouseWriteReady")(
 			function* (orgId: OrgId) {
-				// Same dev opt-out as `resolveRuntimeConfig`: reads must land where this
-				// process would have written, which is the managed warehouse.
 				if (ignoreOrgClickHouse) return false
 				const row = yield* selectCachedRow(orgId)
 				return (

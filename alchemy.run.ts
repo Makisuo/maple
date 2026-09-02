@@ -64,40 +64,18 @@ const appendStepOutputs = (lines: string[]): void => {
 }
 
 /**
- * Is this process `alchemy dev` (the local dev server) rather than a deploy?
- *
- * `alchemy dev` sets ALCHEMY_DEV on the exec child it spawns
- * (`Cli/commands/dev.ts`). The distinction is not stage-derived: a dev *stage*
- * can be deployed to the cloud, and this must stay false when it is.
- *
- * Under the dev server this one stack IS the local dev loop (`bun dev`,
- * `scripts/dev.ts`): the Workers are served by alchemy's local runtime, and
- * everything that is not a Worker runs as a `Command.Dev` child — see
- * `createDevProcess`. The asset Workers (web, landing, local-ui) are never
- * created here in dev: each is fronted by a `Command.Build` that runs a full
- * production build, and their vite/astro dev servers are what serve them.
+ * `alchemy dev` sets ALCHEMY_DEV on its exec child. Not stage-derived: a dev
+ * stage can still be deployed, and this must stay false when it is.
  */
 const isDevServer = process.env.ALCHEMY_DEV === "true"
 
-/**
- * Which apps this `alchemy dev` run serves: every app unless `bun dev` was
- * given a subset (`bun dev api web`). Undefined on a deploy, which is never
- * partial — `wanted(app)` is then always true.
- */
+/** The apps this dev run serves; undefined on a deploy, which is never partial. */
 const devApps = isDevServer ? selectedDevApps() : undefined
 const wanted = (app: DevApp): boolean => devApps === undefined || devApps.has(app)
 
 /**
- * The portless route an app answers at under the dev server
- * (`https://[<worktree>.]<app>.localhost`). A `Portless.Route` registers the
- * route and removes it when the session ends. Two orders, one resource:
- *
- * - A child process is handed the route's port: the route picks a sticky free
- *   port first, and `createDevProcess` passes it on as `PORT`.
- * - A Worker's port must be known at plan time (alchemy binds it in
- *   `precreate`, before any Output resolves), so the Worker gets
- *   `Portless.workerDev(app)` — the same kind of sticky port, not strict —
- *   and the route follows whatever it actually bound (`workerPort`).
+ * A child process is handed its route's port. A Worker binds its port in
+ * `precreate`, before Outputs resolve, so its route follows the Worker instead.
  */
 const createDevRoute = (app: DevApp) => Portless.Route(`${app}-route`, { name: app })
 
@@ -107,18 +85,10 @@ const createWorkerRoute = (app: DevApp, worker: Cloudflare.Worker) =>
 /** The Worker's `dev` block under `bun dev`; undefined on a deploy. */
 const workerDev = (app: DevApp) => (devApps ? Portless.workerDev(app) : undefined)
 
-/**
- * A non-Worker app under the dev server: its own `dev` script, started by
- * `Command.Dev` on the route's port (and told its portless name through
- * PORTLESS_URL, which the vite/astro configs use to find their siblings).
- * Alchemy keeps the child alive across stack restarts and stops it with the
- * stack. `Command.Dev` is a no-op on a deploy, so this is dev-only by
- * construction — the deploy shapes of web/landing/local-ui stay in their own
- * factories.
- */
+/** A non-Worker app's own `dev` script under `Command.Dev`, which is a no-op on deploys. */
 const createDevProcess = (app: DevApp, route: Portless.Route) =>
 	Command.Dev(`${app}-dev`, {
-		command: "bun run dev",
+		command: "bun run --silent dev",
 		cwd: path.join(import.meta.dirname, "apps", app),
 		env: {
 			PORT: Output.map(Output.asOutput(route.port), String),
@@ -183,11 +153,7 @@ type StackProviderServices =
  * `stageDeploysIngest`, below.
  */
 const providers: Layer.Layer<StackProviderServices, never, Alchemy.StackServices> =
-	Cloudflare.providers().pipe(
-		Layer.provideMerge(AWS.providers()),
-		// Dev only in effect (a no-op on deploys): the `*.localhost` routes.
-		Layer.provideMerge(Portless.providers()),
-	)
+	Cloudflare.providers().pipe(Layer.provideMerge(AWS.providers()), Layer.provideMerge(Portless.providers()))
 
 export default Alchemy.Stack(
 	"maple",
@@ -213,8 +179,7 @@ export default Alchemy.Stack(
 		const domains = resolveMapleDomains(stage)
 		const shared = yield* createProductionSharedResources(stage)
 
-		// Routes for the child processes this dev run serves; nothing on a deploy.
-		// The Workers' routes are created after each Worker, below.
+		// Child-process routes; the Workers' routes follow their Workers below.
 		const routes = new Map<DevApp, Portless.Route>()
 		for (const app of DEV_PROCESS_APPS) {
 			if (devApps?.has(app)) routes.set(app, yield* createDevRoute(app))
@@ -262,10 +227,8 @@ export default Alchemy.Stack(
 
 		const ingestUrl = resolveUrl(domains.ingest, "VITE_INGEST_URL", "https://ingest.maple.dev")
 
-		// The application database, shared by the api and alerting Workers. Managed
-		// here (an alchemy Hyperdrive whose origin comes from MAPLE_PG_URL) on dev
-		// stages; stg/prd bind a dashboard-managed config by id inside each factory
-		// instead, and PR previews get none — see `resolveDatabaseMode`.
+		// Shared by api and alerting. Managed here on dev stages; stg/prd bind a
+		// dashboard config by id in their factories; PR previews get none.
 		const mapleDb =
 			resolveDatabaseMode(stage) === "managed" && (wanted("api") || wanted("alerting"))
 				? yield* createManagedMapleDb(stage)
@@ -309,8 +272,7 @@ export default Alchemy.Stack(
 
 		// See `isDevServer`: each of these three is gated on a production
 		// `Command.Build`, so including them would make `alchemy dev` build the
-		// whole frontend before serving anything. Their dev servers come from
-		// `createDevProcess` below instead.
+		// whole frontend before serving anything.
 		const web = isDevServer
 			? undefined
 			: yield* createMapleWeb({
@@ -345,8 +307,7 @@ export default Alchemy.Stack(
 			: undefined
 		if (alerting && devApps) yield* createWorkerRoute("alerting", alerting)
 
-		// Dev only (`devApps` is undefined on a deploy): the vite/astro dev
-		// servers, `cargo run` for the ingest gateway, and the scraper.
+		// Dev only: the vite/astro dev servers, `cargo run`, and the scraper.
 		for (const app of DEV_PROCESS_APPS) {
 			const route = routes.get(app)
 			if (route) yield* createDevProcess(app, route)

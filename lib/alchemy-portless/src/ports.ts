@@ -1,9 +1,7 @@
 import { createServer } from "node:net"
 
-/** Where preferred ports land: high enough to miss every conventional dev port. */
 const RANGE_START = 40000
 const RANGE_SIZE = 10000
-/** How far past the preferred port to probe before giving up on stickiness. */
 const PROBE_WIDTH = 16
 
 const fnv1a = (input: string): number => {
@@ -15,10 +13,10 @@ const fnv1a = (input: string): number => {
 	return hash
 }
 
-/** The port `key` maps to before any probing: stable for the same key on every machine. */
+/** The port `key` maps to before probing; stable across machines. */
 export const preferredPort = (key: string): number => RANGE_START + (fnv1a(key) % RANGE_SIZE)
 
-/** Bind-probe `port` on loopback; `0` asks the OS for any free one. Resolves the bound port. */
+/** Bind-probe `port` on loopback (`0` = any free one); resolves the bound port. */
 const tryListen = (port: number): Promise<number | undefined> =>
 	new Promise((resolve) => {
 		const server = createServer()
@@ -31,11 +29,7 @@ const tryListen = (port: number): Promise<number | undefined> =>
 		})
 	})
 
-/**
- * A free loopback port for `key`, sticky across runs: the same key prefers the
- * same port, walks forward a few steps if that one is taken (a second worktree
- * running the same app), and only then falls back to an OS-chosen port.
- */
+/** A free port for `key`: the preferred one, then a few steps forward, then any. */
 export const choosePort = async (key: string): Promise<number> => {
 	const preferred = preferredPort(key)
 	for (let offset = 0; offset < PROBE_WIDTH; offset++) {

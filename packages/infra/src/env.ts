@@ -136,6 +136,8 @@ export const derived = (key: string, value: string): Config.Config<PlainEnv> =>
  */
 export const authEnv: Config.Config<WorkerEnv> = merge(
 	plainWithDefault("MAPLE_AUTH_MODE", "self_hosted"),
+	// Clerk's SDK phones home unless told not to, and says so at every boot.
+	derived("CLERK_TELEMETRY_DISABLED", "1"),
 	plainWithDefault("MAPLE_DEFAULT_ORG_ID", "default"),
 	optionalSecret("MAPLE_ROOT_PASSWORD"),
 	optionalSecret("CLERK_SECRET_KEY"),
@@ -182,15 +184,8 @@ export const appUrlsEnv: Config.Config<WorkerEnv> = merge(
  */
 export const selfObservabilityEnv = (stage: MapleStage): Config.Config<WorkerEnv> =>
 	merge(
-		// Bound under a different name than it is read from.
-		//
-		// Required on every stage that is actually deployed, and OPTIONAL on dev
-		// stages: `alchemy dev` resolves this same contract locally, where no
-		// developer has (or should need) a real ingest key. Without the exemption
-		// the whole local stack refuses to start on a key whose only job is
-		// exporting the worker's own telemetry. An absent key leaves
-		// MAPLE_INGEST_KEY unbound, which the runtime already treats as
-		// "self-observability off".
+		// Bound under a different name than it is read from. Optional on dev stages
+		// only: no developer has a real ingest key, and absent means self-observability off.
 		stage.kind === "dev"
 			? optionalSecret("MAPLE_OTEL_INGEST_KEY").pipe(
 					Config.map((record) =>

@@ -355,10 +355,8 @@ const runWorker = (explicitProfile: string | undefined, json: boolean) => {
 	}
 	const since = Date.now() - 1000
 	const outfile = join(process.cwd(), "worker-startup.cpuprofile")
-	// `wrangler check startup` needs a wrangler config, and the repo no longer
-	// carries one (local dev and deploys both go through alchemy.run.ts). Startup
-	// validation evaluates only the top-level module scope, so a throwaway config
-	// naming the entry and the compat settings is all it needs — no bindings.
+	// The repo has no wrangler config; startup validation only evaluates module
+	// scope, so a throwaway one naming the entry is enough.
 	const configPath = join(mkdtempSync(join(tmpdir(), "maple-startup-check-")), "wrangler.json")
 	writeFileSync(
 		configPath,

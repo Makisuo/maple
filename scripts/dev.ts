@@ -1,14 +1,6 @@
 /**
- * `bun dev [app ...]` — the whole local stack under ONE `alchemy dev`.
- *
- *   bun dev                      # everything
- *   bun dev api web              # just these (any of the names below)
- *
- * Everything lives in `alchemy.run.ts`: the Workers on alchemy's local
- * runtime, the other apps as `Command.Dev` children, and one `Portless.Route`
- * per app for its `https://<app>.localhost` name and port. This shim only
- * turns the argument list into `MAPLE_DEV_APPS`, tells the apps each other's
- * names, and runs `alchemy dev`.
+ * `bun dev [app ...]`: args → MAPLE_DEV_APPS, the inter-app URLs, then one
+ * `alchemy dev` for the whole stack. Everything else lives in alchemy.run.ts.
  */
 import { spawn } from "node:child_process"
 import path from "node:path"
@@ -28,17 +20,16 @@ if (unknown.length > 0) {
 const selected: ReadonlyArray<DevApp> =
 	args.length > 0 ? DEV_APPS.filter((app) => args.includes(app)) : DEV_APPS
 
-// Inter-app URLs. Plain strings — a route's name is known before it exists —
-// resolved by the stack on dev stages (`resolveUrl` in alchemy.run.ts) and
-// read by the Workers' env. The apps reach each other by name, not port.
+// Plain strings: a route's name is known before it exists.
 const crossAppEnv = {
 	MAPLE_API_BASE_URL: process.env.MAPLE_API_BASE_URL ?? routeUrl("api"),
 	MAPLE_ELECTRIC_SYNC_URL: process.env.MAPLE_ELECTRIC_SYNC_URL ?? routeUrl("electric-sync"),
 	MAPLE_APP_BASE_URL: process.env.MAPLE_APP_BASE_URL ?? routeUrl("web"),
+	// The scraper's api URL; process env beats its `--env-file`.
+	MAPLE_API_URL: process.env.MAPLE_API_URL ?? routeUrl("api"),
 } satisfies Record<string, string>
 
-// Resolved from the workspace root rather than $PATH: a spawned child does not
-// inherit the `node_modules/.bin` entry `bun run` adds for the script itself.
+// A spawned child does not inherit the `node_modules/.bin` PATH entry `bun run` adds.
 const alchemyBin = path.join(import.meta.dirname, "..", "node_modules", ".bin", "alchemy")
 
 const child = spawn(
@@ -52,9 +43,7 @@ const child = spawn(
 	],
 	{
 		stdio: "inherit",
-		// Its own process group, so a signal to this script reaches the whole tree
-		// below alchemy (its exec child, the sidecar, every dev child) the way a
-		// terminal Ctrl-C would — a signal to the CLI process alone stops nothing.
+		// Own process group: a signal to alchemy's CLI process alone stops nothing.
 		detached: true,
 		env: {
 			...process.env,

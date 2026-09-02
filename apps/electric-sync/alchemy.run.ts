@@ -51,8 +51,7 @@ export const createElectricSyncWorker = ({ stage, domains, dev }: CreateElectric
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
-			// Under `bun dev`: a sticky local port the app's portless route follows; undefined
-			// outside the dev server (and under a bare `alchemy dev`, where alchemy picks one).
+			// Under `bun dev`: a sticky port the app's route follows.
 			dev,
 			workersDev: true,
 			// Custom domain (not a zone route): routes don't create DNS records, so
