@@ -37,6 +37,7 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 						const compiled = CH.compile(
 							Integrations.aiSessionListQuery({
 								limit: payload.limit,
+								offset: payload.offset,
 								vendorIds: payload.vendorIds,
 								serviceNames: payload.serviceNames,
 							}),

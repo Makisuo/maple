@@ -114,6 +114,7 @@ SELECT
         GROUP BY sessionId
         ORDER BY startTime DESC
         LIMIT 25
+        OFFSET 25
         FORMAT JSON
 
 -- builder:ai-sessions:aiSessionSpansQuery:default

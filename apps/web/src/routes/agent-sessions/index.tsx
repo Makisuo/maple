@@ -1,3 +1,4 @@
+import { useMemo } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 
@@ -7,16 +8,13 @@ import { AgentSessionsFilterSidebar } from "@/components/agent-sessions/agent-se
 import { NotFoundError } from "@/components/route-error"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import {
-	aiSessionsFacetsResultAtom,
-	listAiSessionsResultAtom,
-} from "@/lib/services/atoms/warehouse-query-atoms"
+import { aiSessionsFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import type { TimeRange } from "@/components/time-range-picker/types"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
+import { useInfiniteAiSessions } from "@/hooks/use-infinite-ai-sessions"
 import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { ToolbarStat } from "@maple/ui/components/toolbar"
@@ -27,8 +25,6 @@ const agentSessionsSearchSchema = Schema.Struct({
 	service: Schema.optional(Schema.String),
 	...TimeRangeSearchFields,
 })
-
-const AGENT_SESSIONS_LIMIT = 50
 
 export const Route = createFileRoute("/agent-sessions/")({
 	component: AgentSessionsPage,
@@ -95,24 +91,25 @@ function AgentSessionsBody({
 		search.endTime,
 		search.timePreset ?? "24h",
 	)
-	const window = { startTime, endTime, limit: AGENT_SESSIONS_LIMIT }
-	// Refreshable (not plain useAtomValue): on an absolute time range the atom
-	// key never rolls, so Reload only works through the refresh subscription.
-	const result = useRefreshableAtomValue(
-		listAiSessionsResultAtom({
-			data: {
-				...window,
-				vendorIds: search.vendor ? [search.vendor] : undefined,
-				serviceNames: search.service ? [search.service] : undefined,
-			},
+	// Memoized on the resolved values: the hook keys its accumulated pages on
+	// these inputs, and a fresh object per render would reset them every time.
+	const filterInputs = useMemo(
+		() => ({
+			startTime,
+			endTime,
+			vendorIds: search.vendor ? [search.vendor] : undefined,
+			serviceNames: search.service ? [search.service] : undefined,
 		}),
+		[startTime, endTime, search.vendor, search.service],
 	)
+	const { firstPageResult, allData, hasNextPage, isCapped, isFetchingNextPage, fetchNextPage } =
+		useInfiniteAiSessions(filterInputs)
 	// The sidebar's counts come from the UNFILTERED window, so picking a vendor
 	// doesn't erase the others from the list. Plain useAtomValue keeps this off
 	// the Reload subscription — the facets refetch when the window rolls, which
 	// is enough.
 	const facetsResult = useAtomValue(aiSessionsFacetsResultAtom({ data: { startTime, endTime } }))
-	const sessions = Result.isSuccess(result) ? result.value.data : []
+	const sessions = allData
 
 	const headerActions = (
 		<div className="flex flex-wrap items-center gap-2">
@@ -144,7 +141,7 @@ function AgentSessionsBody({
 					</DashboardLayout.Header>
 				</DashboardLayout.Sticky>
 				<DashboardLayout.Scroll>
-					{Result.builder(result)
+					{Result.builder(firstPageResult)
 						.onInitial(() => (
 							<div className="divide-y divide-border">
 								{Array.from({ length: 8 }).map((_, i) => (
@@ -161,8 +158,14 @@ function AgentSessionsBody({
 						.onError((error) => (
 							<QueryErrorState error={error} titleOverride="Failed to load agent sessions" />
 						))
-						.onSuccess((value) => (
-							<AgentSessionsList sessions={value.data} limit={AGENT_SESSIONS_LIMIT} />
+						.onSuccess(() => (
+							<AgentSessionsList
+								sessions={allData}
+								hasMore={hasNextPage}
+								isCapped={isCapped}
+								loadingMore={isFetchingNextPage}
+								onReachEnd={fetchNextPage}
+							/>
 						))
 						.render()}
 				</DashboardLayout.Scroll>
