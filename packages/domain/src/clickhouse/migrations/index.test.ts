@@ -29,6 +29,7 @@ import { migration_0019_mv_sweep } from "./0019_mv_sweep"
 import { migration_0020_semconv_key_renames } from "./0020_semconv_key_renames"
 import { migration_0022_service_map_edge_quantiles } from "./0022_service_map_edge_quantiles"
 import { migration_0023_service_operations_discriminators } from "./0023_service_operations_discriminators"
+import { migration_0024_ai_trace_index } from "./0024_ai_trace_index"
 import { migration_0021_product_events } from "./0021_product_events"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
@@ -45,17 +46,18 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
 		expect(migrations.map((m) => m.version)).toEqual([
-			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
 		])
-		expect(migrations.at(-1)).toBe(migration_0023_service_operations_discriminators)
-		expect(latestMigrationVersion).toBe(23)
+		expect(migrations.at(-1)).toBe(migration_0024_ai_trace_index)
+		expect(latestMigrationVersion).toBe(24)
 		// 0010 and 0014-0020 are read-path only and skipped by the ingest-gating
 		// version; 0021 is not — the gateway writes `session_events`' new identity
 		// columns and `product_events` directly, so a BYO-CH org must apply it
 		// before ingest routes there again. 0022 is read-path only again: both
 		// tables it touches are MV-populated and the gateway writes neither, and
 		// 0023 is the same: it only adds counter columns to those MV-populated
-		// service-operations rollups.
+		// service-operations rollups. 0024 is read-path only too: `ai_trace_index`
+		// is MV-populated and the gateway never writes it.
 		expect(clickHouseSchemaVersion).toBe("21")
 		expect(migration_0010_search_indexes.requiredForIngest).toBe(false)
 		expect(migration_0014_web_events.requiredForIngest).toBe(false)
@@ -67,6 +69,7 @@ describe("ClickHouse migrations", () => {
 		expect(migration_0020_semconv_key_renames.requiredForIngest).toBe(false)
 		expect(migration_0022_service_map_edge_quantiles.requiredForIngest).toBe(false)
 		expect(migration_0023_service_operations_discriminators.requiredForIngest).toBe(false)
+		expect(migration_0024_ai_trace_index.requiredForIngest).toBe(false)
 	})
 
 	it("recreates both error-events MVs with the 4xx guard and the widened frame redaction", () => {

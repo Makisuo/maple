@@ -25,6 +25,7 @@ import {
 	errorEvents,
 	errorEventsByTime,
 	errorFingerprintsMinutely,
+	aiTraceIndex,
 	traceDetailSpans,
 	traceListMv,
 	attributeKeysHourly,
@@ -45,6 +46,7 @@ import {
 	DB_STATEMENT_SQL,
 	DB_SYSTEM_ATTR_SQL,
 } from "./db-query-shape-sql"
+import { MAPLE_AI_SESSION_ID_ATTR, MAPLE_AI_VENDOR_ID_ATTR } from "../gen-ai"
 import { DEPLOYMENT_ENV_SQL, MESSAGING_DESTINATION_SQL } from "./semconv-renames"
 import { NORMALIZED_SPAN_NAME_SQL } from "./span-display-name"
 
@@ -958,6 +960,39 @@ export const traceDetailSpansMv = defineMaterializedView("trace_detail_spans_mv"
           SpanAttributes,
           ResourceAttributes
         FROM traces
+      `,
+		}),
+	],
+})
+
+/**
+ * Populates `ai_trace_index` with only the spans the ingest gateway stamped as
+ * GenAI (`maple_ai.vendor.id`). This filter IS Agent Sessions' detection
+ * predicate, moved to insert time: the read side
+ * (`query-engine-integrations/src/ai/ai-sessions.ts`) carries no vendor
+ * predicate at all any more and treats membership in this table as the guard.
+ * Narrowing this filter narrows detection.
+ *
+ * A missing Map key reads back as `''`, so the single `!= ''` comparison is
+ * both the presence check and the non-empty check.
+ */
+export const aiTraceIndexMv = defineMaterializedView("ai_trace_index_mv", {
+	description:
+		"Populates ai_trace_index with GenAI agent spans (maple_ai.vendor.id stamped), pre-extracting the maple_ai.* identity to plain columns.",
+	datasource: aiTraceIndex,
+	nodes: [
+		node({
+			name: "ai_trace_index_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          Timestamp,
+          TraceId,
+          SpanAttributes['${MAPLE_AI_SESSION_ID_ATTR}'] AS SessionId,
+          SpanAttributes['${MAPLE_AI_VENDOR_ID_ATTR}'] AS VendorId,
+          ServiceName
+        FROM traces
+        WHERE SpanAttributes['${MAPLE_AI_VENDOR_ID_ATTR}'] != ''
       `,
 		}),
 	],

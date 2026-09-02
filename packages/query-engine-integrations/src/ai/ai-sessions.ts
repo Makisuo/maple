@@ -25,9 +25,16 @@
 //
 // Both queries are that fan-out, in two stages against two different tables:
 //
-//   detect  — `traces`, filtered on the presence of `maple_ai.vendor.id`. This
-//     is the only level that can use the `mapKeys(SpanAttributes)` bloom skip
-//     index, and with it the scan stays cheap over a week. It yields the
+//   detect  — `ai_trace_index`, the filtered projection holding ONLY the
+//     vendor-stamped spans (~0.01% of rows), pre-extracted to plain columns by
+//     `ai_trace_index_mv`. Detection used to run the vendor predicate against
+//     raw `traces` behind the `mapKeys(SpanAttributes)` bloom skip index, and
+//     that shape cannot be saved: GenAI spans arrive continuously — about one
+//     per index granule at production volume — so the bloom prunes nothing and
+//     the scan reads the fat Map column for EVERY span in the window. Measured
+//     2026-08-29 in production: ~3.6s for a one-hour window, dead at the 15s
+//     kill by a day. The index is the same predicate applied at insert time;
+//     scanning it costs ~10k narrow rows per day. This stage yields the
 //     qualifying trace-id set and nothing else.
 //   fan out — `trace_detail_spans`, restricted by `TraceId IN (…)`. `TraceId` is
 //     a sort-key prefix there (`(OrgId, TraceId, SpanId)`), so this is a seek.
@@ -36,11 +43,14 @@
 //     Timestamp)` and `idx_trace_id` is only a bloom skip index, which prunes
 //     far too little at this org's volume.
 //
-// That is the "optimise the query, not the storage" answer to the fan-out: no
-// new table, no new index, an MV that already exists and that
-// `errorDetailTracesQuery` already splits across for exactly this reason. `IN`
-// rather than a JOIN for the same reason too — ClickHouse pushes the id set into
-// the read, which a JOIN does not do.
+// `IN` rather than a JOIN for the fan-out, the same reason
+// `errorDetailTracesQuery` uses it — ClickHouse pushes the id set into the
+// read, which a JOIN does not do.
+//
+// The index fills forward from its deploy: rows already in `traces` when the MV
+// was created are not in it until a backfill runs, so detection (and the
+// facets) can under-report windows that predate the deploy. The fan-out and the
+// per-session reads still see every span of any trace detection finds.
 //
 // The window predicate sits on BOTH levels, and the fan-out's copy is PADDED
 // rather than exact. That is what reconciles the two demands on it:
@@ -59,8 +69,10 @@
 //
 // A caller that has no window — a deep link carrying only a session id —
 // resolves one with `aiSessionWindowQuery` first, rather than running the
-// fan-out unpruned. That query is the detection scan alone, which the
-// `mapValues(SpanAttributes)` bloom index and the table's 30-day TTL do bound.
+// fan-out unpruned. That query still reads raw `traces`, and can: it prunes by
+// the session id VALUE, which the `mapValues(SpanAttributes)` bloom index does
+// serve (the id is rare), unlike the presence-of-key detection this file moved
+// off `traces` — and the table's 30-day TTL bounds what is left.
 //
 // A `trace:` id needs neither the attribute detection nor the fan-out: it names
 // the trace outright, so `aiTraceWindowQuery`/`aiTraceSpansQuery` are the same
@@ -86,14 +98,19 @@ import {
 	type ColumnAccessor,
 	type CompiledQueryRowSchema,
 } from "@maple-dev/clickhouse-builder"
-import { TraceDetailSpans, Traces } from "@maple/query-engine/ch/tables"
+import { AiTraceIndex, TraceDetailSpans, Traces } from "@maple/query-engine/ch/tables"
 import { CHNumber } from "@maple/query-engine/ch/schema"
 import { AI_SESSION_SPANS_MAX_SPANS } from "@maple/domain/http"
-import { MAPLE_AI_TRACE_SESSION_PREFIX } from "@maple/domain/gen-ai"
+import {
+	MAPLE_AI_SESSION_ID_ATTR,
+	MAPLE_AI_TRACE_SESSION_PREFIX,
+	MAPLE_AI_VENDOR_ID_ATTR,
+	MAPLE_AI_VENDOR_VERSION_ATTR,
+} from "@maple/domain/gen-ai"
 
-const SESSION_ID_ATTR = "maple_ai.session.id"
-const VENDOR_ID_ATTR = "maple_ai.vendor.id"
-const VENDOR_VERSION_ATTR = "maple_ai.vendor.version"
+const SESSION_ID_ATTR = MAPLE_AI_SESSION_ID_ATTR
+const VENDOR_ID_ATTR = MAPLE_AI_VENDOR_ID_ATTR
+const VENDOR_VERSION_ATTR = MAPLE_AI_VENDOR_VERSION_ATTR
 const ERROR_TYPE_ATTR = "error.type"
 const RESPONSE_STATUS_ATTR = "gen_ai.response.status"
 /** `gen_ai.response.status` values that mean the generation failed — semconv's
@@ -124,16 +141,6 @@ const FAN_OUT_PAD_SECONDS = 86_400
 /** ClickHouse returns `''` for a missing Map key, so presence needs both halves. */
 const hasSessionId = (attrs: CH.Expr<Record<string, string>>, get: CH.Expr<string>) =>
 	CH.mapContains(attrs, SESSION_ID_ATTR).and(get.neq(""))
-
-/**
- * The detection predicate: every span the gateway classified as GenAI carries a
- * vendor id, session key or not, so this is the marker that admits a sessionless
- * trace without admitting anything that is not an agent span. Same two halves as
- * {@link hasSessionId} and for the same reason, and `mapContains` is what the
- * `mapKeys(SpanAttributes)` bloom index prunes on.
- */
-const hasVendorId = (attrs: CH.Expr<Record<string, string>>, get: CH.Expr<string>) =>
-	CH.mapContains(attrs, VENDOR_ID_ATTR).and(get.neq(""))
 
 /** Not in the builder's function set; same local helper `tracesDetailQuery` uses. */
 const fromUnixTimestamp64Nano = (nanos: CH.Expr<number>): CH.Expr<string> =>
@@ -199,8 +206,8 @@ export interface AiSessionListOutput {
  * with no session-bearing span falls to the next rank of the same ordering —
  * its earliest vendor-stamped span, which is that trace's root-most agent span.
  *
- * The vendor filter goes on the detection subquery: it is the level the bloom
- * index serves, and it is the only place `maple_ai.vendor.id` is unambiguous —
+ * The vendor filter goes on the detection subquery: it is the level the index
+ * serves, and it is the only place `maple_ai.vendor.id` is unambiguous —
  * a trace's other spans carry other vendors, or none.
  *
  * The service filter goes there too, which means "the trace's agent spans came
@@ -225,16 +232,15 @@ export interface AiSessionListOutput {
 export function aiSessionListQuery(opts: AiSessionListOpts = {}) {
 	const limit = opts.limit ?? 50
 
-	const sessionTraceIds = from(Traces)
+	// No vendor-presence predicate: `ai_trace_index_mv` admits only spans with a
+	// non-empty vendor id, so membership in the table IS the detection predicate.
+	const sessionTraceIds = from(AiTraceIndex)
 		.select(($) => ({ TraceId: $.TraceId }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.Timestamp.gte(param.dateTimeString("startTime")),
 			$.Timestamp.lte(param.dateTimeString("endTime")),
-			hasVendorId($.SpanAttributes, $.SpanAttributes.get(VENDOR_ID_ATTR)),
-			opts.vendorIds?.length
-				? CH.inList($.SpanAttributes.get(VENDOR_ID_ATTR), opts.vendorIds)
-				: undefined,
+			opts.vendorIds?.length ? CH.inList($.VendorId, opts.vendorIds) : undefined,
 			opts.serviceNames?.length ? CH.inList($.ServiceName, opts.serviceNames) : undefined,
 		])
 
@@ -370,10 +376,10 @@ export interface AiSessionFacetsOutput {
 /**
  * Distinct sessions per vendor and per service, for the list's filter sidebar.
  *
- * This is the detection scan of `aiSessionListQuery` and nothing else — no
- * `trace_detail_spans` fan-out, which is the expensive half. It can be: both of
- * the list's filters are applied at that level, so the population a facet
- * describes is exactly the population its filter selects.
+ * This is the detection scan of `aiSessionListQuery` (an `ai_trace_index` read)
+ * and nothing else — no `trace_detail_spans` fan-out, which is the expensive
+ * half. It can be: both of the list's filters are applied at that level, so the
+ * population a facet describes is exactly the population its filter selects.
  *
  * What it cannot do is count per span. A session id is a fact about the TRACE,
  * so a facet keyed on the span's own value would count every agent span of a
@@ -394,12 +400,12 @@ export interface AiSessionFacetsOutput {
 export function aiSessionFacetsQuery(): CHUnionQuery<AiSessionFacetsOutput> {
 	const facet = (
 		facetType: string,
-		name: ($: ColumnAccessor<typeof Traces.columns>) => CH.Expr<string>,
+		name: ($: ColumnAccessor<typeof AiTraceIndex.columns>) => CH.Expr<string>,
 	) => {
-		const perTrace = from(Traces)
+		const perTrace = from(AiTraceIndex)
 			.select(($) => ({
 				traceId: $.TraceId,
-				rawSessionId: CH.max_($.SpanAttributes.get(SESSION_ID_ATTR)),
+				rawSessionId: CH.max_($.SessionId),
 				names: CH.groupUniqArray(name($)),
 			}))
 			.where(($) => [
@@ -408,7 +414,6 @@ export function aiSessionFacetsQuery(): CHUnionQuery<AiSessionFacetsOutput> {
 				$.OrgId.eq(param.string("orgId")),
 				$.Timestamp.gte(param.dateTimeString("startTime")),
 				$.Timestamp.lte(param.dateTimeString("endTime")),
-				hasVendorId($.SpanAttributes, $.SpanAttributes.get(VENDOR_ID_ATTR)),
 				// A blank option filters nothing and is not offered.
 				name($).neq(""),
 			])
@@ -426,7 +431,7 @@ export function aiSessionFacetsQuery(): CHUnionQuery<AiSessionFacetsOutput> {
 	}
 
 	return unionAll(
-		facet("vendor", ($) => $.SpanAttributes.get(VENDOR_ID_ATTR)),
+		facet("vendor", ($) => $.VendorId),
 		facet("service", ($) => $.ServiceName),
 	).format("JSON")
 }

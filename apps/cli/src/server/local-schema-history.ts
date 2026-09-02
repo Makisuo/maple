@@ -132,4 +132,19 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		manifestDigest: "353715a6b6c7a05f3227215b072ac95a8bd5ee67d5eec35f8c2b4c86839a1187",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
+	Object.freeze({
+		// `ai_trace_index` + `ai_trace_index_mv` (ClickHouse migration 0024): the
+		// filtered projection of GenAI agent spans that serves Agent Sessions
+		// detection and facets. Purely additive — a new empty table and the view
+		// that fills it forward — so the v13 -> v14 edge is two CREATEs and a
+		// verify, no data movement.
+		//
+		// projectRevision stays the hardcoded constant, as for v12 and v13 — the
+		// identity this gate compares is the fingerprint/digest pair.
+		version: 14,
+		fingerprint: "c46a599e1bfe417c",
+		digest: "c46a599e1bfe417c1e6f50d123779c6ca9c5f5f375ef9c6fe329c8a9676e3b5b",
+		manifestDigest: "faf78f67abd5901351ce6632cee59f22fadb3c1f7eb9b195dc2f9702d4c9c9bd",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
 ] as const)
