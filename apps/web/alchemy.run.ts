@@ -4,19 +4,43 @@ import * as Command from "alchemy/Command"
 import * as Output from "alchemy/Output"
 import * as Effect from "effect/Effect"
 import {
+	assertBindingParity,
 	CLOUDFLARE_WORKER_PLACEMENT,
 	resolveWorkerName,
 	type MapleDomains,
 	type MapleStage,
 } from "@maple/infra/cloudflare"
+import type { MapleApiWorker } from "../api/alchemy.run.ts"
+import type { WebWorkerEnv } from "./src/worker-env.ts"
 
 export interface CreateMapleWebOptions {
 	stage: MapleStage
 	domains: MapleDomains
+	api: MapleApiWorker
 	apiUrl: string
 	ingestUrl: string
 	electricSyncUrl: string
 }
+
+// The share-preview lookups ride the service binding worker-to-worker; the URL
+// is still bound because bindings address requests by absolute URL, and a
+// deployment without the binding falls back to fetching it over the public
+// domain. A dev stage without an api domain binds neither, and previews
+// degrade to the generic card.
+const makeWorkerEnv = ({ api, apiUrl }: { api: MapleApiWorker; apiUrl: string }) => ({
+	...(apiUrl === "" ? undefined : { MAPLE_API_BASE_URL: apiUrl }),
+	API: api,
+})
+
+// Drift gate for `src/worker-env.ts`, whose Env is structural because the SPA's
+// tsconfig cannot see `@cloudflare/workers-types` (see the note there). This
+// program proves the deployed env satisfies what the worker reads; a renamed
+// key or retyped value fails `tsc -p tsconfig.alchemy.json`. ASSETS is not in
+// `env:` — the assets prop injects it — so the runtime type stands in for it.
+assertBindingParity<
+	WebWorkerEnv,
+	Cloudflare.InferEnv<ReturnType<typeof makeWorkerEnv>> & { ASSETS: WebWorkerEnv["ASSETS"] }
+>()
 
 // The web dashboard is a Vite SPA: `vite build` emits a flat `dist/` and
 // `src/worker.ts` is a tiny assets-fallback worker (unknown routes → SPA
@@ -27,6 +51,7 @@ export interface CreateMapleWebOptions {
 export const createMapleWeb = ({
 	stage,
 	domains,
+	api,
 	apiUrl,
 	ingestUrl,
 	electricSyncUrl,
@@ -59,15 +84,16 @@ export const createMapleWeb = ({
 			},
 		})
 
-		const worker = yield* Cloudflare.Worker<{ MAPLE_API_BASE_URL: string }, Cloudflare.AssetsWithHash>(
+		const worker = yield* Cloudflare.Worker<ReturnType<typeof makeWorkerEnv>, Cloudflare.AssetsWithHash>(
 			"app",
 			{
 				name: resolveWorkerName("web", stage),
 				main: path.join(import.meta.dirname, "src", "worker.ts"),
-				// The bundle bakes this in for the browser (VITE_API_BASE_URL above);
-				// the Worker needs it too, at runtime, for the share-link social
-				// previews it resolves server-side before the SPA ever boots.
-				env: { MAPLE_API_BASE_URL: apiUrl },
+				// The bundle bakes the URL in for the browser (VITE_API_BASE_URL
+				// above); the Worker gets it too, plus the api service binding, for
+				// the share-link social previews it resolves server-side before the
+				// SPA ever boots.
+				env: makeWorkerEnv({ api, apiUrl }),
 				assets: {
 					directory: build.outdir,
 					hash: Output.map(build.hash, (h) => h.output ?? ""),

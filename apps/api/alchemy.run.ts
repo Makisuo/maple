@@ -239,6 +239,114 @@ const apiConfiguredEnv = (stage: MapleStage, domains: MapleDomains) =>
 export type MapleApiWorker = Cloudflare.Worker & Rpc<MapleApiRpcContract>
 
 /**
+ * The api worker's resource bindings, split from the `Config`-sourced env so
+ * `InferEnv` can derive `MapleApiWorkerEnv` below.
+ */
+const makeWorkerBindings = ({
+	stage,
+	mapleDb,
+	replayBlobs,
+	mcpSessions,
+	vcsSyncQueue,
+	vcsSyncQueueName,
+	planetScaleWebhookQueue,
+	planetScaleWebhookQueueName,
+}: {
+	stage: MapleStage
+	mapleDb: Cloudflare.Hyperdrive.Connection | undefined
+	replayBlobs: Cloudflare.R2.Bucket
+	mcpSessions: Cloudflare.KV.Namespace
+	vcsSyncQueue: Cloudflare.Queues.Queue
+	vcsSyncQueueName: string
+	planetScaleWebhookQueue: Cloudflare.Queues.Queue
+	planetScaleWebhookQueueName: string
+}) => ({
+	// Ref stages attach MAPLE_DB via worker.bind below.
+	...(mapleDb ? { MAPLE_DB: mapleDb } : undefined),
+	// Workers AI (`env.AI`, the v1 `Ai()` binding), driving the AI-triage agent on
+	// `@opencode-ai/ai`. v2 emits the `{ type: "ai" }` binding by attaching an AI Gateway
+	// resource, which also fronts model calls with caching/rate-limits/logging.
+	// NOTE: the deploy token needs the account-level "AI Gateway: Edit" permission
+	// for this resource.
+	AI: Cloudflare.AI.Gateway("maple-api-ai"),
+	// Durable chat transcripts, one Durable Object per "<orgId>:<tabId>". v2
+	// provisions new DO classes as SQLite-backed by default. Class is exported
+	// from src/worker.ts.
+	CHAT_SESSION: Cloudflare.DurableObject("chat-session", { className: "ChatSession" }),
+	MCP_SESSIONS: mcpSessions,
+	// Read side of the replay payload store; absent bindings degrade to
+	// inline-only hydration (see platform/ReplayBlobStore.ts).
+	REPLAY_BLOBS: replayBlobs,
+	VCS_SYNC_QUEUE: vcsSyncQueue,
+	VCS_SYNC_QUEUE_NAME: vcsSyncQueueName,
+	PLANETSCALE_WEBHOOK_QUEUE: planetScaleWebhookQueue,
+	PLANETSCALE_WEBHOOK_QUEUE_NAME: planetScaleWebhookQueueName,
+	// Long-running schema-apply: chunks heavy backfill migrations across durable
+	// steps so they never hit the Worker request budget. Class is exported from
+	// src/worker.ts. The first Workflow arg IS the physical workflow name; the
+	// api worker hosts it (no scriptName), so alchemy registers it after deploy.
+	CLICKHOUSE_SCHEMA_APPLY_WORKFLOW: Cloudflare.Workflow<{ orgId: string }>(
+		resolveWorkerName("schema-apply", stage),
+		{ className: "ClickHouseSchemaApplyWorkflow" },
+	),
+	// Fan-out investigation: N lens agents in parallel, then a validator that
+	// promotes one cause and records why each rival lost. Class is exported from
+	// src/worker.ts.
+	INVESTIGATION_FANOUT_WORKFLOW: Cloudflare.Workflow<{
+		orgId: string
+		investigationId: string
+		maxWidth: number
+		reservedPasses: number
+		attempt: number
+	}>(resolveWorkerName("investigation-fanout", stage), {
+		className: "InvestigationFanoutWorkflow",
+	}),
+	API_V2_RATE_LIMITER: Cloudflare.RateLimit("API_V2_RATE_LIMITER", {
+		namespaceId: 2026071801,
+		simple: { limit: 600, period: 60 },
+	}),
+	CLI_AUTH_RATE_LIMITER: Cloudflare.RateLimit("CLI_AUTH_RATE_LIMITER", {
+		namespaceId: 2026072101,
+		simple: { limit: 30, period: 60 },
+	}),
+	MCP_OAUTH_RATE_LIMITER: Cloudflare.RateLimit("MCP_OAUTH_RATE_LIMITER", {
+		namespaceId: 2026072102,
+		simple: { limit: 60, period: 60 },
+	}),
+	// Authenticated POST /mcp, per credential. A short window so a runaway
+	// agent loop is cut off in seconds, at twice the v2 API's throughput.
+	MCP_TOOLS_RATE_LIMITER: Cloudflare.RateLimit("MCP_TOOLS_RATE_LIMITER", {
+		namespaceId: 2026082901,
+		simple: { limit: 120, period: 10 },
+	}),
+	API_V2_RATE_LIMIT_PARTITION: formatMapleStage(stage),
+	// Production only: preview/stg workers run the same email crons against
+	// their own DB branches, so a binding here means every live stage sends
+	// its own copy of onboarding/digest/alert emails to real users.
+	...(stage.kind === "prd"
+		? {
+				EMAIL: Cloudflare.Email.SendEmail("email", {
+					allowedSenderAddresses: ["notifications@noreply.maple.dev"],
+				}),
+			}
+		: undefined),
+})
+
+/**
+ * The api worker's runtime env, derived from the declaration above — one
+ * source of truth, imported (type-only) by `src/worker.ts`.
+ *
+ * `Partial` because a binding's absence is a real runtime state: ref stages
+ * attach MAPLE_DB after the Worker exists, EMAIL is prd-only, pr previews bind
+ * no database, and `alchemy dev` emulation does not cover every binding. The
+ * configuration vars stay `unknown` on purpose: config is read through the
+ * Effect ConfigProvider (`WorkerConfigProviderLayer` → `platform/Env.ts`),
+ * never off `env` directly.
+ */
+export type MapleApiWorkerEnv = Partial<Cloudflare.InferEnv<ReturnType<typeof makeWorkerBindings>>> &
+	Record<string, unknown>
+
+/**
  * A dev stage's managed Hyperdrive, origin parsed from MAPLE_PG_URL (Hyperdrive
  * wants a structured origin). Created once at the root for api and alerting.
  */
@@ -307,32 +415,6 @@ export const createMapleApi = ({
 			title: resolveWorkerName("mcp-sessions", stage),
 		})
 
-		// Long-running schema-apply: chunks heavy backfill migrations across durable
-		// steps so they never hit the Worker request budget. Class is exported from
-		// src/worker.ts. The first Workflow arg IS the physical workflow name; the
-		// api worker hosts it (no scriptName), so alchemy registers it after deploy.
-		const schemaApplyWorkflow = Cloudflare.Workflow<{ orgId: string }>(
-			resolveWorkerName("schema-apply", stage),
-			{ className: "ClickHouseSchemaApplyWorkflow" },
-		)
-
-		// Fan-out investigation: N lens agents in parallel, then a validator that
-		// promotes one cause and records why each rival lost. Class is exported from
-		// src/worker.ts.
-		const investigationFanoutWorkflow = Cloudflare.Workflow<{
-			orgId: string
-			investigationId: string
-			maxWidth: number
-			reservedPasses: number
-			attempt: number
-		}>(resolveWorkerName("investigation-fanout", stage), {
-			className: "InvestigationFanoutWorkflow",
-		})
-
-		// Durable chat transcripts, one Durable Object per "<orgId>:<tabId>". v2 provisions new
-		// DO classes as SQLite-backed by default. Class is exported from src/worker.ts.
-		const chatSession = Cloudflare.DurableObject("chat-session", { className: "ChatSession" })
-
 		// Vendor-agnostic VCS sync queue (commit backfill + webhook deltas). The same
 		// `api` worker is both producer (binding) and consumer (Queues.Consumer
 		// below). Under `alchemy dev` both halves are emulated in-process from this
@@ -381,54 +463,16 @@ export const createMapleApi = ({
 			//               installs that predate the webhook
 			crons: ["0 */12 * * *", "0 * * * *", "0 */6 * * *"],
 			env: {
-				// Ref stages attach MAPLE_DB via worker.bind below.
-				...(mapleDb ? { MAPLE_DB: mapleDb } : undefined),
-				// Workers AI (`env.AI`, the v1 `Ai()` binding), driving the AI-triage agent on
-				// `@opencode-ai/ai`. v2 emits the `{ type: "ai" }` binding by attaching an AI Gateway
-				// resource, which also fronts model calls with caching/rate-limits/logging.
-				// NOTE: the deploy token needs the account-level "AI Gateway: Edit" permission
-				// for this resource.
-				AI: Cloudflare.AI.Gateway("maple-api-ai"),
-				CHAT_SESSION: chatSession,
-				MCP_SESSIONS: mcpSessions,
-				// Read side of the replay payload store; absent bindings degrade to
-				// inline-only hydration (see platform/ReplayBlobStore.ts).
-				REPLAY_BLOBS: replayBlobs,
-				VCS_SYNC_QUEUE: vcsSyncQueue,
-				VCS_SYNC_QUEUE_NAME: vcsSyncQueueName,
-				PLANETSCALE_WEBHOOK_QUEUE: planetScaleWebhookQueue,
-				PLANETSCALE_WEBHOOK_QUEUE_NAME: planetScaleWebhookQueueName,
-				CLICKHOUSE_SCHEMA_APPLY_WORKFLOW: schemaApplyWorkflow,
-				INVESTIGATION_FANOUT_WORKFLOW: investigationFanoutWorkflow,
-				API_V2_RATE_LIMITER: Cloudflare.RateLimit("API_V2_RATE_LIMITER", {
-					namespaceId: 2026071801,
-					simple: { limit: 600, period: 60 },
+				...makeWorkerBindings({
+					stage,
+					mapleDb,
+					replayBlobs,
+					mcpSessions,
+					vcsSyncQueue,
+					vcsSyncQueueName,
+					planetScaleWebhookQueue,
+					planetScaleWebhookQueueName,
 				}),
-				CLI_AUTH_RATE_LIMITER: Cloudflare.RateLimit("CLI_AUTH_RATE_LIMITER", {
-					namespaceId: 2026072101,
-					simple: { limit: 30, period: 60 },
-				}),
-				MCP_OAUTH_RATE_LIMITER: Cloudflare.RateLimit("MCP_OAUTH_RATE_LIMITER", {
-					namespaceId: 2026072102,
-					simple: { limit: 60, period: 60 },
-				}),
-				// Authenticated POST /mcp, per credential. A short window so a runaway
-				// agent loop is cut off in seconds, at twice the v2 API's throughput.
-				MCP_TOOLS_RATE_LIMITER: Cloudflare.RateLimit("MCP_TOOLS_RATE_LIMITER", {
-					namespaceId: 2026082901,
-					simple: { limit: 120, period: 10 },
-				}),
-				API_V2_RATE_LIMIT_PARTITION: formatMapleStage(stage),
-				// Production only: preview/stg workers run the same email crons against
-				// their own DB branches, so a binding here means every live stage sends
-				// its own copy of onboarding/digest/alert emails to real users.
-				...(stage.kind === "prd"
-					? {
-							EMAIL: Cloudflare.Email.SendEmail("email", {
-								allowedSenderAddresses: ["notifications@noreply.maple.dev"],
-							}),
-						}
-					: undefined),
 				...configuredEnv,
 				...devEnv,
 			},

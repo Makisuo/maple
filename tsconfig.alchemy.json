@@ -8,7 +8,11 @@
 		"noEmit": true,
 		"strict": true,
 		"skipLibCheck": true,
-		"types": ["node"],
+		// workers-types is load-bearing for the binding parity gates: without the
+		// ambient globals (Workflow, Service, KVNamespace, …), the references to
+		// them inside alchemy's InferEnv .d.ts silently resolve to `any` under
+		// skipLibCheck and the assignability half of every gate passes vacuously.
+		"types": ["node", "@cloudflare/workers-types"],
 		// Every `@maple/infra` subpath the stack files import. Listing only some of
 		// them let the rest resolve through node_modules instead, so the root
 		// typecheck and turbo's disagreed about which sources they were checking.
