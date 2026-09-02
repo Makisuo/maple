@@ -22,11 +22,6 @@ const spanParams = { ...params, sessionId: "wrun_01M0CSAEW96BH2W9185XZPRPKH" }
 const TRACE_ID = "7f3a4b5c6d7e8f901234567890abcdef"
 const traceParams = { ...params, traceId: TRACE_ID }
 
-/** The detection predicate every read now keys on — a GenAI marker of any kind,
- *  which is what admits a trace whose vendor exposes no session key. */
-const VENDOR_GUARD =
-	"(mapContains(SpanAttributes, 'maple_ai.vendor.id') AND SpanAttributes['maple_ai.vendor.id'] != '')"
-
 /** The trace's session id, or the synthesized one — the grouping key. */
 const SESSION_KEY = "if(rawSessionId = '', concat('trace:', traceId), rawSessionId)"
 
@@ -37,14 +32,17 @@ const decodeRows = <T>(compiled: CompiledQuery<T>, rows: ReadonlyArray<Record<st
 const orgPredicateCount = (sql: string) => sql.split("OrgId = 'org_1'").length - 1
 
 describe("aiSessionListQuery", () => {
-	it("detects sessions on traces, then fans out over trace_detail_spans", () => {
+	it("detects sessions on ai_trace_index, then fans out over trace_detail_spans", () => {
 		const { sql } = compileUnsafe(aiSessionListQuery(), params)
 
-		// The detection level is the one the SpanAttributes bloom index serves;
-		// the fan-out reads the MV whose sort key starts (OrgId, TraceId).
+		// The tier is the point: detection must read the filtered projection, not
+		// raw `traces` — the raw scan reads the fat Map column for every span in
+		// the window and cannot be saved by the bloom index (see the file header).
+		// The fan-out reads the MV whose sort key starts (OrgId, TraceId).
 		expect(sql).toContain("FROM trace_detail_spans")
 		expect(sql).toContain("TraceId IN (SELECT")
-		expect(sql).toContain("FROM traces")
+		expect(sql).toContain("FROM ai_trace_index")
+		expect(sql).not.toContain("FROM traces")
 		expect(sql).toContain("GROUP BY traceId")
 		expect(sql).toContain("GROUP BY sessionId")
 		expect(sql).toContain("ORDER BY startTime DESC")
@@ -61,16 +59,18 @@ describe("aiSessionListQuery", () => {
 		expect(compileUnsafe(aiSessionListQuery(), params).tenantScope).toBe("single-tenant")
 	})
 
-	it("detects on the vendor stamp, not the session id", () => {
+	it("detects on index membership, with no attribute predicate at all", () => {
 		const { sql } = compileUnsafe(aiSessionListQuery(), params)
 		const [, detection] = sql.split("TraceId IN (SELECT")
 
 		// The session id is sparse by vendor — several frameworks never emit one —
-		// so keying detection on it hid those traces entirely. The vendor stamp is
-		// on every span the gateway classified, and `mapContains` is what the
-		// mapKeys bloom index prunes on.
-		expect(detection).toContain(VENDOR_GUARD)
-		expect(detection).not.toContain("mapContains(SpanAttributes, 'maple_ai.session.id')")
+		// so detection keys on the vendor stamp. That predicate now lives in
+		// `ai_trace_index_mv`'s write filter: every row of the index carries a
+		// non-empty vendor id, so being in the table IS the guard and the read
+		// touches no Map column.
+		expect(detection).toContain("FROM ai_trace_index")
+		expect(detection).not.toContain("mapContains")
+		expect(detection).not.toContain("SpanAttributes")
 	})
 
 	it("keys a trace with no session id on the trace itself", () => {
@@ -132,7 +132,7 @@ describe("aiSessionListQuery", () => {
 	it("omits the optional filters when none are given", () => {
 		const { sql } = compileUnsafe(aiSessionListQuery(), params)
 
-		expect(sql).not.toContain("SpanAttributes['maple_ai.vendor.id'] IN")
+		expect(sql).not.toContain("VendorId IN")
 		expect(sql).not.toContain("ServiceName IN")
 	})
 
@@ -144,10 +144,24 @@ describe("aiSessionListQuery", () => {
 
 		// Filtering the fan-out instead would drop spans and under-count spanCount.
 		const [fanOut, detection] = sql.split("TraceId IN (SELECT")
-		expect(detection).toContain("SpanAttributes['maple_ai.vendor.id'] IN ('eve')")
+		expect(detection).toContain("VendorId IN ('eve')")
 		expect(detection).toContain("ServiceName IN ('maple-slack-agent')")
 		expect(fanOut).not.toContain("IN ('eve')")
 		expect(sql).toContain("LIMIT 25")
+	})
+
+	it("skips past the previous pages on the outermost level only", () => {
+		const { sql } = compileUnsafe(aiSessionListQuery({ limit: 50, offset: 100 }), params)
+
+		// The offset must apply to the ordered SESSION rows — the derived per-trace
+		// level has no order to page over.
+		expect(sql).toContain("LIMIT 50\n        OFFSET 100")
+		expect(sql.split("OFFSET").length - 1).toBe(1)
+	})
+
+	it("emits no OFFSET clause for the first page", () => {
+		expect(compileUnsafe(aiSessionListQuery({ offset: 0 }), params).sql).not.toContain("OFFSET")
+		expect(compileUnsafe(aiSessionListQuery(), params).sql).not.toContain("OFFSET")
 	})
 
 	it("pads the fan-out window rather than dropping it", () => {
@@ -207,7 +221,8 @@ describe("aiSessionFacetsQuery", () => {
 	it("groups the detection scan only — no fan-out over trace_detail_spans", () => {
 		const { sql } = compileUnionUnsafe(aiSessionFacetsQuery(), params)
 
-		expect(sql).toContain("FROM traces")
+		expect(sql).toContain("FROM ai_trace_index")
+		expect(sql).not.toContain("FROM traces")
 		expect(sql).not.toContain("trace_detail_spans")
 		expect(sql).not.toContain("TraceId IN (SELECT")
 		expect(sql).toContain("UNION ALL")
@@ -216,7 +231,7 @@ describe("aiSessionFacetsQuery", () => {
 	it("counts distinct sessions per vendor and per service", () => {
 		const { sql } = compileUnionUnsafe(aiSessionFacetsQuery(), params)
 
-		expect(sql).toContain("groupUniqArray(SpanAttributes['maple_ai.vendor.id']) AS names")
+		expect(sql).toContain("groupUniqArray(VendorId) AS names")
 		expect(sql).toContain("groupUniqArray(ServiceName) AS names")
 		expect(sql.split("arrayJoin(names) AS name").length - 1).toBe(2)
 		expect(sql).toContain("'vendor' AS facetType")
@@ -252,11 +267,13 @@ describe("aiSessionFacetsQuery", () => {
 	it("counts over the same population the list detects, and drops the blank option", () => {
 		const { sql } = compileUnionUnsafe(aiSessionFacetsQuery(), params)
 
-		// Same guard as `aiSessionListQuery`'s detection, so the population a facet
-		// describes is exactly the population its filter selects.
-		expect(sql.split(VENDOR_GUARD).length - 1).toBe(2)
-		expect(sql).not.toContain("mapContains(SpanAttributes, 'maple_ai.session.id')")
-		expect(sql).toContain("SpanAttributes['maple_ai.vendor.id'] != ''")
+		// Same surface as `aiSessionListQuery`'s detection — index membership is
+		// the vendor guard — so the population a facet describes is exactly the
+		// population its filter selects. Only the blank-option guard remains as a
+		// predicate.
+		expect(sql.split("FROM ai_trace_index").length - 1).toBe(2)
+		expect(sql).not.toContain("mapContains")
+		expect(sql).toContain("VendorId != ''")
 		expect(sql).toContain("ServiceName != ''")
 	})
 

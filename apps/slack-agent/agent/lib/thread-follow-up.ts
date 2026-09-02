@@ -453,11 +453,20 @@ export function confirmThreadFollowUp(
 		return { engaged: true, reason: "thread-unreadable" }
 	}
 
+	// Truncation is checked BEFORE either bound, not only when no engagement is
+	// visible: a full page is the oldest-first *start* of a longer thread, so
+	// its last element is not the reply's predecessor and its length is not the
+	// distance to the engagement. Computing the bounds anyway once declared an
+	// active incident thread dormant off the stale 50th message (a wrong drop —
+	// the expensive direction), and would keep an engagement parked at the end
+	// of the visible prefix "recent" forever (a wrong promote). Neither bound is
+	// answerable from this page; fail open, per the docblock above.
+	if (messages.length >= EVE_THREAD_PAGE_SIZE - 1) {
+		return { engaged: true, reason: "page-truncated" }
+	}
+
 	const engagementIndex = lastEngagementIndex(messages, pending.botUserId)
 	if (engagementIndex === -1) {
-		if (messages.length >= EVE_THREAD_PAGE_SIZE - 1) {
-			return { engaged: true, reason: "page-truncated" }
-		}
 		return { engaged: false, workedInThread: false, reason: "never-engaged" }
 	}
 

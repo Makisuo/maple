@@ -298,18 +298,20 @@ export function InfraMetricChart({
 				...series.map((name) => focusDot(data, at, valueOf(name), colorOf(name), chromeColors)),
 				focusCrosshair(chromeColors),
 			],
-			x: {
-				// Categorical: these charts plot bucket LABELS, not timestamps.
-				scale: xScale,
-				axis: {
-					line: false,
-					ticks: { size: 0, padding: 8 },
-					tickLabels: { thin: { minGap: 12 } },
+			scales: {
+				x: {
+					// Categorical: these charts plot bucket LABELS, not timestamps.
+					scale: xScale,
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 8 },
+						tickLabels: { thin: { minGap: 12 } },
+					},
 				},
-			},
-			y: {
-				scale: scaleLinear().domain(yDomain),
-				axis: { line: false, ticks: { size: 0, padding: 8, format: tickFormatter } },
+				y: {
+					scale: scaleLinear().domain(yDomain),
+					axis: { line: false, ticks: { size: 0, padding: 8, format: tickFormatter } },
+				},
 			},
 			// A pinned left margin so sibling charts on the page share a plot edge.
 			// `bottom` is left unset: an authored side is a hard lock, and `bottom: 0`

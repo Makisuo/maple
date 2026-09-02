@@ -1,10 +1,13 @@
+import type { MouseEvent } from "react"
 import { Link } from "@tanstack/react-router"
 
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { cn } from "@maple/ui/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
 
 import type { ListPodsResponse } from "@maple/domain/http"
 import type { PodSortKey, SortDirection } from "@/api/warehouse/infra"
+import type { TimeRangeSearch } from "@/components/time-range-picker/search"
 
 import { HostStatusBadge } from "./status-badge"
 import { ColumnHead, DataTable, ROW_LINK_CLASS } from "./primitives/data-table"
@@ -13,6 +16,9 @@ import { MetaLine } from "./primitives/meta-line"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
 export type PodRow = ListPodsResponse["data"][number]
+
+/** Row identity. A pod name repeats across namespaces; the pair doesn't. */
+export const podKey = (pod: Pick<PodRow, "namespace" | "podName">) => `${pod.namespace}/${pod.podName}`
 
 interface PodTableProps {
 	pods: ReadonlyArray<PodRow>
@@ -27,9 +33,22 @@ interface PodTableProps {
 	sortBy?: PodSortKey
 	sortDir?: SortDirection
 	onSortChange?: (key: PodSortKey) => void
+	/**
+	 * Open a row in the peek sheet instead of leaving the page. A plain click
+	 * peeks; a modified click (⌘, ctrl, shift, middle) still follows the link,
+	 * so the row keeps being a link to the pod's page in every way that matters.
+	 */
+	onPeek?: (pod: PodRow) => void
+	/** The row currently open in the peek sheet, by `podKey`. */
+	activeKey?: string
+	/** The window to carry into the pod's page, so it opens on what you were looking at. */
+	timeSearch?: TimeRangeSearch
 	waiting?: boolean
 	referenceTime?: string
 }
+
+const isPlainClick = (event: MouseEvent) =>
+	event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
 
 function workloadOf(pod: PodRow): { kind: string; name: string } | null {
 	if (pod.deploymentName) return { kind: "deploy", name: pod.deploymentName }
@@ -105,6 +124,9 @@ export function PodTable({
 	sortBy = "saturation",
 	sortDir = "desc",
 	onSortChange,
+	onPeek,
+	activeKey,
+	timeSearch,
 	waiting,
 	referenceTime,
 }: PodTableProps) {
@@ -162,13 +184,24 @@ export function PodTable({
 
 			{pods.map((pod) => {
 				const workload = workloadOf(pod)
+				const key = podKey(pod)
 				return (
 					<Link
-						key={`${pod.namespace}/${pod.podName}`}
+						key={key}
 						to="/infra/kubernetes/pods/$podName"
 						params={{ podName: pod.podName }}
-						search={pod.namespace ? { namespace: pod.namespace } : {}}
-						className={ROW_LINK_CLASS}
+						search={{ ...timeSearch, namespace: pod.namespace || undefined }}
+						className={cn(ROW_LINK_CLASS, "data-active:bg-muted/50")}
+						data-active={activeKey === key || undefined}
+						onClick={
+							onPeek
+								? (event) => {
+										if (!isPlainClick(event)) return
+										event.preventDefault()
+										onPeek(pod)
+									}
+								: undefined
+						}
 					>
 						<div className="w-0 min-w-[260px] flex-1">
 							<div className="flex items-center gap-2">

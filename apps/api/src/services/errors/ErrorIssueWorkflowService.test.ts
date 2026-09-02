@@ -14,9 +14,11 @@ import {
 	errorIssueEvents,
 	errorIssuePullRequests,
 	errorIssueStates,
+	issueEscalations,
 } from "@maple/db"
+import type { MapleDatabaseTransaction } from "@maple/db/client"
 import { and, eq } from "drizzle-orm"
-import { Database } from "@/platform/DatabaseLive"
+import { Database, type DatabaseApi, type DatabaseClient } from "@/platform/DatabaseLive"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
 import { ErrorActorsService } from "./ErrorActorsService"
 import { ErrorIssueWorkflowService } from "./ErrorIssueWorkflowService"
@@ -44,6 +46,56 @@ const makeLayer = () => {
 	const actors = ErrorActorsService.layer.pipe(Layer.provide(database))
 	const workflow = databaseAndActorsOnly.pipe(Layer.provide(Layer.mergeAll(database, actors)))
 	return Layer.mergeAll(workflow, actors).pipe(Layer.provideMerge(database))
+}
+
+/**
+ * The client with one table's inserts sabotaged, inside and outside
+ * transactions — a stand-in for the connection dying mid-write, which is what
+ * the workflow's multi-statement operations must survive atomically.
+ */
+const failInsertOf = <T extends object>(client: T, failTable: unknown): T =>
+	new Proxy(client, {
+		get(target, property) {
+			// SAFETY: a Proxy get trap receives a key for its target; indexed access preserves
+			// the target's own property type while the runtime branch below validates callability.
+			const value = target[property as keyof T]
+			if (typeof value !== "function") return value
+			if (property === "insert") {
+				return (table: unknown) => {
+					if (table === failTable) throw new Error("injected insert failure")
+					return value.call(target, table)
+				}
+			}
+			if (property === "transaction") {
+				return <Result>(
+					callback: (tx: MapleDatabaseTransaction) => Promise<Result>,
+					...rest: ReadonlyArray<unknown>
+				) =>
+					value.call(
+						target,
+						(tx: MapleDatabaseTransaction) => callback(failInsertOf(tx, failTable)),
+						...rest,
+					)
+			}
+			return value.bind(target)
+		},
+	})
+
+const makeFaultyLayer = (failTable: unknown) => {
+	const database = createTestDb(createdDbs).layer
+	const faulty = Layer.effect(
+		Database,
+		Effect.gen(function* () {
+			const real = yield* Database
+			return {
+				execute: <T>(fn: (db: DatabaseClient) => Promise<T>) =>
+					real.execute((db) => fn(failInsertOf(db, failTable))),
+			} satisfies DatabaseApi
+		}),
+	).pipe(Layer.provide(database))
+	const actors = ErrorActorsService.layer.pipe(Layer.provide(faulty))
+	const workflow = databaseAndActorsOnly.pipe(Layer.provide(Layer.mergeAll(faulty, actors)))
+	return Layer.mergeAll(workflow, actors).pipe(Layer.provideMerge(faulty))
 }
 
 const seedIssue = (issueId: ErrorIssueId, overrides: Partial<typeof errorIssues.$inferInsert> = {}) =>
@@ -174,6 +226,78 @@ describe("ErrorIssueWorkflowService", () => {
 			assert.strictEqual(stateChange?.fromState, "in_review")
 			assert.strictEqual(stateChange?.toState, "done")
 		}).pipe(Effect.provide(makeLayer())),
+	)
+
+	it.effect("rolls the whole done transition back when the timeline event cannot commit", () =>
+		Effect.gen(function* () {
+			const workflow = yield* ErrorIssueWorkflowService
+			const actors = yield* ErrorActorsService
+			const database = yield* Database
+			const actor = yield* actors.ensureUserActor(ORG, USER)
+			const issueId = asIssueId(randomUUID())
+			const incidentId = asIncidentId(randomUUID())
+			const now = yield* Clock.currentTimeMillis
+			yield* seedIssue(issueId, { workflowState: "in_review" })
+			yield* database.execute((db) =>
+				db.insert(errorIncidents).values({
+					id: incidentId,
+					orgId: ORG,
+					issueId,
+					status: "open",
+					reason: "first_seen",
+					firstTriggeredAt: new Date(now),
+					lastTriggeredAt: new Date(now),
+					createdAt: new Date(now),
+					updatedAt: new Date(now),
+				}),
+			)
+
+			const current = yield* workflow.requireIssue(ORG, issueId)
+			const failure = yield* Effect.flip(workflow.applyTransition(ORG, actor.id, current, "done"))
+			assert.strictEqual(failure._tag, "@maple/http/errors/ErrorPersistenceError")
+
+			// Nothing may commit without the event: a done issue with an open
+			// incident and no audit trail is unrepairable, because a retry sees the
+			// target state already stored and returns early.
+			const after = yield* workflow.requireIssue(ORG, issueId)
+			assert.strictEqual(after.workflowState, "in_review")
+			assert.isNull(after.resolvedAt)
+			const [incident] = yield* database.execute((db) =>
+				db.select().from(errorIncidents).where(eq(errorIncidents.id, incidentId)),
+			)
+			assert.strictEqual(incident?.status, "open")
+		}).pipe(Effect.provide(makeFaultyLayer(errorIssueEvents))),
+	)
+
+	it.effect("rolls the severity change back when the escalation outbox insert fails", () =>
+		Effect.gen(function* () {
+			const workflow = yield* ErrorIssueWorkflowService
+			const actors = yield* ErrorActorsService
+			const database = yield* Database
+			const actor = yield* actors.ensureUserActor(ORG, USER)
+			const issueId = asIssueId(randomUUID())
+			yield* seedIssue(issueId)
+
+			const failure = yield* Effect.flip(
+				workflow.setSeverity(ORG, actor.id, issueId, "critical", { source: "manual" }),
+			)
+			assert.strictEqual(failure._tag, "@maple/http/errors/ErrorPersistenceError")
+
+			// The severity must not outlive its escalation row: committed alone, a
+			// retried setSeverity observes "nothing changed" and returns before
+			// enqueueing, so the page for this severity is permanently lost.
+			const [issue] = yield* database.execute((db) =>
+				db.select().from(errorIssues).where(eq(errorIssues.id, issueId)),
+			)
+			assert.isNull(issue?.severity)
+			const events = yield* database.execute((db) =>
+				db
+					.select()
+					.from(errorIssueEvents)
+					.where(and(eq(errorIssueEvents.orgId, ORG), eq(errorIssueEvents.issueId, issueId))),
+			)
+			assert.deepStrictEqual(events, [])
+		}).pipe(Effect.provide(makeFaultyLayer(issueEscalations))),
 	)
 
 	it.effect("hydrates activity rollups: comments, agent notes, and non-abandoned PR links", () =>

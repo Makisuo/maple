@@ -67,7 +67,8 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		compile: () => compileUnsafe(CH.aiSessionListQuery(), window),
 	},
 	{
-		// The vendor/service filters the AI sessions list page sends.
+		// The vendor/service filters the AI sessions list page sends, on its
+		// second page.
 		module: "ai-sessions",
 		name: "aiSessionListQuery",
 		label: "filtered",
@@ -75,6 +76,7 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 			compileUnsafe(
 				CH.aiSessionListQuery({
 					limit: 25,
+					offset: 25,
 					vendorIds: ["eve"],
 					serviceNames: ["maple-slack-agent"],
 				}),

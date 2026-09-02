@@ -190,20 +190,26 @@ export function PlanetScaleChart({
 				focusDot(data, at, value, color, chromeColors),
 				focusCrosshair(chromeColors),
 			],
-			x: {
-				// A POINT scale over the bucket labels: this axis is categorical, which
-				// is also what lets the markers snap by index.
-				scale: scalePoint,
-				axis: { line: false, ticks: { size: 0, padding: 8 }, tickLabels: { thin: { minGap: 12 } } },
-			},
-			y: {
-				scale: scaleLinear().domain(yDomain),
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 8,
-						format: (v: number) => formatMetricValue(v, metric),
+			scales: {
+				x: {
+					// A POINT scale over the bucket labels: this axis is categorical, which
+					// is also what lets the markers snap by index.
+					scale: scalePoint,
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 8 },
+						tickLabels: { thin: { minGap: 12 } },
+					},
+				},
+				y: {
+					scale: scaleLinear().domain(yDomain),
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 8,
+							format: (v: number) => formatMetricValue(v, metric),
+						},
 					},
 				},
 			},

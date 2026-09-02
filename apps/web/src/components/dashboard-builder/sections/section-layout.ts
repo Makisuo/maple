@@ -115,7 +115,10 @@ export function autoLayoutPerContainer(
 		else byContainer.set(key, [widget])
 	}
 
-	const relaid = new Map<string, DashboardWidget>()
+	// Keyed by object identity, not `widget.id`: stored widget IDs are not
+	// validated unique, and an id-keyed map made every duplicate collapse onto
+	// the last widget — persisting one config twice and losing the other.
+	const relaid = new Map<DashboardWidget, DashboardWidget>()
 	for (const bucket of byContainer.values()) {
 		let currentX = 0
 		let currentY = 0
@@ -128,7 +131,7 @@ export function autoLayoutPerContainer(
 				currentY += rowHeight
 				rowHeight = 0
 			}
-			relaid.set(widget.id, { ...widget, layout: { ...widget.layout, x: currentX, y: currentY } })
+			relaid.set(widget, { ...widget, layout: { ...widget.layout, x: currentX, y: currentY } })
 			currentX += w
 			rowHeight = Math.max(rowHeight, h)
 		}
@@ -136,5 +139,5 @@ export function autoLayoutPerContainer(
 
 	// Rebuild in the board's sorted order so array order still matches visual
 	// order for the compactor.
-	return sortWidgetsForLayout(widgets, sections).map((widget) => relaid.get(widget.id) ?? widget)
+	return sortWidgetsForLayout(widgets, sections).map((widget) => relaid.get(widget) ?? widget)
 }

@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { verificationVerdictAutoCloses } from "@maple/domain/http"
 
-import { verdictFromInvestigationStatus } from "./FixVerificationTickService"
+import { splitVersionRows, verdictFromInvestigationStatus } from "./FixVerificationTickService"
 
 /**
  * The verdict mapping is deliberately inverted relative to an incident
@@ -52,5 +52,40 @@ describe("verdictFromInvestigationStatus", () => {
 		assert.deepStrictEqual(verifying, ["inconclusive"])
 		assert.strictEqual(verificationVerdictAutoCloses("low"), true)
 		assert.strictEqual(verificationVerdictAutoCloses("critical"), false)
+	})
+})
+
+describe("splitVersionRows", () => {
+	it("splits attributable occurrences against the merge-time baseline", () => {
+		const split = splitVersionRows(
+			[
+				{ serviceVersion: "v1", count: 40 },
+				{ serviceVersion: "v3", count: 2 },
+			],
+			["v1", "v2"],
+			1000,
+		)
+		assert.deepStrictEqual(split, { postMerge: 2, staleClients: 40, unattributed: 0 })
+	})
+
+	it("keeps a count of occurrences that report no build", () => {
+		// The old code discarded these rows entirely, so a service that never
+		// reports `service.version` looked identical to one that went silent — and
+		// with a usable pre-merge rate the no-agent fallback then wrote `verified`
+		// and auto-closed the issue while the error was still firing.
+		const split = splitVersionRows([{ serviceVersion: "", count: 17 }], ["v1"], 1000)
+		assert.strictEqual(split.unattributed, 17)
+		assert.strictEqual(split.postMerge, 0)
+	})
+
+	it("treats a truncated version scan as incomplete evidence", () => {
+		// Any single non-baseline build is decisive, so a scan that dropped rows
+		// past its cap cannot claim the window was clean.
+		const rows = Array.from({ length: 3 }, (_, index) => ({
+			serviceVersion: `v${index}`,
+			count: 1,
+		}))
+		const split = splitVersionRows(rows, ["v0", "v1", "v2"], 3)
+		assert.isAbove(split.unattributed, 0)
 	})
 })

@@ -22,12 +22,15 @@ export interface DerivedRuleStatus {
 }
 
 /**
- * A rule counts as stale when it hasn't been evaluated for 3× the larger of
- * its evaluation window and the scheduler cadence (~1 min). Shared with the
- * diagnosis panel so both surfaces agree on "stale".
+ * A rule counts as stale after 3× the server's state heartbeat: the scheduler
+ * evaluates every enabled rule about once a minute regardless of its window,
+ * but republishes `last_evaluated_at` at most every ~5 minutes to keep the
+ * Electric shape quiet. Deliberately independent of `windowMinutes` — the
+ * window sizes what each evaluation reads, not how often it runs, and scaling
+ * by it hid scheduler outages for up to 3× the window (72h on a daily rule).
+ * Shared with the diagnosis panel so both surfaces agree on "stale".
  */
-export const staleThresholdMs = (rule: Pick<AlertRuleDocument, "windowMinutes">): number =>
-	3 * Math.max(rule.windowMinutes, 5) * 60_000
+export const staleThresholdMs = (): number => 3 * 5 * 60_000
 
 const lastEvaluatedMs = (
 	rule: AlertRuleDocument,
@@ -109,7 +112,7 @@ export function deriveRuleStatus(input: {
 	}
 
 	const evaluatedAt = lastEvaluatedMs(rule, states)
-	if (evaluatedAt == null || now - evaluatedAt > staleThresholdMs(rule)) {
+	if (evaluatedAt == null || now - evaluatedAt > staleThresholdMs()) {
 		return {
 			status: "stale",
 			attention,

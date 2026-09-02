@@ -28,6 +28,7 @@ import {
 } from "@maple/domain/http"
 import { ErrorIssueId as ErrorIssueIdSchema, type InvestigationId } from "@maple/domain/primitives"
 import {
+	errorIssueEvents,
 	errorIssuePullRequests,
 	errorIssues,
 	errorIssueVerifications,
@@ -37,7 +38,7 @@ import {
 	type ErrorIssueVerificationRow,
 } from "@maple/db"
 import { and, desc, eq, inArray, lte, ne } from "drizzle-orm"
-import { Cause, Clock, Context, Effect, Layer, Option, Schema } from "effect"
+import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { summarizeCause } from "@/platform/describe-cause"
 import { Env } from "@/platform/Env"
@@ -663,23 +664,25 @@ const make: Effect.Effect<
 		// window, and `.returning()` is what says which one this was — a driver
 		// write-result shape would not.
 		const opened = yield* dbExecute((db) =>
-			db.insert(errorIssueVerifications).values({
-				id: verificationId,
-				orgId,
-				issueId: issue.id,
-				pullRequestId: link.id,
-				status: "waiting",
-				mergedAt: msToDate(mergedAtMs),
-				verifyAfter: msToDate(verifyAfterMs),
-				// The builds this issue was known to affect at merge time. Everything
-				// downstream is a membership test against this array.
-				baselineVersionsJson: issue.seenVersionsJson,
-				baselineOccurrenceCount: issue.occurrenceCount,
-				baselineRatePerHour: ratePerHour,
-				attempt: 0,
-				createdAt: msToDate(nowMs),
-				updatedAt: msToDate(nowMs),
-			})
+			db
+				.insert(errorIssueVerifications)
+				.values({
+					id: verificationId,
+					orgId,
+					issueId: issue.id,
+					pullRequestId: link.id,
+					status: "waiting",
+					mergedAt: msToDate(mergedAtMs),
+					verifyAfter: msToDate(verifyAfterMs),
+					// The builds this issue was known to affect at merge time. Everything
+					// downstream is a membership test against this array.
+					baselineVersionsJson: issue.seenVersionsJson,
+					baselineOccurrenceCount: issue.occurrenceCount,
+					baselineRatePerHour: ratePerHour,
+					attempt: 0,
+					createdAt: msToDate(nowMs),
+					updatedAt: msToDate(nowMs),
+				})
 				.onConflictDoNothing()
 				.returning({ id: errorIssueVerifications.id }),
 		)
@@ -736,102 +739,100 @@ const make: Effect.Effect<
 	 * this call from the link path the window would never open and the issue would
 	 * sit in `in_review` forever.
 	 */
-	const openMergedVerifications = Effect.fn("IssueFixVerification.openMergedVerifications")(
-		function* (
-			orgId: OrgId,
-			links: ReadonlyArray<typeof errorIssuePullRequests.$inferSelect>,
-			merge: {
-				readonly mergedAtMs: number
-				readonly mergeCommitSha: string | null
-				readonly nowMs: number
-			},
+	const openMergedVerifications = Effect.fn("IssueFixVerification.openMergedVerifications")(function* (
+		orgId: OrgId,
+		links: ReadonlyArray<typeof errorIssuePullRequests.$inferSelect>,
+		merge: {
+			readonly mergedAtMs: number
+			readonly mergeCommitSha: string | null
+			readonly nowMs: number
+		},
+	) {
+		const { mergedAtMs, mergeCommitSha, nowMs } = merge
+		const systemActor = yield* actors.ensureSystemActor(orgId)
+
+		// One issue's problem must not cost the others. The API doc on
+		// `onPullRequestEvent` and `openVerification`'s both promise a multi-issue
+		// delivery does not lose the rest when one issue fails, but only the
+		// transition/not-found cases were caught — every `dbExecute` in here fails
+		// outward as `ErrorPersistenceError` and aborted the remaining links, which
+		// the sink then swallowed, so those links were dropped with no retry and no
+		// trace of why.
+		const openForLink = Effect.fn("IssueFixVerification.openForLink")(function* (
+			link: (typeof links)[number],
 		) {
-			const { mergedAtMs, mergeCommitSha, nowMs } = merge
-			const systemActor = yield* actors.ensureSystemActor(orgId)
+			// One live verification per issue. A `synchronize` after a merge, a
+			// redelivered webhook, or a second PR attached to the same issue must
+			// not open a second window.
+			const open = yield* dbExecute((db) =>
+				db
+					.select()
+					.from(errorIssueVerifications)
+					.where(
+						and(
+							eq(errorIssueVerifications.orgId, orgId),
+							eq(errorIssueVerifications.issueId, link.issueId),
+							inArray(errorIssueVerifications.status, ["waiting", "running"]),
+						),
+					)
+					.limit(1),
+			)
+			if (Arr.isArrayNonEmpty(open)) return false
 
-			// One issue's problem must not cost the others. The API doc on
-			// `onPullRequestEvent` and `openVerification`'s both promise a multi-issue
-			// delivery does not lose the rest when one issue fails, but only the
-			// transition/not-found cases were caught — every `dbExecute` in here fails
-			// outward as `ErrorPersistenceError` and aborted the remaining links, which
-			// the sink then swallowed, so those links were dropped with no retry and no
-			// trace of why.
-			const openForLink = Effect.fn("IssueFixVerification.openForLink")(function* (
-				link: (typeof links)[number],
-			) {
-				// One live verification per issue. A `synchronize` after a merge, a
-				// redelivered webhook, or a second PR attached to the same issue must
-				// not open a second window.
-				const open = yield* dbExecute((db) =>
-					db
-						.select()
-						.from(errorIssueVerifications)
-						.where(
-							and(
-								eq(errorIssueVerifications.orgId, orgId),
-								eq(errorIssueVerifications.issueId, link.issueId),
-								inArray(errorIssueVerifications.status, ["waiting", "running"]),
-							),
-						)
-						.limit(1),
-				)
-				if (open[0] !== undefined) return false
+			const issueRows = yield* dbExecute((db) =>
+				db
+					.select()
+					.from(errorIssues)
+					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, link.issueId)))
+					.limit(1),
+			)
+			const issue = Arr.head(issueRows)
+			if (Option.isNone(issue)) return false
 
-				const issueRows = yield* dbExecute((db) =>
-					db
-						.select()
-						.from(errorIssues)
-						.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, link.issueId)))
-						.limit(1),
-				)
-				const issue = issueRows[0]
-				if (issue === undefined) return false
-
-				yield* workflow.recordEvent(orgId, link.issueId, systemActor.id, "pr_merged", {
-					payload: {
-						pullRequestId: link.id,
-						url: link.url,
-						repoFullName: link.repoFullName,
-						number: link.number,
-						mergeCommitSha,
-						mergedAt: new Date(mergedAtMs).toISOString(),
-					},
-					timestamp: nowMs,
-				})
-
-				yield* openVerification({
-					orgId,
-					issue,
-					link: { ...link, mergedAt: msToDate(mergedAtMs), mergeCommitSha },
-					mergedAtMs,
-					nowMs,
-					systemActor,
-				})
-				return true
+			yield* workflow.recordEvent(orgId, link.issueId, systemActor.id, "pr_merged", {
+				payload: {
+					pullRequestId: link.id,
+					url: link.url,
+					repoFullName: link.repoFullName,
+					number: link.number,
+					mergeCommitSha,
+					mergedAt: new Date(mergedAtMs).toISOString(),
+				},
+				timestamp: nowMs,
 			})
 
-			let opened = 0
-			for (const link of links) {
-				const didOpen = yield* openForLink(link).pipe(
-					Effect.catchCause((cause) =>
-						Cause.hasInterruptsOnly(cause)
-							? Effect.interrupt
-							: Effect.logError("[IssueFixVerification] could not open a verification").pipe(
-									Effect.annotateLogs({
-										orgId,
-										issueId: link.issueId,
-										pullRequestId: link.id,
-										error: summarizeCause(cause),
-									}),
-									Effect.as(false),
-								),
-					),
-				)
-				if (didOpen) opened += 1
-			}
-			return opened
-		},
-	)
+			yield* openVerification({
+				orgId,
+				issue: issue.value,
+				link: { ...link, mergedAt: msToDate(mergedAtMs), mergeCommitSha },
+				mergedAtMs,
+				nowMs,
+				systemActor,
+			})
+			return true
+		})
+
+		let opened = 0
+		for (const link of links) {
+			const didOpen = yield* openForLink(link).pipe(
+				Effect.catchCause((cause) =>
+					Cause.hasInterruptsOnly(cause)
+						? Effect.interrupt
+						: Effect.logError("[IssueFixVerification] could not open a verification").pipe(
+								Effect.annotateLogs({
+									orgId,
+									issueId: link.issueId,
+									pullRequestId: link.id,
+									error: summarizeCause(cause),
+								}),
+								Effect.as(false),
+							),
+				),
+			)
+			if (didOpen) opened += 1
+		}
+		return opened
+	})
 
 	const onPullRequestEvent: IssueFixVerificationServiceApi["onPullRequestEvent"] = Effect.fn(
 		"IssueFixVerification.onPullRequestEvent",
@@ -926,9 +927,16 @@ const make: Effect.Effect<
 					updatedAt: msToDate(nowMs),
 				})
 				.where(
-					inArray(
-						errorIssuePullRequests.id,
-						links.map((link) => link.id),
+					and(
+						inArray(
+							errorIssuePullRequests.id,
+							links.map((link) => link.id),
+						),
+						// A GitHub merge is irreversible, so a non-merged event reaching a
+						// link already marked merged can only be a stale or out-of-order
+						// queue delivery — never let it regress the state or null the merge
+						// metadata a verification window was opened from.
+						...(input.merged ? [] : [ne(errorIssuePullRequests.state, "merged")]),
 					),
 				),
 		)
@@ -1031,6 +1039,11 @@ const make: Effect.Effect<
 	const markRunning: IssueFixVerificationServiceApi["markRunning"] = Effect.fn(
 		"IssueFixVerification.markRunning",
 	)(function* (row, investigationId, nowMs) {
+		// CAS on the state the tick selected the row in: the error tick can refute
+		// this row while the agent is being enqueued, and resurrecting a terminal
+		// `not_fixed` back to `running` would overwrite that decisive verdict. The
+		// orphaned agent run is the cheaper casualty — with no investigationId
+		// linked, `settledRuns` never picks it up.
 		yield* dbExecute((db) =>
 			db
 				.update(errorIssueVerifications)
@@ -1039,7 +1052,13 @@ const make: Effect.Effect<
 					investigationId,
 					updatedAt: msToDate(nowMs),
 				})
-				.where(eq(errorIssueVerifications.id, row.id)),
+				.where(
+					and(
+						eq(errorIssueVerifications.id, row.id),
+						eq(errorIssueVerifications.status, row.status),
+						eq(errorIssueVerifications.attempt, row.attempt),
+					),
+				),
 		)
 	})
 
@@ -1047,6 +1066,22 @@ const make: Effect.Effect<
 		"IssueFixVerification.applyVerdict",
 	)(function* (row, verdict, note, nowMs) {
 		const systemActor = yield* actors.ensureSystemActor(row.orgId)
+
+		// Every status write CASes on the state and attempt the caller read. Two
+		// writers travel these rows — the error tick's refutation and this path —
+		// so a stale snapshot must become a no-op, never a `verified` written over
+		// a decisive `not_fixed`. The verdict event commits in the same
+		// transaction: a status that settled without its event is invisible to
+		// the timeline AND to the next tick, so nothing could ever repair it.
+		const guard = () =>
+			and(
+				eq(errorIssueVerifications.id, row.id),
+				eq(errorIssueVerifications.status, row.status),
+				eq(errorIssueVerifications.attempt, row.attempt),
+			)
+		const lostRace = Effect.logInfo("[FixVerification] verdict lost a race and was not applied").pipe(
+			Effect.annotateLogs({ orgId: row.orgId, verificationId: row.id, verdict }),
+		)
 
 		// An inconclusive verdict re-arms one longer window rather than settling.
 		// Past the attempt cap it hands the issue back to a human instead of
@@ -1063,47 +1098,48 @@ const make: Effect.Effect<
 				verificationWindowMs({ severity: null, ratePerHour: row.baselineRatePerHour }),
 				firstWindowMs,
 			)
-			yield* dbExecute((db) =>
-				db
-					.update(errorIssueVerifications)
-					.set({
-						status: "waiting",
-						attempt: row.attempt + 1,
-						verifyAfter: msToDate(nowMs + extendedMs),
-						verdict: null,
-						verdictNote: note,
-						investigationId: null,
-						updatedAt: msToDate(nowMs),
-					})
-					.where(eq(errorIssueVerifications.id, row.id)),
-			)
-			yield* workflow.recordEvent(row.orgId, row.issueId, systemActor.id, "verification_verdict", {
-				payload: {
-					verificationId: row.id,
-					verdict: "inconclusive",
-					note,
-					retrying: true,
-					verifyAfter: new Date(nowMs + extendedMs).toISOString(),
+			const retryEvent = workflow.buildEvent(
+				row.orgId,
+				row.issueId,
+				systemActor.id,
+				"verification_verdict",
+				nowMs,
+				{
+					payload: {
+						verificationId: row.id,
+						verdict: "inconclusive",
+						note,
+						retrying: true,
+						verifyAfter: new Date(nowMs + extendedMs).toISOString(),
+					},
 				},
-				timestamp: nowMs,
-			})
+			)
+			const landed = yield* dbExecute((db) =>
+				db.transaction(async (tx) => {
+					const updated = await tx
+						.update(errorIssueVerifications)
+						.set({
+							status: "waiting",
+							attempt: row.attempt + 1,
+							verifyAfter: msToDate(nowMs + extendedMs),
+							verdict: null,
+							verdictNote: note,
+							investigationId: null,
+							updatedAt: msToDate(nowMs),
+						})
+						.where(guard())
+						.returning({ id: errorIssueVerifications.id })
+					if (updated.length === 0) return false
+					await tx.insert(errorIssueEvents).values(retryEvent)
+					return true
+				}),
+			)
+			if (!landed) yield* lostRace
 			return
 		}
 
 		const status =
 			verdict === "verified" ? "verified" : verdict === "not_fixed" ? "not_fixed" : "inconclusive"
-
-		yield* dbExecute((db) =>
-			db
-				.update(errorIssueVerifications)
-				.set({
-					status,
-					verdict,
-					verdictNote: note,
-					updatedAt: msToDate(nowMs),
-				})
-				.where(eq(errorIssueVerifications.id, row.id)),
-		)
 
 		const issueRows = yield* dbExecute((db) =>
 			db
@@ -1112,23 +1148,51 @@ const make: Effect.Effect<
 				.where(and(eq(errorIssues.orgId, row.orgId), eq(errorIssues.id, row.issueId)))
 				.limit(1),
 		)
-		const issue = issueRows[0]
-		if (issue === undefined) return
+		const issue = Arr.head(issueRows)
 
-		const autoCloses = verdict === "verified" && verificationVerdictAutoCloses(issue.severity ?? null)
+		const autoCloses =
+			Option.isSome(issue) &&
+			verdict === "verified" &&
+			verificationVerdictAutoCloses(issue.value.severity ?? null)
 
-		yield* workflow.recordEvent(row.orgId, row.issueId, systemActor.id, "verification_verdict", {
-			payload: {
-				verificationId: row.id,
-				verdict,
-				note,
-				autoClosed: autoCloses,
-				severity: issue.severity ?? null,
-				postMergeOccurrenceCount: row.postMergeOccurrenceCount,
-				investigationId: row.investigationId,
-			},
-			timestamp: nowMs,
-		})
+		// A vanished issue still gets its verdict on the verification row; there is
+		// just no timeline to write the event to.
+		const verdictEvent = Option.map(issue, (issue) =>
+			workflow.buildEvent(row.orgId, row.issueId, systemActor.id, "verification_verdict", nowMs, {
+				payload: {
+					verificationId: row.id,
+					verdict,
+					note,
+					autoClosed: autoCloses,
+					severity: issue.severity ?? null,
+					postMergeOccurrenceCount: row.postMergeOccurrenceCount,
+					investigationId: row.investigationId,
+				},
+			}),
+		)
+
+		const landed = yield* dbExecute((db) =>
+			db.transaction(async (tx) => {
+				const updated = await tx
+					.update(errorIssueVerifications)
+					.set({
+						status,
+						verdict,
+						verdictNote: note,
+						updatedAt: msToDate(nowMs),
+					})
+					.where(guard())
+					.returning({ id: errorIssueVerifications.id })
+				if (updated.length === 0) return false
+				if (Option.isSome(verdictEvent)) await tx.insert(errorIssueEvents).values(verdictEvent.value)
+				return true
+			}),
+		)
+		if (!landed) {
+			yield* lostRace
+			return
+		}
+		if (Option.isNone(issue)) return
 
 		// `verified` on a high/critical issue deliberately transitions nothing: the
 		// verdict and its evidence are on the timeline, and a human closes it. See
@@ -1144,7 +1208,7 @@ const make: Effect.Effect<
 		if (target === null) return
 
 		yield* workflow
-			.applyTransition(row.orgId, systemActor.id, issue, target, {
+			.applyTransition(row.orgId, systemActor.id, issue.value, target, {
 				payload: { viaVerification: row.id, verdict },
 				timestamp: nowMs,
 			})
@@ -1154,7 +1218,7 @@ const make: Effect.Effect<
 						Effect.logInfo("[FixVerification] verdict could not move the issue").pipe(
 							Effect.annotateLogs({
 								issueId: row.issueId,
-								from: issue.workflowState,
+								from: issue.value.workflowState,
 								to: target,
 								reason: error.message,
 							}),

@@ -365,6 +365,20 @@
       "when": 1788253667237,
       "tag": "0052_mcp_refresh_family_expiry",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1788259897779,
+      "tag": "0053_digest_opt_out",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1788285534887,
+      "tag": "0054_alert_incident_open_uniqueness",
+      "breakpoints": true
     }
   ]
 }

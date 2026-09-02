@@ -95,6 +95,11 @@ export function serviceMapEdgesExistingHoursSQL(params: {
 		])
 		.groupBy("hourTs")
 		.format("JSON")
+		// The seal probe must read the backend the rollup WRITES (`ingest` is
+		// Tinybird-pinned). Resolved as a read for a BYO-ClickHouse org, it saw
+		// that org's never-written table, judged every hour missing, and re-rolled
+		// + re-ingested the same additive rows into Tinybird on every tick.
+		.route("ingest")
 
 	return compile(query, {
 		orgId: params.orgId,
@@ -128,6 +133,10 @@ export function serviceMapResolutionsExistingHoursSQL(params: {
 		])
 		.groupBy("hourTs")
 		.format("JSON")
+		// Same backend-consistency rule as the edges probe: resolutions are
+		// written via `ingest`, so "which hours already resolved" must ask the
+		// ingest backend, not a BYO read override.
+		.route("ingest")
 
 	return compile(query, {
 		orgId: params.orgId,

@@ -1,4 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
+import { Option } from "effect"
+import { HARD_SERIES_LIMIT } from "@maple/ui/components/plot"
 import { CH } from "@maple/query-engine"
 import { executeLocalCompiledQuery } from "@/lib/query"
 import { LOCAL_ORG_ID } from "../lib/constants"
@@ -43,6 +45,24 @@ export interface MetricSeriesPoint {
 }
 
 /**
+ * The detail chart draws at most `HARD_SERIES_LIMIT` lines, so cap the series
+ * in the query — a high-cardinality install would otherwise fetch and pivot
+ * every service's series only for the chart to drop all but 60 of them.
+ * Exported through the compile helpers below so the cap is testable.
+ */
+const SERIES_CAP = { groupBy: ["service"], seriesLimit: HARD_SERIES_LIMIT }
+
+export const compileMetricRateTimeseriesQuery = (
+	opts: { metricName: string; bucketSeconds: number },
+	params: Parameters<typeof CH.compile>[1],
+) => CH.compile(CH.metricsTimeseriesRateQuery({ ...opts, ...SERIES_CAP }), params)
+
+export const compileMetricValueTimeseriesQuery = (
+	opts: { metricType: CH.MetricsTimeseriesOpts["metricType"] },
+	params: Parameters<typeof CH.compile>[1],
+) => CH.compile(CH.metricsTimeseriesQuery({ ...opts, ...SERIES_CAP }), params)
+
+/**
  * Detail timeseries, one series per service. Monotonic counters plot the true
  * per-second rate (window-CTE query); gauges/histograms plot the average value.
  */
@@ -53,37 +73,46 @@ export function useLocalMetricTimeseries(entry: MetricEntry | null | undefined, 
 		queryKey: ["local", "metrics", "timeseries", metricName, entry?.metricType, isRate, range],
 		enabled: entry != null,
 		placeholderData: keepPreviousData,
-		queryFn: async (): Promise<ReadonlyArray<MetricSeriesPoint>> => {
-			const { startTime, endTime } = boundsForRange(range)
-			const bucketSeconds = bucketSecondsForRange(range)
-			const params = { orgId: LOCAL_ORG_ID, startTime, endTime, bucketSeconds, metricName: metricName! }
-			if (isRate) {
-				const rows = await executeLocalCompiledQuery(
-					CH.compile(
-						CH.metricsTimeseriesRateQuery({ metricName: metricName!, bucketSeconds }),
-						params,
-					),
-				)
-				return rows.map((r) => ({
-					bucket: r.bucket,
-					groupName: r.groupName,
-					value: Number(r.rateValue),
-				}))
-			}
-			const rows = await executeLocalCompiledQuery(
-				CH.compile(
-					CH.metricsTimeseriesQuery({
-						metricType: entry!.metricType as CH.MetricsTimeseriesOpts["metricType"],
-					}),
-					params,
-				),
-			)
-			return rows.map((r) => ({
-				bucket: r.bucket,
-				groupName: r.groupName,
-				value: Number(r.avgValue),
-			}))
-		},
+		queryFn: (): Promise<ReadonlyArray<MetricSeriesPoint>> =>
+			Option.match(Option.fromNullishOr(entry), {
+				// Unreachable: `enabled` gates the query on the entry existing.
+				onNone: () => Promise.resolve([]),
+				onSome: async (metric) => {
+					const { startTime, endTime } = boundsForRange(range)
+					const bucketSeconds = bucketSecondsForRange(range)
+					const params = {
+						orgId: LOCAL_ORG_ID,
+						startTime,
+						endTime,
+						bucketSeconds,
+						metricName: metric.metricName,
+					}
+					if (isRate) {
+						const rows = await executeLocalCompiledQuery(
+							compileMetricRateTimeseriesQuery(
+								{ metricName: metric.metricName, bucketSeconds },
+								params,
+							),
+						)
+						return rows.map((r) => ({
+							bucket: r.bucket,
+							groupName: r.groupName,
+							value: Number(r.rateValue),
+						}))
+					}
+					const rows = await executeLocalCompiledQuery(
+						compileMetricValueTimeseriesQuery(
+							{ metricType: metric.metricType as CH.MetricsTimeseriesOpts["metricType"] },
+							params,
+						),
+					)
+					return rows.map((r) => ({
+						bucket: r.bucket,
+						groupName: r.groupName,
+						value: Number(r.avgValue),
+					}))
+				},
+			}),
 	})
 }
 

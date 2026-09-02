@@ -582,8 +582,11 @@ export function metricsSelectExprs($: ColumnAccessor<typeof MetricsSum.columns>,
 		const $h = $ as unknown as ColumnAccessor<typeof MetricsHistogram.columns>
 		return {
 			avgValue: CH.if_(CH.sum($h.Count).gt(0), CH.sum($h.Sum).div(CH.sum($h.Count)), CH.lit(0)),
-			minValue: CH.min_($h.Min),
-			maxValue: CH.max_($h.Max),
+			// Min/Max are Nullable (OTel histograms may omit extrema), and min/max
+			// over an all-NULL bucket return NULL — fall back to 0 like avgValue so
+			// the declared non-null Float64 row contract holds.
+			minValue: CH.ifNull(CH.min_($h.Min), CH.lit(0)),
+			maxValue: CH.ifNull(CH.max_($h.Max), CH.lit(0)),
 			sumValue: CH.sum($h.Sum),
 			dataPointCount: CH.sum($h.Count),
 		}

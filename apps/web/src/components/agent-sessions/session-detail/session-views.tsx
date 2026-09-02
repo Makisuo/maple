@@ -344,7 +344,6 @@ export function SessionViews({
 						onToggleRow={(key) => setOpenRows((previous) => toggled(previous, key))}
 						selectedSpanId={selectedSpanId}
 						onSelectSpan={selectSpan}
-						onOpenTraceView={openInTraceView}
 					/>
 				)}
 			</TabsContent>

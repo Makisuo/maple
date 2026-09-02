@@ -1,5 +1,6 @@
 import type { AlertDestinationRow } from "@maple/db"
 import {
+	AlertDeliveryAuthError,
 	AlertDeliveryError,
 	AlertDeliveryRejectedError,
 	AlertDeliveryTargetMissingError,
@@ -566,6 +567,136 @@ describe("dispatchDelivery", () => {
 			assert.instanceOf(error, AlertDeliveryError)
 			assert.strictEqual(error.destinationType, "slack-bot")
 			assert.include(error.message, "timed out after 5000ms")
+		}),
+	)
+
+	it.effect("slack-bot: the delivery timeout aborts the underlying request", () =>
+		Effect.gen(function* () {
+			// A timeout that leaves the POST running is a duplicate page in waiting:
+			// the queue retries while the "timed-out" request still delivers.
+			let sawSignal = false
+			let aborted = false
+			const fetchFn: typeof fetch = (_input, init) =>
+				new Promise<Response>((_resolve, reject) => {
+					sawSignal = init?.signal != null
+					init?.signal?.addEventListener("abort", () => {
+						aborted = true
+						reject(new DOMException("The operation was aborted", "AbortError"))
+					})
+				})
+
+			const fiber = yield* Effect.forkChild(
+				Effect.flip(
+					dispatchDelivery(slackBotContext, "{}", fetchFn, 5_000, LINK, CHAT, slackTokenDeps()),
+				),
+				{ startImmediately: true },
+			)
+			yield* TestClock.adjust("6 seconds")
+			const error = yield* Fiber.join(fiber)
+
+			assert.instanceOf(error, AlertDeliveryError)
+			assert.include(error.message, "timed out")
+			assert.isTrue(sawSignal)
+			assert.isTrue(aborted)
+		}),
+	)
+
+	it.effect("webhook: the abort signal survives the SSRF-guarded fetch path", () =>
+		Effect.gen(function* () {
+			const webhookContext: DispatchContext = {
+				...pagerdutyContext,
+				destination: { ...destinationRow, name: "Webhook", type: "webhook" },
+				publicConfig: { summary: "POST hooks.example.test", channelLabel: null },
+				secretConfig: {
+					type: "webhook",
+					url: "https://hooks.example.test/maple",
+					signingSecret: null,
+				},
+			}
+			let aborted = false
+			const fetchFn: typeof fetch = (_input, init) =>
+				new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener("abort", () => {
+						aborted = true
+						reject(new DOMException("The operation was aborted", "AbortError"))
+					})
+				})
+
+			const fiber = yield* Effect.forkChild(
+				Effect.flip(dispatchDelivery(webhookContext, "{}", fetchFn, 5_000, LINK, CHAT, noEmailDeps)),
+				{ startImmediately: true },
+			)
+			yield* TestClock.adjust("6 seconds")
+			const error = yield* Fiber.join(fiber)
+
+			assert.instanceOf(error, AlertDeliveryError)
+			assert.include(error.message, "timed out")
+			assert.isTrue(aborted)
+		}),
+	)
+
+	it.effect("slack-bot: an auth error code is terminal, not retried forever", () =>
+		Effect.gen(function* () {
+			const fetchFn: typeof fetch = async () =>
+				new Response(JSON.stringify({ ok: false, error: "invalid_auth" }), { status: 200 })
+
+			const error = yield* Effect.flip(
+				dispatchDelivery(slackBotContext, "{}", fetchFn, 5_000, LINK, CHAT, slackTokenDeps()),
+			)
+
+			// Slack reports auth failure as HTTP 200 + `ok:false`. Retrying replays
+			// the same dead token; only classifying it terminal lets the failure
+			// streak disable the destination and surface it in the setup audit.
+			assert.instanceOf(error, AlertDeliveryAuthError)
+			assert.isFalse(error.error.retryable)
+			assert.strictEqual(error.providerErrorCode, "invalid_auth")
+		}),
+	)
+
+	it.effect("slack-bot: an archived channel is a missing target", () =>
+		Effect.gen(function* () {
+			const fetchFn: typeof fetch = async () =>
+				new Response(JSON.stringify({ ok: false, error: "is_archived" }), { status: 200 })
+
+			const error = yield* Effect.flip(
+				dispatchDelivery(slackBotContext, "{}", fetchFn, 5_000, LINK, CHAT, slackTokenDeps()),
+			)
+
+			assert.instanceOf(error, AlertDeliveryTargetMissingError)
+			assert.isFalse(error.error.retryable)
+			assert.strictEqual(error.providerErrorCode, "is_archived")
+		}),
+	)
+
+	it.effect("slack-bot: a permanently rejected payload is not retryable", () =>
+		Effect.gen(function* () {
+			const fetchFn: typeof fetch = async () =>
+				new Response(JSON.stringify({ ok: false, error: "invalid_blocks" }), { status: 200 })
+
+			const error = yield* Effect.flip(
+				dispatchDelivery(slackBotContext, "{}", fetchFn, 5_000, LINK, CHAT, slackTokenDeps()),
+			)
+
+			assert.instanceOf(error, AlertDeliveryRejectedError)
+			assert.isFalse(error.error.retryable)
+			assert.strictEqual(error.providerErrorCode, "invalid_blocks")
+		}),
+	)
+
+	it.effect("slack-bot: an unrecognized error code stays retryable", () =>
+		Effect.gen(function* () {
+			const fetchFn: typeof fetch = async () =>
+				new Response(JSON.stringify({ ok: false, error: "fatal_error" }), { status: 200 })
+
+			const error = yield* Effect.flip(
+				dispatchDelivery(slackBotContext, "{}", fetchFn, 5_000, LINK, CHAT, slackTokenDeps()),
+			)
+
+			// Mis-classifying transient as terminal costs a destination its
+			// enablement; unknown codes err on the retry side.
+			assert.instanceOf(error, AlertDeliveryError)
+			assert.isTrue(error.error.retryable)
+			assert.strictEqual(error.providerErrorCode, "fatal_error")
 		}),
 	)
 

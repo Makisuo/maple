@@ -56,7 +56,7 @@ const PRODUCT_EVENTS_TRACE_PROJECTION_SQL = `OrgId,
 const PRODUCT_EVENTS_TRACE_FILTER = "SpanAttributes['maple.product_event.name'] != ''"
 
 /**
- * Backfill of the trace half of {@link migration_0024_product_events_from_traces}.
+ * Backfill of the trace half of {@link migration_0025_product_events_from_traces}.
  *
  * Row-wise, so any chunk boundary is safe. Idempotent by `DELETE WHERE Source =
  * 'trace'` before it runs — same shape as 0021's browser half, and safe for the
@@ -97,7 +97,7 @@ export const productEventsTracesBackfill: BackfillSpec = {
 }
 
 /**
- * Migration 0024 — product events annotated in code.
+ * Migration 0025 — product events annotated in code.
  *
  * A customer marks a span they already emit:
  *
@@ -120,7 +120,7 @@ export const productEventsTracesBackfill: BackfillSpec = {
  *    is backfilled from `traces`' 30-day window.
  *
  * `product_events_mv` is dropped and re-created rather than left alone: an MV's
- * SELECT is fixed at creation, so the pre-0024 body writes 15 columns into a
+ * SELECT is fixed at creation, so the pre-0025 body writes 15 columns into a
  * 17-column table and every browser row inserted between the ALTER and the
  * re-create would take defaults for the two new columns. They default to `''`,
  * which is the correct value for a browser row — so this is ordering hygiene
@@ -145,7 +145,7 @@ export const productEventsTracesBackfill: BackfillSpec = {
  *
  * Give those columns a `jsonPath` and this flag becomes a data-loss bug: the
  * readiness gate compares `stamped >= clickHouseSchemaVersion`, which stays at
- * 21, so a BYO org that has not applied 0024 is still routed to its own cluster
+ * 21, so a BYO org that has not applied 0025 is still routed to its own cluster
  * — where the INSERT fails on the unknown column, retries, trips the breaker and
  * drops the batch. The gate's safety argument is "an older binary writing into a
  * newer schema", and that would be the inverse.
@@ -154,8 +154,8 @@ export const productEventsTracesBackfill: BackfillSpec = {
  * every BYO-CH org over a feature none of their existing writers touch, which is
  * why the column declaration is the right place to solve it.
  */
-export const migration_0024_product_events_from_traces = {
-	version: 24,
+export const migration_0025_product_events_from_traces = {
+	version: 25,
 	description:
 		"Add TraceId/SpanId to product_events and materialize product events from spans carrying the maple.product_event.name attribute",
 	requiredForIngest: false,

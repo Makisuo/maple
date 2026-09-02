@@ -59,6 +59,8 @@ export const vcsRepositories = pgTable(
 		provider: text("provider").$type<VcsProviderId>().notNull(),
 		// Internal id of the owning vcs_installations row (NOT the provider's external
 		// installation id). Provider ids are resolved at the sync/webhook boundary.
+		// Deliberately no FK (house style): VcsRepository enforces the link — child
+		// upserts share-lock the parent row and no-op when it is gone.
 		installationId: text("installation_id").$type<VcsInstallationId>().notNull(),
 		externalRepoId: text("external_repo_id").notNull(),
 		owner: text("owner").notNull(),
@@ -92,12 +94,15 @@ export const vcsRepositories = pgTable(
 
 /**
  * Resolved commits. Each commit belongs to exactly one `vcs_repositories` row
- * (`repository_id`) — a commit without a repo is not meaningful, and that link
- * is what a repo/installation purge cascades on. There is no branch link: a repo
+ * (`repository_id`) — a commit without a repo is not meaningful. There is no FK:
+ * VcsRepository enforces the link (purges delete children in the same
+ * transaction; child upserts share-lock the parent and no-op when it is gone,
+ * and the (org_id, sha) reads join the parent). There is no branch link: a repo
  * stores the commits of its single tracked branch, so "the repo's commits" is the
  * whole set. The dashboard resolver matches a trace's full 40-char SHA by
- * `(org_id, sha)` — provider-agnostic, no join — so `org_id` stays denormalized
- * here. The row is self-contained (`html_url` + author fields).
+ * `(org_id, sha)` — provider-agnostic, and `org_id` stays denormalized here so
+ * the lookup needs only the orphan-shield join described above. The row is
+ * self-contained (`html_url` + author fields).
  */
 export const vcsCommits = pgTable(
 	"vcs_commits",

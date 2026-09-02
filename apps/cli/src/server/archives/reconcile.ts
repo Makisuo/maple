@@ -193,9 +193,28 @@ const decideCreate = (
 	if (!snapshot.promoted && phaseAtLeast(phase, "promoted") && phase !== "aborted") {
 		return { kind: "FailClosed", reason: `phase ${phase} requires its final generation`, operationId }
 	}
-	// 5. aborted operation still in the active directory.
+	// 5. A durably aborted operation still in the active directory. This is a
+	// LEGITIMATE crash state: the abort path writes "aborted" durably and then
+	// finishes cleanup + archival, so a crash anywhere in that tail leaves an
+	// aborted journal here. Resume the idempotent abort finish — but only when
+	// nothing was published; an aborted phase alongside a final generation is a
+	// contradiction and fails closed.
 	if (phase === "aborted") {
-		return { kind: "FailClosed", reason: "aborted operation still in active dir", operationId }
+		if (snapshot.promoted) {
+			return {
+				kind: "FailClosed",
+				reason: "aborted operation has a published final generation",
+				operationId,
+			}
+		}
+		return {
+			kind: "CreateAbortPrepublication",
+			operationId,
+			journalDigest,
+			migrationRequired,
+			intent,
+			buildingPresent: snapshot.buildingPresent,
+		}
 	}
 
 	// Terminal verify-only: phase >= complete.

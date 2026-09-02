@@ -201,6 +201,59 @@ describe("auth-headers", () => {
 			expect(call).toBe(2)
 		})
 
+		it("fails closed when the org switches while a request is being authorized", async () => {
+			let release: (() => void) | undefined
+			const gate = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			let call = 0
+			setMapleAuthHeadersProvider(async () => {
+				call += 1
+				if (call === 1) {
+					await gate
+					return { authorization: bearerExpiringIn(600) }
+				}
+				return { authorization: bearerExpiringIn(600) }
+			})
+			setActiveOrgId("org_first")
+			// The request below was constructed under org_first. Re-signing it with
+			// org_second's bearer would run it — a create, an update — against the
+			// wrong tenant, so it must be refused, not retried.
+			const pending = getMapleAuthHeaders()
+			setActiveOrgId("org_second")
+			release?.()
+
+			await expect(pending).rejects.toMatchObject({
+				_tag: "@maple/web/services/MapleAuthIdentityChangedError",
+			})
+		})
+
+		it("fails closed when the identity moves again during the boot-path retry", async () => {
+			// Started with no active org (boot), so one re-resolve is allowed — but
+			// if the identity changes again mid-retry, the token being returned
+			// already belongs to an org the user has left.
+			const gates: Array<() => void> = []
+			setMapleAuthHeadersProvider(async () => {
+				await new Promise<void>((resolve) => {
+					gates.push(resolve)
+				})
+				return { authorization: bearerExpiringIn(600) }
+			})
+			const pending = getMapleAuthHeaders()
+			setActiveOrgId("org_b")
+			// Release the first resolve; the retry starts under org_b's generation.
+			gates.shift()?.()
+			await vi.waitFor(() => {
+				if (gates.length === 0) throw new Error("retry not started")
+			})
+			setActiveOrgId("org_c")
+			gates.shift()?.()
+
+			await expect(pending).rejects.toMatchObject({
+				_tag: "@maple/web/services/MapleAuthIdentityChangedError",
+			})
+		})
+
 		it("drops the cached token on sign-out", async () => {
 			setMapleAuthHeadersProvider(async () => ({ authorization: bearerExpiringIn(600) }))
 			await getMapleAuthHeaders()

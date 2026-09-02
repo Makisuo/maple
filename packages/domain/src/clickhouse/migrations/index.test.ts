@@ -1,3 +1,4 @@
+import { String as Str } from "effect"
 import { describe, expect, it } from "vitest"
 import { type BackfillSpec, isBackfill, renderStatementFull } from "../backfill"
 import { migration_0004_service_namespace_projections } from "./0004_service_namespace_projections"
@@ -28,7 +29,8 @@ import { migration_0019_mv_sweep } from "./0019_mv_sweep"
 import { migration_0020_semconv_key_renames } from "./0020_semconv_key_renames"
 import { migration_0022_service_map_edge_quantiles } from "./0022_service_map_edge_quantiles"
 import { migration_0023_service_operations_discriminators } from "./0023_service_operations_discriminators"
-import { migration_0024_product_events_from_traces } from "./0024_product_events_from_traces"
+import { migration_0024_ai_trace_index } from "./0024_ai_trace_index"
+import { migration_0025_product_events_from_traces } from "./0025_product_events_from_traces"
 import { migration_0021_product_events } from "./0021_product_events"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
@@ -45,17 +47,18 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
 		expect(migrations.map((m) => m.version)).toEqual([
-			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
 		])
-		expect(migrations.at(-1)).toBe(migration_0024_product_events_from_traces)
-		expect(latestMigrationVersion).toBe(24)
+		expect(migrations.at(-1)).toBe(migration_0025_product_events_from_traces)
+		expect(latestMigrationVersion).toBe(25)
 		// 0010 and 0014-0020 are read-path only and skipped by the ingest-gating
 		// version; 0021 is not — the gateway writes `session_events`' new identity
 		// columns and `product_events` directly, so a BYO-CH org must apply it
 		// before ingest routes there again. 0022 is read-path only again: both
 		// tables it touches are MV-populated and the gateway writes neither, and
 		// 0023 is the same: it only adds counter columns to those MV-populated
-		// service-operations rollups.
+		// service-operations rollups. 0024 is read-path only too: `ai_trace_index`
+		// is MV-populated and the gateway never writes it.
 		expect(clickHouseSchemaVersion).toBe("21")
 		expect(migration_0010_search_indexes.requiredForIngest).toBe(false)
 		expect(migration_0014_web_events.requiredForIngest).toBe(false)
@@ -67,7 +70,8 @@ describe("ClickHouse migrations", () => {
 		expect(migration_0020_semconv_key_renames.requiredForIngest).toBe(false)
 		expect(migration_0022_service_map_edge_quantiles.requiredForIngest).toBe(false)
 		expect(migration_0023_service_operations_discriminators.requiredForIngest).toBe(false)
-		expect(migration_0024_product_events_from_traces.requiredForIngest).toBe(false)
+		expect(migration_0024_ai_trace_index.requiredForIngest).toBe(false)
+		expect(migration_0025_product_events_from_traces.requiredForIngest).toBe(false)
 	})
 
 	it("recreates both error-events MVs with the 4xx guard and the widened frame redaction", () => {
@@ -387,6 +391,72 @@ describe("ClickHouse migrations", () => {
 		expect(serviceOverviewHourlyBackfill.tsColumn).toBe("Timestamp")
 		expect(serviceOperationsHourlyBackfill.from).toBe("service_operations_minutely")
 		expect(serviceOperationsHourlyBackfill.tsColumn).toBe("Minute")
+	})
+
+	it("orders 0009 so a re-apply converges instead of doubling the annual rollups", () => {
+		// The targets are additive AggregatingMergeTrees retained a year: replaying
+		// the backfills after a partial failure (chunk N fails, admin re-runs the
+		// apply) would double every sum until TTL. DROP → TRUNCATE → backfill →
+		// CREATE MV is the 0015 cutover shape, restated as invariants.
+		const kinds = migration_0009_one_year_service_history.statements.map((stmt) =>
+			// Str.split returns a NonEmptyArray, so the head index is statically safe.
+			isBackfill(stmt) ? `backfill:${stmt.target}` : Str.split(stmt, "\n")[0].trim(),
+		)
+		const at = (needle: string) => {
+			const index = kinds.findIndex((kind) => kind.startsWith(needle))
+			expect(index, needle).toBeGreaterThanOrEqual(0)
+			return index
+		}
+
+		// Both live writers are detached before either target is truncated.
+		expect(at("DROP VIEW IF EXISTS service_overview_hourly_mv")).toBeLessThan(
+			at("TRUNCATE TABLE IF EXISTS service_overview_hourly"),
+		)
+		expect(at("DROP VIEW IF EXISTS service_operations_hourly_mv")).toBeLessThan(
+			at("TRUNCATE TABLE IF EXISTS service_operations_hourly"),
+		)
+		// Each target is emptied before its backfill, and its view reattaches after.
+		expect(at("TRUNCATE TABLE IF EXISTS service_overview_hourly")).toBeLessThan(
+			at("backfill:service_overview_hourly"),
+		)
+		expect(at("backfill:service_overview_hourly")).toBeLessThan(
+			at("CREATE MATERIALIZED VIEW IF NOT EXISTS service_overview_hourly_mv"),
+		)
+		expect(at("TRUNCATE TABLE IF EXISTS service_operations_hourly")).toBeLessThan(
+			at("backfill:service_operations_hourly"),
+		)
+		expect(at("backfill:service_operations_hourly")).toBeLessThan(
+			at("CREATE MATERIALIZED VIEW IF NOT EXISTS service_operations_hourly_mv"),
+		)
+	})
+
+	it("keeps every backfill convergent on re-apply: target emptied or rebuilt first", () => {
+		// A migration is recorded only after every statement succeeds, so a failure
+		// anywhere replays the WHOLE migration — including backfills that already
+		// inserted. Every backfill target must therefore be emptied of the rows the
+		// backfill writes earlier in the same migration: truncated, rebuilt from
+		// scratch (DROP TABLE IF EXISTS <fresh> + rename swap), or scoped-deleted
+		// for a dual-fed target (0021). An additive INSERT…SELECT into a surviving
+		// table doubles on the rerun and nothing downstream can detect it.
+		// identity_links is exempt because a replay is a merge no-op: its only
+		// aggregate is SimpleAggregateFunction(min) keyed by the full sorting key,
+		// so re-inserted rows collapse to the values already stored.
+		const mergeIdempotentTargets = new Set(["identity_links"])
+		for (const migration of migrations) {
+			migration.statements.forEach((stmt, index) => {
+				if (!isBackfill(stmt) || mergeIdempotentTargets.has(stmt.target)) return
+				const before = migration.statements
+					.slice(0, index)
+					.filter((s): s is string => typeof s === "string")
+				const emptied = before.some(
+					(s) =>
+						s.startsWith(`TRUNCATE TABLE IF EXISTS ${stmt.target}`) ||
+						s.startsWith(`DROP TABLE IF EXISTS ${stmt.target}`) ||
+						s.startsWith(`DELETE FROM ${stmt.target} `),
+				)
+				expect(emptied, `m${migration.version} backfill:${stmt.target}`).toBe(true)
+			})
+		}
 	})
 
 	it("adds the service-operation rollup and exposes a coordinated chunkable backfill", () => {

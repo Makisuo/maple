@@ -5,14 +5,13 @@ SELECT
           'vendor' AS facetType
         FROM (SELECT
           TraceId AS traceId,
-          max(SpanAttributes['maple_ai.session.id']) AS rawSessionId,
-          groupUniqArray(SpanAttributes['maple_ai.vendor.id']) AS names
-        FROM traces
+          max(SessionId) AS rawSessionId,
+          groupUniqArray(VendorId) AS names
+        FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND (mapContains(SpanAttributes, 'maple_ai.vendor.id') AND SpanAttributes['maple_ai.vendor.id'] != '')
-          AND SpanAttributes['maple_ai.vendor.id'] != ''
+          AND VendorId != ''
         GROUP BY traceId) AS facet_traces
         GROUP BY name
         ORDER BY count DESC
@@ -24,13 +23,12 @@ SELECT
           'service' AS facetType
         FROM (SELECT
           TraceId AS traceId,
-          max(SpanAttributes['maple_ai.session.id']) AS rawSessionId,
+          max(SessionId) AS rawSessionId,
           groupUniqArray(ServiceName) AS names
-        FROM traces
+        FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND (mapContains(SpanAttributes, 'maple_ai.vendor.id') AND SpanAttributes['maple_ai.vendor.id'] != '')
           AND ServiceName != ''
         GROUP BY traceId) AS facet_traces
         GROUP BY name
@@ -67,11 +65,10 @@ SELECT
           AND Timestamp <= '2026-01-03 14:15:00' + INTERVAL 86400 SECOND
           AND TraceId IN (SELECT
           TraceId AS TraceId
-        FROM traces
+        FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
-          AND Timestamp <= '2026-01-03 14:15:00'
-          AND (mapContains(SpanAttributes, 'maple_ai.vendor.id') AND SpanAttributes['maple_ai.vendor.id'] != ''))
+          AND Timestamp <= '2026-01-03 14:15:00')
         GROUP BY traceId) AS session_traces
         GROUP BY sessionId
         ORDER BY startTime DESC
@@ -107,17 +104,17 @@ SELECT
           AND Timestamp <= '2026-01-03 14:15:00' + INTERVAL 86400 SECOND
           AND TraceId IN (SELECT
           TraceId AS TraceId
-        FROM traces
+        FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND (mapContains(SpanAttributes, 'maple_ai.vendor.id') AND SpanAttributes['maple_ai.vendor.id'] != '')
-          AND SpanAttributes['maple_ai.vendor.id'] IN ('eve')
+          AND VendorId IN ('eve')
           AND ServiceName IN ('maple-slack-agent'))
         GROUP BY traceId) AS session_traces
         GROUP BY sessionId
         ORDER BY startTime DESC
         LIMIT 25
+        OFFSET 25
         FORMAT JSON
 
 -- builder:ai-sessions:aiSessionSpansQuery:default

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer } from "effect"
 import { TestClock } from "effect/testing"
-import { OrgId, WarehouseQueryError, WarehouseQueryResponse } from "@maple/domain/http"
+import { OrgId, UserId, WarehouseQueryError, WarehouseQueryResponse } from "@maple/domain/http"
 import type { WeeklyDigestProps } from "@maple/email/weekly-digest-core"
 import { digestSubscriptions } from "@maple/db"
 import { eq } from "drizzle-orm"
@@ -695,6 +695,60 @@ describe("DigestService.runDigestTick — stored scope handling", () => {
 			// subscriber down with the bad row.
 			assert.deepStrictEqual(sends.sort(), ["broken@example.com", "fine@example.com"])
 			assert.strictEqual(result.errorCount, 0)
+		}).pipe(Effect.provide(layer))
+	})
+})
+
+describe("DigestService — subscriber opt-out", () => {
+	it.effect("the Clerk sweep re-enables a returning member but not one who opted out", () => {
+		const { layer } = makeHarness()
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(TICK_MS)
+			const digest = yield* DigestService
+			const database = yield* Database
+
+			const optedOut = yield* seedSub({ email: "opted-out@example.com" })
+			const departed = yield* seedSub({ email: "departed@example.com" })
+			const optedOutUser = UserId.make(`user-${optedOut}`)
+			const departedUser = UserId.make(`user-${departed}`)
+
+			yield* digest.upsertSubscription(ORG_ID, optedOutUser, {
+				email: "opted-out@example.com",
+				enabled: false,
+			})
+			// What the sweep itself does to a member it no longer sees in the org.
+			yield* database.execute((db) =>
+				db
+					.update(digestSubscriptions)
+					.set({ enabled: false })
+					.where(eq(digestSubscriptions.id, departed)),
+			)
+
+			yield* digest.reconcileSubscriptions([
+				{ orgId: ORG_ID, userId: optedOutUser, email: "opted-out@example.com" },
+				{ orgId: ORG_ID, userId: departedUser, email: "departed@example.com" },
+			])
+
+			assert.strictEqual((yield* getSub(optedOut)).enabled, false)
+			assert.strictEqual((yield* getSub(departed)).enabled, true)
+		}).pipe(Effect.provide(layer))
+	})
+
+	it.effect("deleting a subscription records the opt-out instead of erasing it", () => {
+		const { layer } = makeHarness()
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(TICK_MS)
+			const digest = yield* DigestService
+			const id = yield* seedSub({ email: "gone@example.com" })
+			const userId = UserId.make(`user-${id}`)
+
+			yield* digest.deleteSubscription(ORG_ID, userId)
+			yield* digest.reconcileSubscriptions([{ orgId: ORG_ID, userId, email: "gone@example.com" }])
+
+			// A hard delete here would be undone by the very next sweep.
+			const row = yield* getSub(id)
+			assert.strictEqual(row.enabled, false)
+			assert.notStrictEqual(row.optedOutAt, null)
 		}).pipe(Effect.provide(layer))
 	})
 })

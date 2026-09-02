@@ -6,7 +6,7 @@ import { scaleSequential, scaleSequentialLog, type ScaleSequentialBase } from "d
  *
  * ## The scale is d3's, exactly as the docs prescribe
  *
- * `@tanstack/charts-scales@0.14.0` ships **band / linear / ordinal / point only** —
+ * `@tanstack/charts-scales@0.16.0` ships **band / linear / ordinal / point only** —
  * there is no colour scale in the package. The documented escape hatch (the
  * Legends and Color guide) is a d3 sequential scale: `ChartColorOptions.scale` is
  * typed as `ConfiguredColorScaleLike`, which is exactly d3's shape, and `d3-scale`

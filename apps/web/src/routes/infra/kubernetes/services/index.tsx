@@ -35,10 +35,9 @@ function ServiceLensIndexPage() {
 
 	return (
 		<ServiceLensShell
-			startTime={search.startTime ?? startTime}
-			endTime={search.endTime ?? endTime}
+			startTime={startTime}
+			endTime={endTime}
 			timeSearch={search}
-			timePreset={search.timePreset ?? (search.startTime ? undefined : "12h")}
 			onTimeChange={(range, options) =>
 				void navigate({
 					replace: options?.replace,

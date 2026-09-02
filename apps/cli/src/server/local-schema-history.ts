@@ -133,28 +133,31 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 	Object.freeze({
-		// Product events from traces. `product_events` gains `TraceId`/`SpanId`
-		// (`DEFAULT ''`, appended) and an `idx_trace_id` bloom filter, and
-		// `product_events_traces_mv` starts projecting spans annotated with
-		// `maple.product_event.name` into the table — carrying the span's attribute
-		// map as the event's properties, narrowable with
-		// `maple.product_event.include` and overridable with
-		// `maple.product_event.prop.*`.
+		// `ai_trace_index` + `ai_trace_index_mv` (ClickHouse migration 0024): the
+		// filtered projection of GenAI agent spans that serves Agent Sessions
+		// detection and facets. Purely additive — a new empty table and the view
+		// that fills it forward — so the v13 -> v14 edge is two CREATEs and a
+		// verify, no data movement.
 		//
-		// The trace half IS backfilled from `traces`, unlike the last two edges:
-		// there is a source to re-project from. It is bounded by raw traces'
-		// 30-day retention against `product_events`' 365, so annotated spans older
-		// than that window are gone and the table accrues them from here. No
-		// existing row is rewritten — the columns are metadata-only defaults, and
-		// the browser/server/mobile rows are verified byte-identical afterwards.
+		// projectRevision stays the hardcoded constant, as for v12 and v13 — the
+		// identity this gate compares is the fingerprint/digest pair.
+		version: 14,
+		fingerprint: "c46a599e1bfe417c",
+		digest: "c46a599e1bfe417c1e6f50d123779c6ca9c5f5f375ef9c6fe329c8a9676e3b5b",
+		manifestDigest: "faf78f67abd5901351ce6632cee59f22fadb3c1f7eb9b195dc2f9702d4c9c9bd",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
+	Object.freeze({
+		// TODO(v15): what changed, whether any part is rewritten or any row
+		// moves, and what this edge does NOT backfill.
 		//
 		// projectRevision is carried forward deliberately — it is a hardcoded
 		// constant that no longer tracks the generator's header, and the identity
 		// this gate compares is the fingerprint/digest pair.
-		version: 14,
-		fingerprint: "892bcf3b1df69fdd",
-		digest: "892bcf3b1df69fdd2ca04c738a5f7e21746de2a7e74a2444cf5c4525f9eb4821",
-		manifestDigest: "4870ae8019002bf1a0b41bba1d6da88366cd72a39e0961e1db24f5cd4dd721d0",
+		version: 15,
+		fingerprint: "9c8d377e9709d823",
+		digest: "9c8d377e9709d82319807cd7fe7510a25f5385e91a2b08f2e4f93dbbb37ac510",
+		manifestDigest: "16620c2585833543b890fc606882fd679649cc13ffac7600c5611dfec5fb4ebd",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 ] as const)

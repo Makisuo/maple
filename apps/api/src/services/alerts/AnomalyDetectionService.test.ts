@@ -95,7 +95,10 @@ const seedIncident = (
 		[
 			asIncidentId(`00000000-0000-4000-8000-0000000000${String(incident.n).padStart(2, "0")}`),
 			incident.orgId,
-			`${incident.signalType}:${incident.serviceName}:${incident.deploymentEnv}`,
+			// Suffixed with n: `anomaly_incidents_open_detector_idx` allows one OPEN
+			// incident per detector, so same-group rows model distinct detectors
+			// (the error-spike shape, where the fingerprint is part of the key).
+			`${incident.signalType}:${incident.serviceName}:${incident.deploymentEnv}:${incident.n}`,
 			incident.signalType,
 			incident.serviceName,
 			incident.deploymentEnv,

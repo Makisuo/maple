@@ -194,23 +194,25 @@ function StackedBarFigure({
 					states: [{ when: { focus: "primary" }, style: { fillOpacity: 1 } }],
 				}),
 			],
-			x: {
-				scale: scaleBand<string>(buckets, [0, 1]).paddingInner(0.2),
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 8,
-						spacing: 72,
-						format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+			scales: {
+				x: {
+					scale: scaleBand<string>(buckets, [0, 1]).paddingInner(0.2),
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 8,
+							spacing: 72,
+							format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+						},
 					},
 				},
-			},
-			y: {
-				scale: scaleLinear().domain([0, stackMax]),
-				nice: true,
-				grid: true,
-				axis: { line: false, ticks: { size: 0, padding: 6, format: formatNumber } },
+				y: {
+					scale: scaleLinear().domain([0, stackMax]),
+					nice: true,
+					grid: true,
+					axis: { line: false, ticks: { size: 0, padding: 6, format: formatNumber } },
+				},
 			},
 			// One bar segment is one datum, so nearest is the right semantic; the
 			// tooltip widens back out to the whole bucket itself.
@@ -452,23 +454,25 @@ export const StackedBarSceneLegendSpike = memo(function StackedBarSceneLegendSpi
 					ariaLabel: "Spans by service",
 				}),
 			},
-			x: {
-				scale: scaleBand<string>(buckets, [0, 1]).paddingInner(0.2),
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 8,
-						spacing: 72,
-						format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+			scales: {
+				x: {
+					scale: scaleBand<string>(buckets, [0, 1]).paddingInner(0.2),
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 8,
+							spacing: 72,
+							format: (value: string) => formatBucketLabel(value, axisContext, "tick"),
+						},
 					},
 				},
-			},
-			y: {
-				scale: scaleLinear().domain([0, stackMax]),
-				nice: true,
-				grid: true,
-				axis: { line: false, ticks: { size: 0, padding: 6, format: formatNumber } },
+				y: {
+					scale: scaleLinear().domain([0, stackMax]),
+					nice: true,
+					grid: true,
+					axis: { line: false, ticks: { size: 0, padding: 6, format: formatNumber } },
+				},
 			},
 			focus: "nearest",
 			focusRing: false,

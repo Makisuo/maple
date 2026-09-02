@@ -141,41 +141,43 @@ export const HistogramSpike = memo(function HistogramSpike({
 					states: [{ when: { focus: "primary" }, style: { fillOpacity: 1 } }],
 				}),
 			],
-			x: {
-				// The FACTORY, not an instance: it infers its domain from the
-				// materialized `x1`/`x2` channels. `scaleLinear()` would keep its empty
-				// configured domain and draw axes with no bars at all, silently.
-				scale: scaleLinear,
-				grid: false,
-				axis: {
-					line: false,
-					// A number formatter over numbers. No string splitting, no empty
-					// labels on negative bounds.
-					ticks: { size: 0, padding: 8, spacing: 56, format: formatNumber },
-				},
-			},
-			y: logScaleY
-				? {
-						// `[1, max]`, not `[0, max]`: there is no zero-anchor default for a
-						// log axis and zero has no position on one. Matches the production
-						// chart's `domain={[1, "auto"]}` under `scale="log"`.
-						// d3's `scaleLog`, configured. `[1, max]` rather than `[0, max]`:
-						// zero has no position on a log axis, which is also why the bar
-						// baseline below is 1. Matches the production chart's
-						// `domain={[1, "auto"]}` under `scale="log"`.
-						scale: scaleLog().domain([1, Math.max(maxCount, 10)]),
-						grid: true,
-						axis: { line: false, ticks: { size: 0, padding: 6, format: formatNumber } },
-					}
-				: {
-						// TanStack's inferred linear domain starts at the DATA MINIMUM,
-						// where Recharts' `YAxis` anchors at 0. A configured instance is the
-						// only way to pin the floor.
-						scale: scaleLinear().domain([0, Math.max(maxCount, 1)]),
-						nice: true,
-						grid: true,
-						axis: { line: false, ticks: { size: 0, padding: 6, format: formatNumber } },
+			scales: {
+				x: {
+					// The FACTORY, not an instance: it infers its domain from the
+					// materialized `x1`/`x2` channels. `scaleLinear()` would keep its empty
+					// configured domain and draw axes with no bars at all, silently.
+					scale: scaleLinear,
+					grid: false,
+					axis: {
+						line: false,
+						// A number formatter over numbers. No string splitting, no empty
+						// labels on negative bounds.
+						ticks: { size: 0, padding: 8, spacing: 56, format: formatNumber },
 					},
+				},
+				y: logScaleY
+					? {
+							// `[1, max]`, not `[0, max]`: there is no zero-anchor default for a
+							// log axis and zero has no position on one. Matches the production
+							// chart's `domain={[1, "auto"]}` under `scale="log"`.
+							// d3's `scaleLog`, configured. `[1, max]` rather than `[0, max]`:
+							// zero has no position on a log axis, which is also why the bar
+							// baseline below is 1. Matches the production chart's
+							// `domain={[1, "auto"]}` under `scale="log"`.
+							scale: scaleLog().domain([1, Math.max(maxCount, 10)]),
+							grid: true,
+							axis: { line: false, ticks: { size: 0, padding: 6, format: formatNumber } },
+						}
+					: {
+							// TanStack's inferred linear domain starts at the DATA MINIMUM,
+							// where Recharts' `YAxis` anchors at 0. A configured instance is the
+							// only way to pin the floor.
+							scale: scaleLinear().domain([0, Math.max(maxCount, 1)]),
+							nice: true,
+							grid: true,
+							axis: { line: false, ticks: { size: 0, padding: 6, format: formatNumber } },
+						},
+			},
 			// Cartesian, so `focus: "nearest"` does engage — verified by the `states`
 			// entry above lighting up the hovered bar, which is exactly what a polar
 			// mark cannot do. One bar is one datum, so nearest is also the right

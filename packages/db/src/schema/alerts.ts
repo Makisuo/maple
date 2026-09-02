@@ -10,6 +10,7 @@ import {
 	timestamp,
 	uniqueIndex,
 } from "drizzle-orm/pg-core"
+import { sql } from "drizzle-orm"
 import type {
 	AlertDeliveryEventId,
 	AlertDestinationId,
@@ -192,6 +193,14 @@ export const alertIncidents = pgTable(
 		index("alert_incidents_org_rule_idx").on(table.orgId, table.ruleId),
 		index("alert_incidents_org_issue_idx").on(table.orgId, table.errorIssueId),
 		uniqueIndex("alert_incidents_incident_key_idx").on(table.incidentKey),
+		// One open incident per (rule, group): the scheduler's claim serializes
+		// rule evaluation in the common case, and this makes duplicate opens from
+		// an expired claim impossible instead of merely unlikely. NULL groupKey
+		// rows (pre-scheduler history) escape the constraint; the scheduler always
+		// writes a string key.
+		uniqueIndex("alert_incidents_open_group_idx")
+			.on(table.orgId, table.ruleId, table.groupKey)
+			.where(sql`${table.status} = 'open'`),
 	],
 )
 

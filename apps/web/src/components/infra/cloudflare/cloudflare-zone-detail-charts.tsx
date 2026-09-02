@@ -200,19 +200,21 @@ export function StackedBreakdownChart({
 				}),
 				focusCrosshair(chromeColors),
 			],
-			x: {
-				scale: scalePoint,
-				axis: {
-					line: false,
-					ticks: { size: 0, padding: 8 },
-					tickLabels: { thin: { minGap: 12 } },
+			scales: {
+				x: {
+					scale: scalePoint,
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 8 },
+						tickLabels: { thin: { minGap: 12 } },
+					},
 				},
-			},
-			y: {
-				scale: scaleLinear().domain(yDomain),
-				axis: {
-					line: false,
-					ticks: { size: 0, padding: 8, format: (v: number) => formatNumber(v) },
+				y: {
+					scale: scaleLinear().domain(yDomain),
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 8, format: (v: number) => formatNumber(v) },
+					},
 				},
 			},
 			margin: { top: 12, right: 12, bottom: 4, left: 52 },
@@ -433,19 +435,21 @@ export function CloudflareZoneLatencyChart({
 				),
 				focusCrosshair(chromeColors),
 			],
-			x: {
-				scale: scalePoint,
-				axis: {
-					line: false,
-					ticks: { size: 0, padding: 8 },
-					tickLabels: { thin: { minGap: 12 } },
+			scales: {
+				x: {
+					scale: scalePoint,
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 8 },
+						tickLabels: { thin: { minGap: 12 } },
+					},
 				},
-			},
-			y: {
-				scale: scaleLinear().domain(yDomain),
-				axis: {
-					line: false,
-					ticks: { size: 0, padding: 8, format: (v: number) => formatLatency(v) },
+				y: {
+					scale: scaleLinear().domain(yDomain),
+					axis: {
+						line: false,
+						ticks: { size: 0, padding: 8, format: (v: number) => formatLatency(v) },
+					},
 				},
 			},
 			margin: { top: 12, right: 12, bottom: 4, left: 52 },

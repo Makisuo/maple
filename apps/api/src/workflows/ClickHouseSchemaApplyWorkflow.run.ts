@@ -390,7 +390,8 @@ export async function runClickHouseSchemaApply(
 	}
 }
 
-async function runWithDb(
+/** Exported for tests: the orchestration body behind `runClickHouseSchemaApply`. */
+export async function runWithDb(
 	connection: PgConnectionScopeApi,
 	env: SchemaApplyWorkflowEnv,
 	event: WorkflowEventLike<SchemaApplyWorkflowPayload>,
@@ -411,18 +412,27 @@ async function runWithDb(
 	const appliedVersions: number[] = []
 	const skippedFeatures: Array<{ readonly id: string; readonly reason: string }> = []
 
-	const cfg = await step.do("load-config", STEP, async () => {
-		const c = await loadConfig(dbStep, orgId, encryptionKey)
-		await updateRun(
-			dbStep,
-			orgId,
-			{ status: "running", phase: "connecting", errorMessage: null, startedAt: new Date(startedAt) },
-			Date.now(),
-		)
-		return c
-	})
-
+	// Inside the protected region below: a config-load failure (settings row
+	// deleted, decrypt failure, invalid URL) must still transition the run row
+	// to failed, or the service reads the leftover "queued" as already_running
+	// and the org can never apply its schema again.
 	try {
+		const cfg = await step.do("load-config", STEP, async () => {
+			const c = await loadConfig(dbStep, orgId, encryptionKey)
+			await updateRun(
+				dbStep,
+				orgId,
+				{
+					status: "running",
+					phase: "connecting",
+					errorMessage: null,
+					startedAt: new Date(startedAt),
+				},
+				Date.now(),
+			)
+			return c
+		})
+
 		await step.do("ensure-bookkeeping", STEP, () => ensureMigrationsTable(cfg).then(() => undefined))
 		const applied = await step.do("read-applied", STEP, () =>
 			readAppliedVersions(cfg).then((s) => [...s]),
