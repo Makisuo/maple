@@ -1221,7 +1221,7 @@ const toMapEdge = (row: {
 	callCount: number
 	errorCount: number
 	avgDurationMs: number
-	p95DurationMs: number
+	maxDurationMs: number
 	estimatedSpanCount: number
 }): V2ServiceMapEdge => {
 	const calls = Number(row.callCount)
@@ -1236,7 +1236,7 @@ const toMapEdge = (row: {
 		error_count: errors,
 		error_rate: calls > 0 ? errors / calls : 0,
 		avg_duration_ms: Number(row.avgDurationMs),
-		max_duration_ms: Number(row.p95DurationMs),
+		max_duration_ms: Number(row.maxDurationMs),
 		has_sampling: estimated > calls + 0.001,
 		sampling_weight: calls > 0 ? estimated / calls : 1,
 	}

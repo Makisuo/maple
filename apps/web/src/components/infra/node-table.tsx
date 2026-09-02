@@ -6,7 +6,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui
 import type { ListNodesResponse } from "@maple/domain/http"
 
 import { HostStatusBadge } from "./status-badge"
-import { ColumnHead, DataTable, MetaChip, ROW_LINK_CLASS, useTableSort } from "./primitives/data-table"
+import { ColumnHead, DataTable, ROW_LINK_CLASS, useTableSort } from "./primitives/data-table"
+import { MetaLine } from "./primitives/meta-line"
 import { formatUptime } from "@maple/ui/lib/format"
 import { formatRelativeTime } from "@maple/ui/lib/time-format"
 
@@ -105,9 +106,7 @@ export function NodeTable({ nodes, waiting, referenceTime }: NodeTableProps) {
 						<div className="truncate font-mono text-[13px] font-medium text-foreground transition-colors group-hover:text-primary">
 							{node.nodeName}
 						</div>
-						<div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-							{node.kubeletVersion && <MetaChip>kubelet {node.kubeletVersion}</MetaChip>}
-						</div>
+						<MetaLine items={[node.kubeletVersion && `kubelet ${node.kubeletVersion}`]} />
 					</div>
 					<div className="w-[88px]">
 						<HostStatusBadge lastSeen={node.lastSeen} referenceTime={referenceTime} />

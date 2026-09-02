@@ -1,5 +1,5 @@
 import { slackWorkspaces } from "@maple/db"
-import { AlertDeliveryAuthError, OrgId } from "@maple/domain/http"
+import { AlertDeliveryAuthError, AlertDeliveryError, OrgId } from "@maple/domain/http"
 import { and, eq, isNull } from "drizzle-orm"
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { decryptAes256Gcm, parseBase64Aes256GcmKey } from "@/platform/Crypto"
@@ -59,8 +59,19 @@ export const resolveSlackBotTokenForDispatch = Effect.fn("SlackBotTokenResolver.
 ) {
 	const decodedOrgId = yield* Schema.decodeEffect(OrgId)(orgId).pipe(Effect.orDie)
 	yield* Effect.annotateCurrentSpan({ orgId: decodedOrgId })
+	// A failed LOOKUP is not a failed authentication: the workspace may be
+	// connected and healthy behind a transient Postgres blip. Keep it retryable
+	// so the queue re-enqueues instead of dropping the alert (and so it does not
+	// count toward auto-disabling the destination).
 	const rowOption = yield* loadActiveWorkspaceByOrg(database, decodedOrgId).pipe(
-		Effect.mapError((error) => notConnected(`Failed to load Slack installation: ${error.message}`)),
+		Effect.mapError(
+			(error) =>
+				new AlertDeliveryError({
+					message: "Failed to load the Slack installation",
+					destinationType: "slack-bot",
+					cause: error,
+				}),
+		),
 	)
 	if (Option.isNone(rowOption)) {
 		return yield* Effect.fail(
@@ -87,7 +98,7 @@ class SlackBotTokenConfigError extends Schema.TaggedError<SlackBotTokenConfigErr
 ) {}
 
 export interface SlackBotTokenResolverApi {
-	readonly resolve: (orgId: OrgId) => Effect.Effect<string, AlertDeliveryAuthError>
+	readonly resolve: (orgId: OrgId) => Effect.Effect<string, AlertDeliveryAuthError | AlertDeliveryError>
 }
 
 const make: Effect.Effect<SlackBotTokenResolverApi, SlackBotTokenConfigError, Database | Env> = Effect.gen(

@@ -172,8 +172,9 @@ export const cloudflareFilterConditions = (
 	})
 	// `CH.when` only skips null/undefined, so an empty needle would compile to a match-everything
 	// predicate — noise in the SQL and a needless change to the query fingerprint.
-	if (active("path") && (opts.pathContains ?? "") !== "") {
-		conditions.push(CH.positionCaseInsensitive(attrExpr($, "path"), CH.lit(opts.pathContains!)).gt(0))
+	const pathContains = opts.pathContains ?? ""
+	if (active("path") && pathContains !== "") {
+		conditions.push(CH.positionCaseInsensitive(attrExpr($, "path"), CH.lit(pathContains)).gt(0))
 	}
 	return conditions
 }

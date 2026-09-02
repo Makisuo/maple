@@ -16,7 +16,12 @@ import type {
 	ErrorsSummaryRequest,
 	ErrorsTimeseriesRequest,
 	ErrorsSparkRequest,
+	ContainerDetailSummaryRequest,
+	ContainerFacetsRequest,
+	ContainersSummaryRequest,
 	HostDetailSummaryRequest,
+	ListContainersRequest,
+	InfraPresenceRequest,
 	ListHostsRequest,
 	ListLogsRequest,
 	ListMetricsRequest,
@@ -365,6 +370,24 @@ export const metricsSummary = defineQuery({
 	cache: 60,
 	compile: (payload: MetricsSummaryRequest, orgId: string) =>
 		CH.compile(CH.metricsSummaryQuery({ serviceName: payload.service }), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
+/**
+ * Sidebar gate: which Infrastructure surfaces this org reports. Runs on every
+ * page load, so it is cached generously — a surface appearing or disappearing
+ * is not something the nav has to notice within the minute, and the probe's
+ * whole value is that it costs less than the pages it hides.
+ */
+export const infraPresence = defineQuery({
+	id: "infraPresence",
+	profile: "discovery",
+	cache: 300,
+	compile: (payload: InfraPresenceRequest, orgId: string) =>
+		CH.compileUnion(CH.infraPresenceQuery(), {
 			orgId,
 			startTime: payload.startTime,
 			endTime: payload.endTime,
@@ -968,6 +991,109 @@ export const listPodsCount = defineQuery({
 		}),
 })
 
+// Containers (Docker) — keep page and denominator filters identical.
+const listContainersFilters = (payload: ListContainersRequest | ContainerFacetsRequest) => ({
+	search: payload.search,
+	containerNames: payload.containerNames,
+	hostNames: payload.hostNames,
+	images: payload.images,
+	composeProjects: payload.composeProjects,
+	composeServices: payload.composeServices,
+	environments: payload.environments,
+	excludedContainerNames: payload.excludedContainerNames,
+	excludedHostNames: payload.excludedHostNames,
+	excludedImages: payload.excludedImages,
+	excludedComposeProjects: payload.excludedComposeProjects,
+	excludedComposeServices: payload.excludedComposeServices,
+	excludedEnvironments: payload.excludedEnvironments,
+})
+
+export const listContainers = defineQuery({
+	id: "listContainers",
+	profile: "list",
+	cache: timeRangeCache,
+	compile: (payload: ListContainersRequest, orgId: string) =>
+		CH.compile(
+			CH.listContainersQuery({
+				...listContainersFilters(payload),
+				scope: payload.scope,
+				sortBy: payload.sortBy,
+				sortDir: payload.sortDir,
+				limit: payload.limit,
+				offset: payload.offset,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const listContainersCount = defineQuery({
+	id: "listContainersCount",
+	profile: "aggregation",
+	cache: timeRangeCache,
+	compile: (payload: ListContainersRequest, orgId: string) =>
+		CH.compile(CH.listContainersSummaryQuery(listContainersFilters(payload)), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
+export const containersSummary = defineQuery({
+	id: "containersSummary",
+	profile: "aggregation",
+	cache: timeRangeCache,
+	compile: (payload: ContainersSummaryRequest, orgId: string) =>
+		CH.compile(
+			CH.listContainersSummaryQuery({
+				hostNames: payload.hostNames,
+				environments: payload.environments,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const containerDetailSummary = defineQuery({
+	id: "containerDetailSummary",
+	profile: "aggregation",
+	cache: timeRangeCache,
+	compile: (payload: ContainerDetailSummaryRequest, orgId: string) =>
+		CH.compile(
+			CH.containerDetailSummaryQuery({
+				containerName: payload.containerName,
+				hostName: payload.hostName,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const containerCountersSummary = defineQuery({
+	id: "containerCountersSummary",
+	profile: "aggregation",
+	cache: timeRangeCache,
+	compile: (payload: ContainerDetailSummaryRequest, orgId: string) =>
+		CH.compile(
+			CH.containerCountersSummaryQuery({
+				containerName: payload.containerName,
+				hostName: payload.hostName,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+export const containerFacets = defineQuery({
+	id: "containerFacets",
+	profile: "discovery",
+	// Bound Map-column decompression memory across the UNION fan-out.
+	settings: { maxThreads: 4 },
+	cache: 60,
+	compile: (payload: ContainerFacetsRequest, orgId: string) =>
+		CH.compileUnion(CH.containerFacetsQuery(listContainersFilters(payload)), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+		}),
+})
+
 // Probes resolve a time bound so hierarchy reads avoid ~30 daily partitions.
 // An outer cache owns the full sequence, so these definitions remain uncached.
 export const spanHierarchyProbeRecent = defineQuery({
@@ -1058,6 +1184,37 @@ export const serviceOperationsSummaryRaw = defineQuery({
 			CH.serviceOperationsSummaryRawQuery(serviceOperationsSummaryOptions(payload)),
 			serviceOperationsParams(payload, orgId),
 			{ rowSchema: CH.serviceOperationsSummaryRowSchema },
+		),
+})
+
+/**
+ * The API tab. Same splice, same rollup tables, same cost — the only difference
+ * is the HTTP-endpoint predicate, so the raw fallback and its 10s ceiling apply
+ * identically. Its own id keeps the cache entries separate from the unfiltered
+ * Operations tab reading the same window.
+ */
+export const serviceEndpointsSummary = defineQuery({
+	id: "serviceEndpoints",
+	profile: "aggregation",
+	cache: undefined,
+	compile: (payload: ServiceOperationsRequest, orgId: string) =>
+		CH.compile(
+			CH.serviceEndpointsSummaryQuery(serviceOperationsSummaryOptions(payload)),
+			serviceOperationsParams(payload, orgId),
+			{ rowSchema: CH.serviceEndpointsSummaryRowSchema },
+		),
+})
+
+export const serviceEndpointsSummaryRaw = defineQuery({
+	id: "serviceEndpoints",
+	profile: "aggregation",
+	settings: SERVICE_OPERATIONS_RAW_SETTINGS,
+	cache: undefined,
+	compile: (payload: ServiceOperationsRequest, orgId: string) =>
+		CH.compile(
+			CH.serviceEndpointsSummaryRawQuery(serviceOperationsSummaryOptions(payload)),
+			serviceOperationsParams(payload, orgId),
+			{ rowSchema: CH.serviceEndpointsSummaryRowSchema },
 		),
 })
 

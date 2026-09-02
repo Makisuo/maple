@@ -8,8 +8,6 @@
 	},
 	"scripts": {
 		"db:generate": "bun run --cwd ../../packages/db db:generate",
-		"dev": "portless",
-		"dev:app": "bun run ../../scripts/portless-wrangler.ts --env-file ../../.env.local --port ${PORT:-3472} --inspector-port=$((${PORT:-3472} + 10000))",
 		"test": "vitest run",
 		"test:integration": "vitest run --config vitest.integration.config.ts",
 		"eval": "vitest run --config vitest.eval.config.ts",
@@ -66,9 +64,5 @@
 		"vitest": "catalog:",
 		"vitest-evals": "^0.4.0",
 		"wrangler": "^4.118.0"
-	},
-	"portless": {
-		"name": "api",
-		"script": "dev:app"
 	}
 }

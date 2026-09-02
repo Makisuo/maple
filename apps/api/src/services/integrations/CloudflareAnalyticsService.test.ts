@@ -10,7 +10,7 @@ import {
 	oauthConnections,
 	orgClickHouseSettings,
 } from "@maple/db"
-import { ConfigProvider, Effect, Layer, Schema } from "effect"
+import { Array as Arr, ConfigProvider, Effect, Layer, Schema } from "effect"
 import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -18,7 +18,7 @@ import { eq } from "drizzle-orm"
 import { encryptAes256Gcm, parseBase64Aes256GcmKey } from "@/platform/Crypto"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import {
 	WarehouseQueryService,
 	type WarehouseQueryServiceApi,
@@ -193,6 +193,11 @@ interface HyperdriveConfigFixture {
 
 interface FetchOptions {
 	readonly zones?: ReadonlyArray<typeof zoneFixture>
+	/**
+	 * When set, the `/zones` listing serves only the zones of the account whose id appears
+	 * in the request URL (the listing is account-filtered upstream) — multi-account tests.
+	 */
+	readonly zonesByAccount?: Record<string, ReadonlyArray<typeof zoneFixture>>
 	readonly zonesStatus?: number
 	readonly graphqlErrors?: ReadonlyArray<{ message: string; path?: ReadonlyArray<string | number> }>
 	/** When set, every outbound GraphQL document is captured here (batching assertions). */
@@ -200,6 +205,10 @@ interface FetchOptions {
 	/** Live Worker scripts the REST enumeration returns (default: my-worker). */
 	readonly workerScripts?: ReadonlyArray<{ id: string }>
 	/** Hyperdrive configs the REST enumeration returns (default: none). Mutable so a test can change the upstream set between polls. */
+	/** Serve this many synthetic active zones with real pagination (50/page). */
+	zonesTotal?: number
+	/** Awaited before answering each GraphQL call — lets a test interleave a concurrent write. */
+	onGraphql?: () => Promise<void>
 	hyperdriveConfigs?: ReadonlyArray<HyperdriveConfigFixture>
 	/** HTTP status for the hyperdrive listing (default 200). Mutable for per-poll failure injection. */
 	hyperdriveStatus?: number
@@ -250,6 +259,7 @@ const mockCloudflareFetch =
 			return jsonResponse({}, options.metricsStatus ?? 200)
 		}
 		if (url.includes("/graphql")) {
+			await options.onGraphql?.()
 			const body = JSON.parse(await readRequestBody(input, init)) as { query: string }
 			options.graphqlQueries?.push(body.query)
 			if (options.graphqlErrors) {
@@ -303,7 +313,30 @@ const mockCloudflareFetch =
 				)
 			}
 			const page = Number(new URL(url).searchParams.get("page") ?? "1")
-			const zones = page === 1 ? (options.zones ?? [zoneFixture]) : []
+			if (options.zonesTotal != null) {
+				const perPage = 50
+				const start = (page - 1) * perPage
+				const count = Math.min(perPage, Math.max(0, options.zonesTotal - start))
+				const synthetic = Array.from({ length: count }, (_, index) => ({
+					...zoneFixture,
+					id: `zone-${start + index}`,
+					name: `z${start + index}.example.com`,
+				}))
+				return jsonResponse({
+					success: true,
+					errors: [],
+					messages: [],
+					result: synthetic,
+					result_info: { count, page, per_page: perPage, total_count: options.zonesTotal },
+				})
+			}
+			const forAccount =
+				options.zonesByAccount == null
+					? null
+					: (Object.entries(options.zonesByAccount).find(([accountId]) =>
+							url.includes(accountId),
+						)?.[1] ?? [])
+			const zones = page === 1 ? (forAccount ?? options.zones ?? [zoneFixture]) : []
 			return jsonResponse({
 				success: true,
 				errors: [],
@@ -399,8 +432,16 @@ const makeLayer = (
 		Layer.provideMerge(Layer.succeed(Retry.Retry, { while: () => false })),
 	)
 
-/** Insert a connected Cloudflare org with a non-expiring encrypted access token. */
-const seedConnection = (scope: string = ANALYTICS_SCOPE) =>
+/**
+ * Insert the org's Cloudflare connection with a non-expiring encrypted access token. One grant
+ * may cover several accounts — pass them all; the first is the row's principal.
+ */
+const seedConnection = (
+	scope: string = ANALYTICS_SCOPE,
+	accounts: Arr.NonEmptyReadonlyArray<{ id: string; name: string }> = [
+		{ id: ACCOUNT_ID, name: "Test Account" },
+	],
+) =>
 	Effect.gen(function* () {
 		const database = yield* Database
 		const key = yield* parseBase64Aes256GcmKey(ENCRYPTION_KEY_B64, (message) => new Error(message))
@@ -410,8 +451,12 @@ const seedConnection = (scope: string = ANALYTICS_SCOPE) =>
 				id: randomUUID(),
 				orgId: ORG,
 				provider: "cloudflare",
-				externalUserId: ACCOUNT_ID,
-				externalAccountName: "Test Account",
+				externalUserId: Arr.headNonEmpty(accounts).id,
+				externalAccountName: Arr.headNonEmpty(accounts).name,
+				grantedAccountsJson:
+					accounts.length > 1
+						? JSON.stringify(accounts.map((account) => ({ id: account.id, name: account.name })))
+						: null,
 				connectedByUserId: "user_1",
 				scope,
 				accessTokenCiphertext: accessEnc.ciphertext,
@@ -457,6 +502,7 @@ const seedStateRow = (values: Partial<typeof cloudflareAnalyticsState.$inferInse
 			db.insert(cloudflareAnalyticsState).values({
 				id: randomUUID(),
 				orgId: ORG,
+				accountId: ACCOUNT_ID,
 				zoneId: "",
 				createdAt: new Date(T0 - 60 * MIN),
 				updatedAt: new Date(T0 - 60 * MIN),
@@ -525,7 +571,7 @@ describe("CloudflareAnalyticsService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, captured)))
 	})
 
-	it.effect("pollOrg records missing analytics scopes instead of calling the API", () => {
+	it.effect("pollOrg skips a scope-incapable account without calling the API or touching state", () => {
 		const testDb = createTestDb(trackedDbs)
 		const captured: CapturedIngest[] = []
 		return Effect.gen(function* () {
@@ -535,10 +581,11 @@ describe("CloudflareAnalyticsService", () => {
 			const summary = yield* service.pollOrg(ORG)
 			assert.strictEqual(summary.skipped, "missing analytics scopes")
 			assert.strictEqual(summary.callsMade, 0)
+			// The account is skipped before any state rows exist — capability is surfaced
+			// per account by the status endpoint (analyticsCapable), not by error stamps
+			// rewritten every tick.
 			const rows = yield* loadStateRows
-			// One row per account-scoped dataset (workers + queues×2 + durable objects).
-			assert.strictEqual(rows.length, 4)
-			for (const row of rows) assert.include(row.lastError ?? "", "scopes")
+			assert.strictEqual(rows.length, 0)
 			assert.strictEqual(captured.length, 0)
 		}).pipe(Effect.provide(makeLayer(testDb, captured)))
 	})
@@ -600,6 +647,62 @@ describe("CloudflareAnalyticsService", () => {
 			// Nothing bypassed the gateway via a direct warehouse ingest.
 			assert.strictEqual(captured.length, 0)
 		}).pipe(Effect.provide(makeLayer(testDb, captured, { otlpCalls })))
+	})
+
+	it.effect("pollOrg polls every account of the grant, each with its own state rows and zones", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		const SECOND_ACCOUNT = "acct-2"
+		const secondZone = {
+			...zoneFixture,
+			id: "zone-2",
+			name: "beta.example",
+			account: { id: SECOND_ACCOUNT, name: "Second Account" },
+		}
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			// One grant covering both accounts — the order here is the status order.
+			yield* seedConnection(ANALYTICS_SCOPE, [
+				{ id: ACCOUNT_ID, name: "Test Account" },
+				{ id: SECOND_ACCOUNT, name: "Second Account" },
+			])
+			const service = yield* CloudflareAnalyticsService
+			const summary = yield* service.pollOrg(ORG)
+			assert.isNull(summary.skipped)
+			assert.isAbove(summary.rowsIngested, 0)
+
+			// Each account discovered ITS zones and owns its state rows — including its own
+			// workers anchor, so leases and discovery run per account.
+			const rows = yield* loadStateRows
+			const httpRows = rows.filter((row) => row.dataset === "http_requests")
+			assert.deepStrictEqual(httpRows.map((row) => `${row.accountId}:${row.zoneId}`).sort(), [
+				`${ACCOUNT_ID}:${ZONE_ID}`,
+				`${SECOND_ACCOUNT}:zone-2`,
+			])
+			const anchors = rows.filter((row) => row.dataset === "workers_invocations")
+			assert.deepStrictEqual(anchors.map((row) => row.accountId).sort(), [ACCOUNT_ID, SECOND_ACCOUNT])
+
+			// The integration status breaks the same state down per account, while the
+			// legacy top-level view merges both accounts' zones.
+			const status = yield* service.getIntegrationStatus(ORG)
+			assert.strictEqual(status.connected, true)
+			assert.deepStrictEqual(
+				(status.accounts ?? []).map((account) => account.accountId),
+				[ACCOUNT_ID, SECOND_ACCOUNT],
+			)
+			assert.deepStrictEqual(
+				(status.accounts ?? []).map((account) => account.zones.map((zone) => zone.id)),
+				[[ZONE_ID], ["zone-2"]],
+			)
+			assert.deepStrictEqual(status.zones.map((zone) => zone.id).sort(), [ZONE_ID, "zone-2"].sort())
+			assert.strictEqual(status.accountId, ACCOUNT_ID)
+		}).pipe(
+			Effect.provide(
+				makeLayer(testDb, captured, {
+					zonesByAccount: { [ACCOUNT_ID]: [zoneFixture], [SECOND_ACCOUNT]: [secondZone] },
+				}),
+			),
+		)
 	})
 
 	const hyperdriveMysqlFixture: HyperdriveConfigFixture = {
@@ -813,6 +916,34 @@ describe("CloudflareAnalyticsService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, captured)))
 	})
 
+	it.effect("pollOrg does NOT disable unseen zones when the zone listing is truncated", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			// A zone the account still owns, but which fell past the 200-zone
+			// discovery cap of a 201-zone listing: unseen, not removed.
+			yield* seedStateRow({
+				dataset: "http_requests",
+				zoneId: "beyond-cap-zone",
+				zoneName: "beyond.example.com",
+				watermarkAt: new Date(T0 - 20 * MIN),
+				settingsFetchedAt: new Date(T0 - 5 * MIN),
+			})
+			const service = yield* CloudflareAnalyticsService
+			yield* service.pollOrg(ORG)
+			const rows = yield* loadStateRows
+			// A vanished row fails the test through the error channel, so the
+			// assertions below get a narrowed row instead of a `!`.
+			const beyond = yield* Effect.fromOption(
+				Arr.findFirst(rows, (row) => row.zoneId === "beyond-cap-zone"),
+			)
+			assert.isTrue(beyond.enabled)
+			assert.notInclude(beyond.lastError ?? "", "no longer present")
+		}).pipe(Effect.provide(makeLayer(testDb, captured, { zonesTotal: 201 })))
+	})
+
 	it.effect("pollOrg skips when another tick holds the lease", () => {
 		const testDb = createTestDb(trackedDbs)
 		const captured: CapturedIngest[] = []
@@ -825,6 +956,50 @@ describe("CloudflareAnalyticsService", () => {
 			assert.strictEqual(summary.skipped, "lease held by another tick")
 			assert.strictEqual(captured.length, 0)
 		}).pipe(Effect.provide(makeLayer(testDb, captured)))
+	})
+
+	it.effect("a tick that lost its lease does not clear the successor's on release", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		// Simulate the overlap: while this tick is mid-poll (first GraphQL call),
+		// a successor claims the anchor lease — as happens when a tick outlives
+		// LEASE_MS. The finishing tick's release must be a compare-and-set on the
+		// lease value it wrote, so the successor's live lease survives.
+		const SUCCESSOR_LEASE = new Date(T0 + 3 * MIN)
+		let injected = false
+		const onGraphql = async () => {
+			if (injected) return
+			injected = true
+			await executeSql(
+				testDb,
+				`UPDATE cloudflare_analytics_state SET lease_until = $1
+				 WHERE dataset = 'workers_invocations' AND zone_id = ''`,
+				[SUCCESSOR_LEASE],
+			)
+		}
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			yield* seedStateRow({
+				dataset: "workers_invocations",
+				zoneId: "",
+				discoveredAt: new Date(T0 - 5 * MIN),
+				settingsFetchedAt: new Date(T0 - 5 * MIN),
+			})
+			const service = yield* CloudflareAnalyticsService
+			yield* service.pollOrg(ORG)
+
+			const anchor = yield* Effect.promise(() =>
+				queryFirstRow<{ lease_until: Date | string | null }>(
+					testDb,
+					`SELECT lease_until FROM cloudflare_analytics_state
+					 WHERE dataset = 'workers_invocations' AND zone_id = ''`,
+				),
+			)
+			// Pre-CAS this was nulled by the stale tick's unconditional release,
+			// letting a third tick overlap the successor.
+			assert.strictEqual(new Date(anchor?.lease_until ?? 0).getTime(), SUCCESSOR_LEASE.getTime())
+		}).pipe(Effect.provide(makeLayer(testDb, captured, { onGraphql })))
 	})
 
 	it.effect("pollOrg reclaims a far-future (corrupt) lease instead of skipping forever", () => {
@@ -1455,6 +1630,7 @@ describe("CloudflareAnalyticsService", () => {
 				lastSyncedAt: T0 - 5 * MIN,
 				lastError: null,
 				watermarkAt: T0 - 15 * MIN,
+				backfillAt: null,
 			})
 			assert.strictEqual(status.workers?.lastError, "boom")
 			assert.strictEqual(status.workers?.watermarkAt, null)

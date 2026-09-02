@@ -26,7 +26,7 @@ import { WorkflowEntrypoint } from "cloudflare:workers"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import { makeWorkflowBridge } from "./rpc.ts"
-import { WorkerEnvironment } from "./worker-environment.ts"
+import { MissingWorkerBindingError, WorkerEnvironment } from "./worker-environment.ts"
 
 // Runtime services provided by the bridge while a workflow executes
 
@@ -171,8 +171,15 @@ export const workflowHandle = Effect.fn("workflowHandle")(function* (classOrName
 	const name = typeof classOrName === "string" ? classOrName : classOrName.name
 	const binding = env[name] as any
 	if (!binding || typeof binding.create !== "function") {
+		// Bindings are declared in `wrangler.jsonc` at deploy time, so a missing one
+		// is a deployment that should not have shipped rather than a runtime state.
+		// oxlint-disable-next-line maple/no-effect-die
 		return yield* Effect.die(
-			new Error(`Worker env has no Workflow binding named '${name}'. Check wrangler.jsonc.`),
+			new MissingWorkerBindingError({
+				binding: name,
+				kind: "Workflow",
+				message: `Worker env has no Workflow binding named '${name}'. Check wrangler.jsonc.`,
+			}),
 		)
 	}
 	return {

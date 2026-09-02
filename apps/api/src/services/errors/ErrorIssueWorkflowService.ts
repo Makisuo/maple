@@ -156,6 +156,22 @@ export interface ErrorIssueWorkflowServiceApi extends ErrorIssueWorkflowPublicAp
 			readonly timestamp?: number
 		},
 	) => Effect.Effect<unknown, ErrorPersistenceError>
+	/**
+	 * The insert `recordEvent` would write, for a caller that must commit the
+	 * event atomically with its own statements in one transaction.
+	 */
+	readonly buildEvent: (
+		orgId: OrgId,
+		issueId: ErrorIssueId,
+		actorId: ActorId | null,
+		type: ErrorIssueEventType,
+		timestamp: number,
+		opts?: {
+			readonly fromState?: WorkflowState | null
+			readonly toState?: WorkflowState | null
+			readonly payload?: StoredJsonRecord
+		},
+	) => ErrorIssueEventInsert
 	readonly applyTransition: (
 		orgId: OrgId,
 		actorId: ActorId | null,
@@ -401,6 +417,29 @@ const make: Effect.Effect<
 			return hydrated[0]!
 		})
 
+		const buildEventInsert = (
+			orgId: OrgId,
+			issueId: ErrorIssueId,
+			actorId: ActorId | null,
+			type: ErrorIssueEventType,
+			timestamp: number,
+			opts: {
+				readonly fromState?: WorkflowState | null
+				readonly toState?: WorkflowState | null
+				readonly payload?: StoredJsonRecord
+			} = {},
+		): ErrorIssueEventInsert => ({
+			id: newEventId(),
+			orgId,
+			issueId,
+			actorId,
+			type,
+			fromState: opts.fromState ?? null,
+			toState: opts.toState ?? null,
+			payloadJson: opts.payload ?? {},
+			createdAt: msToDate(timestamp),
+		})
+
 		/**
 		 * Mirror an actor-attributed issue event into the org audit log. Never
 		 * fails: the issue event is already committed, and `audit.record` swallows
@@ -477,17 +516,7 @@ const make: Effect.Effect<
 			"ErrorsService.recordEvent",
 		)(function* (orgId, issueId, actorId, type, opts = {}) {
 			const timestamp = opts.timestamp ?? (yield* Clock.currentTimeMillis)
-			const insert: ErrorIssueEventInsert = {
-				id: newEventId(),
-				orgId,
-				issueId,
-				actorId: actorId ?? null,
-				type,
-				fromState: opts.fromState ?? null,
-				toState: opts.toState ?? null,
-				payloadJson: opts.payload ?? {},
-				createdAt: msToDate(timestamp),
-			}
+			const insert = buildEventInsert(orgId, issueId, actorId ?? null, type, timestamp, opts)
 			const inserted = yield* dbExecute((db) => db.insert(errorIssueEvents).values(insert))
 			// System/sweep events carry no actor and stay out of the audit log.
 			if (actorId !== null) {
@@ -571,47 +600,52 @@ const make: Effect.Effect<
 				)
 			}
 
-			yield* dbExecute((db) =>
-				db
-					.update(errorIssues)
-					.set(update)
-					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, row.id))),
-			)
-			if (toState === "done") {
-				yield* dbExecute((db) =>
-					db
-						.update(errorIncidents)
-						.set({
-							status: "resolved",
-							resolvedAt: msToDate(timestamp),
-							updatedAt: msToDate(timestamp),
-						})
-						.where(
-							and(
-								eq(errorIncidents.orgId, orgId),
-								eq(errorIncidents.issueId, row.id),
-								eq(errorIncidents.status, "open"),
-							),
-						),
-				)
-				yield* dbExecute((db) =>
-					db
-						.update(errorIssueStates)
-						.set({ openIncidentId: null, updatedAt: msToDate(timestamp) })
-						.where(and(eq(errorIssueStates.orgId, orgId), eq(errorIssueStates.issueId, row.id))),
-				)
-			}
-
 			const notePayload: StoredJsonRecord = opts.note
 				? { ...opts.payload, note: opts.note }
 				: { ...opts.payload }
-			yield* recordEvent(orgId, row.id, actorId, "state_change", {
+			const eventInsert = buildEventInsert(orgId, row.id, actorId ?? null, "state_change", timestamp, {
 				fromState,
 				toState,
 				payload: notePayload,
-				timestamp,
 			})
-			if (actorId) yield* actorsService.touchActor(orgId, actorId, timestamp)
+			// One transaction, because a `done` that committed the issue but lost the
+			// incident resolution or its timeline event could never be repaired: a
+			// retry sees `fromState === toState` and returns before reaching them.
+			yield* dbExecute((db) =>
+				db.transaction(async (tx) => {
+					await tx
+						.update(errorIssues)
+						.set(update)
+						.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, row.id)))
+					if (toState === "done") {
+						await tx
+							.update(errorIncidents)
+							.set({
+								status: "resolved",
+								resolvedAt: msToDate(timestamp),
+								updatedAt: msToDate(timestamp),
+							})
+							.where(
+								and(
+									eq(errorIncidents.orgId, orgId),
+									eq(errorIncidents.issueId, row.id),
+									eq(errorIncidents.status, "open"),
+								),
+							)
+						await tx
+							.update(errorIssueStates)
+							.set({ openIncidentId: null, updatedAt: msToDate(timestamp) })
+							.where(
+								and(eq(errorIssueStates.orgId, orgId), eq(errorIssueStates.issueId, row.id)),
+							)
+					}
+					await tx.insert(errorIssueEvents).values(eventInsert)
+				}),
+			)
+			if (actorId) {
+				yield* recordEventAudit(orgId, row.id, actorId, "state_change", { fromState, toState })
+				yield* actorsService.touchActor(orgId, actorId, timestamp)
+			}
 			return yield* requireIssue(orgId, row.id)
 		})
 
@@ -769,40 +803,33 @@ const make: Effect.Effect<
 			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
 		})
 
-		const enqueueSeverityEscalation = Effect.fn("ErrorsService.enqueueSeverityEscalation")(function* (
+		/** The outbox row a severity change owes, or none when the change does not escalate. */
+		const severityEscalationInsert = (
 			orgId: OrgId,
 			issueId: ErrorIssueId,
 			from: IssueSeverity | null,
 			to: IssueSeverity,
 			source: "ai" | "manual",
-		) {
-			const reason = escalationReasonFor(from, to)
-			if (reason === null) return
-			const timestamp = yield* Clock.currentTimeMillis
-			yield* dbExecute((db) =>
-				db
-					.insert(issueEscalations)
-					.values({
-						id: newIssueEscalationId(),
-						orgId,
-						issueId,
-						severity: to,
-						source,
-						reason,
-						runId: null,
-						investigationId: null,
-						payloadJson: {},
-						deliveryResultsJson: [],
-						status: "queued",
-						attempts: 0,
-						dedupeKey: escalationDedupeKey(orgId, issueId, to),
-						error: null,
-						createdAt: msToDate(timestamp),
-						processedAt: null,
-					})
-					.onConflictDoNothing(),
-			)
-		})
+			timestamp: number,
+		): Option.Option<typeof issueEscalations.$inferInsert> =>
+			Option.map(Option.fromNullOr(escalationReasonFor(from, to)), (reason) => ({
+				id: newIssueEscalationId(),
+				orgId,
+				issueId,
+				severity: to,
+				source,
+				reason,
+				runId: null,
+				investigationId: null,
+				payloadJson: {},
+				deliveryResultsJson: [],
+				status: "queued",
+				attempts: 0,
+				dedupeKey: escalationDedupeKey(orgId, issueId, to),
+				error: null,
+				createdAt: msToDate(timestamp),
+				processedAt: null,
+			}))
 
 		const setSeverity: ErrorIssueWorkflowServiceApi["setSeverity"] = Effect.fn(
 			"ErrorsService.setSeverity",
@@ -824,28 +851,45 @@ const make: Effect.Effect<
 			const changed = current.severity !== severity || current.severitySource !== nextSource
 			if (!changed) return yield* hydrateIssue(orgId, current)
 
-			const severityRows = yield* dbExecute((db) =>
-				db
-					.update(errorIssues)
-					.set({
-						severity,
-						severitySource: nextSource,
-						updatedAt: msToDate(timestamp),
-					})
-					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId)))
-					.returning(txidColumn),
+			const payload: StoredJsonRecord = opts?.note
+				? { from: current.severity, to: severity, source, note: opts.note }
+				: { from: current.severity, to: severity, source }
+			const eventInsert =
+				current.severity !== severity
+					? Option.some(
+							buildEventInsert(orgId, issueId, actorId, "severity_change", timestamp, {
+								payload,
+							}),
+						)
+					: Option.none()
+			// Clearing the severity (null) never escalates; a set severity may.
+			const escalationInsert = Option.flatMap(Option.fromNullOr(severity), (next) =>
+				severityEscalationInsert(orgId, issueId, current.severity, next, source, timestamp),
 			)
-			if (current.severity !== severity) {
-				const payload: StoredJsonRecord = opts?.note
-					? { from: current.severity, to: severity, source, note: opts.note }
-					: { from: current.severity, to: severity, source }
-				yield* recordEvent(orgId, issueId, actorId, "severity_change", {
-					payload,
-					timestamp,
-				})
-			}
-			if (severity !== null) {
-				yield* enqueueSeverityEscalation(orgId, issueId, current.severity, severity, source)
+			// One transaction: a severity that committed without its escalation row
+			// could never page anyone — a retry sees the severity already stored and
+			// returns before reaching the outbox insert.
+			const severityRows = yield* dbExecute((db) =>
+				db.transaction(async (tx) => {
+					const rows = await tx
+						.update(errorIssues)
+						.set({
+							severity,
+							severitySource: nextSource,
+							updatedAt: msToDate(timestamp),
+						})
+						.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId)))
+						.returning(txidColumn)
+					if (Option.isSome(eventInsert))
+						await tx.insert(errorIssueEvents).values(eventInsert.value)
+					if (Option.isSome(escalationInsert)) {
+						await tx.insert(issueEscalations).values(escalationInsert.value).onConflictDoNothing()
+					}
+					return rows
+				}),
+			)
+			if (Option.isSome(eventInsert)) {
+				yield* recordEventAudit(orgId, issueId, actorId, "severity_change", {})
 			}
 			yield* actorsService.touchActor(orgId, actorId, timestamp)
 			const next = yield* requireIssue(orgId, issueId)
@@ -918,6 +962,7 @@ const make: Effect.Effect<
 			hydrateIssueRows,
 			hydrateIssue,
 			recordEvent,
+			buildEvent: buildEventInsert,
 			applyTransition,
 			heartbeatIssue,
 			releaseIssue,

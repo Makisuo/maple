@@ -227,14 +227,23 @@ const seed = async (): Promise<void> => {
 		database,
 	)
 
-	const sessionRows = SEED_SESSIONS.map(
-		(row) =>
-			`(${quote(ORG_ID)}, ${quote(row.sessionId)}, ${quote(row.startTime)}, ${row.durationMs}, ${row.pageViews}, ${row.version}, ${quote(row.visitorId)}, ${row.visitorIsNew}, ${quote(row.referrerHost)}, ${quote(row.country)}, ${quote(row.deviceType)}, ${quote(row.browserName)}, ${quote(row.osName)}, ${quote(row.language)}, ${quote(row.utmSource)}, ${quote(row.host)}, ${quote(row.entryPath)}, ${quote(row.exitPath)})`,
-	).join(",\n")
-	await clickhouseExec(
-		`INSERT INTO session_replays (OrgId, SessionId, StartTime, DurationMs, PageViews, Version, VisitorId, VisitorIsNew, ReferrerHost, Country, DeviceType, BrowserName, OsName, Language, UtmSource, Host, EntryPath, ExitPath) VALUES\n${sessionRows}`,
-		database,
-	)
+	// One INSERT per version, with merges held off. `optimize_on_insert` is on by
+	// default, so a single block collapses a ReplacingMergeTree's duplicates
+	// before they are ever visible — seeding that way leaves this suite asserting
+	// over pre-deduplicated rows, which is the one state it exists to rule out.
+	await clickhouseExec(`SYSTEM STOP MERGES session_replays`, database)
+	for (const version of [...new Set(SEED_SESSIONS.map((row) => row.version))].sort()) {
+		const sessionRows = SEED_SESSIONS.filter((row) => row.version === version)
+			.map(
+				(row) =>
+					`(${quote(ORG_ID)}, ${quote(row.sessionId)}, ${quote(row.startTime)}, ${row.durationMs}, ${row.pageViews}, ${row.version}, ${quote(row.visitorId)}, ${row.visitorIsNew}, ${quote(row.referrerHost)}, ${quote(row.country)}, ${quote(row.deviceType)}, ${quote(row.browserName)}, ${quote(row.osName)}, ${quote(row.language)}, ${quote(row.utmSource)}, ${quote(row.host)}, ${quote(row.entryPath)}, ${quote(row.exitPath)})`,
+			)
+			.join(",\n")
+		await clickhouseExec(
+			`INSERT INTO session_replays (OrgId, SessionId, StartTime, DurationMs, PageViews, Version, VisitorId, VisitorIsNew, ReferrerHost, Country, DeviceType, BrowserName, OsName, Language, UtmSource, Host, EntryPath, ExitPath) VALUES\n${sessionRows}`,
+			database,
+		)
+	}
 }
 
 const runJson = async (sql: string): Promise<ReadonlyArray<Record<string, unknown>>> => {
@@ -418,6 +427,25 @@ describe.skipIf(!clickhouseE2eEnabled)("web analytics raw-vs-rollup parity", () 
 			 WHERE Host != domain(Url) OR PagePath != path(Url)`,
 		)
 		assert.strictEqual(Number(drift[0]?.n), 0, "write-time URL parsing diverged from read-time")
+	})
+
+	/**
+	 * Parity is an equality between two sources, so it holds just as well when
+	 * both are wrong. `session_replays` is a `ReplacingMergeTree(Version)` and the
+	 * seed's s1/s2 carry an un-merged v1 (`PageViews = 0`) beside a v2 reporting
+	 * two page views: a `uniqIf(SessionId, PageViews <= 1)` matches on the v1 row
+	 * and calls every one of them a bounce.
+	 */
+	it("counts a bounce from the session's latest version, not any version", async () => {
+		const rows = await runJson(
+			CH.compileUnsafe(CH.webAnalyticsSummaryQuery({ useProductEvents: false }), window).sql,
+		)
+		const row = rows[0]
+		assert.isDefined(row, "summary returned no rows")
+		// s1 and s2 ended on two page views; only s3, still on its start row, is a
+		// bounce. s4 carries no VisitorId and is outside the measured population.
+		assert.strictEqual(Number(row?.identifiedSessions), 3)
+		assert.strictEqual(Number(row?.bouncedSessions), 1)
 	})
 
 	// A `for` loop, not `describe.each`: the latter OOMs tsc in this repo.

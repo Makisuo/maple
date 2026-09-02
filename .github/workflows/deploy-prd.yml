@@ -122,20 +122,21 @@ jobs:
               env:
                   AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
 
-            # First pass of a stage with the AWS half on: the ingest ACM certificate
-            # is created PENDING_VALIDATION and the 443 listener fails. Finish the
-            # job here — create the validation CNAME in the Cloudflare zone with the
-            # token Infisical already provides, wait for ISSUED, deploy again. A
-            # deploy that failed for any other reason reaches this too: the script
-            # is a no-op on an ISSUED certificate and the retry fails the same way.
-            - name: Validate the ingest certificate and retry the deploy
+            # First pass of a stage with the AWS half on: each service's ACM
+            # certificate is created PENDING_VALIDATION and its 443 listener fails.
+            # Finish the job here — create the validation CNAMEs in the Cloudflare
+            # zone with the token Infisical already provides, wait for ISSUED, deploy
+            # again. A deploy that failed for any other reason reaches this too: the
+            # script is a no-op on an ISSUED certificate and the retry fails the same
+            # way. EVERY certificate-bearing service must be listed, or its first
+            # deploy cannot complete without someone doing this by hand.
+            - name: Validate the service certificates and retry the deploy
               id: retry
               if: ${{ steps.deploy.outcome == 'failure' }}
               env:
-                  INGEST_DOMAIN: ingest.maple.dev
                   AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
               run: |
-                  bash scripts/ingest-cert-validate.sh
+                  bash scripts/acm-cert-validate.sh ingest.maple.dev electric.maple.dev
                   bun run alchemy:deploy:prd
 
             - name: Fail the run if the deploy did not succeed
@@ -143,3 +144,24 @@ jobs:
               run: |
                   echo "::error::alchemy deploy failed and the certificate-validation retry did not recover it (retry outcome: ${{ steps.retry.outcome }})"
                   exit 1
+
+    # A skipped job does not fail its run, so with CI red this workflow reported
+    # SUCCESS while nothing deployed — which is how a broken `main` looked like a
+    # string of clean deploys for several commits, and why an Electric deploy
+    # nobody had noticed was never running took an hour to spot. This job always
+    # runs, so the run's conclusion says what actually happened.
+    deployment-gate:
+        needs: deploy-prd
+        if: ${{ always() }}
+        runs-on: ubuntu-latest
+        steps:
+            - name: Report whether the deploy ran
+              run: |
+                  result="${{ needs.deploy-prd.result }}"
+                  if [ "$result" = "skipped" ]; then
+                      echo "::error::Nothing was deployed: CI did not pass for ${{ github.event.workflow_run.head_sha || github.sha }}. Fix main, then re-run."
+                      exit 1
+                  fi
+                  # A genuine deploy failure already fails its own job and reddens
+                  # the run; there is nothing to add here.
+                  echo "deploy-prd: $result"

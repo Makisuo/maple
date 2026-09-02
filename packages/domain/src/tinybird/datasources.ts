@@ -501,6 +501,19 @@ export const serviceMapDbEdgesHourly = defineDatasource("service_map_db_edges_ho
 		UnsampledSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
 		SampleRateSum: t.simpleAggregateFunction("sum", t.float64()),
 		DbNamespace: t.string().lowCardinality(),
+		// Sample-weighted t-digest of Duration (nanoseconds), so the map's database
+		// nodes can show a real p95 instead of the max they showed for months.
+		// Same state type and weight expression as
+		// `service_map_db_query_shapes_hourly.DurationQuantiles`, which the detail
+		// panel already merges — the node and the panel therefore finalize the
+		// identical statistic off the identical spans.
+		//
+		// Added by migration 0022. Buckets sealed before it hold an empty state,
+		// which merges to nothing; the read path reports 0 and the UI falls back to
+		// the max, labelled as a max. Not backfilled: raw `traces` keeps 30 days
+		// against this table's 365, so a backfill could only ever repair a twelfth
+		// of the window.
+		DurationQuantiles: t.aggregateFunction("quantilesTDigestWeighted(0.5, 0.95), UInt64", t.uint32()),
 	},
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
@@ -609,6 +622,9 @@ export const serviceExternalEdgesHourly = defineDatasource("service_external_edg
 		DurationSumMs: t.simpleAggregateFunction("sum", t.float64()),
 		MaxDurationMs: t.simpleAggregateFunction("max", t.float64()),
 		SampleRateSum: t.simpleAggregateFunction("sum", t.float64()),
+		// See the note on `service_map_db_edges_hourly.DurationQuantiles` — same
+		// state, same reason, same migration.
+		DurationQuantiles: t.aggregateFunction("quantilesTDigestWeighted(0.5, 0.95), UInt64", t.uint32()),
 	},
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
@@ -1062,6 +1078,51 @@ export const traceDetailSpans = defineDatasource("trace_detail_spans", {
 })
 
 export type TraceDetailSpansRow = InferRow<typeof traceDetailSpans>
+
+/**
+ * Filtered projection of GenAI agent spans — every span the ingest gateway
+ * stamped with `maple_ai.vendor.id` — for the Agent Sessions read path
+ * (`aiSessionPageQuery`, `aiSessionListQuery`'s index levels, and
+ * `aiSessionFacetsQuery`).
+ *
+ * Why it exists: detecting agent traces by `mapContains(SpanAttributes, …)` on
+ * raw `traces` cannot be indexed at this shape. GenAI spans are ~0.01% of rows
+ * but arrive continuously — about one per index granule — so the
+ * `mapKeys(SpanAttributes)` bloom index prunes nothing and the scan reads the
+ * fat Map column for every span in the window (measured 2026-08-29: ~3.6s for
+ * one hour, timeout at a day). This table holds only those spans, pre-extracted
+ * to plain columns, so the same detection is a scan of ~10k narrow rows per day.
+ *
+ * The columns are exactly what its readers need — the trace-id set, the
+ * grouping key, the two filter dimensions, and the agent-span bounds that tell
+ * the fan-out which hours to read. Everything else about an agent span (its
+ * failure attributes, its vendor version) is read per-trace off
+ * `trace_detail_spans`, over the page's bounds rather than the caller's window.
+ *
+ * Session ids live only on the turn-owning spans, so `SessionId` is '' for most
+ * rows — resolution to a session key stays per-TRACE at read time, exactly as
+ * documented in `query-engine-integrations/src/ai/ai-sessions.ts`.
+ */
+export const aiTraceIndex = defineDatasource("ai_trace_index", {
+	description:
+		"GenAI agent spans only (maple_ai.vendor.id stamped), pre-extracted to plain columns. Detection/facet surface for the Agent Sessions pages. Populated by materialized view.",
+	jsonPaths: false,
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		Timestamp: t.dateTime64(9),
+		TraceId: t.string(),
+		SessionId: t.string(),
+		VendorId: t.string().lowCardinality(),
+		ServiceName: t.string().lowCardinality(),
+	},
+	engine: engine.mergeTree({
+		partitionKey: "toDate(Timestamp)",
+		sortingKey: ["OrgId", "Timestamp", "TraceId"],
+		ttl: "toDate(Timestamp) + INTERVAL 30 DAY",
+	}),
+})
+
+export type AiTraceIndexRow = InferRow<typeof aiTraceIndex>
 
 /**
  * OpenTelemetry sum/counter metrics datasource
@@ -1579,6 +1640,26 @@ export const serviceOperationsMinutely = defineDatasource("service_operations_mi
 		EstimatedErrorCount: t.simpleAggregateFunction("sum", t.float64()),
 		DurationSum: t.simpleAggregateFunction("sum", t.float64()),
 		DurationQuantiles: t.aggregateFunction("quantilesTDigest(0.5, 0.95)", t.uint64()),
+		// Discriminators added by migration 0023, as additive MEASURES rather than
+		// GROUP BY dimensions: a new dimension would have to join the sorting key,
+		// and on an AggregatingMergeTree a non-key column merges rows together and
+		// sums across the values you were trying to separate. Counting instead keeps
+		// the grain, the cardinality and the sorting key exactly as they were.
+		//
+		// ClassifiedSpanCount is written only by the post-0023 MV, so a bucket where
+		// it is 0 predates the migration and its two siblings mean "unknown", not
+		// "none" — that distinction is what stops historical windows reading as
+		// zero-endpoint. Nothing is backfilled: raw `traces` keeps 30 days against
+		// this table's 90, so a backfill could only ever repair part of the window.
+		ClassifiedSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		// Spans that actually served a request. Outbound HTTP calls normalize to the
+		// same `METHOD /path` name as an endpoint, so without this the API tab lists
+		// a service's own outbound calls as endpoints it serves.
+		ServerSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		// Spans that carried `http.route`. The normalized name falls back to
+		// `url.path`, so a route template and a raw URL are indistinguishable in
+		// SpanName alone — this is the difference.
+		RoutedSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
 	},
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Minute)",
@@ -1616,6 +1697,26 @@ export const serviceOperationsHourly = defineDatasource("service_operations_hour
 		EstimatedErrorCount: t.simpleAggregateFunction("sum", t.float64()),
 		DurationSum: t.simpleAggregateFunction("sum", t.float64()),
 		DurationQuantiles: t.aggregateFunction("quantilesTDigest(0.5, 0.95)", t.uint64()),
+		// Discriminators added by migration 0023, as additive MEASURES rather than
+		// GROUP BY dimensions: a new dimension would have to join the sorting key,
+		// and on an AggregatingMergeTree a non-key column merges rows together and
+		// sums across the values you were trying to separate. Counting instead keeps
+		// the grain, the cardinality and the sorting key exactly as they were.
+		//
+		// ClassifiedSpanCount is written only by the post-0023 MV, so a bucket where
+		// it is 0 predates the migration and its two siblings mean "unknown", not
+		// "none" — that distinction is what stops historical windows reading as
+		// zero-endpoint. Nothing is backfilled: raw `traces` keeps 30 days against
+		// this table's 365, so a backfill could only ever repair part of the window.
+		ClassifiedSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		// Spans that actually served a request. Outbound HTTP calls normalize to the
+		// same `METHOD /path` name as an endpoint, so without this the API tab lists
+		// a service's own outbound calls as endpoints it serves.
+		ServerSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		// Spans that carried `http.route`. The normalized name falls back to
+		// `url.path`, so a route template and a raw URL are indistinguishable in
+		// SpanName alone — this is the difference.
+		RoutedSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
 	},
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toYYYYMM(Hour)",

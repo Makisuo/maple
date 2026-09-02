@@ -335,8 +335,10 @@ function SankeyFigure({
 			],
 			// Pixel-space composite: there is no x/y domain to infer, and letting one
 			// be inferred draws axes over an empty scale.
-			x: null,
-			y: null,
+			scales: {
+				x: null,
+				y: null,
+			},
 			guides: false,
 			// Unlike the polar spike, `focus: "nearest"` DOES engage — the children
 			// are ordinary cartesian marks in pixel coordinates.

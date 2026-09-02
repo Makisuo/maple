@@ -10,9 +10,8 @@
 	],
 	"scripts": {
 		"build": "turbo build",
-		"dev": "turbo dev",
+		"dev": "bun run ./scripts/dev.ts",
 		"prepare": "effect-tsgo unpatch --no-typescript --oxlint && effect-tsgo patch --no-typescript --oxlint",
-		"dev:essentials": "turbo dev --filter=@maple/api --filter=@maple/alerting --filter=@maple/ingest --filter=@maple/web --filter=@maple/scraper --filter=@maple/electric-sync",
 		"docker:build": "COMPOSE_PARALLEL_LIMIT=1 docker compose build",
 		"docker:up": "COMPOSE_PARALLEL_LIMIT=1 docker compose up --build",
 		"db:up": "docker compose up -d postgres electric",
@@ -21,7 +20,6 @@
 		"ch:test": "CLICKHOUSE_E2E=1 CLICKHOUSE_E2E_URL=http://127.0.0.1:8123 bun run --filter=@maple/api test -- src/services/warehouse/sql-catalog.clickhouse.e2e.test.ts src/services/warehouse/WarehouseQueryService.clickhouse.e2e.test.ts src/services/warehouse/web-analytics-parity.clickhouse.e2e.test.ts",
 		"db:migrate:local": "DATABASE_URL=postgres://maple:maple@localhost:5499/maple bun run --cwd packages/db db:migrate",
 		"migrate:prod": "bun run --cwd packages/db ps:apply-schema main",
-		"dev:alerting": "bun --filter=@maple/alerting dev",
 		"format": "oxfmt",
 		"format:check": "oxfmt --check",
 		"lint": "oxlint -c .oxlintrc.effect.json --quiet alchemy.run.ts scripts apps packages lib examples && bun run lint:slack-agent",
@@ -41,6 +39,7 @@
 		"tinybird:manifest:check": "bun run ./scripts/generate-tinybird-project-manifest.ts --check",
 		"clickhouse:schema": "bun run ./scripts/generate-clickhouse-schema.ts && bun run ./scripts/generate-clickhouse-schema-sql.ts && bun run ./scripts/generate-clickhouse-insert-mappings.ts && bun run ./scripts/lint-clickhouse-schema.ts",
 		"clickhouse:schema:check": "bun run ./scripts/generate-clickhouse-schema.ts --check && bun run ./scripts/generate-clickhouse-schema-sql.ts --check && bun run ./scripts/generate-clickhouse-insert-mappings.ts --check && bun run ./scripts/lint-clickhouse-schema.ts && bun run ./scripts/check-local-schema-manifest.ts",
+		"local-schema:bump": "bun run ./scripts/bump-local-schema.ts",
 		"clickhouse:schema:lint": "bun run ./scripts/lint-clickhouse-schema.ts",
 		"check:tokens": "bun run ./scripts/check-token-drift.ts",
 		"ios:openapi": "bun run ./scripts/generate-ios-openapi.ts",
@@ -55,6 +54,7 @@
 		"@effect/platform-node": "4.0.0-rc.111",
 		"@effect/tsgo": "0.36.4",
 		"@effect/vitest": "catalog:effect",
+		"@maple/alchemy-portless": "workspace:*",
 		"@maple/infra": "workspace:*",
 		"@oxlint/plugins": "1.77.0",
 		"@tinybirdco/sdk": "catalog:tinybird",
@@ -78,6 +78,10 @@
 		"vitest": "^4.1.9"
 	},
 	"catalogs": {
+		"charts": {
+			"@tanstack/charts": "0.16.0",
+			"@tanstack/charts-scales": "0.16.0"
+		},
 		"clickhouse": {
 			"@clickhouse/client-web": "^1.21.0"
 		},

@@ -130,7 +130,7 @@ export const errorDetail = Effect.fn("Observability.errorDetail")(function* (inp
 					startTime: t.startTime,
 					errorMessage: t.errorMessage ?? "",
 					logs: pipe(
-						i < logsResults.length ? logsResults[i]!.data : [],
+						logsResults[i]?.data ?? [],
 						Arr.take(5),
 						Arr.map((l) => ({
 							timestamp: String(l.timestamp),

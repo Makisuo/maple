@@ -6,12 +6,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui
 import type { ListHostsResponse } from "@maple/domain/http"
 
 import { HostStatusBadge } from "./status-badge"
-import { InlineMetricBars } from "./primitives/inline-bars"
+import { MeterRows } from "./primitives/meter-rows"
+import { MetaLine } from "./primitives/meta-line"
 import {
 	ColumnHead,
 	DataTable,
 	type SortControls,
-	MetaChip,
 	ROW_LINK_CLASS,
 	useTableSort,
 } from "./primitives/data-table"
@@ -100,27 +100,19 @@ export function HostTable({ hosts, waiting }: HostTableProps) {
 						<div className="truncate font-mono text-[13px] font-medium text-foreground transition-colors group-hover:text-primary">
 							{host.hostName}
 						</div>
-						<div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-							{host.osType && <MetaChip>{host.osType}</MetaChip>}
-							{host.hostArch && (
-								<>
-									<span className="text-foreground/20">·</span>
-									<MetaChip>{host.hostArch}</MetaChip>
-								</>
-							)}
-							{host.cloudProvider && (
-								<>
-									<span className="text-foreground/20">·</span>
-									<MetaChip>{host.cloudProvider}</MetaChip>
-								</>
-							)}
-						</div>
+						<MetaLine items={[host.osType, host.hostArch, host.cloudProvider]} />
 					</div>
 					<div className="w-[88px]">
 						<HostStatusBadge lastSeen={host.lastSeen} />
 					</div>
 					<div className="w-[200px]">
-						<InlineMetricBars cpu={host.cpuPct} memory={host.memoryPct} disk={host.diskPct} />
+						<MeterRows
+							meters={[
+								{ label: "CPU", fraction: host.cpuPct },
+								{ label: "MEM", fraction: host.memoryPct },
+								{ label: "DSK", fraction: host.diskPct },
+							]}
+						/>
 					</div>
 					<div className="hidden w-[80px] text-right font-mono text-[12px] tabular-nums text-foreground/80 lg:block">
 						{formatLoad(host.load15)}

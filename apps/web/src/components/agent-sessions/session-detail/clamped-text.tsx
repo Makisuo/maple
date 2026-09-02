@@ -47,12 +47,17 @@ export function ClampedText({
 	const expanded = controlledExpanded ?? localExpanded
 	const [clamped, setClamped] = useState(false)
 	const bodyRef = useRef<HTMLDivElement>(null)
+	/** Which of the three bodies is mounted. Same text laid out as markdown and
+	 *  as pre-wrapped raw are different heights, so a view switch has to
+	 *  re-measure — and `body` itself is a fresh node every render, so naming
+	 *  the CHOICE is what keeps the effect from running forever. */
+	const rendering = body !== undefined ? "body" : html !== undefined ? "html" : "text"
 
 	useLayoutEffect(() => {
-		const body = bodyRef.current
-		if (body === null || expanded) return
-		setClamped(body.scrollHeight > body.clientHeight + 1)
-	}, [text, expanded])
+		const measured = bodyRef.current
+		if (measured === null || expanded) return
+		setClamped(measured.scrollHeight > measured.clientHeight + 1)
+	}, [text, rendering, expanded])
 
 	return (
 		<div className="min-w-0">

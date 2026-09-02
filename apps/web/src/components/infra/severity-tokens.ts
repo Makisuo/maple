@@ -50,9 +50,6 @@ export const STATUS_RING: Record<HostStatus, string> = {
 	down: "ring-[color-mix(in_oklab,var(--severity-error)_45%,transparent)]",
 } satisfies Record<HostStatus, string>
 
-/** Pulse fill behind an active status dot. */
-export const STATUS_PULSE = "bg-[color-mix(in_oklab,var(--severity-info)_55%,transparent)]"
-
 const STATUS_LABEL: Record<HostStatus, string> = {
 	active: "Active",
 	idle: "Idle",

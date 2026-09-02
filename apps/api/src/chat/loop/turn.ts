@@ -455,11 +455,18 @@ const runStep = (
 		const settleAndRecurse = Stream.unwrap(
 			Effect.gen(function* () {
 				if (failed) return Stream.empty
+
+				const response = LLMResponse.fromEvents(collected)
+				// Accounted *before* the abort check: the provider served this step and charges for
+				// it whether or not the user has since stopped the turn, and the session runner
+				// bills what this accumulator holds. A step interrupted before the provider's
+				// terminal event reports no usage at all, so there is nothing to recover there.
+				if (response && input.usage) addUsage(input.usage, response.usage)
+
 				// Aborted between steps: the session already recorded the terminal event, so stop
 				// without emitting a second one.
 				if (!isCurrent(input)) return Stream.empty
 
-				const response = LLMResponse.fromEvents(collected)
 				// A clean EOF without a provider terminal event is not a successful answer. Treating it
 				// as `stop` produced the same empty bubble as a genuinely blank model completion.
 				if (!response) {
@@ -470,11 +477,20 @@ const runStep = (
 					})
 				}
 
-				if (input.usage) addUsage(input.usage, response.usage)
-
+				// The completion is an exactly-once output channel: a response carrying
+				// duplicate completion calls must not run it twice (competing submits
+				// would leave the report reflecting one payload and its side effects
+				// another). Keep the first and drop the rest before any dispatch.
+				let completionSeen = false
 				const calls = response.events
 					.filter(LLMEvent.is.toolCall)
 					.filter((call) => !call.providerExecuted)
+					.filter((call) => {
+						if (call.name !== input.completion?.name) return true
+						if (completionSeen) return false
+						completionSeen = true
+						return true
+					})
 				const finishReason = response.finishReason?.normalized
 				const providerFailure = response.events.find(LLMEvent.is.providerError)
 

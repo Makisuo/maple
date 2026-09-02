@@ -43,9 +43,10 @@ export const ORG_MEMBERSHIP_CACHE_BUCKET = "org-membership"
  * and the extra Clerk volume is small. Do not "fix" it by removing the cache:
  * this read sits in auth, in front of every request that carries the header.
  *
- * A Clerk webhook on `organizationMembership.deleted`/`.updated` calling
- * `edgeCache.invalidate({ bucket, key: userId })` would close the window
- * properly, and is the follow-up worth doing.
+ * The Clerk webhook on `organizationMembership.deleted`/`.updated` now closes
+ * the window from the other side: `MembershipRevocationService` invalidates
+ * `{ bucket, key: userId }` and drops the memo. These TTLs remain the ceiling
+ * for the case where the webhook is missed or delayed.
  */
 const MEMBERSHIP_MEMO_TTL_MS = 60_000
 const MEMBERSHIP_CACHE_TTL_SECONDS = 300
@@ -76,6 +77,17 @@ interface MemoEntry {
 // Per-isolate tier. A warm isolate answers with zero network; the shared tier
 // behind it is what keeps Clerk out of the path across isolates.
 const membershipMemo = new Map<string, MemoEntry>()
+
+/**
+ * Drop one user's memoized memberships. The shared tier is evicted through
+ * `edgeCache.invalidate`, but the per-isolate memo answers with zero network
+ * and would otherwise keep serving a removed member for up to a minute.
+ * Only the isolate that handles the webhook is reached — the shared eviction
+ * is what bounds the rest.
+ */
+export const forgetMembershipMemo = (userId: UserId): void => {
+	membershipMemo.delete(userId)
+}
 
 const decodeOrgIdOption = Schema.decodeUnknownOption(OrgId)
 const decodeRoleNameOption = Schema.decodeUnknownOption(RoleName)

@@ -1,3 +1,14 @@
+import { Schema } from "effect"
+
+/**
+ * A slot index that no longer holds an entry. The list, the free list, and the
+ * key map are maintained together, so reaching one is a bug in this file — not
+ * an input the caller can produce, and not something a caller could handle.
+ */
+class LruSlotError extends Schema.TaggedError<LruSlotError>()("@maple/query-engine/drain/LruSlotError", {
+	slot: Schema.Number,
+}) {}
+
 interface LruEntry<V> {
 	key: number
 	value: V
@@ -20,6 +31,18 @@ export class LruCache<V> {
 
 	constructor(capacity: number) {
 		this.capacity = capacity
+	}
+
+	/**
+	 * The entry at a slot the caller has already established is live — from
+	 * `map`, from `head`/`tail`, or from a neighbour link. Replaces a bare `!`:
+	 * the assertion is the same, but a broken invariant now names the slot
+	 * instead of surfacing as `undefined` two frames later.
+	 */
+	private entryAt(slot: number): LruEntry<V> {
+		const entry = this.entries[slot]
+		if (entry === null || entry === undefined) throw new LruSlotError({ slot })
+		return entry
 	}
 
 	get size(): number {
@@ -49,8 +72,7 @@ export class LruCache<V> {
 	put(key: number, value: V): [number, V] | undefined {
 		const existingSlot = this.map.get(key)
 		if (existingSlot !== undefined) {
-			const entry = this.entries[existingSlot]!
-			entry.value = value
+			this.entryAt(existingSlot).value = value
 			this.moveToHead(existingSlot)
 			return undefined
 		}
@@ -68,7 +90,7 @@ export class LruCache<V> {
 		})
 
 		if (this.head !== null) {
-			this.entries[this.head]!.prev = slot
+			this.entryAt(this.head).prev = slot
 		}
 		this.head = slot
 		if (this.tail === null) {
@@ -84,7 +106,7 @@ export class LruCache<V> {
 		if (slot === undefined) return undefined
 		this.map.delete(key)
 		this.unlink(slot)
-		const entry = this.entries[slot]!
+		const entry = this.entryAt(slot)
 		this.entries[slot] = null
 		this.freeSlots.push(slot)
 		return entry.value
@@ -101,8 +123,8 @@ export class LruCache<V> {
 	}
 
 	private allocSlot(entry: LruEntry<V>): number {
-		if (this.freeSlots.length > 0) {
-			const slot = this.freeSlots.pop()!
+		const slot = this.freeSlots.pop()
+		if (slot !== undefined) {
 			this.entries[slot] = entry
 			return slot
 		}
@@ -111,14 +133,14 @@ export class LruCache<V> {
 	}
 
 	private unlink(slot: number): void {
-		const entry = this.entries[slot]!
+		const entry = this.entryAt(slot)
 		if (entry.prev !== null) {
-			this.entries[entry.prev]!.next = entry.next
+			this.entryAt(entry.prev).next = entry.next
 		} else {
 			this.head = entry.next
 		}
 		if (entry.next !== null) {
-			this.entries[entry.next]!.prev = entry.prev
+			this.entryAt(entry.next).prev = entry.prev
 		} else {
 			this.tail = entry.prev
 		}
@@ -127,11 +149,11 @@ export class LruCache<V> {
 	private moveToHead(slot: number): void {
 		if (this.head === slot) return
 		this.unlink(slot)
-		const entry = this.entries[slot]!
+		const entry = this.entryAt(slot)
 		entry.prev = null
 		entry.next = this.head
 		if (this.head !== null) {
-			this.entries[this.head]!.prev = slot
+			this.entryAt(this.head).prev = slot
 		}
 		this.head = slot
 		if (this.tail === null) {
@@ -142,7 +164,7 @@ export class LruCache<V> {
 	private evictTail(): [number, V] | undefined {
 		if (this.tail === null) return undefined
 		const tailSlot = this.tail
-		const entry = this.entries[tailSlot]!
+		const entry = this.entryAt(tailSlot)
 		const key = entry.key
 		const value = entry.value
 		this.map.delete(key)

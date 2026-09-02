@@ -42,6 +42,24 @@ const isPreviewQueryReady = (form: RuleFormState): boolean => {
 }
 
 /**
+ * The form with every field the preview query ignores pinned to a constant.
+ *
+ * The retained query atom is keyed by the whole payload, so a keystroke in the
+ * rule's name or notes used to mint a fresh atom — and a fresh warehouse
+ * request — per character, none of which changed the preview. Exported for the
+ * regression test.
+ */
+export const toPreviewForm = (form: RuleFormState): RuleFormState => ({
+	...form,
+	name: "Untitled rule",
+	notes: "",
+	tags: [],
+	destinationIds: [],
+	notificationTitle: "",
+	notificationBody: "",
+})
+
+/**
  * Evaluator-faithful preview data for the shared alert rule chart
  * ({@link import("@/components/alerts/alert-rule-chart").AlertRuleChart}).
  *
@@ -67,11 +85,7 @@ export function useAlertRulePreview(
 
 	const payload = useMemo((): V2AlertRulePreviewParams | null => {
 		if (deferredForm === null || !isPreviewQueryReady(deferredForm)) return null
-		// The rule params require a non-empty name; the preview doesn't care,
-		// so substitute a placeholder while the user hasn't typed one yet.
-		const rule = buildRuleCreateParamsV2(
-			deferredForm.name.trim().length > 0 ? deferredForm : { ...deferredForm, name: "Untitled rule" },
-		)
+		const rule = buildRuleCreateParamsV2(toPreviewForm(deferredForm))
 		return {
 			rule,
 			start_time: IsoDateTimeString.make(new Date(normalizeTimestampInput(startTime)).toISOString()),

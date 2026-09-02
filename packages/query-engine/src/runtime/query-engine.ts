@@ -262,19 +262,19 @@ function traceServicePartitionWindow(
  * (`toJSONString` — Map columns can't survive an `argMin`). Decode defensively:
  * a malformed value degrades to an empty map, never a thrown defect.
  */
+const decodeProjectedAttributes = Schema.decodeUnknownOption(
+	Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+)
+
 function parseProjectedAttributes(raw: unknown): Record<string, string> {
 	if (typeof raw !== "string" || raw.length === 0) return {}
-	try {
-		const parsed: unknown = JSON.parse(raw)
-		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {}
-		const out: Record<string, string> = {}
-		for (const [key, value] of Object.entries(parsed)) {
-			if (typeof value === "string" && value.length > 0) out[key] = value
-		}
-		return out
-	} catch {
-		return {}
+	const parsed = decodeProjectedAttributes(raw)
+	if (Option.isNone(parsed)) return {}
+	const out: Record<string, string> = {}
+	for (const [key, value] of Object.entries(parsed.value)) {
+		if (typeof value === "string" && value.length > 0) out[key] = value
 	}
+	return out
 }
 
 function servicesForTraceRow(
@@ -688,13 +688,15 @@ function groupTimeSeriesRows<T extends { bucket: string | Date; groupName: strin
 
 	for (const row of rows) {
 		const bucket = normalizeBucket(row.bucket)
-		if (!bucketMap.has(bucket)) {
-			bucketMap.set(bucket, {})
+		let series = bucketMap.get(bucket)
+		if (series === undefined) {
+			series = {}
+			bucketMap.set(bucket, series)
 			if (!fillOptions) {
 				bucketOrder.push(bucket)
 			}
 		}
-		bucketMap.get(bucket)![row.groupName] = valueExtractor(row)
+		series[row.groupName] = valueExtractor(row)
 	}
 
 	if (fillOptions) {
@@ -705,9 +707,11 @@ function groupTimeSeriesRows<T extends { bucket: string | Date; groupName: strin
 		}
 	}
 
+	// Every ordered bucket was either seeded above or written while iterating
+	// rows; an empty series is the honest value for one that was neither.
 	return bucketOrder.map((bucket) => ({
 		bucket,
-		series: bucketMap.get(bucket)!,
+		series: bucketMap.get(bucket) ?? {},
 	}))
 }
 
@@ -771,9 +775,11 @@ function groupAllMetricsTimeSeriesRows<
 		}
 	}
 
+	// Every ordered bucket was either seeded above or written while iterating
+	// rows; an empty series is the honest value for one that was neither.
 	return bucketOrder.map((bucket) => ({
 		bucket,
-		series: bucketMap.get(bucket)!,
+		series: bucketMap.get(bucket) ?? {},
 	}))
 }
 
@@ -1262,13 +1268,17 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 		}
 
 		const range = yield* validateExecute(request)
+		// Always a number. Only a timeseries query carries an explicit
+		// `bucketSeconds` or reports one on the span, but every timeseries branch
+		// below needs the value, and a `number | undefined` here meant each of them
+		// re-asserted the correlation the type system could not follow.
+		const isTimeseries = request.query.kind === "timeseries"
 		const bucketSeconds =
-			request.query.kind === "timeseries"
-				? (request.query.bucketSeconds ?? computeBucketSeconds(range.startMs, range.endMs))
-				: undefined
-		if (bucketSeconds) yield* Effect.annotateCurrentSpan("query.bucketSeconds", bucketSeconds)
+			(isTimeseries ? request.query.bucketSeconds : undefined) ??
+			computeBucketSeconds(range.startMs, range.endMs)
+		if (isTimeseries) yield* Effect.annotateCurrentSpan("query.bucketSeconds", bucketSeconds)
 
-		const fillOptions = bucketSeconds
+		const fillOptions = isTimeseries
 			? {
 					startMs: range.startMs,
 					endMs: range.endMs,
@@ -1295,7 +1305,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 								groupBy: tracesQuery.groupBy as string[] | undefined,
 								apdexThresholdMs:
 									tracesQuery.metric === "apdex" ? tracesQuery.apdexThresholdMs : undefined,
-								bucketSeconds: bucketSeconds!,
+								bucketSeconds,
 								seriesLimit: tracesQuery.seriesLimit,
 								overviewTiers,
 							}),
@@ -1303,7 +1313,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 							orgId: tenant.orgId,
 							startTime: request.startTime,
 							endTime: request.endTime,
-							bucketSeconds: bucketSeconds!,
+							bucketSeconds,
 						},
 						"tracesAllMetricsTimeseries",
 					)
@@ -1359,14 +1369,14 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						groupBy: tracesQuery.groupBy as string[] | undefined,
 						apdexThresholdMs:
 							tracesQuery.metric === "apdex" ? tracesQuery.apdexThresholdMs : undefined,
-						bucketSeconds: bucketSeconds!,
+						bucketSeconds,
 						seriesLimit: tracesQuery.seriesLimit,
 					}),
 				{
 					orgId: tenant.orgId,
 					startTime: request.startTime,
 					endTime: request.endTime,
-					bucketSeconds: bucketSeconds!,
+					bucketSeconds,
 				},
 				"tracesTimeseries",
 			)
@@ -1387,7 +1397,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 					warehouse,
 					logsTimeseries,
 					tenant,
-					toLogsTimeseriesInput(request.startTime, request.endTime, request.query, bucketSeconds!),
+					toLogsTimeseriesInput(request.startTime, request.endTime, request.query, bucketSeconds),
 				),
 				logsTimeseries.id,
 			)
@@ -1409,7 +1419,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 				{
 					startTime: request.startTime,
 					endTime: request.endTime,
-					bucketSeconds: bucketSeconds!,
+					bucketSeconds,
 				},
 				{ value: "metricsTimeseries", rate: "metricsRateIncrease" },
 			)

@@ -65,13 +65,15 @@ describe("serviceOperationsSummaryQuery", () => {
 		expect(sql).toContain("sum(SampleRate) AS bEstimatedSpanCount")
 		expect(sql).toContain("sumIf(SampleRate, StatusCode = 'Error') AS bEstimatedErrorCount")
 		expect(sql).toContain("countIf(StatusCode = 'Error') AS bErrorCount")
-		expect(sql).toContain("quantilesTDigestState(0.5, 0.95)(Duration)")
-		expect(sql).toContain("quantilesTDigestMergeState(0.5, 0.95)(DurationQuantiles)")
+		// Three levels merged out of two-level stored state — see RAW_DURATION_STATE.
+		expect(sql).toContain("quantilesTDigestState(0.5, 0.95, 0.99)(Duration)")
+		expect(sql).toContain("quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles)")
 		expect(sql).toContain(
 			"if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedErrorCount) / sum(bEstimatedSpanCount), 0) AS errorRate",
 		)
-		expect(sql).toContain("quantilesTDigestMerge(0.5, 0.95)(bDurationQuantiles), 1")
-		expect(sql).toContain("quantilesTDigestMerge(0.5, 0.95)(bDurationQuantiles), 2")
+		expect(sql).toContain("quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1")
+		expect(sql).toContain("quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2")
+		expect(sql).toContain("quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3")
 	})
 
 	it("applies environment filter via ResourceAttributes", () => {
@@ -218,10 +220,12 @@ describe("row schemas (BYO-CH UInt64-as-string)", () => {
 			avgDurationMs: 12.5,
 			p50DurationMs: "10",
 			p95DurationMs: "42",
+			p99DurationMs: "77",
 		})
 		expect(decoded.spanCount).toBe(1200)
 		expect(decoded.errorRate).toBeCloseTo(0.0025)
 		expect(decoded.p95DurationMs).toBe(42)
+		expect(decoded.p99DurationMs).toBe(77)
 	})
 
 	it("decodes numeric strings in timeseries rows", () => {

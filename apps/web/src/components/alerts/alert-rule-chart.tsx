@@ -563,28 +563,30 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 						]),
 				focusCrosshair(chromeColors),
 			],
-			x: {
-				// A real time scale over the bucket instants, which is what Recharts'
-				// `type="number" scale="time"` was.
-				scale: scaleTime().domain([new Date(domain.min), new Date(domain.max)]),
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 8,
-						format: (value: Date) => formatTime(value.getTime(), "tick"),
+			scales: {
+				x: {
+					// A real time scale over the bucket instants, which is what Recharts'
+					// `type="number" scale="time"` was.
+					scale: scaleTime().domain([new Date(domain.min), new Date(domain.max)]),
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 8,
+							format: (value: Date) => formatTime(value.getTime(), "tick"),
+						},
+						tickLabels: { thin: { minGap: 12 } },
 					},
-					tickLabels: { thin: { minGap: 12 } },
 				},
-			},
-			y: {
-				scale: scaleLinear().domain(yDomain),
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 8,
-						format: (value: number) => formatSignalValue(signalType, value),
+				y: {
+					scale: scaleLinear().domain(yDomain),
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 8,
+							format: (value: number) => formatSignalValue(signalType, value),
+						},
 					},
 				},
 			},

@@ -20,7 +20,7 @@ import { rawCompiledQuery } from "@maple/query-engine/ch"
 import { parseStatement, type ClickHouseStatement } from "@maple-dev/clickhouse-builder/sql"
 import { EdgeCacheService, MemoryCacheBackendLive } from "@maple/cache"
 import { makeWarehouseExecutor, type ResolvedWarehouseConfig } from "@maple/query-engine/execution"
-import { __testables, WarehouseQueryService } from "./WarehouseQueryService"
+import { __testables, WarehouseQueryService, WarehouseRedirectRefusedError } from "./WarehouseQueryService"
 import {
 	OrgClickHouseSettingsService,
 	type OrgClickHouseSettingsServiceApi,
@@ -966,5 +966,49 @@ describe("isEmptyJsonBodyError (empty Tinybird body ⇒ zero rows)", () => {
 		assert.isFalse(__testables.isEmptyJsonBodyError(new Error("Unexpected end of JSON input")))
 		assert.isFalse(__testables.isEmptyJsonBodyError("Unexpected end of JSON input"))
 		assert.isFalse(__testables.isEmptyJsonBodyError(null))
+	})
+})
+
+describe("BYO ClickHouse redirect refusal", () => {
+	// A BYO endpoint is validated when saved, not when used, so a target that
+	// passed validation and then answers a query with a 307 must not be followed
+	// into the internal network.
+	const chConfig = {
+		kind: "clickhouse" as const,
+		url: "https://ch.example.com",
+		username: "u",
+		password: "p",
+		database: "default",
+	}
+
+	it("refuses a 3xx from the query endpoint and never follows the Location", async () => {
+		const seen: RequestInit[] = []
+		const requestFetch: typeof fetch = async (_input, init) => {
+			seen.push(init ?? {})
+			return new Response("", { status: 307, headers: { location: "http://169.254.169.254/" } })
+		}
+
+		const client = __testables.createClickHouseSqlClient(chConfig, requestFetch)
+		let thrown: unknown
+		try {
+			await client.sql(parseStatement("SELECT 1"), undefined)
+		} catch (error) {
+			thrown = error
+		}
+
+		assert.instanceOf(thrown, WarehouseRedirectRefusedError)
+		assert.match((thrown as Error).message, /redirect responses are not allowed \(307\)/)
+		// The Location is kept as context, so a refusal is diagnosable without
+		// being confusable with an ordinary 4xx from the cluster.
+		assert.strictEqual((thrown as WarehouseRedirectRefusedError).location, "http://169.254.169.254/")
+		// Exactly one request, and it opted out of automatic redirect following.
+		assert.strictEqual(seen.length, 1)
+		assert.strictEqual(seen[0]?.redirect, "manual")
+	})
+
+	it("passes an ordinary 2xx response through untouched", async () => {
+		const requestFetch: typeof fetch = async () => new Response('{"n":1}\n', { status: 200 })
+		const response = await __testables.redirectRefusingFetch(requestFetch)("https://ch.example.com")
+		assert.strictEqual(response.status, 200)
 	})
 })

@@ -16,6 +16,7 @@ import {
 	type Layout3DMode,
 	type Vec3,
 } from "./layout"
+import { layoutKey, type ServiceMap3DTuning } from "./tuning"
 
 /**
  * The WebGL half of the 3D service-map experiment.
@@ -26,8 +27,6 @@ import {
  */
 
 const BACKDROP = "#0a0d14"
-/** Label height as a share of viewport height (sprites are size-attenuation-free). */
-const LABEL_HEIGHT = 0.045
 const vec = ([x, y, z]: Vec3) => new THREE.Vector3(x, y, z)
 
 interface Pipe {
@@ -119,9 +118,6 @@ const geometryFor = (node: Node3D): THREE.BufferGeometry => {
 }
 
 const VIEW_DIRECTION: Vec3 = [0.66, 0.34, 0.72]
-const CAMERA_FOV = 46
-/** Share of the frustum the graph should occupy after framing. */
-const FRAME_FILL = 0.9
 /** Frames to keep re-fitting while the canvas settles into its flex parent. */
 const SETTLE_FRAMES = 30
 
@@ -139,13 +135,13 @@ function frameCamera(
 	target: THREE.Vector3,
 	points: ReadonlyArray<Vec3>,
 	aspect: number,
+	lens: { fov: number; fill: number },
 ): void {
 	const direction = vec(VIEW_DIRECTION).normalize()
 	const probe = new THREE.Vector3()
 	const right = new THREE.Vector3()
 	const up = new THREE.Vector3()
-	let distance = fitCamera(points, { direction: VIEW_DIRECTION, fovDegrees: CAMERA_FOV, aspect })
-		.distance
+	let distance = fitCamera(points, { direction: VIEW_DIRECTION, fovDegrees: lens.fov, aspect }).distance
 
 	for (let pass = 0; pass < 4; pass++) {
 		camera.position.copy(target).addScaledVector(direction, distance)
@@ -164,14 +160,14 @@ function frameCamera(
 			maxY = Math.max(maxY, probe.y)
 		}
 
-		const halfHeight = Math.tan((CAMERA_FOV * Math.PI) / 360) * distance
+		const halfHeight = Math.tan((lens.fov * Math.PI) / 360) * distance
 		right.setFromMatrixColumn(camera.matrixWorld, 0)
 		up.setFromMatrixColumn(camera.matrixWorld, 1)
 		target
 			.addScaledVector(right, ((minX + maxX) / 2) * halfHeight * aspect)
 			.addScaledVector(up, ((minY + maxY) / 2) * halfHeight)
 
-		distance *= Math.min(1.6, Math.max(0.7, Math.max(maxX - minX, maxY - minY) / 2 / FRAME_FILL))
+		distance *= Math.min(1.6, Math.max(0.7, Math.max(maxX - minX, maxY - minY) / 2 / lens.fill))
 	}
 
 	camera.position.copy(target).addScaledVector(direction, distance)
@@ -187,10 +183,12 @@ function Controls({
 	autoRotate,
 	points,
 	layoutId,
+	tuning,
 }: {
 	autoRotate: boolean
 	points: ReadonlyArray<Vec3>
 	layoutId: string
+	tuning: ServiceMap3DTuning
 }) {
 	const camera = useThree((state) => state.camera)
 	const domElement = useThree((state) => state.gl.domElement)
@@ -212,9 +210,13 @@ function Controls({
 	const framedFor = useRef<string | null>(null)
 	const settleFrames = useRef(0)
 
+	const { cameraFov, frameFill, autoRotateSpeed } = tuning
+
+	// A dialed lens changes the fit, not just the projection, so it re-settles
+	// exactly like a new layout does.
 	useEffect(() => {
 		settleFrames.current = 0
-	}, [layoutId])
+	}, [layoutId, cameraFov, frameFill])
 
 	// Framing happens on the first frame rather than in an effect: `<Canvas>` is
 	// the parent, so R3F applies its own `camera` prop after every child effect
@@ -228,27 +230,29 @@ function Controls({
 		// behind, so a single early fit leaves the graph off-centre for good.
 		const rect = domElement.getBoundingClientRect()
 		const aspect = rect.width / Math.max(rect.height, 1)
-		const key = `${layoutId}@${aspect.toFixed(3)}`
+		const key = `${layoutId}@${aspect.toFixed(3)}@${cameraFov}@${frameFill}`
 		const settling = settleFrames.current < SETTLE_FRAMES
 		if (settling) settleFrames.current += 1
 		if ((settling || framedFor.current !== key) && camera instanceof THREE.PerspectiveCamera) {
 			framedFor.current = key
-			camera.fov = CAMERA_FOV
+			camera.fov = cameraFov
 			camera.near = 0.1
 			camera.far = 600
 			camera.aspect = aspect
 			camera.updateProjectionMatrix()
-			const target = vec(fitCamera(points, {
-				direction: VIEW_DIRECTION,
-				fovDegrees: CAMERA_FOV,
-				aspect,
-			}).target)
-			frameCamera(camera, target, points, aspect)
+			const target = vec(
+				fitCamera(points, {
+					direction: VIEW_DIRECTION,
+					fovDegrees: cameraFov,
+					aspect,
+				}).target,
+			)
+			frameCamera(camera, target, points, aspect, { fov: cameraFov, fill: frameFill })
 			instance.target.copy(target)
 		}
 
 		instance.autoRotate = autoRotate
-		instance.autoRotateSpeed = 0.55
+		instance.autoRotateSpeed = autoRotateSpeed
 		instance.update()
 	})
 
@@ -261,6 +265,7 @@ interface NodeMeshProps {
 	color: string
 	scale: number
 	halo: THREE.Texture
+	labelHeight: number
 	state: "normal" | "focused" | "dimmed"
 	onSelect: (id: string | null) => void
 	onHover: (id: string | null) => void
@@ -272,6 +277,7 @@ const NodeMesh = memo(function NodeMesh({
 	color,
 	scale,
 	halo,
+	labelHeight,
 	state,
 	onSelect,
 	onHover,
@@ -281,10 +287,13 @@ const NodeMesh = memo(function NodeMesh({
 		() => makeLabelTexture(node.label, node.system ?? node.namespace),
 		[node.label, node.system, node.namespace],
 	)
-	useEffect(() => () => {
-		geometry.dispose()
-		label.texture.dispose()
-	}, [geometry, label])
+	useEffect(
+		() => () => {
+			geometry.dispose()
+			label.texture.dispose()
+		},
+		[geometry, label],
+	)
 
 	const three = useMemo(() => new THREE.Color(color), [color])
 	const dimmed = state === "dimmed"
@@ -335,7 +344,7 @@ const NodeMesh = memo(function NodeMesh({
 				// `sizeAttenuation: false` pins the label to a constant share of the
 				// viewport, so text stays readable at any zoom instead of turning into
 				// a billboard the size of the node it labels.
-				<sprite position={[0, scale * 1.55, 0]} scale={[LABEL_HEIGHT * label.aspect, LABEL_HEIGHT, 1]}>
+				<sprite position={[0, scale * 1.55, 0]} scale={[labelHeight * label.aspect, labelHeight, 1]}>
 					<spriteMaterial
 						map={label.texture}
 						transparent
@@ -350,7 +359,15 @@ const NodeMesh = memo(function NodeMesh({
 	)
 })
 
-function Pipes({ pipes, dimmedEdges }: { pipes: ReadonlyArray<Pipe>; dimmedEdges: ReadonlySet<number> }) {
+function Pipes({
+	pipes,
+	dimmedEdges,
+	opacity,
+}: {
+	pipes: ReadonlyArray<Pipe>
+	dimmedEdges: ReadonlySet<number>
+	opacity: number
+}) {
 	const geometries = useMemo(
 		() => pipes.map((pipe) => new THREE.TubeGeometry(pipe.curve, 48, pipe.radius, 10, false)),
 		[pipes],
@@ -371,7 +388,7 @@ function Pipes({ pipes, dimmedEdges }: { pipes: ReadonlyArray<Pipe>; dimmedEdges
 							roughness={0.5}
 							metalness={0.15}
 							transparent
-							opacity={dimmed ? 0.06 : 0.42}
+							opacity={dimmed ? 0.06 : opacity}
 						/>
 					</mesh>
 				)
@@ -396,11 +413,13 @@ function Packets({
 	packets,
 	dimmedEdges,
 	running,
+	speed,
 }: {
 	pipes: ReadonlyArray<Pipe>
 	packets: ReadonlyArray<Packet>
 	dimmedEdges: ReadonlySet<number>
 	running: boolean
+	speed: number
 }) {
 	const mesh = useRef<THREE.InstancedMesh>(null)
 	const clock = useRef(0)
@@ -420,7 +439,7 @@ function Packets({
 	useFrame((_, delta) => {
 		const instance = mesh.current
 		if (!instance) return
-		if (running) clock.current += delta
+		if (running) clock.current += delta * speed
 		const time = clock.current
 		packets.forEach((packet, index) => {
 			const pipe = pipes[packet.pipe]!
@@ -440,17 +459,30 @@ function Packets({
 	return (
 		<instancedMesh ref={mesh} args={[undefined, undefined, packets.length]} frustumCulled={false}>
 			<sphereGeometry args={[1, 10, 8]} />
-			<meshBasicMaterial toneMapped={false} blending={THREE.AdditiveBlending} transparent depthWrite={false} />
+			<meshBasicMaterial
+				toneMapped={false}
+				blending={THREE.AdditiveBlending}
+				transparent
+				depthWrite={false}
+			/>
 		</instancedMesh>
 	)
 }
 
 /** One faint disc per storey, so the floors read as floors and not as free space. */
-function TierPlanes({ tierCount, radius }: { tierCount: number; radius: number }) {
+function TierPlanes({
+	tierCount,
+	radius,
+	floorGap,
+}: {
+	tierCount: number
+	radius: number
+	floorGap: number
+}) {
 	return (
 		<group>
 			{Array.from({ length: tierCount }, (_, tier) => (
-				<mesh key={tier} position={[0, -tier * 7 - 1.4, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+				<mesh key={tier} position={[0, -tier * floorGap - 1.4, 0]} rotation={[-Math.PI / 2, 0, 0]}>
 					<ringGeometry args={[radius * 1.34, radius * 1.4, 96]} />
 					<meshBasicMaterial
 						color="#3d5680"
@@ -471,6 +503,7 @@ export interface ServiceMap3DProps {
 	colorMode: ColorMode3D
 	flowing: boolean
 	autoRotate: boolean
+	tuning: ServiceMap3DTuning
 	selectedId: string | null
 	onSelect: (id: string | null) => void
 	onHover: (id: string | null) => void
@@ -482,6 +515,7 @@ export function ServiceMap3D({
 	colorMode,
 	flowing,
 	autoRotate,
+	tuning,
 	selectedId,
 	onSelect,
 	onHover,
@@ -498,7 +532,9 @@ export function ServiceMap3D({
 		return () => cancelAnimationFrame(frame)
 	})
 
-	const layout = useMemo(() => layoutGraph(topology, layoutMode), [topology, layoutMode])
+	const layout = useMemo(() => layoutGraph(topology, layoutMode, tuning), [topology, layoutMode, tuning])
+	// Spacing is dialable, so the layout can change without `layoutMode` doing so.
+	const layoutId = layoutKey(layoutMode, tuning)
 	const peakThroughput = useMemo(
 		() => topology.nodes.reduce((max, node) => Math.max(max, node.throughput), 1),
 		[topology],
@@ -583,16 +619,24 @@ export function ServiceMap3D({
 			onPointerMissed={() => onSelect(null)}
 			style={{ background: BACKDROP }}
 		>
-			<fogExp2 attach="fog" args={[BACKDROP, 0.0125]} />
+			<fogExp2 attach="fog" args={[BACKDROP, tuning.fogDensity]} />
 			<ambientLight intensity={0.55} />
 			<hemisphereLight args={["#7fa8ff", "#0b0f18", 0.7]} />
 			<directionalLight position={[18, 26, 14]} intensity={1.1} />
 			<pointLight position={[-20, -20, -12]} intensity={40} color="#4f7dff" distance={90} />
 
-			<Controls autoRotate={autoRotate} points={framePoints} layoutId={layoutMode} />
-			{layoutMode === "floors" && <TierPlanes tierCount={layout.tierCount} radius={layout.radius} />}
-			<Pipes pipes={pipes} dimmedEdges={dimmedEdges} />
-			<Packets pipes={pipes} packets={packets} dimmedEdges={dimmedEdges} running={flowing} />
+			<Controls autoRotate={autoRotate} points={framePoints} layoutId={layoutId} tuning={tuning} />
+			{layoutMode === "floors" && (
+				<TierPlanes tierCount={layout.tierCount} radius={layout.radius} floorGap={layout.floorGap} />
+			)}
+			<Pipes pipes={pipes} dimmedEdges={dimmedEdges} opacity={tuning.pipeOpacity} />
+			<Packets
+				pipes={pipes}
+				packets={packets}
+				dimmedEdges={dimmedEdges}
+				running={flowing}
+				speed={tuning.packetSpeed}
+			/>
 
 			{topology.nodes.map((node) => {
 				const position = layout.positions.get(node.id)
@@ -612,6 +656,7 @@ export function ServiceMap3D({
 						color={nodeColor(node, colorMode)}
 						scale={nodeScale(node.throughput, peakThroughput)}
 						halo={halo}
+						labelHeight={tuning.labelHeight}
 						state={state}
 						onSelect={onSelect}
 						onHover={onHover}

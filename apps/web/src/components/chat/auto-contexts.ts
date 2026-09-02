@@ -6,6 +6,7 @@ export type AutoContext =
 	| { kind: "error_issue"; id: string; issueId: string }
 	| { kind: "alert_rule"; id: string; ruleId: string }
 	| { kind: "host"; id: string; hostName: string }
+	| { kind: "container"; id: string; containerName: string }
 	| { kind: "logs_explorer"; id: string }
 	| { kind: "metrics_explorer"; id: string }
 	| { kind: "traces_explorer"; id: string }
@@ -34,6 +35,8 @@ export function autoContextLabel(ctx: AutoContext): string {
 			return `Alert rule: ${ctx.ruleId.slice(0, 8)}…`
 		case "host":
 			return `Host: ${ctx.hostName}`
+		case "container":
+			return `Container: ${ctx.containerName}`
 		case "logs_explorer":
 			return "Logs explorer"
 		case "metrics_explorer":
@@ -104,6 +107,15 @@ export function deriveAutoContexts(pathname: string): AutoContext[] {
 			}
 			return []
 		case "infra":
+			// Static children first — the fall-through branch reads any other second
+			// segment as a host name.
+			if (second === "containers") {
+				if (third) {
+					const containerName = decode(third)
+					return [{ kind: "container", id: `container:${containerName}`, containerName }]
+				}
+				return []
+			}
 			if (second && second !== "kubernetes") {
 				const hostName = decode(second)
 				return [{ kind: "host", id: `host:${hostName}`, hostName }]
@@ -166,6 +178,12 @@ export function suggestionsForContexts(contexts: AutoContext[]): string[] | null
 				`Show CPU and memory trends for ${ctx.hostName}`,
 				`Are there any errors from ${ctx.hostName}?`,
 				`What services are running on ${ctx.hostName}?`,
+			]
+		case "container":
+			return [
+				`Why is ${ctx.containerName}'s CPU high?`,
+				`Show logs from ${ctx.containerName}`,
+				`Has ${ctx.containerName} restarted recently?`,
 			]
 		case "logs_explorer":
 			return ["Find errors in the last 15 minutes", "Show me warnings", "Mine log patterns"]

@@ -55,6 +55,13 @@ export const mcpOAuthRefreshTokens = pgTable(
 		revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
 		expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+		/**
+		 * When the whole grant dies, regardless of how often it rotates. Carried
+		 * unchanged across rotations — `expires_at` alone resets on every refresh,
+		 * which made an MCP grant effectively permanent. Null on rows written
+		 * before the column existed.
+		 */
+		familyExpiresAt: timestamp("family_expires_at", { withTimezone: true, mode: "date" }),
 	},
 	(table) => [
 		uniqueIndex("mcp_oauth_refresh_tokens_hash_unique").on(table.tokenHash),

@@ -2,6 +2,7 @@ import * as Integrations from "@maple/query-engine-integrations"
 import { CH, formatWarehouseDateTime, parseWarehouseDateTime } from "@maple/query-engine"
 import {
 	QueryEngineValidationError,
+	type ContainerInfraTimeseriesRequest,
 	type HostInfraTimeseriesRequest,
 	type NodeInfraTimeseriesRequest,
 	type PodInfraTimeseriesRequest,
@@ -162,6 +163,81 @@ export const hostMetricSpec = (metric: HostInfraTimeseriesRequest["metric"]) => 
 	}
 }
 
+/**
+ * Metric name(s), grouping/labeling, unit and query-family flag for a container
+ * infra metric. `isSum` routes to the metrics_sum query; docker percent gauges
+ * carry `divideBy: 100` so chart scales match the pod pages (0..1).
+ */
+export const containerMetricSpec = (metric: ContainerInfraTimeseriesRequest["metric"]) => {
+	switch (metric) {
+		case "cpu":
+			return {
+				metricNames: ["container.cpu.utilization"],
+				unit: "percent" as const,
+				isSum: false,
+				average: undefined,
+				divideBy: 100,
+				metricLabels: undefined,
+				groupByAttributeKey: undefined,
+			}
+		case "memory_percent":
+			return {
+				metricNames: ["container.memory.percent"],
+				unit: "percent" as const,
+				isSum: false,
+				average: undefined,
+				divideBy: 100,
+				metricLabels: undefined,
+				groupByAttributeKey: undefined,
+			}
+		case "uptime":
+			return {
+				metricNames: ["container.uptime"],
+				unit: "seconds" as const,
+				isSum: false,
+				average: undefined,
+				divideBy: undefined,
+				metricLabels: undefined,
+				groupByAttributeKey: undefined,
+			}
+		case "memory_bytes":
+			// Sampled bytes, not a cumulative counter — summing a bucket's samples
+			// would inflate the chart by samples-per-bucket.
+			return {
+				metricNames: ["container.memory.usage.total"],
+				unit: "bytes" as const,
+				isSum: true,
+				average: true,
+				divideBy: undefined,
+				metricLabels: undefined,
+				groupByAttributeKey: undefined,
+			}
+		case "network":
+			return {
+				metricNames: ["container.network.io.usage.rx_bytes", "container.network.io.usage.tx_bytes"],
+				unit: "bytes" as const,
+				isSum: true,
+				average: undefined,
+				divideBy: undefined,
+				metricLabels: [
+					["container.network.io.usage.rx_bytes", "receive"],
+					["container.network.io.usage.tx_bytes", "transmit"],
+				] as ReadonlyArray<readonly [string, string]>,
+				groupByAttributeKey: undefined,
+			}
+		case "disk_io":
+			return {
+				metricNames: ["container.blockio.io_service_bytes_recursive"],
+				unit: "bytes" as const,
+				isSum: true,
+				average: undefined,
+				divideBy: undefined,
+				metricLabels: undefined,
+				groupByAttributeKey: "operation",
+			}
+	}
+}
+
 const isProductEventsFunnelError = Schema.is(CH.ProductEventsFunnelError)
 
 /**
@@ -181,17 +257,22 @@ const isProductEventsFunnelError = Schema.is(CH.ProductEventsFunnelError)
 export const validateFunnelDefinition = (
 	opts: CH.ProductEventsFunnelOpts | CH.ProductEventsFunnelBreakdownOpts,
 ): Effect.Effect<void, QueryEngineValidationError> =>
-	Effect.suspend(() => {
-		try {
+	Effect.try({
+		try: () => {
 			if ("breakdownBy" in opts) CH.productEventsFunnelBreakdownQuery(opts)
 			else CH.productEventsFunnelQuery(opts)
-			return Effect.void
-		} catch (error) {
-			if (isProductEventsFunnelError(error)) {
-				return Effect.fail(
-					new QueryEngineValidationError({ message: error.message, details: [error.reason] }),
-				)
-			}
-			return Effect.die(error)
-		}
-	})
+		},
+		catch: (error) => error,
+	}).pipe(
+		Effect.catch((error) =>
+			// The builder throws its own tagged error for a definition it cannot
+			// compile, which is the caller's 400. Anything else is a bug in the
+			// builder rather than something the request could be rewritten to avoid.
+			isProductEventsFunnelError(error)
+				? Effect.fail(
+						new QueryEngineValidationError({ message: error.message, details: [error.reason] }),
+					)
+				: // oxlint-disable-next-line maple/no-effect-die
+					Effect.die(error),
+		),
+	)

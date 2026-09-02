@@ -66,6 +66,8 @@ const formatAutoContextLine = (ctx: AutoContext): string => {
 			return `- alert_rule: ${ctx.ruleId}`
 		case "host":
 			return `- host: ${ctx.hostName}`
+		case "container":
+			return `- container: ${ctx.containerName}`
 		case "logs_explorer":
 			return "- view: logs explorer"
 		case "metrics_explorer":

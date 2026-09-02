@@ -6,7 +6,7 @@
  * `chat/loop/context.ts` used to be the only bound: it walked the transcript mid-turn and rewrote
  * old tool results in place. That works on token count and fails on everything else.
  *
- * The default chat route is OpenRouter `openai/gpt-5.6-luna`, whose route id is `"openrouter-chat"`
+ * The default chat route is OpenRouter (`z-ai/glm-5.3-flash:nitro`), whose route id is `"openrouter-chat"`
  * — not in `@opencode-ai/ai`'s `RESPECTS_INLINE_HINTS` (`anthropic-messages`, `bedrock-converse`), so
  * `applyCachePolicy` returns early and Maple emits no cache breakpoints at all. Caching on that path
  * is *implicit prefix* caching: the provider matches the longest identical prefix it has seen, and

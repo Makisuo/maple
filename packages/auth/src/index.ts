@@ -364,6 +364,8 @@ export interface AuthEnv {
 	readonly MAPLE_AUTH_MODE: string
 	readonly MAPLE_DEFAULT_ORG_ID: string
 	readonly MAPLE_ORG_ID_OVERRIDE: Option.Option<string>
+	/** Only `development` lets a pinned org trust a non-member's session role. */
+	readonly MAPLE_ENVIRONMENT?: string | undefined
 	readonly MAPLE_ROOT_PASSWORD: Option.Option<Redacted.Redacted<string>>
 	readonly CLERK_SECRET_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly CLERK_PUBLISHABLE_KEY: Option.Option<string>
@@ -375,12 +377,26 @@ const getOptionalString = <A>(option: Option.Option<A>): A | undefined => Option
 const getOptionalSecret = (option: Option.Option<Redacted.Redacted<string>>): string | undefined =>
 	Option.match(option, { onNone: () => undefined, onSome: Redacted.value })
 
+/**
+ * A secret the auth mode requires but the deployment did not supply. Config is
+ * read once at layer build, so this is a misconfigured deployment rather than a
+ * request that could be answered differently.
+ */
+class MissingAuthSecretError extends Schema.TaggedError<MissingAuthSecretError>()(
+	"@maple/auth/MissingAuthSecretError",
+	{ secret: Schema.String, message: Schema.String },
+) {}
+
 const requireSecret = (
 	option: Option.Option<Redacted.Redacted<string>>,
 	label: string,
 ): Effect.Effect<string, never> =>
 	Option.match(option, {
-		onNone: () => Effect.die(new Error(`${label} is required`)),
+		// Config is read once at layer build, so a missing secret is a misconfigured
+		// deployment, not a request that could be answered differently.
+		onNone: () =>
+			// oxlint-disable-next-line maple/no-effect-die
+			Effect.die(new MissingAuthSecretError({ secret: label, message: `${label} is required` })),
 		onSome: (value) => Effect.succeed(Redacted.value(value)),
 	})
 
@@ -674,20 +690,41 @@ export const makeResolveTenant = (
 			const orgIdOverride = getOptionalString(env.MAPLE_ORG_ID_OVERRIDE)
 			const userId = yield* decodeUserId(auth.userId, "Invalid user in Clerk session token")
 
-			// Two credentials must not be allowed to select an organization, and in
-			// both cases the header is a rejection rather than a silent ignore:
-			//
-			// - an API key is already organization-bound, so a selection could only
-			//   ever widen it (`acceptsToken` is what admits keys here — the MCP
-			//   resolver — and that path passes no verifier anyway);
-			// - `MAPLE_ORG_ID_OVERRIDE` pins a deployment to one organization, and
-			//   honouring a selection would defeat the pin.
-			const selectable =
-				auth.tokenType === "session_token" && orgIdOverride === undefined
-					? verifyOrgMembership
-					: undefined
+			// An API key is organization-bound; for keys the header is a rejection.
+			const selectable = auth.tokenType === "session_token" ? verifyOrgMembership : undefined
 
-			if (!auth.orgId && !orgIdOverride) {
+			const sessionRoles: ReadonlyArray<RoleName> =
+				typeof auth.orgRole === "string"
+					? yield* Effect.map(
+							decodeRoleName(auth.orgRole, "Invalid role in Clerk session token"),
+							(role) => [role],
+						)
+					: []
+
+			if (orgIdOverride !== undefined) {
+				const pinnedOrgId = yield* decodeOrgId(orgIdOverride, "Invalid MAPLE_ORG_ID_OVERRIDE value")
+				// The pin wins over a selection header (every web session names its own
+				// org). The role is the verified membership's; a non-member is only let
+				// in with their session's role on a development pin.
+				if (auth.orgId === pinnedOrgId) {
+					return { orgId: pinnedOrgId, userId, roles: sessionRoles, authMode: "clerk" }
+				}
+				const membership = verifyOrgMembership
+					? yield* verifyOrgMembership(userId, pinnedOrgId)
+					: Option.none<VerifiedOrgMembership>()
+				if (Option.isSome(membership)) {
+					return { orgId: pinnedOrgId, userId, roles: [membership.value.role], authMode: "clerk" }
+				}
+				if (env.MAPLE_ENVIRONMENT === "development") {
+					return { orgId: pinnedOrgId, userId, roles: sessionRoles, authMode: "clerk" }
+				}
+				if (verifyOrgMembership) {
+					return yield* Effect.fail(organizationAccessDenied(pinnedOrgId))
+				}
+				return { orgId: pinnedOrgId, userId, roles: [], authMode: "clerk" }
+			}
+
+			if (!auth.orgId) {
 				// No active organization in the session. A request that names one it
 				// can prove membership of is still serviceable — this is the widget
 				// publishing path, whose whole point is not to disturb whatever the
@@ -705,18 +742,9 @@ export const makeResolveTenant = (
 			}
 
 			const clerkTenant: TenantContext = {
-				orgId: yield* decodeOrgId(
-					orgIdOverride ?? auth.orgId!,
-					"Invalid organization in Clerk session token",
-				),
+				orgId: yield* decodeOrgId(auth.orgId, "Invalid organization in Clerk session token"),
 				userId,
-				roles:
-					typeof auth.orgRole === "string"
-						? yield* Effect.map(
-								decodeRoleName(auth.orgRole, "Invalid role in Clerk session token"),
-								(role) => [role],
-							)
-						: [],
+				roles: sessionRoles,
 				authMode: "clerk",
 			}
 

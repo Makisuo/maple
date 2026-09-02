@@ -68,6 +68,7 @@ import { ApiAuthorizationLayer } from "@/services/auth/ApiAuthorizationLayer"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import { SessionAuthorizationLayer } from "@/services/auth/SessionAuthorizationLayer"
 import { ApiV2RateLimiter } from "@/services/auth/ApiV2RateLimiter"
+import { McpToolRateLimiter } from "@/services/auth/McpToolRateLimiter"
 import { EdgeCacheService } from "@maple/cache"
 import { CacheBackendLive } from "@/platform/CacheBackendLive"
 import { OrgMembershipService } from "@/services/auth/OrgMembershipService"
@@ -186,6 +187,7 @@ export const ApiAuthLive = Layer.mergeAll(
 	SessionAuthorizationLayer,
 ).pipe(
 	Layer.provideMerge(ApiV2RateLimiter.layer),
+	Layer.provideMerge(McpToolRateLimiter.layer),
 	Layer.provideMerge(ApiKeysService.layer),
 	// Denied attempts are audited from inside the auth layers themselves.
 	Layer.provideMerge(AuditLogService.layer),

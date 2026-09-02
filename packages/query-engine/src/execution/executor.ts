@@ -67,6 +67,12 @@ const CAPABILITIES_INSPECTION_TIMEOUT = Duration.seconds(2)
 const WarehouseCapabilityMetadataTarget = Schema.Literals(["version", "indexes", "columns", "settings"])
 type WarehouseCapabilityMetadataTarget = Schema.Schema.Type<typeof WarehouseCapabilityMetadataTarget>
 
+/** SQL that reached the executor still carrying a `__PARAM_…__` placeholder. */
+class UnresolvedQueryParamError extends Schema.TaggedError<UnresolvedQueryParamError>()(
+	"@maple/query-engine/execution/UnresolvedQueryParamError",
+	{ param: Schema.String, message: Schema.String },
+) {}
+
 class WarehouseCapabilityProbeError extends Schema.TaggedError<WarehouseCapabilityProbeError>()(
 	"@maple/query-engine/execution/WarehouseCapabilityProbeError",
 	{
@@ -398,12 +404,15 @@ WHERE name = 'enable_full_text_index'`,
 		// template, or a splice compiled with `deferParams` that nothing resolved.
 		const leftoverParam = sql.match(/__PARAM_[A-Za-z]+_(\w+)__/)
 		if (leftoverParam) {
-			// An unresolved param is a compile-time bug in Maple's query construction,
-			// not a recoverable runtime failure — surface it as a defect.
+			// An unresolved placeholder means the SQL reached the executor without
+			// going through `compile()` — a bug in Maple's own query construction. No
+			// request could be rewritten to avoid it and no caller could handle it.
+			// oxlint-disable-next-line maple/no-effect-die
 			return yield* Effect.die(
-				new Error(
-					`Compiled SQL contains unresolved param '${leftoverParam[1]}' — the query declared it but the runtime params object did not provide it`,
-				),
+				new UnresolvedQueryParamError({
+					param: leftoverParam[1] ?? "",
+					message: `Compiled SQL contains unresolved param '${leftoverParam[1]}' — the query declared it but the runtime params object did not provide it`,
+				}),
 			)
 		}
 
@@ -919,7 +928,10 @@ WHERE name = 'enable_full_text_index'`,
 		capabilities: WarehouseCapabilities | undefined,
 	): Effect.Effect<CompiledQuery<T>> =>
 		typeof compiled === "function"
-			? Effect.orDie(compiled(capabilities!))
+			? // The capability-aware form is only reachable from the two methods that
+				// resolve capabilities first. Baseline is the conservative stand-in — it
+				// generates the widest SQL — if a caller ever reaches here without them.
+				Effect.orDie(compiled(capabilities ?? baselineWarehouseCapabilities()))
 			: resolveCompiledQuery(compiled)
 
 	const executeCompiledQuery = Effect.fn("WarehouseQueryService.executeCompiledQuery")(function* <T>(

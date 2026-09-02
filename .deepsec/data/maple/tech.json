@@ -1,6 +1,13 @@
 {
-	"tags": ["bun", "github-actions", "node"],
-	"sentinels": ["bun.lock", "package.json"],
-	"detectedAt": "2026-05-16T17:40:20.965Z",
-	"rootPath": "/Users/makisuo/Documents/GitHub/maple"
+  "tags": [
+    "bun",
+    "github-actions",
+    "node"
+  ],
+  "sentinels": [
+    "bun.lock",
+    "package.json"
+  ],
+  "detectedAt": "2026-08-31T19:40:00.782Z",
+  "rootPath": "/Users/makisuo/Documents/GitHub/maple"
 }

@@ -100,4 +100,51 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		manifestDigest: "221f2e37bf61b08b87b9cac21acde9c18f1c0bb04625eea6ca2450e280581a1e",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
+	Object.freeze({
+		// The DurationQuantiles columns on the two service-map edge rollups
+		// (ClickHouse migration 0022). Additive and metadata-only: no part is
+		// rewritten and no row moves, which is why the v11 -> v12 edge is two
+		// `ADD COLUMN` statements and a verify rather than a backfill.
+		//
+		// projectRevision is unchanged from v11 on purpose — it is a hardcoded
+		// constant (`CURRENT_SCHEMA_PROJECT_REVISION`) that no longer tracks what
+		// the generator stamps into the file header, and the identity this gate
+		// actually compares is the fingerprint/digest pair.
+		version: 12,
+		fingerprint: "e9888b70dde4f661",
+		digest: "e9888b70dde4f661d38d6b48fa7e15845ed2f24a4a2208ab3d27a1cc495f7367",
+		manifestDigest: "693be62c03142596a4fe081c20d22e0c72f002ee1725d5a900d51055a8f069a7",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
+	Object.freeze({
+		// The three discriminator counters on both service-operations rollups
+		// (ClickHouse migration 0023). Additive and metadata-only, exactly like
+		// v11 -> v12: no part is rewritten and no row moves, so the edge is six
+		// `ADD COLUMN` statements, a view recreation and a verify.
+		//
+		// projectRevision stays pinned to the v11/v12 value for the same reason
+		// recorded there — it is a hardcoded constant that no longer tracks the
+		// generator's header, and the identity this gate compares is the
+		// fingerprint/digest pair.
+		version: 13,
+		fingerprint: "7c44772116706420",
+		digest: "7c4477211670642086313b71593d848cbadefc24142a1c6e0fe5fd93a8dd7a6e",
+		manifestDigest: "353715a6b6c7a05f3227215b072ac95a8bd5ee67d5eec35f8c2b4c86839a1187",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
+	Object.freeze({
+		// `ai_trace_index` + `ai_trace_index_mv` (ClickHouse migration 0024): the
+		// filtered projection of GenAI agent spans that serves Agent Sessions
+		// detection and facets. Purely additive — a new empty table and the view
+		// that fills it forward — so the v13 -> v14 edge is two CREATEs and a
+		// verify, no data movement.
+		//
+		// projectRevision stays the hardcoded constant, as for v12 and v13 — the
+		// identity this gate compares is the fingerprint/digest pair.
+		version: 14,
+		fingerprint: "c46a599e1bfe417c",
+		digest: "c46a599e1bfe417c1e6f50d123779c6ca9c5f5f375ef9c6fe329c8a9676e3b5b",
+		manifestDigest: "faf78f67abd5901351ce6632cee59f22fadb3c1f7eb9b195dc2f9702d4c9c9bd",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
 ] as const)

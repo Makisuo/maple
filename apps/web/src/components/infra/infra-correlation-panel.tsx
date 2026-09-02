@@ -6,6 +6,7 @@ import { formatForTinybird, relativeToAbsolute, snapRangeForCache } from "@/lib/
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 import { NodeDetailChart, PodDetailChart } from "./k8s-detail-chart"
+import { ContainerDetailChart } from "./container-detail-chart"
 import { HostDetailChart } from "./host-detail-chart"
 import { getActiveInfraCorrelations, type InfraCorrelation } from "./infra-correlations"
 import { useLinkedCursor } from "@/hooks/use-linked-cursor"
@@ -65,7 +66,7 @@ export function InfraCorrelationPanel({
 	if (correlations.length === 0) {
 		return (
 			<div className="rounded-md border border-dashed px-4 py-12 text-center text-sm text-muted-foreground">
-				No Kubernetes or host metadata on this record.
+				No Kubernetes, container, or host metadata on this record.
 			</div>
 		)
 	}
@@ -102,9 +103,27 @@ export function InfraCorrelationPanel({
 
 function renderCharts(correlation: InfraCorrelation, startTime: string, endTime: string, syncId: string) {
 	switch (correlation.kind) {
-		// Pod/Node charts each render as a self-contained card whose legend
-		// already names the metric, so they just stack — no extra card/label
-		// wrapper (which previously double-bordered and duplicated the label).
+		// Container/Pod/Node charts each render as a self-contained card whose
+		// legend already names the metric, so they just stack — no extra
+		// card/label wrapper (which previously double-bordered and duplicated
+		// the label).
+		case "container":
+			return (
+				<div className="space-y-3">
+					{correlation.charts.map((c) => (
+						<ContainerDetailChart
+							key={c.metric}
+							containerName={correlation.identifier}
+							hostName={correlation.hostName}
+							metric={c.metric}
+							startTime={startTime}
+							endTime={endTime}
+							bucketSeconds={BUCKET_SECONDS}
+							syncId={syncId}
+						/>
+					))}
+				</div>
+			)
 		case "pod":
 			return (
 				<div className="space-y-3">
@@ -175,6 +194,17 @@ function CorrelationLink({ correlation }: { correlation: InfraCorrelation }) {
 	)
 
 	switch (correlation.kind) {
+		case "container":
+			return (
+				<Link
+					to="/infra/containers/$containerName"
+					params={{ containerName: correlation.identifier }}
+					search={correlation.hostName ? { host: correlation.hostName } : {}}
+					className={className}
+				>
+					{content}
+				</Link>
+			)
 		case "pod":
 			return (
 				<Link

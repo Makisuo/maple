@@ -14,7 +14,7 @@
  * driver — the one input a shaper needs beyond its rows is the window's
  * duration, and the caller hands that in.
  */
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 import { SpanId, TraceId } from "@maple/domain"
 import { parseWarehouseDateTime, warehouseDateTimeToIso } from "./datetime"
 
@@ -324,17 +324,19 @@ export interface LogRow {
 const toTraceId = Schema.decodeSync(TraceId)
 const toSpanId = Schema.decodeSync(SpanId)
 
+const decodeJsonObject = Schema.decodeUnknownOption(
+	Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+)
+
 function parseAttributes(value: unknown): Record<string, string> {
 	if (typeof value !== "string" || value.length === 0) return {}
-	try {
-		const parsed: unknown = JSON.parse(value)
-		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {}
-		// SAFETY: the warehouse serialises attribute maps as JSON objects of
-		// strings; a non-string value is a schema drift the readers tolerate.
-		return parsed as Record<string, string>
-	} catch {
-		return {}
-	}
+	// `Schema.Record` admits only JSON objects, so an array, a scalar, and a
+	// malformed string all decode to `None` and degrade to an empty map.
+	const parsed = decodeJsonObject(value)
+	if (Option.isNone(parsed)) return {}
+	// SAFETY: the warehouse serialises attribute maps as JSON objects of
+	// strings; a non-string value is a schema drift the readers tolerate.
+	return parsed.value as Record<string, string>
 }
 
 export function coerceLogRow(raw: Record<string, unknown>): LogRow {

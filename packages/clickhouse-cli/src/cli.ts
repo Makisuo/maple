@@ -223,7 +223,7 @@ interface Flags {
 function parseFlags(args: ReadonlyArray<string>): Flags {
 	const flags: Record<string, string> = {}
 	for (let i = 0; i < args.length; i++) {
-		const a = args[i]!
+		const a = args[i] ?? ""
 		if (!a.startsWith("--")) {
 			continue
 		}

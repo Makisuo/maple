@@ -200,7 +200,7 @@ const rowsForSql = (sql: string): ReadonlyArray<Record<string, unknown>> => {
 				callCount: "10",
 				errorCount: "2",
 				avgDurationMs: "12.5",
-				p95DurationMs: "30",
+				maxDurationMs: "30",
 				estimatedSpanCount: "20",
 			},
 		]
@@ -404,7 +404,14 @@ describe("v2 telemetry reads over HTTP", () => {
 
 		const serviceMap = await harness.request("GET", `/v2/service_map?${windowQuery}`, key.secret)
 		expect(serviceMap.status).toBe(200)
-		expect(serviceMap.body.edges[0]).toMatchObject({ source_service: "api", target_service: "payments" })
+		// `max_duration_ms` included on purpose: this stub is not typechecked
+		// (see the partial-stub gap), so a renamed row field only ever surfaces as
+		// a decode failure here. Asserting the value keeps the fixture honest.
+		expect(serviceMap.body.edges[0]).toMatchObject({
+			source_service: "api",
+			target_service: "payments",
+			max_duration_ms: 30,
+		})
 
 		const annualWindow = "start_time=2025-07-16T12%3A00%3A00.000Z&end_time=2026-07-15T12%3A00%3A00.000Z"
 		const annualServices = await harness.request("GET", `/v2/services?${annualWindow}`, key.secret)

@@ -43,6 +43,7 @@ import {
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { layerFromEnv, layerFromEnvRecord, runScheduledEffect } from "@maple/effect-cloudflare"
 import { Cause, Effect, Layer, Match } from "effect"
+import type { AlertingWorkerEnv } from "../alchemy.run.ts"
 
 // Module-scope construction; `flush(env)` resolves env on first call. The
 // in-isolate buffers coalesce concurrent scheduled ticks into one POST per
@@ -53,10 +54,6 @@ const telemetry = MapleCloudflareSDK.make({
 	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
 })
-
-interface AlertingWorkerEnv {
-	readonly [key: string]: unknown
-}
 
 export const buildLayer = (env: AlertingWorkerEnv) => {
 	// Keep config and binding services on the same invocation-scoped env record;
@@ -464,10 +461,12 @@ export const selectScheduledProgram = <R>(
 		Match.when("*/15 * * * *", () => ticks.digest),
 		Match.when("0 * * * *", () => ticks.serviceMapRollup),
 		Match.when("* * * * *", () =>
-			// `fixVerification` runs after `error` in the same group so a window that
-			// this minute's error tick just refuted is already settled when the
-			// verification tick looks at it — one fewer wasted agent start.
-			Effect.all([ticks.alert, ticks.error, ticks.escalation, ticks.fixVerification], {
+			// `fixVerification` is chained onto `error` rather than listed beside it:
+			// a window this minute's error tick just refuted must already be settled
+			// when the verification tick looks at it, and array order under bounded
+			// concurrency does not promise that — alert and escalation finishing
+			// first would have started fixVerification while error still ran.
+			Effect.all([ticks.alert, Effect.andThen(ticks.error, ticks.fixVerification), ticks.escalation], {
 				concurrency: 2,
 				discard: true,
 			}),
@@ -512,6 +511,8 @@ interface ExecutionContextLike {
 	waitUntil(promise: Promise<unknown>): void
 }
 
+let loggedNonProdSkip = false
+
 export default {
 	async scheduled(
 		event: ScheduledEventLike,
@@ -528,9 +529,13 @@ export default {
 		const allowNonProd =
 			env.MAPLE_ALERTING_ALLOW_NONPROD === "1" || env.MAPLE_ALERTING_ALLOW_NONPROD === "true"
 		if (environment !== "production" && !allowNonProd) {
-			console.log(
-				`Skipping alerting cron on non-production stage (MAPLE_ENVIRONMENT=${environment || "unset"}, cron=${event.cron}); set MAPLE_ALERTING_ALLOW_NONPROD=1 to run crons here`,
-			)
+			// Once per isolate, not once per tick.
+			if (!loggedNonProdSkip) {
+				loggedNonProdSkip = true
+				console.log(
+					`Skipping alerting crons on non-production stage (MAPLE_ENVIRONMENT=${environment || "unset"}); set MAPLE_ALERTING_ALLOW_NONPROD=1 to run them here`,
+				)
+			}
 			return
 		}
 		const program = selectScheduledProgram(event.cron, scheduledTicks)

@@ -3,6 +3,8 @@
 import * as React from "react"
 import { Option, Schema } from "effect"
 
+import { readLocalStorage, writeLocalStorage } from "../lib/local-storage"
+
 /**
  * Remembered open/closed state for one collapsible filter section.
  *
@@ -25,23 +27,14 @@ type SectionState = typeof SectionState.Type
 const decodeSectionState = Schema.decodeUnknownOption(Schema.fromJsonString(SectionState))
 
 function read(): SectionState {
-	try {
-		const raw = localStorage.getItem(STORAGE_KEY)
-		if (raw === null) return {}
-		return Option.getOrElse(decodeSectionState(raw), (): SectionState => ({}))
-	} catch {
-		// localStorage unavailable (private mode / SSR) — the preference is a
-		// nicety, so fall back to defaults rather than throwing.
-		return {}
-	}
+	// Unavailable storage and an unreadable entry are the same answer here: no
+	// preference, so every section falls back to the caller's default.
+	const stored = Option.flatMap(readLocalStorage(STORAGE_KEY), decodeSectionState)
+	return Option.getOrElse(stored, (): SectionState => ({}))
 }
 
 function write(key: string, open: boolean): void {
-	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...read(), [key]: open }))
-	} catch {
-		// Quota or unavailable — the session keeps working, it just won't remember.
-	}
+	writeLocalStorage(STORAGE_KEY, JSON.stringify({ ...read(), [key]: open }))
 }
 
 /**

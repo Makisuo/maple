@@ -1,7 +1,16 @@
 import type { IconProps } from "./icon"
 
+interface OpenjdkIconProps extends IconProps {
+	/**
+	 * Render the mark in `currentColor` instead of the brand color — the service
+	 * map draws runtime glyphs in its muted text color so the branded platform
+	 * icon beside them stays the node's only color accent.
+	 */
+	monochrome?: boolean
+}
+
 // Source: simple-icons (MIT) — https://simpleicons.org/icons/openjdk
-function OpenjdkIcon({ size = 24, className, ...props }: IconProps) {
+function OpenjdkIcon({ size = 24, className, monochrome = false, ...props }: OpenjdkIconProps) {
 	return (
 		<svg
 			xmlns="http://www.w3.org/2000/svg"
@@ -9,7 +18,7 @@ function OpenjdkIcon({ size = 24, className, ...props }: IconProps) {
 			width={size}
 			height={size}
 			className={className}
-			fill="#437291"
+			fill={monochrome ? "currentColor" : "#437291"}
 			aria-hidden="true"
 			{...props}
 		>
@@ -18,4 +27,12 @@ function OpenjdkIcon({ size = 24, className, ...props }: IconProps) {
 	)
 }
 
-export { OpenjdkIcon }
+/**
+ * Monochrome OpenJDK mark as a plain icon component — for the
+ * `ComponentType<{ size, className }>` slots that can't pass `monochrome`.
+ */
+function OpenjdkMonoIcon({ size = 24, className, ...props }: IconProps) {
+	return <OpenjdkIcon size={size} className={className} monochrome {...props} />
+}
+
+export { OpenjdkIcon, OpenjdkMonoIcon }

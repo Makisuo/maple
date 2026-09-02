@@ -1,5 +1,5 @@
 {
-  "id": "5224691f-23a3-4172-b65b-be481ae93ad6",
+  "id": "4c8a2222-430b-45e3-883e-1b3d57661ac1",
   "prevId": "d60d7088-c27b-48cd-94b6-6d9fd59a02ff",
   "version": "7",
   "dialect": "postgresql",
@@ -1820,448 +1820,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.audit_log_entries": {
-      "name": "audit_log_entries",
-      "schema": "",
-      "columns": {
-        "org_id": {
-          "name": "org_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "actor_type": {
-          "name": "actor_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "api_key_id": {
-          "name": "api_key_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "actor_id": {
-          "name": "actor_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "actor_label": {
-          "name": "actor_label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "affected_user_id": {
-          "name": "affected_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "action": {
-          "name": "action",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "outcome": {
-          "name": "outcome",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "denial_reason": {
-          "name": "denial_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resource_type": {
-          "name": "resource_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resource_id": {
-          "name": "resource_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "changed_fields": {
-          "name": "changed_fields",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "changes_json": {
-          "name": "changes_json",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "metadata_json": {
-          "name": "metadata_json",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "request_id": {
-          "name": "request_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "origin_ip": {
-          "name": "origin_ip",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "origin_country": {
-          "name": "origin_country",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "occurred_at": {
-          "name": "occurred_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "recorded_at": {
-          "name": "recorded_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "audit_log_entries_org_occurred_idx": {
-          "name": "audit_log_entries_org_occurred_idx",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "occurred_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "audit_log_entries_org_actor_type_occurred_idx": {
-          "name": "audit_log_entries_org_actor_type_occurred_idx",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "actor_type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "occurred_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "audit_log_entries_org_resource_idx": {
-          "name": "audit_log_entries_org_resource_idx",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "resource_type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "resource_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "audit_log_entries_org_request_idx": {
-          "name": "audit_log_entries_org_request_idx",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "request_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "audit_log_entries_org_outcome_occurred_idx": {
-          "name": "audit_log_entries_org_outcome_occurred_idx",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "outcome",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "occurred_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "audit_log_entries_occurred_idx": {
-          "name": "audit_log_entries_occurred_idx",
-          "columns": [
-            {
-              "expression": "occurred_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "audit_log_entries_org_user_occurred_idx": {
-          "name": "audit_log_entries_org_user_occurred_idx",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "occurred_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "audit_log_entries_org_api_key_occurred_idx": {
-          "name": "audit_log_entries_org_api_key_occurred_idx",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "api_key_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "occurred_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "audit_log_entries_org_actor_occurred_idx": {
-          "name": "audit_log_entries_org_actor_occurred_idx",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "actor_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "occurred_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "audit_log_entries_org_affected_user_occurred_idx": {
-          "name": "audit_log_entries_org_affected_user_occurred_idx",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "affected_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "occurred_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "audit_log_entries_org_action_occurred_idx": {
-          "name": "audit_log_entries_org_action_occurred_idx",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "action",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "occurred_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "audit_log_entries_changed_fields_gin_idx": {
-          "name": "audit_log_entries_changed_fields_gin_idx",
-          "columns": [
-            {
-              "expression": "changed_fields",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "gin",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "audit_log_entries_org_id_id_pk": {
-          "name": "audit_log_entries_org_id_id_pk",
-          "columns": [
-            "org_id",
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.cloudflare_analytics_state": {
       "name": "cloudflare_analytics_state",
       "schema": "",
@@ -2277,6 +1835,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
         },
         "dataset": {
           "name": "dataset",
@@ -2385,11 +1950,17 @@
         }
       },
       "indexes": {
-        "cf_analytics_state_org_dataset_zone_idx": {
-          "name": "cf_analytics_state_org_dataset_zone_idx",
+        "cf_analytics_state_org_account_dataset_zone_idx": {
+          "name": "cf_analytics_state_org_account_dataset_zone_idx",
           "columns": [
             {
               "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2450,6 +2021,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "config_id": {
           "name": "config_id",
@@ -6717,6 +6294,12 @@
         },
         "external_account_name": {
           "name": "external_account_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "granted_accounts_json": {
+          "name": "granted_accounts_json",
           "type": "text",
           "primaryKey": false,
           "notNull": false

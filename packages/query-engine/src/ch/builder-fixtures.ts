@@ -641,6 +641,30 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 			),
 	},
 	{
+		// routes/internal/query-engine.http.ts — service detail "API" tab. Same
+		// splice as the Operations fixture with the HTTP-endpoint predicate on
+		// every tier, so the sweep validates the filtered form separately.
+		module: "service-endpoints",
+		name: "serviceEndpointsSummaryQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(CH.serviceEndpointsSummaryQuery({ serviceName: "api", limit: 50 }), window),
+	},
+	{
+		module: "service-endpoints",
+		name: "serviceEndpointsSummaryQuery",
+		label: "envFiltered",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.serviceEndpointsSummaryQuery({
+					serviceName: "api",
+					environments: ["production"],
+					limit: 50,
+				}),
+				window,
+			),
+	},
+	{
 		module: "service-operations",
 		name: "serviceOperationsTimeseriesQuery",
 		label: "default",
@@ -676,6 +700,17 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 				}),
 				window,
 			),
+	},
+
+	{
+		// Sidebar presence gate — no params beyond the org + window, so one fixture
+		// covers it. What the catalog is watching here is that it stays free of
+		// aggregates: a `count()` would read the whole match set before LIMIT 1
+		// could trim its single output row.
+		module: "infra",
+		name: "infraPresenceQuery",
+		label: "default",
+		compile: () => CH.compileUnionUnsafe(CH.infraPresenceQuery(), window),
 	},
 
 	// Infra gauge timeseries and facet unions.
@@ -785,6 +820,150 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		compile: () => CH.compileUnionUnsafe(CH.workloadFacetsQuery({ kind: "deployment" }), window),
 	},
 
+	// Containers (Docker) — list/summary/detail/timeseries/facets, mirrors the
+	// /list-containers route family (routes/internal/query-engine.http.ts).
+	{
+		module: "containers",
+		name: "listContainersQuery",
+		label: "default",
+		compile: () => CH.compileUnsafe(CH.listContainersQuery({}), window),
+	},
+	{
+		module: "containers",
+		name: "listContainersQuery",
+		label: "filtered",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.listContainersQuery({
+					search: "api",
+					hostNames: ["ip-10-0-1-42"],
+					images: ["ghcr.io/acme/api:1.4.2"],
+					composeProjects: ["shop"],
+					excludedContainerNames: ["buildkitd"],
+					sortBy: "cpuPct",
+					sortDir: "desc",
+				}),
+				window,
+			),
+	},
+	{
+		// `scope` switches on the wrapped-query WHERE over aggregates.
+		module: "containers",
+		name: "listContainersQuery",
+		label: "scoped",
+		compile: () => CH.compileUnsafe(CH.listContainersQuery({ scope: "saturated" }), window),
+	},
+	{
+		module: "containers",
+		name: "listContainersSummaryQuery",
+		label: "default",
+		compile: () => CH.compileUnsafe(CH.listContainersSummaryQuery({}), window),
+	},
+	{
+		module: "containers",
+		name: "containerDetailSummaryQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.containerDetailSummaryQuery({ containerName: "api", hostName: "ip-10-0-1-42" }),
+				window,
+			),
+	},
+	{
+		module: "containers",
+		name: "containerCountersSummaryQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.containerCountersSummaryQuery({ containerName: "api", hostName: "ip-10-0-1-42" }),
+				window,
+			),
+	},
+	{
+		// Percent gauges divide by 100 so chart scales match the pod pages.
+		module: "containers",
+		name: "containerGaugeTimeseriesQuery",
+		label: "percent",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.containerGaugeTimeseriesQuery({
+					containerName: "api",
+					hostName: "ip-10-0-1-42",
+					metricName: "container.cpu.utilization",
+					divideBy: 100,
+				}),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
+		module: "containers",
+		name: "containerGaugeTimeseriesQuery",
+		label: "unscaled",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.containerGaugeTimeseriesQuery({ containerName: "api", metricName: "container.uptime" }),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
+		// Network splits direction into metric names → multiIf series labels.
+		module: "containers",
+		name: "containerSumTimeseriesQuery",
+		label: "network",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.containerSumTimeseriesQuery({
+					containerName: "api",
+					metricNames: [
+						"container.network.io.usage.rx_bytes",
+						"container.network.io.usage.tx_bytes",
+					],
+					metricLabels: [
+						["container.network.io.usage.rx_bytes", "receive"],
+						["container.network.io.usage.tx_bytes", "transmit"],
+					],
+				}),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
+		// Sampled sums (memory bytes) average a bucket's samples instead of
+		// adding them.
+		module: "containers",
+		name: "containerSumTimeseriesQuery",
+		label: "memory-average",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.containerSumTimeseriesQuery({
+					containerName: "api",
+					metricNames: ["container.memory.usage.total"],
+					average: true,
+				}),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
+		// Block IO groups by the `operation` datapoint attribute instead.
+		module: "containers",
+		name: "containerSumTimeseriesQuery",
+		label: "blockio",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.containerSumTimeseriesQuery({
+					containerName: "api",
+					metricNames: ["container.blockio.io_service_bytes_recursive"],
+					groupByAttributeKey: "operation",
+				}),
+				{ ...window, bucketSeconds: 300 },
+			),
+	},
+	{
+		module: "containers",
+		name: "containerFacetsQuery",
+		label: "default",
+		compile: () => CH.compileUnionUnsafe(CH.containerFacetsQuery(), window),
+	},
+
 	// ----- service-map: the parent⋈child span join and its two projections.
 	// ----- The rollup's rows are `ingest`ed into service_map_edges_hourly
 	// ----- verbatim, so these must reach the ClickHouse DESCRIBE sweep.
@@ -860,6 +1039,62 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 		label: "default",
 		compile: () =>
 			CH.compileUnsafe(CH.serviceDependenciesForServiceQuery({ serviceName: "web" }), window),
+	},
+	{
+		// Hourly MV UNION ALL the two partial hours from raw traces. Absent from
+		// this catalog until 2026-08-30, which is how its splice drifted: the
+		// hourly branch floored the start to the hour while the raw branch covered
+		// only the trailing one, so every non-hour-aligned window counted the whole
+		// leading hour. Nothing swept it and nothing gated it.
+		module: "service-map",
+		name: "serviceDbEdgesSQL",
+		label: "default",
+		compile: () => runCompile(CH.serviceDbEdgesSQL({}, window)),
+	},
+	{
+		module: "service-map",
+		name: "serviceDbEdgesSQL",
+		label: "env-scoped",
+		compile: () => runCompile(CH.serviceDbEdgesSQL({ deploymentEnv: "production" }, window)),
+	},
+	{
+		module: "service-map",
+		name: "serviceDbEdgesForServiceQuery",
+		label: "default",
+		compile: () => CH.compileUnsafe(CH.serviceDbEdgesForServiceQuery({ serviceName: "web" }), window),
+	},
+	{
+		module: "service-map",
+		name: "serviceDbQuerySummarySQL",
+		label: "default",
+		compile: () => runCompile(CH.serviceDbQuerySummarySQL({ ...window, dbSystem: "postgresql" })),
+	},
+	{
+		// Hour-aligned buckets take the sealed-rollup UNION raw-edge path; the
+		// sub-hour branch below reads raw `traces` for the whole window instead,
+		// and is a genuinely different SQL shape.
+		module: "service-map",
+		name: "serviceDbQueryTimeseriesSQL",
+		label: "hourly-buckets",
+		compile: () =>
+			runCompile(
+				CH.serviceDbQueryTimeseriesSQL({ ...window, dbSystem: "postgresql", bucketSeconds: 3600 }),
+			),
+	},
+	{
+		module: "service-map",
+		name: "serviceDbQueryTimeseriesSQL",
+		label: "sub-hour-buckets",
+		compile: () =>
+			runCompile(
+				CH.serviceDbQueryTimeseriesSQL({ ...window, dbSystem: "postgresql", bucketSeconds: 300 }),
+			),
+	},
+	{
+		module: "service-map",
+		name: "serviceDbTopQueriesSQL",
+		label: "default",
+		compile: () => runCompile(CH.serviceDbTopQueriesSQL({ ...window, dbSystem: "postgresql" })),
 	},
 	{
 		// Hourly MV UNION ALL raw traces, minus the internal-resolution anti-join.

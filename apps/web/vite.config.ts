@@ -80,7 +80,8 @@ export default defineConfig(({ mode }) => {
 		},
 		define,
 		plugins: [
-			devtools(),
+			// Console piping forwards every browser console line into the dev server's stdout.
+			devtools({ consolePiping: { enabled: false } }),
 			tanstackRouter({
 				target: "react",
 				autoCodeSplitting: true,

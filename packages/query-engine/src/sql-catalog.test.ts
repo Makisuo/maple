@@ -15,6 +15,7 @@ import {
 	UNDECODED_QUERIES,
 	undecodedColumns,
 	undecodedQueries,
+	unsplicedTwoTierQueries,
 } from "./sql-catalog"
 import { builderFixtures } from "./ch/builder-fixtures"
 import * as activityQueries from "./ch/queries/activity"
@@ -22,6 +23,7 @@ import * as alertCheckQueries from "./ch/queries/alert-checks"
 import * as auditLogQueries from "./ch/queries/audit-log"
 import * as anomalyQueries from "./ch/queries/anomaly"
 import * as attributeKeyQueries from "./ch/queries/attribute-keys"
+import * as containerQueries from "./ch/queries/containers"
 import * as errorQueries from "./ch/queries/errors"
 import * as infraQueries from "./ch/queries/infra"
 import * as livenessQueries from "./ch/queries/liveness"
@@ -30,6 +32,7 @@ import * as metricQueries from "./ch/queries/metrics"
 import * as serviceInfraQueries from "./ch/queries/service-infra"
 import * as serviceMapRollupQueries from "./ch/queries/service-map-rollup"
 import * as serviceMapQueries from "./ch/queries/service-map"
+import * as serviceEndpointQueries from "./ch/queries/service-endpoints"
 import * as serviceOperationQueries from "./ch/queries/service-operations"
 import * as serviceQueries from "./ch/queries/services"
 import * as sessionEventQueries from "./ch/queries/session-events"
@@ -60,6 +63,24 @@ describe("sql catalog", () => {
 	// executed until a fixture exists for it.
 	it("covers every name in warehouseQueries", () => {
 		expect(uncoveredPipes(pipeEntries)).toEqual([])
+	})
+
+	// The tiling invariant, enforced structurally.
+	//
+	// Every query that unions a rollup tier with a raw tier must take its window
+	// boundary from `rollup-splice`, because the two tiers have to cover the
+	// window exactly once and a hand-written pair of inequalities that drift
+	// apart produces wrong counts rather than an error. `serviceDbEdges` drifted
+	// exactly this way and inflated every non-hour-aligned window by the whole
+	// leading hour; it was invisible partly because it had no fixture here at all.
+	//
+	// The list is empty, not an allowlist. See `unsplicedTwoTierQueries`.
+	it("splices every two-tier query through the shared boundary", () => {
+		expect(
+			unsplicedTwoTierQueries(entries),
+			"these queries read a rollup AND a raw table but compute their own boundary — " +
+				"use `interiorConditions` / `edgeCondition` from ch/queries/rollup-splice",
+		).toEqual([])
 	})
 
 	// Asserted exactly, not as a ceiling: a query that stops deriving a row
@@ -220,6 +241,7 @@ const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 	"audit-log": auditLogQueries,
 	anomaly: anomalyQueries,
 	"attribute-keys": attributeKeyQueries,
+	containers: containerQueries,
 	errors: errorQueries,
 	infra: infraQueries,
 	liveness: livenessQueries,
@@ -228,6 +250,7 @@ const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 	"service-infra": serviceInfraQueries,
 	"service-map-rollup": serviceMapRollupQueries,
 	"service-map": serviceMapQueries,
+	"service-endpoints": serviceEndpointQueries,
 	"service-operations": serviceOperationQueries,
 	services: serviceQueries,
 	"session-events": sessionEventQueries,
@@ -323,15 +346,11 @@ const EXEMPT_BUILDERS: ReadonlySet<string> = new Set([
 	"infra/workloadDetailSummaryQuery",
 	"service-infra/serviceWorkloadsSQL",
 	"service-map-rollup/serviceMapResolutionsRollupSQL",
-	"service-map/serviceDbEdgesSQL",
-	"service-map/serviceDbEdgesForServiceQuery",
-	"service-map/serviceDbQuerySummarySQL",
-	"service-map/serviceDbQueryTimeseriesSQL",
-	"service-map/serviceDbTopQueriesSQL",
 	"service-map/servicePlatformsSQL",
 
 	// todo batch ④ — remainder (billing, service detail, operations, stray trace/log lookups)
 	"logs/getLogByKeyQuery",
+	"service-endpoints/serviceEndpointsSummaryRawQuery",
 	"service-operations/serviceOperationsSummaryRawQuery",
 	"service-operations/serviceOperationsTimeseriesRawQuery",
 	"services/serviceHealthSnapshotQuery",

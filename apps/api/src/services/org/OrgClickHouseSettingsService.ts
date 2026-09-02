@@ -32,7 +32,7 @@ import {
 } from "@maple/domain/clickhouse"
 import { EdgeCacheService } from "@maple/cache"
 import { orgClickHouseSchemaApplyRuns, orgClickHouseSettings } from "@maple/db"
-import { eq, inArray } from "drizzle-orm"
+import { and, eq, inArray, lt, notInArray, or } from "drizzle-orm"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import {
 	Array as Arr,
@@ -263,6 +263,22 @@ const ROOT_ROLE = Schema.decodeSync(RoleName)("root")
 const ORG_ADMIN_ROLE = Schema.decodeSync(RoleName)("org:admin")
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
 
+const SkippedEntries = Schema.Array(Schema.Struct({ id: Schema.String, reason: Schema.String }))
+const decodeSkippedEntriesOption = Schema.decodeUnknownOption(SkippedEntries)
+
+/**
+ * The run row's `skipped` jsonb, written by the schema-apply workflow as
+ * `{ id, reason }` entries (non-gating migrations and optional features it
+ * could not apply). Exposed on the status response: a "succeeded" run that
+ * silently skipped a failed view recreation left the cluster without that
+ * writer, and nothing else tells the operator to re-apply. Lenient — an
+ * unrecognised shape (old rows, nulls) reads as no skips.
+ */
+export const decodeSkippedEntries = (
+	value: unknown,
+): ReadonlyArray<{ readonly id: string; readonly reason: string }> =>
+	Option.getOrElse(decodeSkippedEntriesOption(value), () => [])
+
 export interface OrgClickHouseSettingsServiceApi {
 	readonly get: (
 		orgId: OrgId,
@@ -391,6 +407,14 @@ const toPersistenceError = (error: unknown) =>
 // schema apply. Resolved off the worker env at runtime — see `apply-schema`.
 const SCHEMA_APPLY_WORKFLOW_BINDING = "CLICKHOUSE_SCHEMA_APPLY_WORKFLOW"
 
+/**
+ * A queued/running apply-run row whose `updatedAt` is older than this is
+ * treated as abandoned and may be reclaimed by a new applySchema call. The
+ * workflow touches the row on every durable step, so half an hour of silence
+ * means the instance died somewhere its catch could not reach.
+ */
+const STALE_APPLY_RUN_MS = 30 * 60_000
+
 interface WorkflowBinding {
 	readonly create: (options?: {
 		readonly id?: string
@@ -436,7 +460,10 @@ const decryptToken = (
 // here is the single edit needed to roll customers onto a newer maple-otel
 // collector — the generated YAML and the documented `docker run …` command
 // both pick it up.
-const COLLECTOR_IMAGE_REF = "ghcr.io/makisuo/maple/otel-collector-maple:0.1.5"
+// Stays on the latest PUBLISHED tag: this ref lands verbatim in configs
+// customers download and run. Bump only after the release tag's image exists
+// on GHCR (the Docker onboarding modal is gated the same way).
+const COLLECTOR_IMAGE_REF = "ghcr.io/mapletechlabs/maple/otel-collector-maple:0.2.0"
 const COLLECTOR_PASSWORD_ENV = "MAPLE_CLICKHOUSE_PASSWORD"
 
 /**
@@ -478,6 +505,12 @@ const renderCollectorYaml = (input: {
 		"        endpoint: 0.0.0.0:4317",
 		"      http:",
 		"        endpoint: 0.0.0.0:4318",
+		"  # Uncomment to monitor local Docker containers (requires running the",
+		"  # collector with -v /var/run/docker.sock:/var/run/docker.sock:ro and",
+		"  # --user 0:0, and adding docker_stats to the metrics pipeline below).",
+		"  # docker_stats:",
+		"  #   endpoint: unix:///var/run/docker.sock",
+		"  #   collection_interval: 30s",
 		"",
 		"processors:",
 		"  memory_limiter:",
@@ -904,6 +937,10 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		const env = yield* Env
 		const httpClient = yield* HttpClient.HttpClient
 		const encryptionKey = yield* parseEncryptionKey(Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY))
+		// Dev-only way past a per-org BYO row; the environment gate keeps it off deploys.
+		const ignoreOrgClickHouse =
+			env.MAPLE_ENVIRONMENT === "development" &&
+			(env.MAPLE_IGNORE_ORG_CLICKHOUSE === "1" || env.MAPLE_IGNORE_ORG_CLICKHOUSE === "true")
 		// Optional: present only inside a Worker isolate. Used to kick off the
 		// background schema-apply Workflow. Read optionally so non-worker/test
 		// contexts (where the binding is absent) still construct the service.
@@ -1274,22 +1311,28 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			// Ensure BYO ClickHouse is configured before queuing a run.
 			yield* requireActiveRow(orgId)
 
-			const existing = yield* database
-				.execute((db) =>
-					db
-						.select()
-						.from(orgClickHouseSchemaApplyRuns)
-						.where(eq(orgClickHouseSchemaApplyRuns.orgId, orgId))
-						.limit(1),
+			// Resolve the binding BEFORE claiming: a missing binding must not leave
+			// a queued row behind that every later attempt reads as already_running.
+			const binding = Option.match(workerEnv, {
+				onNone: () => undefined,
+				onSome: (e) => e[SCHEMA_APPLY_WORKFLOW_BINDING],
+			})
+			if (!isWorkflowBinding(binding)) {
+				return yield* Effect.fail(
+					new OrgClickHouseSettingsPersistenceError({
+						message: `Schema-apply workflow binding (${SCHEMA_APPLY_WORKFLOW_BINDING}) unavailable`,
+					}),
 				)
-				.pipe(Effect.mapError(toPersistenceError))
-			const current = existing[0]
-			if (current && (current.status === "queued" || current.status === "running")) {
-				return new OrgClickHouseApplySchemaStarted({ status: "already_running" })
 			}
 
+			// Atomic claim: the conflict-update is gated so exactly one of two
+			// concurrent applySchema calls wins (interleaved workflow instances
+			// would race destructive DROP/TRUNCATE/backfill migrations). A
+			// queued/running row that stopped updating for STALE_APPLY_RUN_MS is
+			// reclaimable — the workflow stamps progress on every step, so a silent
+			// stall that long means the instance died without reaching its catch.
 			const now = yield* Clock.currentTimeMillis
-			yield* database
+			const claimed = yield* database
 				.execute((db) =>
 					db
 						.insert(orgClickHouseSchemaApplyRuns)
@@ -1311,6 +1354,13 @@ export class OrgClickHouseSettingsService extends Context.Service<
 						})
 						.onConflictDoUpdate({
 							target: orgClickHouseSchemaApplyRuns.orgId,
+							setWhere: or(
+								notInArray(orgClickHouseSchemaApplyRuns.status, ["queued", "running"]),
+								lt(
+									orgClickHouseSchemaApplyRuns.updatedAt,
+									new Date(now - STALE_APPLY_RUN_MS),
+								),
+							),
 							set: {
 								status: "queued",
 								phase: "queued",
@@ -1324,28 +1374,45 @@ export class OrgClickHouseSettingsService extends Context.Service<
 								finishedAt: null,
 								updatedAt: new Date(now),
 							},
-						}),
+						})
+						.returning({ orgId: orgClickHouseSchemaApplyRuns.orgId }),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
-
-			const binding = Option.match(workerEnv, {
-				onNone: () => undefined,
-				onSome: (e) => e[SCHEMA_APPLY_WORKFLOW_BINDING],
-			})
-			if (!isWorkflowBinding(binding)) {
-				return yield* Effect.fail(
-					new OrgClickHouseSettingsPersistenceError({
-						message: `Schema-apply workflow binding (${SCHEMA_APPLY_WORKFLOW_BINDING}) unavailable`,
-					}),
-				)
+			if (claimed.length === 0) {
+				return new OrgClickHouseApplySchemaStarted({ status: "already_running" })
 			}
+
 			yield* Effect.tryPromise({
 				try: () => binding.create({ params: { orgId } }),
 				catch: (error) =>
 					new OrgClickHouseSettingsPersistenceError({
 						message: `Failed to start schema-apply workflow: ${error instanceof Error ? error.message : String(error)}`,
 					}),
-			})
+			}).pipe(
+				// No workflow exists to move the claim off "queued", so release it
+				// here (best-effort) — otherwise the org is wedged on already_running
+				// until manual database repair.
+				Effect.tapError((error) =>
+					database
+						.execute((db) =>
+							db
+								.update(orgClickHouseSchemaApplyRuns)
+								.set({
+									status: "failed",
+									errorMessage: error.message,
+									finishedAt: new Date(now),
+									updatedAt: new Date(now),
+								})
+								.where(
+									and(
+										eq(orgClickHouseSchemaApplyRuns.orgId, orgId),
+										eq(orgClickHouseSchemaApplyRuns.status, "queued"),
+									),
+								),
+						)
+						.pipe(Effect.ignore),
+				),
+			)
 
 			return new OrgClickHouseApplySchemaStarted({ status: "started" })
 		})
@@ -1374,6 +1441,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 					stepsTotal: null,
 					stepsDone: null,
 					appliedVersions: [],
+					skipped: [],
 					errorMessage: null,
 					startedAt: null,
 					finishedAt: null,
@@ -1397,6 +1465,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 				stepsTotal: row.stepsTotal ?? null,
 				stepsDone: row.stepsDone ?? null,
 				appliedVersions,
+				skipped: decodeSkippedEntries(row.skipped),
 				errorMessage: row.errorMessage ?? null,
 				startedAt: dateToMs(row.startedAt),
 				finishedAt: dateToMs(row.finishedAt),
@@ -1676,6 +1745,10 @@ export class OrgClickHouseSettingsService extends Context.Service<
 
 		const resolveRuntimeConfig = Effect.fn("OrgClickHouseSettingsService.resolveRuntimeConfig")(
 			function* (orgId: OrgId) {
+				if (ignoreOrgClickHouse) {
+					yield* Effect.annotateCurrentSpan("clickhouse.config.source", "ignored_dev")
+					return Option.none<RuntimeBackendConfig>()
+				}
 				const cached = yield* resolveCachedSettings(orgId)
 
 				if (cached === null) {
@@ -1733,6 +1806,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		// reads it fresh.
 		const isWarehouseWriteReady = Effect.fn("OrgClickHouseSettingsService.isWarehouseWriteReady")(
 			function* (orgId: OrgId) {
+				if (ignoreOrgClickHouse) return false
 				const row = yield* selectCachedRow(orgId)
 				return (
 					Option.isSome(row) &&

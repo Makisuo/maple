@@ -95,6 +95,25 @@ export interface LogVolumeSeries {
 	readonly baseline: ReadonlyArray<{ errorLogCount: number }>
 }
 
+/**
+ * Bound per-org work to the busiest log series — the same rule the golden
+ * path applies inline. The input arrives in ClickHouse GROUP BY order, which
+ * is arbitrary: slicing it unsorted would drop busy (or already-anomalous)
+ * series nondeterministically, and a dropped open series never refreshes
+ * `lastTriggeredAt`, so the no-data sweep would falsely resolve it.
+ */
+export const capBusiestLogSeries = (
+	series: ReadonlyArray<LogVolumeSeries>,
+	max: number,
+): ReadonlyArray<LogVolumeSeries> =>
+	[...series]
+		.sort(
+			(a, b) =>
+				Math.max(b.current.errorLogCount, b.baseline.length) -
+				Math.max(a.current.errorLogCount, a.baseline.length),
+		)
+		.slice(0, max)
+
 export interface ErrorSpikeObservation {
 	readonly fingerprintHash: string
 	readonly serviceName: string

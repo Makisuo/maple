@@ -247,8 +247,10 @@ function TreemapFigure({
 			],
 			// A treemap resolves its own plot-space rectangles; an inferred x/y domain
 			// would draw axes over coordinates that mean nothing.
-			x: null,
-			y: null,
+			scales: {
+				x: null,
+				y: null,
+			},
 			guides: false,
 			focus: "nearest",
 			focusRing: false,

@@ -123,19 +123,25 @@ const sendHttp = Effect.fn("AlertDelivery.http", { kind: "client" })(function* (
 	// which calls it as a bare local.
 	const { fetchFn } = runtime
 
+	// The signal is what makes the timeout below real: `timeoutOrElse` interrupts
+	// this Effect, and without wiring the interruption to `RequestInit.signal`
+	// the POST would keep running and could still deliver after we reported a
+	// retryable timeout — a duplicate page once the retry lands.
 	const response = yield* Effect.tryPromise({
-		try: () =>
+		try: (signal) =>
 			spec.guarded
 				? safeFetch(spec.url, {
 						method: "POST",
 						headers: { ...spec.headers },
 						body: spec.body,
+						signal,
 						fetchFn,
 					})
 				: fetchFn(spec.url, {
 						method: "POST",
 						headers: { ...spec.headers },
 						body: spec.body,
+						signal,
 					}),
 		catch: (error) =>
 			makeDeliveryError(

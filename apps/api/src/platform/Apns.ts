@@ -1,4 +1,4 @@
-import { Clock, Context, Effect, Layer, Option, Redacted, Ref, Schema } from "effect"
+import { Clock, Context, Effect, Layer, Option, Redacted, Ref, Schema, Semaphore } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import type { MobilePushEnvironment } from "@maple/domain/http"
 import { Env, type EnvConfig } from "./Env"
@@ -198,6 +198,48 @@ const resolveConfig = (env: EnvConfig): ApnsConfig | null => {
 
 const decodeReason = Schema.decodeUnknownOption(Schema.Struct({ reason: Schema.String }))
 
+/**
+ * TTL cache around `mint` with single-flight refresh. MobilePushService fans
+ * out up to eight concurrent sends, so a cold or expired cache would otherwise
+ * mint one JWT per fiber — and Apple throttles clients that update provider
+ * tokens too often (`TooManyProviderTokenUpdates`). One permit serializes the
+ * stale path; waiters re-check the cache and reuse the winner's token.
+ * Exported for the concurrency test only.
+ */
+export const makeSingleFlightTokenCache = <E, R>(
+	ttlMs: number,
+	mint: Effect.Effect<string, E, R>,
+): Effect.Effect<Effect.Effect<string, E, R>> =>
+	Ref.make(Option.none<{ readonly value: string; readonly mintedAtMs: number }>()).pipe(
+		Effect.map((cached) => {
+			const lock = Semaphore.makeUnsafe(1)
+			// A cached token counts only while younger than the TTL; expiry is
+			// absence, not a null to compare against.
+			const freshValue = (nowMs: number) =>
+				Ref.get(cached).pipe(
+					Effect.map(Option.filter((entry) => nowMs - entry.mintedAtMs < ttlMs)),
+					Effect.map(Option.map((entry) => entry.value)),
+				)
+			return Effect.gen(function* () {
+				const nowMs = yield* Clock.currentTimeMillis
+				const entry = yield* freshValue(nowMs)
+				if (Option.isSome(entry)) return entry.value
+				return yield* lock.withPermits(1)(
+					Effect.gen(function* () {
+						// Double-checked: a fiber that waited here usually finds the
+						// winner's fresh token and must not mint another.
+						const innerNowMs = yield* Clock.currentTimeMillis
+						const latest = yield* freshValue(innerNowMs)
+						if (Option.isSome(latest)) return latest.value
+						const value = yield* mint
+						yield* Ref.set(cached, Option.some({ value, mintedAtMs: innerNowMs }))
+						return value
+					}),
+				)
+			})
+		}),
+	)
+
 export class ApnsClient extends Context.Service<ApnsClient, ApnsClientApi>()(
 	"@maple/api/platform/ApnsClient",
 	{
@@ -237,11 +279,6 @@ export class ApnsClient extends Context.Service<ApnsClient, ApnsClientApi>()(
 				}),
 			)
 
-			const cachedToken = yield* Ref.make<{
-				readonly value: string
-				readonly mintedAtMs: number
-			} | null>(null)
-
 			const mintToken = Effect.fn("ApnsClient.mintToken")(function* () {
 				const nowMs = yield* Clock.currentTimeMillis
 				const header = base64UrlString(JSON.stringify({ alg: "ES256", kid: config.keyId }))
@@ -260,17 +297,10 @@ export class ApnsClient extends Context.Service<ApnsClient, ApnsClientApi>()(
 						),
 					catch: (cause) => new ApnsError({ message: "APNs JWT signing failed", cause }),
 				})
-				const value = `${signingInput}.${base64UrlBytes(signature)}`
-				yield* Ref.set(cachedToken, { value, mintedAtMs: nowMs })
-				return value
+				return `${signingInput}.${base64UrlBytes(signature)}`
 			})
 
-			const currentToken = Effect.gen(function* () {
-				const nowMs = yield* Clock.currentTimeMillis
-				const cached = yield* Ref.get(cachedToken)
-				if (cached !== null && nowMs - cached.mintedAtMs < TOKEN_TTL_MS) return cached.value
-				return yield* mintToken()
-			})
+			const currentToken = yield* makeSingleFlightTokenCache(TOKEN_TTL_MS, mintToken())
 
 			const send = Effect.fn("ApnsClient.send")(function* (push: ApnsPush) {
 				yield* Effect.annotateCurrentSpan({

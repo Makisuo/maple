@@ -174,8 +174,9 @@ function Body({ children }: { children: React.ReactNode }) {
 }
 
 /** Filter rail, flush left of the content and full height. A sheet below `lg`. */
-function Filters({ children }: { children: React.ReactNode }) {
-	return <PageLayout.FilterSidebar>{children}</PageLayout.FilterSidebar>
+/** `width` is a Tailwind class, forwarded for rails whose content needs more than `w-64`. */
+function Filters({ children, width }: { children: React.ReactNode; width?: string }) {
+	return <PageLayout.FilterSidebar width={width}>{children}</PageLayout.FilterSidebar>
 }
 
 /** The main column: `Sticky` (optional) above `Scroll`. */

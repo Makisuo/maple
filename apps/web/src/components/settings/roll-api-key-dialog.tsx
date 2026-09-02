@@ -56,6 +56,11 @@ export function RollApiKeyDialog({ open, onOpenChange, apiKey, onRolled }: RollA
 			onOpenChange(true)
 			return
 		}
+		// The roll is already dispatched: dismissing now (Escape, outside click,
+		// the built-in close button) would revoke the old key while the one-time
+		// replacement secret arrives into a closed dialog — either never seen, or
+		// shown later under whichever key the dialog opens for next.
+		if (isRolling) return
 		onOpenChange(false)
 		setNewSecret(null)
 	}

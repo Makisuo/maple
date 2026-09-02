@@ -13,7 +13,7 @@ import { DashboardPersistenceService } from "@/services/dashboards/DashboardPers
 import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
 import { ApiAuthorizationV2Layer } from "@/services/auth/ApiAuthorizationV2Layer"
 import { AuditLogService } from "@/services/audit/AuditLogService"
-import { ApiV2RateLimiter, type ApiV2RateLimiterApi } from "@/services/auth/ApiV2RateLimiter"
+import { ApiV2RateLimiter, type RateLimiterApi } from "@/services/auth/ApiV2RateLimiter"
 import { V2TransportErrorBoundaryLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
@@ -49,9 +49,7 @@ const testConfig = () =>
 		}),
 	)
 
-const makeHarness = (
-	checkRateLimit: ApiV2RateLimiterApi["check"] = () => Effect.succeed("allowed" as const),
-) => {
+const makeHarness = (checkRateLimit: RateLimiterApi["check"] = () => Effect.succeed("allowed" as const)) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 	const servicesLive = Layer.mergeAll(
@@ -405,6 +403,43 @@ describe("v2 api_keys over HTTP", () => {
 		const writeKey = await harness.bootstrapKey(["api_keys:write"])
 		const listViaWrite = await harness.request("GET", "/v2/api_keys", { token: writeKey.secret })
 		expect(listViaWrite.status).toBe(200)
+		await harness.dispose()
+	})
+
+	// The scope check reads the router's matched route template, so a path the
+	// router normalizes (case, percent-encoding, duplicate slashes, path
+	// parameters) can no longer route to a handler while dodging the check.
+	it.each([
+		["/V2/api_keys", "uppercase segment"],
+		["/v2/%61pi_keys", "percent-encoded segment"],
+		["/v2//api_keys", "duplicate slash"],
+		["/v2/api_keys;x", "path parameter suffix"],
+		["/v2/api_keys/", "trailing slash"],
+	])("rejects %s (%s) for a read-only key", async (path) => {
+		const harness = makeHarness()
+		const readOnly = await harness.bootstrapKey(["api_keys:read"])
+
+		const created = await harness.request("POST", path, {
+			token: readOnly.secret,
+			body: { name: "nope" },
+		})
+		expect(created.status).toBe(403)
+		expect(created.body.error.code).toBe("insufficient_scope")
+		await harness.dispose()
+	})
+
+	// The mirror of the case above: a key that *does* hold the scope still
+	// reaches the handler through a normalized path, so the fix denies on scope
+	// rather than on the path shape.
+	it("still serves a normalized path to a key that holds the scope", async () => {
+		const harness = makeHarness()
+		const writeKey = await harness.bootstrapKey(["api_keys:write"])
+
+		const created = await harness.request("POST", "/V2//api_keys", {
+			token: writeKey.secret,
+			body: { name: "normalized" },
+		})
+		expect(created.status).toBe(200)
 		await harness.dispose()
 	})
 

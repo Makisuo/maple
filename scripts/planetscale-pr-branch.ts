@@ -479,7 +479,7 @@ const createAndAwaitBranch = async (database: string, branchName: string): Promi
  * packages/db/scripts/reset-preview-branch.ts). Returns false on failure so the
  * caller can fall back to delete → recreate.
  */
-const resetBranchInPlace = (connectionUrl: string, replicationUrl?: string): boolean => {
+const resetBranchInPlace = (branchName: string, connectionUrl: string, replicationUrl?: string): boolean => {
 	const dbPackageDir = fileURLToPath(new URL("../packages/db", import.meta.url))
 	console.log(`$ bun run --cwd packages/db db:reset-preview`)
 	const proc = spawnSync("bun", ["run", "--cwd", dbPackageDir, "db:reset-preview"], {
@@ -488,6 +488,9 @@ const resetBranchInPlace = (connectionUrl: string, replicationUrl?: string): boo
 		env: {
 			...process.env,
 			DATABASE_URL: connectionUrl,
+			// The reset script's guard: name the pr-* branch this credential was
+			// minted for. A generic CI flag no longer authorizes the wipe.
+			RESET_EXPECTED_BRANCH: branchName,
 			// The inactive-slot sweep needs the REPLICATION attribute the main
 			// role deliberately lacks.
 			...(replicationUrl ? { REPLICATION_DATABASE_URL: replicationUrl } : undefined),
@@ -542,7 +545,7 @@ const main = async () => {
 			// branch delete revokes both roles and fresh ones are minted after the
 			// recreate.
 			const electric = createCredential(database, branchName, { replication: true, suffix: "-repl" })
-			if (resetBranchInPlace(credential.url, electric.url)) {
+			if (resetBranchInPlace(branchName, credential.url, electric.url)) {
 				maskAndExport({ MAPLE_PG_URL: credential.url, MAPLE_PG_ELECTRIC_URL: electric.url }, [
 					credential.password,
 					electric.password,

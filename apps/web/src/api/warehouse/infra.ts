@@ -2,6 +2,7 @@ import {
 	FleetUtilizationTimeseriesRequest,
 	HostDetailSummaryRequest,
 	HostInfraTimeseriesRequest,
+	InfraPresenceRequest,
 	ListHostsRequest,
 	ListPodsRequest,
 	PodsSummaryRequest,
@@ -16,9 +17,15 @@ import {
 	WorkloadDetailSummaryRequest,
 	WorkloadInfraTimeseriesRequest,
 	WorkloadFacetsRequest,
+	ListContainersRequest,
+	ContainersSummaryRequest,
+	ContainerDetailSummaryRequest,
+	ContainerInfraTimeseriesRequest,
+	ContainerFacetsRequest,
 	type FleetUtilizationTimeseriesResponse,
 	type HostDetailSummaryResponse,
 	type HostInfraTimeseriesResponse,
+	type InfraPresenceResponse,
 	type ListHostsResponse,
 	type ListPodsResponse,
 	type PodsSummaryResponse,
@@ -33,6 +40,11 @@ import {
 	type WorkloadDetailSummaryResponse,
 	type WorkloadInfraTimeseriesResponse,
 	type WorkloadFacetsResponse,
+	type ListContainersResponse,
+	type ContainersSummaryResponse,
+	type ContainerDetailSummaryResponse,
+	type ContainerInfraTimeseriesResponse,
+	type ContainerFacetsResponse,
 } from "@maple/domain/http"
 import { Effect } from "effect"
 import { MapleInternalAtomClient } from "@/lib/services/common/internal-atom-client"
@@ -47,6 +59,27 @@ export type SortDirection = "asc" | "desc"
 
 /** One-click fleet scopes from the summary band. */
 export type PodScope = "saturated" | "elevated" | "unbounded" | "stale"
+
+export interface InfraPresenceInput {
+	startTime: string
+	endTime: string
+}
+
+/** Which Infrastructure surfaces report telemetry — the sidebar's visibility gate. */
+export function infraPresence({ data }: { data: InfraPresenceInput }) {
+	return runWarehouseQuery("infraPresence", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleInternalAtomClient
+			const response: InfraPresenceResponse = yield* client.queryEngine.infraPresence({
+				payload: new InfraPresenceRequest({
+					startTime: data.startTime,
+					endTime: data.endTime,
+				}),
+			})
+			return response
+		}),
+	)
+}
 
 export interface ListHostsInput {
 	startTime: string
@@ -475,6 +508,186 @@ export function nodeInfraTimeseries({ data }: { data: NodeInfraTimeseriesInput }
 					bucketSeconds: data.bucketSeconds,
 				}),
 			})
+			return response
+		}),
+	)
+}
+
+// Containers (Docker)
+
+/** Mirrors ContainerSortKeyLiteral in @maple/domain — `saturation` is peak-of-either-percent. */
+export type ContainerSortKey = "saturation" | "cpuPct" | "memoryPct" | "containerName" | "lastSeen"
+
+/** One-click fleet scopes from the containers summary band (no `unbounded` — see domain). */
+export type ContainerScope = "saturated" | "elevated" | "stale"
+
+export interface ContainerFilterInputs {
+	search?: string
+	containerNames?: ReadonlyArray<string>
+	hostNames?: ReadonlyArray<string>
+	images?: ReadonlyArray<string>
+	composeProjects?: ReadonlyArray<string>
+	composeServices?: ReadonlyArray<string>
+	environments?: ReadonlyArray<string>
+	excludedContainerNames?: ReadonlyArray<string>
+	excludedHostNames?: ReadonlyArray<string>
+	excludedImages?: ReadonlyArray<string>
+	excludedComposeProjects?: ReadonlyArray<string>
+	excludedComposeServices?: ReadonlyArray<string>
+	excludedEnvironments?: ReadonlyArray<string>
+}
+
+export interface ListContainersInput extends ContainerFilterInputs {
+	startTime: string
+	endTime: string
+	scope?: ContainerScope
+	sortBy?: ContainerSortKey
+	sortDir?: SortDirection
+	limit?: number
+	offset?: number
+}
+
+const containerFilterPayload = (data: ContainerFilterInputs) => ({
+	search: data.search,
+	containerNames: data.containerNames,
+	hostNames: data.hostNames,
+	images: data.images,
+	composeProjects: data.composeProjects,
+	composeServices: data.composeServices,
+	environments: data.environments,
+	excludedContainerNames: data.excludedContainerNames,
+	excludedHostNames: data.excludedHostNames,
+	excludedImages: data.excludedImages,
+	excludedComposeProjects: data.excludedComposeProjects,
+	excludedComposeServices: data.excludedComposeServices,
+	excludedEnvironments: data.excludedEnvironments,
+})
+
+export function listContainers({ data }: { data: ListContainersInput }) {
+	return runWarehouseQuery("listContainers", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleInternalAtomClient
+			const response: ListContainersResponse = yield* client.queryEngine.listContainers({
+				payload: new ListContainersRequest({
+					startTime: data.startTime,
+					endTime: data.endTime,
+					...containerFilterPayload(data),
+					scope: data.scope,
+					sortBy: data.sortBy,
+					sortDir: data.sortDir,
+					limit: data.limit,
+					offset: data.offset,
+				}),
+			})
+			return response
+		}),
+	)
+}
+
+export interface ContainersSummaryInput {
+	startTime: string
+	endTime: string
+	hostNames?: ReadonlyArray<string>
+	environments?: ReadonlyArray<string>
+}
+
+/** Fleet-shape counts for the containers summary band — scope-only, like podsSummary. */
+export function containersSummary({ data }: { data: ContainersSummaryInput }) {
+	return runWarehouseQuery("containersSummary", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleInternalAtomClient
+			const response: ContainersSummaryResponse = yield* client.queryEngine.containersSummary({
+				payload: new ContainersSummaryRequest({
+					startTime: data.startTime,
+					endTime: data.endTime,
+					hostNames: data.hostNames,
+					environments: data.environments,
+				}),
+			})
+			return response
+		}),
+	)
+}
+
+export interface ContainerFacetsInput extends ContainerFilterInputs {
+	startTime: string
+	endTime: string
+}
+
+export function getContainerFacets({ data }: { data: ContainerFacetsInput }) {
+	return runWarehouseQuery("containerFacets", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleInternalAtomClient
+			const response: ContainerFacetsResponse = yield* client.queryEngine.containerFacets({
+				payload: new ContainerFacetsRequest({
+					startTime: data.startTime,
+					endTime: data.endTime,
+					...containerFilterPayload(data),
+				}),
+			})
+			return response
+		}),
+	)
+}
+
+export interface ContainerDetailSummaryInput {
+	startTime: string
+	endTime: string
+	containerName: string
+	hostName?: string
+}
+
+export function containerDetailSummary({ data }: { data: ContainerDetailSummaryInput }) {
+	return runWarehouseQuery("containerDetailSummary", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleInternalAtomClient
+			const response: ContainerDetailSummaryResponse = yield* client.queryEngine.containerDetailSummary(
+				{
+					payload: new ContainerDetailSummaryRequest({
+						startTime: data.startTime,
+						endTime: data.endTime,
+						containerName: data.containerName,
+						hostName: data.hostName,
+					}),
+				},
+			)
+			return response
+		}),
+	)
+}
+
+export type ContainerInfraMetric =
+	| "cpu"
+	| "memory_percent"
+	| "memory_bytes"
+	| "network"
+	| "disk_io"
+	| "uptime"
+
+export interface ContainerInfraTimeseriesInput {
+	startTime: string
+	endTime: string
+	containerName: string
+	hostName?: string
+	metric: ContainerInfraMetric
+	bucketSeconds?: number
+}
+
+export function containerInfraTimeseries({ data }: { data: ContainerInfraTimeseriesInput }) {
+	return runWarehouseQuery("containerInfraTimeseries", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleInternalAtomClient
+			const response: ContainerInfraTimeseriesResponse =
+				yield* client.queryEngine.containerInfraTimeseries({
+					payload: new ContainerInfraTimeseriesRequest({
+						startTime: data.startTime,
+						endTime: data.endTime,
+						containerName: data.containerName,
+						hostName: data.hostName,
+						metric: data.metric,
+						bucketSeconds: data.bucketSeconds,
+					}),
+				})
 			return response
 		}),
 	)

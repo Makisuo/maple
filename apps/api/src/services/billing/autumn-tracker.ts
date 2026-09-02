@@ -1,20 +1,33 @@
 /**
- * Fire-and-forget Autumn usage tracking for headless AI runs. Small imperative
- * copy of apps/chat-agent/src/lib/autumn-tracker.ts (which is app-internal and
- * not exported); the idempotency key carries the source so a chat message and
- * a triage run can never collide.
+ * Fire-and-forget Autumn usage tracking for every AI surface Maple bills:
+ * autonomous triage, the Slack agent, and an attended chat turn. Small
+ * imperative module rather than a service, because every caller reaches it from
+ * a place where a failure must not propagate.
+ *
+ * The idempotency key carries the source, so two surfaces that legitimately key
+ * on the same id can never collide — and a retry of any of them bills once.
  */
 
 import { AUTUMN_API_VERSION, AUTUMN_TRACK_PATH } from "@/services/billing/autumn-api"
 
 const DEFAULT_AUTUMN_API_URL = "https://api.useautumn.com"
 
+/**
+ * Ceiling on one track call.
+ *
+ * Every caller awaits this from somewhere that is holding something open — a chat
+ * turn holds the session's turn slot until it resolves, so an unbounded stall would
+ * leave a finished conversation unable to accept the next message. A dropped meter
+ * event is the cheaper failure, and it is already the failure mode for a non-2xx.
+ */
+const TRACK_TIMEOUT_MS = 5_000
+
 export interface TrackTokenUsageOptions {
 	readonly orgId: string
 	readonly inputTokens: number
 	readonly outputTokens: number
 	readonly idempotencyKey: string
-	readonly source: "triage"
+	readonly source: "triage" | "slack" | "chat"
 }
 
 interface TrackEvent {
@@ -43,6 +56,7 @@ const postTrack = async (
 				value: event.value,
 				idempotency_key: event.idempotencyKey,
 			}),
+			signal: AbortSignal.timeout(TRACK_TIMEOUT_MS),
 		})
 		if (!response.ok) {
 			const body = await response.text().catch(() => "")

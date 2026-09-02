@@ -90,6 +90,21 @@ export const startInvestigationFanout: (
 			return { started: false, reason: "no_binding" as const }
 		}
 
+		// Persist the instance id BEFORE dispatch, exactly as the manual start path
+		// does. Without it every automatically created investigation kept a null
+		// `workflowInstanceId`, and `restartInvestigation` — which terminates the
+		// prior instance only when the column is populated — left the old workflow
+		// running to publish over the replacement attempt. Attempt 0's instance id
+		// is deterministic: the bare investigation id.
+		yield* database
+			.execute((db) =>
+				db
+					.update(investigations)
+					.set({ workflowInstanceId: investigationId, updatedAt: new Date(nowMs) })
+					.where(eq(investigations.id, investigationId)),
+			)
+			.pipe(Effect.asVoid)
+
 		// `Exit`, not `Effect.option`: the reason a create() failed is the whole
 		// diagnostic value here — an id collision means a live instance already owns
 		// this investigation, a network error means retry.

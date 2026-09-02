@@ -1,14 +1,11 @@
 import { useDeferredValue, useEffect, useMemo, useRef, type ReactNode } from "react"
-import { Link } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
 import type { AiSessionSpan } from "@maple/domain/http"
-import { Button } from "@maple/ui/components/ui/button"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { formatBytes, formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 
-import { MessageResponse } from "@/components/ai-elements/message-response"
 import {
 	AlertWarningIcon,
 	BranchForkIcon,
@@ -20,7 +17,6 @@ import {
 	CompactLinesIcon,
 	CornerDownLeftIcon,
 	DotsIcon,
-	ExternalLinkIcon,
 	FaceRobotIcon,
 	GearIcon,
 	PixelSparkleIcon,
@@ -40,8 +36,9 @@ import {
 import type { SessionToolResults } from "@/lib/agent-sessions/span-detail"
 import { formatClockInTimezone } from "@/lib/timezone-format"
 import { ClampedText, firstLine } from "./clamped-text"
-import { useJsonPayload, useMessageBody, ViewSwitch } from "./payload-view"
+import { disclosed, MessageBody, useJsonPayload, useMessageBody, ViewSwitch } from "./payload-view"
 import { Pill } from "./pill"
+import { ToolIo, ToolIoSummary } from "./tool-io"
 
 /**
  * The session as a conversation.
@@ -99,7 +96,6 @@ export function SessionTranscript({
 	onToggleRow,
 	selectedSpanId,
 	onSelectSpan,
-	onOpenTraceView,
 }: {
 	turns: readonly SessionTurn[]
 	/** The session's captured tool results by call id (`sessionToolResults`). */
@@ -119,8 +115,6 @@ export function SessionTranscript({
 	onToggleRow: (key: string) => void
 	selectedSpanId: string | undefined
 	onSelectSpan: (spanId: string | undefined) => void
-	/** Switch to the Traces view with this span still selected. */
-	onOpenTraceView: () => void
 }) {
 	const { ref: listRef, getScrollElement, scrollMargin } = usePageScrollMargin()
 	const { effectiveTimezone } = useTimezonePreference()
@@ -208,7 +202,6 @@ export function SessionTranscript({
 									onToggleRow={onToggleRow}
 									selected={"span" in row && row.span.spanId === selectedSpanId}
 									onSelectSpan={onSelectSpan}
-									onOpenTraceView={onOpenTraceView}
 								/>
 							</div>
 						)
@@ -229,18 +222,6 @@ interface BlockProps {
 	onToggleRow: (key: string) => void
 	selected: boolean
 	onSelectSpan: (spanId: string | undefined) => void
-	onOpenTraceView: () => void
-}
-
-/**
- * Is this disclosure open?
- *
- * The set holds the rows the reader has flipped AWAY from their default, so the
- * "Expand tool payloads" chip still moves every card they have not touched, and a card
- * they opened by hand stays open when the chip goes off.
- */
-function disclosed(openRows: ReadonlySet<string>, key: string, byDefault: boolean): boolean {
-	return openRows.has(key) ? !byDefault : byDefault
 }
 
 function TranscriptBlock(props: BlockProps) {
@@ -483,17 +464,10 @@ function UserBlock({
 				</div>
 				{/* Clamped like every other long body: a pasted 400-line prompt is one
 				    block of a conversation, not the page. "Show full" opens it. */}
-				<ClampedText
-					text={raw ? row.text : body.formatted}
-					html={raw ? undefined : body.highlighted}
-					mono={!raw && body.rendered === "json"}
-					body={
-						raw || body.rendered === "json" ? undefined : (
-							<MessageResponse className="text-foreground text-sm leading-relaxed">
-								{row.text}
-							</MessageResponse>
-						)
-					}
+				<MessageBody
+					text={row.text}
+					body={body}
+					raw={raw}
 					expanded={disclosed(openRows, textKey, false)}
 					onToggleExpanded={() => onToggleRow(textKey)}
 				/>
@@ -576,15 +550,11 @@ function SystemBlock({
 			{open && (
 				<div className="flex items-start gap-1.5 pb-2 pl-6">
 					<div className="min-w-0 grow">
-						<ClampedText
-							text={raw ? row.text : body.formatted}
-							html={raw ? undefined : body.highlighted}
-							mono={!raw && body.rendered === "json"}
-							body={
-								raw || body.rendered === "json" ? undefined : (
-									<MessageResponse className="text-sm">{row.text}</MessageResponse>
-								)
-							}
+						<MessageBody
+							text={row.text}
+							body={body}
+							raw={raw}
+							proseClassName="text-sm"
 							expanded={disclosed(openRows, textKey, false)}
 							onToggleExpanded={() => onToggleRow(textKey)}
 						/>
@@ -609,7 +579,6 @@ function AssistantBlock({
 	onToggleRow,
 	selected,
 	onSelectSpan,
-	onOpenTraceView,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "assistant" }> }) {
 	const tone = row.failed ? "text-destructive" : "text-chart-2"
 	const Glyph = row.failed ? CircleWarningIcon : PixelSparkleIcon
@@ -618,6 +587,7 @@ function AssistantBlock({
 	// payload. Empty where the call succeeded, and the hook is cheap on "".
 	const error = useJsonPayload(row.failed ? row.span.statusMessage : "")
 	const body = useMessageBody(row.text ?? "")
+	const textKey = `${row.key}:text`
 	const rawKey = `${row.key}:raw`
 	const raw = disclosed(openRows, rawKey, false)
 	const errorRawKey = `${row.key}:error-raw`
@@ -657,23 +627,18 @@ function AssistantBlock({
 						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
 					/>
 				)}
-				{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
 			</div>
-			{row.text !== undefined &&
-				(raw ? (
-					<p className="whitespace-pre-wrap break-words pt-2.5 text-foreground text-sm leading-relaxed">
-						{row.text}
-					</p>
-				) : body.highlighted !== undefined ? (
-					<div
-						className="min-w-0 whitespace-pre-wrap break-words pt-2.5 font-mono text-muted-foreground text-xs leading-relaxed"
-						dangerouslySetInnerHTML={{ __html: body.highlighted }}
+			{row.text !== undefined && (
+				<div className="pt-2.5">
+					<MessageBody
+						text={row.text}
+						body={body}
+						raw={raw}
+						expanded={disclosed(openRows, textKey, false)}
+						onToggleExpanded={() => onToggleRow(textKey)}
 					/>
-				) : (
-					<MessageResponse className="pt-2.5 text-foreground text-sm leading-relaxed">
-						{row.text}
-					</MessageResponse>
-				))}
+				</div>
+			)}
 			{row.failed && (
 				<div className="flex flex-col gap-1.5 pt-2.5">
 					{row.span.statusMessage !== "" && (
@@ -729,6 +694,7 @@ function PromptBlock({
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "prompt" }> }) {
 	const rawKey = `${row.key}:raw`
 	const raw = disclosed(openRows, rawKey, false)
+	const textKey = `${row.key}:text`
 	const body = useMessageBody(row.text)
 
 	return (
@@ -746,20 +712,13 @@ function PromptBlock({
 						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
 					/>
 				</div>
-				{raw ? (
-					<p className="whitespace-pre-wrap break-words text-foreground text-sm leading-relaxed">
-						{row.text}
-					</p>
-				) : body.highlighted !== undefined ? (
-					<div
-						className="min-w-0 whitespace-pre-wrap break-words font-mono text-muted-foreground text-xs leading-relaxed"
-						dangerouslySetInnerHTML={{ __html: body.highlighted }}
-					/>
-				) : (
-					<MessageResponse className="text-foreground text-sm leading-relaxed">
-						{row.text}
-					</MessageResponse>
-				)}
+				<MessageBody
+					text={row.text}
+					body={body}
+					raw={raw}
+					expanded={disclosed(openRows, textKey, false)}
+					onToggleExpanded={() => onToggleRow(textKey)}
+				/>
 				<InlineNote>
 					The reply isn't captured. This emitter records{" "}
 					<span className="font-mono">gen_ai.input.messages</span> but not{" "}
@@ -842,7 +801,6 @@ function ToolBlock({
 	onToggleRow,
 	selected,
 	onSelectSpan,
-	onOpenTraceView,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "tool" }> }) {
 	const payloadsKey = `${row.key}:payloads`
 	const open = disclosed(openRows, payloadsKey, showPayloads)
@@ -881,78 +839,51 @@ function ToolBlock({
 						<span className={cn(META, "shrink-0")}>
 							· {row.span.serviceName}
 							{!row.fromMessageOnly && ` · ${formatDuration(row.span.durationMs)}`}
-							{!open && payloadSummary(row)}
 						</span>
+						{/* Sizes in gutter order while the pair is shut, so the reader knows
+						    what opening it costs before they pay for it. */}
+						{!open && <ToolIoSummary args={row.args} result={row.result} />}
 					</button>
 					{row.failed && row.span.genAi.errorType !== undefined && (
 						<Pill tone="error" className={WIRE_PILL}>
 							error.type {row.span.genAi.errorType}
 						</Pill>
 					)}
-					{!row.failed && row.callId !== undefined && !selected && (
+					{!row.failed && row.callId !== undefined && (
 						<span className={cn(META, "shrink-0")}>{row.callId}</span>
 					)}
-					{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
-				</div>
-
-				{open ? (
-					<>
-						{row.args !== undefined && (
-							<PayloadSection
-								label="Arguments"
-								payload={row.args}
-								openRows={openRows}
-								onToggleRow={onToggleRow}
-								textKey={`${row.key}:args-text`}
-							/>
-						)}
-						{row.result !== undefined ? (
-							<PayloadSection
-								label="Result"
-								payload={row.result}
-								meta={row.failed ? `span status ${row.span.statusCode}` : undefined}
-								tone={row.failed ? "text-destructive/90" : undefined}
-								bordered={row.args !== undefined}
-								openRows={openRows}
-								onToggleRow={onToggleRow}
-								textKey={`${row.key}:result-text`}
-							/>
-						) : (
-							<MissingResult fromMessageOnly={row.fromMessageOnly} />
-						)}
-						<button
-							type="button"
-							onClick={() => onToggleRow(payloadsKey)}
-							aria-expanded
-							className="flex cursor-pointer items-center gap-2 border-border/60 border-t px-3 py-1.5 text-chart-2 text-xs"
-						>
-							<ChevronDownIcon size={11} />
-							collapse payloads
-						</button>
-					</>
-				) : (
+					{/* The one control that opens the pair, in the header where the reader
+					    already is — not a footer they have to scroll the payloads to reach. */}
 					<button
 						type="button"
 						onClick={() => onToggleRow(payloadsKey)}
-						aria-expanded={false}
-						className="flex cursor-pointer items-center gap-2 border-border/60 border-t px-3 py-1.5 text-chart-2 text-xs"
+						aria-expanded={open}
+						aria-label={open ? "Collapse payloads" : "Expand payloads"}
+						className="-mr-1 shrink-0 cursor-pointer p-1 text-muted-foreground hover:text-foreground"
 					>
-						<ChevronRightIcon size={11} />
-						expand payloads
+						{open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
 					</button>
+				</div>
+
+				{open && (
+					<ToolIo
+						args={row.args}
+						result={row.result}
+						failed={row.failed}
+						resultMeta={row.failed ? `span status ${row.span.statusCode}` : undefined}
+						missingResultNote={
+							row.fromMessageOnly
+								? "not captured — this call is known only from the message that made it. Whether it ran is unknown."
+								: "not captured — the span carries no result attribute and no later message echoes this call id. Whether it succeeded is unknown."
+						}
+						keyPrefix={row.key}
+						openRows={openRows}
+						onToggleRow={onToggleRow}
+					/>
 				)}
 			</div>
 		</Row>
 	)
-}
-
-/** The one-line stand-in when payloads are collapsed — sizes, so the reader
- *  knows what expanding costs them. */
-function payloadSummary(row: Extract<TranscriptRow, { kind: "tool" }>): string {
-	const parts: string[] = []
-	if (row.args !== undefined) parts.push(`args ${formatBytes(row.args.byteLength)}`)
-	parts.push(row.result === undefined ? "no result" : `result ${formatBytes(row.result.byteLength)}`)
-	return ` · ${parts.join(" · ")}`
 }
 
 function PayloadSection({
@@ -1034,23 +965,6 @@ function PayloadSection({
 					Cut off here by the instrumentation, not by Maple — the tail was never recorded.
 				</p>
 			)}
-		</div>
-	)
-}
-
-/** A missing result is not a successful one, and this row refuses to imply it. */
-function MissingResult({ fromMessageOnly }: { fromMessageOnly: boolean }) {
-	return (
-		<div className="flex items-center gap-2.5 border-input border-t border-dashed bg-muted/20 px-3 py-2.5">
-			<CircleQuestionIcon size={13} className="shrink-0 text-muted-foreground" />
-			<span className="font-medium font-mono text-[10px] text-muted-foreground uppercase tracking-[0.1em]">
-				Result
-			</span>
-			<span className="min-w-0 text-muted-foreground text-xs">
-				{fromMessageOnly
-					? "not captured — this call is known only from the message that made it. Whether it ran is unknown."
-					: "not captured — the span carries no result attribute and no later message echoes this call id. Whether it succeeded is unknown."}
-			</span>
 		</div>
 	)
 }
@@ -1249,7 +1163,6 @@ function StructureRow({
 	timeZone,
 	selected,
 	onSelectSpan,
-	onOpenTraceView,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "structure" }> }) {
 	const category = row.label.startsWith("tool ")
 		? "tool"
@@ -1302,7 +1215,6 @@ function StructureRow({
 					<span className="grow" />
 					<span className={cn(META, "shrink-0")}>{formatDuration(row.span.durationMs)}</span>
 				</button>
-				{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
 			</div>
 		</Row>
 	)
@@ -1409,39 +1321,6 @@ function InlineNote({ children, className }: { children: ReactNode; className?: 
 			<CircleQuestionIcon size={13} className="mt-0.5 shrink-0 text-muted-foreground" />
 			<p className="min-w-0 text-muted-foreground text-xs leading-relaxed">{children}</p>
 		</div>
-	)
-}
-
-function OpenInTraces({ span, onOpenTraceView }: { span: AiSessionSpan; onOpenTraceView: () => void }) {
-	return (
-		<span className="flex shrink-0 items-center gap-1.5">
-			<Button
-				variant="outline"
-				size="sm"
-				className="h-5 px-1.5 text-[11px]"
-				onClick={(event) => {
-					event.stopPropagation()
-					onOpenTraceView()
-				}}
-			>
-				Waterfall
-			</Button>
-			<Button
-				variant="outline"
-				size="sm"
-				className="h-5 gap-1 px-1.5 text-[11px]"
-				render={
-					<Link
-						to="/traces/$traceId"
-						params={{ traceId: span.traceId }}
-						search={{ t: span.timestamp, spanId: span.spanId }}
-					/>
-				}
-			>
-				Open in Traces
-				<ExternalLinkIcon size={10} />
-			</Button>
-		</span>
 	)
 }
 

@@ -3,10 +3,9 @@
 	"version": "0.0.1",
 	"type": "module",
 	"scripts": {
-		"dev": "portless",
+		"dev": "bun run --silent sync:cli && exec env -u CLAUDECODE astro dev --port ${PORT:-3391} --host ${HOST:-127.0.0.1}",
 		"sync:i18n": "paraglide-js compile --project ./project.inlang --outdir ./src/paraglide --strategy url baseLocale && astro sync",
 		"sync:cli": "mkdir -p public/cli && cp ../../scripts/install.sh public/cli/install && cp ../../scripts/uninstall.sh public/cli/uninstall",
-		"dev:app": "bun run sync:cli && astro dev --port ${PORT:-3391} --host ${HOST:-127.0.0.1}",
 		"test": "vitest run",
 		"build": "bun run sync:cli && astro build",
 		"preview": "astro preview",
@@ -28,7 +27,7 @@
 		"@maple/ui": "workspace:*",
 		"@shikijs/transformers": "^4.4.1",
 		"@tailwindcss/vite": "catalog:tailwind",
-		"@tanstack/charts": "0.14.0",
+		"@tanstack/charts": "catalog:charts",
 		"@types/react": "catalog:react",
 		"@types/react-dom": "catalog:react",
 		"astro": "^7.2.8",
@@ -47,9 +46,5 @@
 		"@types/d3-scale": "^4.0.9",
 		"typescript": "^6.0.3",
 		"vitest": "catalog:"
-	},
-	"portless": {
-		"name": "landing",
-		"script": "dev:app"
 	}
 }

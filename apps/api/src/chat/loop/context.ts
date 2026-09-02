@@ -14,7 +14,7 @@
  * ## Why this is now a fallback rather than the main defence
  *
  * This module used to truncate old tool results *in place*, mid-turn. That is the one shape the
- * default route cannot afford: OpenRouter `openai/gpt-5.6-luna` gets no cache breakpoints from
+ * default route cannot afford: OpenRouter (`z-ai/glm-5.3-flash:nitro`) gets no cache breakpoints from
  * `@opencode-ai/ai` (its route id is not in `RESPECTS_INLINE_HINTS`), so caching there is implicit-prefix and
  * prefix stability is the only lever. Rewriting a step-3 result diverges the prefix near the front of
  * the turn and voids everything after it — at exactly the moment the transcript is longest.

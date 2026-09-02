@@ -104,18 +104,29 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisStage[] {
 			summary: "Never evaluated — the scheduler has not picked this rule up yet",
 			evidence: ["New rules are evaluated within about a minute of being enabled."],
 		})
-	} else {
-		const referenceMs = evaluatedAt ?? scheduledAt!
-		const stale = now - referenceMs > staleThresholdMs(rule)
+	} else if (evaluatedAt == null && scheduledAt != null) {
+		// Scheduled is not evaluated. Presenting the schedule timestamp as "last
+		// evaluated" let a worker that claimed the rule and crashed before its
+		// first evaluation read as a passing stage — and, with every later stage
+		// unknown, as "Rule is healthy".
+		stages.push({
+			id: "evaluated",
+			label: "Evaluated recently",
+			status: "warn",
+			summary: `Scheduled ${relative(now, scheduledAt)} but no evaluation has completed yet`,
+			evidence: [`Last scheduled: ${new Date(scheduledAt).toLocaleString()}`],
+		})
+	} else if (evaluatedAt != null) {
+		const stale = now - evaluatedAt > staleThresholdMs()
 		stages.push({
 			id: "evaluated",
 			label: "Evaluated recently",
 			status: stale ? "warn" : "pass",
 			summary: stale
-				? `Last evaluated ${relative(now, referenceMs)} — expected roughly every minute`
-				: `Last evaluated ${relative(now, referenceMs)}`,
+				? `Last evaluated ${relative(now, evaluatedAt)} — expected roughly every minute`
+				: `Last evaluated ${relative(now, evaluatedAt)}`,
 			evidence: [
-				evaluatedAt != null ? `Last evaluation: ${new Date(evaluatedAt).toLocaleString()}` : null,
+				`Last evaluation: ${new Date(evaluatedAt).toLocaleString()}`,
 				scheduledAt != null ? `Last scheduled: ${new Date(scheduledAt).toLocaleString()}` : null,
 			].filter((line): line is string => line != null),
 		})

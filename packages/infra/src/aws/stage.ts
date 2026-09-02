@@ -245,3 +245,25 @@ export function stageEnablesReplayBlobs(stage: MapleStage): boolean {
 export function resolveCollectorTaskSize(stage: MapleStage): IngestTaskSize {
 	return stage.kind === "prd" ? { cpu: 512, memory: 1024 } : { cpu: 256, memory: 1024 }
 }
+
+/**
+ * Whether a stage runs its own ElectricSQL sync service.
+ *
+ * PR previews are excluded for the same reason they get no Electric config at
+ * all: no PlanetScale branch, so nothing to replicate from. Dev stages use the
+ * docker `electric` service.
+ */
+export function stageDeploysElectric(stage: MapleStage): boolean {
+	return stage.kind === "prd" || stage.kind === "stg"
+}
+
+/**
+ * Fargate task size for Electric per stage.
+ *
+ * Eight low-write control-plane tables, so this is sized for the BEAM's floor
+ * rather than for throughput. Raise it when a shape's snapshot query, not its
+ * change stream, becomes the cost.
+ */
+export function resolveElectricTaskSize(stage: MapleStage): IngestTaskSize {
+	return stage.kind === "prd" ? { cpu: 512, memory: 1024 } : { cpu: 256, memory: 512 }
+}

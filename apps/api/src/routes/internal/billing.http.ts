@@ -222,6 +222,15 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 				.handle("attach", ({ payload }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
+						// Starting or changing a plan is an org-wide spend decision, so
+						// it is gated like every other billing write in this group.
+						yield* requireAdmin(
+							tenant.roles,
+							() =>
+								new BillingForbiddenError({
+									message: "Only org admins can change the subscription",
+								}),
+						)
 						// No buyer identity rides along: `/v1/billing.attach` carries no
 						// identity fields in Autumn 2.3.0, and the `customerData` we used to
 						// hand `autumnHandler` here was silently discarded by it. Seeding
@@ -299,6 +308,16 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleInternalApi, "billing",
 				.handle("openCustomerPortal", ({ payload }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
+						// The Stripe portal can cancel the subscription and exposes the
+						// payment methods and invoice history — admin-only, like the
+						// billing-details writes it overlaps with.
+						yield* requireAdmin(
+							tenant.roles,
+							() =>
+								new BillingForbiddenError({
+									message: "Only org admins can open the billing portal",
+								}),
+						)
 						const result = yield* autumn.openCustomerPortal(tenant.orgId, {
 							returnUrl: payload.returnUrl,
 						})

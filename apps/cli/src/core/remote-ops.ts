@@ -84,10 +84,7 @@ export const serviceMap = (
 					callCount: e.call_count,
 					errorCount: e.error_count,
 					avgDurationMs: e.avg_duration_ms,
-					// Not a fudge: the v2 handler populates `max_duration_ms` from the
-					// query's `p95DurationMs` (routes/v2/telemetry.http.ts, `toMapEdge`),
-					// so this reads back the same value under its real name.
-					p95DurationMs: e.max_duration_ms,
+					maxDurationMs: e.max_duration_ms,
 				}),
 			),
 	)

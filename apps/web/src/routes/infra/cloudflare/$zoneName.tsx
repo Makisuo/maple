@@ -12,6 +12,11 @@ import { HeroChip, PageHero } from "@/components/infra/primitives/page-hero"
 import { StatRail, StatRailItem, StatRailLoading } from "@/components/infra/primitives/stat-rail"
 import { formatBytes, formatPercent } from "@maple/ui/lib/format"
 import { CloudflareBreakdownPanel } from "@/components/infra/cloudflare/cloudflare-breakdown-panel"
+import {
+	CloudflareIngestEmpty,
+	CloudflareStalledAction,
+} from "@/components/infra/cloudflare/cloudflare-ingest-status"
+import { useCloudflareIngestPhase } from "@/components/infra/cloudflare/use-cloudflare-ingest-phase"
 import { CloudflareEdgeShareBand } from "@/components/infra/cloudflare/cloudflare-edge-share-band"
 import { CloudflareFilterChips } from "@/components/infra/cloudflare/cloudflare-filter-chips"
 import { CloudflareFilterSidebarView } from "@/components/infra/cloudflare/cloudflare-filter-sidebar"
@@ -204,6 +209,9 @@ function ZoneDetailContent({
 	onToggleFilter: (key: CloudflareFilterKey, value: string) => void
 }) {
 	const bucketSeconds = chartBucketSeconds(startTime, endTime)
+	// A zone drilled into before any data has been collected would otherwise read as "this zone
+	// has no traffic", which is a different — and wrong — thing to tell someone.
+	const { phase } = useCloudflareIngestPhase()
 
 	const detailResult = useRefreshableAtomValue(
 		cloudflareZoneDetailResultAtom({
@@ -233,6 +241,13 @@ function ZoneDetailContent({
 		.onError((err) => <QueryErrorState error={err} />)
 		.onSuccess((detail, result) => {
 			if (detail.statusBuckets.length === 0 && !result.waiting) {
+				if (phase != null && phase.kind !== "live" && phase.kind !== "backfilling") {
+					return (
+						<CloudflareIngestEmpty phase={phase}>
+							{phase.kind === "stalled" ? <CloudflareStalledAction /> : null}
+						</CloudflareIngestEmpty>
+					)
+				}
 				return (
 					<Empty className="py-16">
 						<EmptyHeader>

@@ -39,7 +39,7 @@ import { DurableObjectState, fromDurableObjectState } from "./durable-object-sta
 import type { HttpEffect } from "./http.ts"
 import { makeDurableObjectBridge, makeRpcStub } from "./rpc.ts"
 import type { DurableWebSocket } from "./websocket.ts"
-import { WorkerEnvironment } from "./worker-environment.ts"
+import { MissingWorkerBindingError, WorkerEnvironment } from "./worker-environment.ts"
 
 export type DurableObjectId = cf.DurableObjectId
 export type AlarmInvocationInfo = cf.AlarmInvocationInfo
@@ -170,10 +170,15 @@ export const namespaceOf = Effect.fn("namespaceOf")(function* <Definition = unkn
 	const name = typeof classOrName === "string" ? classOrName : classOrName.name
 	const binding = env[name] as cf.DurableObjectNamespace | undefined
 	if (!binding || typeof binding.getByName !== "function") {
+		// Bindings are declared in `wrangler.jsonc` at deploy time, so a missing one
+		// is a deployment that should not have shipped rather than a runtime state.
+		// oxlint-disable-next-line maple/no-effect-die
 		return yield* Effect.die(
-			new Error(
-				`Worker env has no DurableObjectNamespace binding named '${name}'. Check wrangler.jsonc.`,
-			),
+			new MissingWorkerBindingError({
+				binding: name,
+				kind: "DurableObjectNamespace",
+				message: `Worker env has no DurableObjectNamespace binding named '${name}'. Check wrangler.jsonc.`,
+			}),
 		)
 	}
 	return {

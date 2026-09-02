@@ -164,7 +164,7 @@ export const runScheduledSync = Effect.gen(function* () {
 	Effect.withSpan("VcsScheduledSync.tick"),
 )
 
-// Must match `max_retries` in wrangler.jsonc / alchemy.run.ts. No DLQ exists, so on the
+// Must match the consumer's `maxRetries` in alchemy.run.ts. No DLQ exists, so on the
 // final delivery (attempt > max_retries) we persist a terminal status instead of silently dropping.
 const VCS_SYNC_MAX_RETRIES = 3
 

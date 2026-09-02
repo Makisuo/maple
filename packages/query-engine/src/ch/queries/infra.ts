@@ -17,18 +17,7 @@ import { from, fromQuery, type ColumnAccessor } from "@maple-dev/clickhouse-buil
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, MetricsSum } from "../tables"
 import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
-import type { FacetOutput } from "./query-helpers"
-
-// A conditional aggregate over a metric family the entity never emitted returns
-// `nan`, which ClickHouse serializes as JSON `null` — and one null against a
-// numeric row schema fails the decode for the whole page, not just that row.
-// Absent samples mean "none of this resource in use", which is what the callers
-// already assume: `podScopeCondition("unbounded")` tests `saturation = 0`.
-const avgIfOrZero = (value: CH.Expr<number>, condition: CH.Condition): CH.Expr<number> =>
-	CH.ifNotFinite(CH.avgIf(value, condition), 0)
-
-const maxIfOrZero = (value: CH.Expr<number>, condition: CH.Condition): CH.Expr<number> =>
-	CH.ifNotFinite(CH.maxIf(value, condition), 0)
+import { avgIfOrZero, facetAttrExpr, maxIfOrZero, type FacetOutput } from "./query-helpers"
 
 const HOSTMETRIC_NAMES = [
 	"system.cpu.utilization",
@@ -444,8 +433,11 @@ const podFilterConditions = (
 			excluded?.length ? CH.notInList(expr, excluded) : undefined,
 		]
 	}),
-	CH.when(opts.workloadKind && opts.workloadName, () =>
-		$.ResourceAttributes.get(workloadAttrKey(opts.workloadKind!)).eq(opts.workloadName!),
+	CH.when(
+		opts.workloadKind !== undefined && opts.workloadName !== undefined
+			? { kind: opts.workloadKind, name: opts.workloadName }
+			: undefined,
+		(workload) => $.ResourceAttributes.get(workloadAttrKey(workload.kind)).eq(workload.name),
 	),
 ]
 
@@ -1001,22 +993,6 @@ export function workloadGaugeTimeseriesQuery(opts: WorkloadGaugeTimeseriesOpts) 
 // list query (pods, nodes, or workloads), filtered by the same opts so the
 // facet counts reflect the *current* filtered set.
 
-/**
- * Facet dimensions are plain `ResourceAttributes` keys, with one exception: the
- * deployment environment has two spellings in the wild (OTel renamed
- * `deployment.environment` to `deployment.environment.name`), so it resolves to
- * the coalescing expression instead of a single map lookup. Without this a
- * cluster whose collector still emits the legacy key produced an empty
- * environment facet.
- */
-const facetAttrExpr = (
-	resourceAttributes: { get(key: string): CH.Expr<string> },
-	attrKey: string,
-): CH.Expr<string> =>
-	attrKey === "deployment.environment.name"
-		? deploymentEnvExpr(resourceAttributes)
-		: resourceAttributes.get(attrKey)
-
 export type PodFacetsOutput = FacetOutput
 
 const makePodFacet = (opts: ListPodsOpts, attrKey: string, facetType: string, perFacetLimit: number) =>
@@ -1113,5 +1089,83 @@ export function workloadFacetsQuery(opts: ListWorkloadsOpts): CHUnionQuery<Workl
 		makeWorkloadFacet(opts, "k8s.cluster.name", "cluster", 50),
 		makeWorkloadFacet(opts, "deployment.environment.name", "environment", 50),
 		makeWorkloadFacet(opts, "eks.amazonaws.com/compute-type", "computeType", 10),
+	).format("JSON")
+}
+
+// Infrastructure presence — which surfaces this org actually reports
+//
+// The sidebar's Infrastructure section has seven children, and almost no org
+// runs all seven. To show only the ones an org has, something has to answer
+// "does this surface report anything?" on every page load — so the probe has
+// to be far cheaper than the list queries it gates.
+//
+// One branch per surface, each an existence check: a constant select list, a
+// single probe metric, a bounded window, `LIMIT 1`. Deliberately NOT an
+// aggregate — `count()` reads every matching row before the limit can trim its
+// one output row, while a non-aggregating branch stops at the first hit, which
+// is the whole point. One metric name rather than the surface's full set for
+// the same reason: every pod emits `k8s.pod.cpu.usage` and every container
+// `container.cpu.utilization`, so one name reaches the same population.
+//
+// A surface with nothing to report contributes NO row — presence is the row's
+// existence, not a count in it. The set of surfaces is known to the caller, so
+// there is nothing a zero row would say that an absent one does not.
+//
+// Callers pass a short window (an hour is plenty — this asks "is it reporting
+// now?", not "has it ever").
+
+/** Sidebar surfaces gated by the probe. `hosts` is `/infra` itself. */
+export type InfraSurface = "hosts" | "containers" | "k8sPods" | "k8sNodes" | "k8sWorkloads"
+
+export interface InfraPresenceOutput {
+	readonly surface: string
+}
+
+/**
+ * The three workload kinds share one branch: the sidebar has a single
+ * "K8s Workloads" row, so which owner attribute is set doesn't change what it
+ * shows — only whether *any* of them is.
+ */
+const WORKLOAD_OWNER_KEYS = [
+	"k8s.deployment.name",
+	"k8s.statefulset.name",
+	"k8s.daemonset.name",
+] as const
+
+const presenceBranch = (
+	surface: InfraSurface,
+	metricName: string,
+	identity: ($: ColumnAccessor<typeof MetricsGauge.columns>) => CH.Condition,
+) =>
+	from(MetricsGauge)
+		.select(() => ({ surface: CH.lit(surface) }))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.TimeUnix.gte(param.dateTimeString("startTime")),
+			$.TimeUnix.lte(param.dateTimeString("endTime")),
+			$.MetricName.eq(metricName),
+			identity($),
+		])
+		.limit(1)
+
+export function infraPresenceQuery(): CHUnionQuery<InfraPresenceOutput> {
+	return unionAll(
+		presenceBranch("hosts", "system.cpu.utilization", ($) =>
+			$.ResourceAttributes.get("host.name").neq(""),
+		),
+		presenceBranch("containers", "container.cpu.utilization", ($) =>
+			$.ResourceAttributes.get("container.name").neq(""),
+		),
+		presenceBranch("k8sPods", POD_FACET_PROBE_METRIC, ($) =>
+			$.ResourceAttributes.get("k8s.pod.name").neq(""),
+		),
+		presenceBranch("k8sNodes", NODE_FACET_PROBE_METRIC, ($) =>
+			$.ResourceAttributes.get("k8s.node.name").neq(""),
+		),
+		presenceBranch("k8sWorkloads", POD_FACET_PROBE_METRIC, ($) =>
+			WORKLOAD_OWNER_KEYS.map((key) => $.ResourceAttributes.get(key).neq("")).reduce((a, b) =>
+				a.or(b),
+			),
+		),
 	).format("JSON")
 }

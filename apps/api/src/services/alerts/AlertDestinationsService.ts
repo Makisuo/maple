@@ -23,7 +23,7 @@ import {
 	type UserId,
 } from "@maple/domain/http"
 import { alertDestinations, alertRules, type AlertDestinationRow } from "@maple/db"
-import { and, desc, eq } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import { Context, Effect, Layer, Match, Option, Redacted, Schema } from "effect"
 import { encryptAes256Gcm, type EncryptedValue } from "@/platform/Crypto"
 import { Database } from "@/platform/DatabaseLive"
@@ -852,13 +852,47 @@ export class AlertDestinationsService extends Context.Service<
 					}),
 				)
 			}
-			const deleted = yield* dbExecute((db) =>
-				db
-					.delete(alertDestinations)
-					.where(and(eq(alertDestinations.orgId, orgId), eq(alertDestinations.id, destinationId)))
-					.returning(txidColumn),
+			// The scan above is the rich-message UX path; this transaction is the
+			// correctness gate. Rule writes validate destinations under the same
+			// per-org advisory lock, so re-checking references inside it closes the
+			// race where a rule commits a reference between our scan and the delete.
+			const deleteResult = yield* dbExecute((db) =>
+				db.transaction(async (tx) => {
+					await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${orgId}))`)
+					const stillReferenced = await tx
+						.select({ id: alertRules.id, name: alertRules.name })
+						.from(alertRules)
+						.where(
+							and(
+								eq(alertRules.orgId, orgId),
+								sql`${alertRules.destinationIdsJson} @> ${JSON.stringify([destinationId])}::jsonb`,
+							),
+						)
+					if (stillReferenced.length > 0) {
+						return { referencedBy: stillReferenced, deleted: [] }
+					}
+					const deleted = await tx
+						.delete(alertDestinations)
+						.where(
+							and(eq(alertDestinations.orgId, orgId), eq(alertDestinations.id, destinationId)),
+						)
+						.returning(txidColumn)
+					return { referencedBy: [], deleted }
+				}),
 			)
-			const txid = readTxid(deleted)
+			if (deleteResult.referencedBy.length > 0) {
+				return yield* Effect.fail(
+					new AlertDestinationInUseError({
+						message: `Destination is still used by alert rules: ${deleteResult.referencedBy
+							.map((rule) => rule.name)
+							.join(", ")}`,
+						destinationId,
+						ruleIds: deleteResult.referencedBy.map((rule) => decodeAlertRuleIdSync(rule.id)),
+						ruleNames: deleteResult.referencedBy.map((rule) => rule.name),
+					}),
+				)
+			}
+			const txid = readTxid(deleteResult.deleted)
 			return new AlertDestinationDeleteResponse({
 				id: destinationId,
 				...(txid !== undefined ? { txid } : undefined),

@@ -164,3 +164,19 @@ describe("buildDiagnosis", () => {
 		expect(stage(stages, "data").status).toBe("fail")
 	})
 })
+
+describe("scheduled but never evaluated", () => {
+	it("warns instead of reporting the rule healthy", () => {
+		// A worker that claimed the rule and crashed before its first evaluation
+		// used to read the schedule timestamp as a completed evaluation — passing
+		// stage, unknown downstream stages, "All stages passing" header.
+		const stages = diagnose({
+			rule: makeRule({ lastEvaluatedAt: null, lastScheduledAt: iso(60_000) }),
+			states: [],
+		})
+		const evaluated = stage(stages, "evaluated")
+		expect(evaluated.status).toBe("warn")
+		expect(evaluated.summary).toContain("no evaluation has completed")
+		expect(diagnosisVerdict(stages).status).toBe("warn")
+	})
+})

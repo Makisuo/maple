@@ -25,6 +25,7 @@ import {
 	errorEvents,
 	errorEventsByTime,
 	errorFingerprintsMinutely,
+	aiTraceIndex,
 	traceDetailSpans,
 	traceListMv,
 	attributeKeysHourly,
@@ -45,6 +46,7 @@ import {
 	DB_STATEMENT_SQL,
 	DB_SYSTEM_ATTR_SQL,
 } from "./db-query-shape-sql"
+import { MAPLE_AI_SESSION_ID_ATTR, MAPLE_AI_VENDOR_ID_ATTR } from "../gen-ai"
 import { DEPLOYMENT_ENV_SQL, MESSAGING_DESTINATION_SQL } from "./semconv-renames"
 import { NORMALIZED_SPAN_NAME_SQL } from "./span-display-name"
 
@@ -510,7 +512,8 @@ export const serviceMapDbEdgesHourlyMv = defineMaterializedView("service_map_db_
           max(Duration / 1000000) AS MaxDurationMs,
           countIf(TraceState LIKE '%th:%') AS SampledSpanCount,
           countIf(TraceState = '' OR TraceState NOT LIKE '%th:%') AS UnsampledSpanCount,
-          sum(SampleRate) AS SampleRateSum
+          sum(SampleRate) AS SampleRateSum,
+          quantilesTDigestWeightedState(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0))) AS DurationQuantiles
         FROM traces
         WHERE SpanKind IN ('Client', 'Producer')
           AND ${DB_SYSTEM_ATTR_SQL} != ''
@@ -622,7 +625,8 @@ export const serviceExternalEdgesHourlyMv = defineMaterializedView("service_exte
           countIf(StatusCode = 'Error') AS ErrorCount,
           sum(Duration / 1000000) AS DurationSumMs,
           max(Duration / 1000000) AS MaxDurationMs,
-          sum(SampleRate) AS SampleRateSum
+          sum(SampleRate) AS SampleRateSum,
+          quantilesTDigestWeightedState(0.5, 0.95)(Duration, toUInt32(greatest(SampleRate, 1.0))) AS DurationQuantiles
         FROM traces
         WHERE SpanKind IN ('Client', 'Producer')
           AND SpanAttributes['db.system.name'] = ''
@@ -956,6 +960,39 @@ export const traceDetailSpansMv = defineMaterializedView("trace_detail_spans_mv"
           SpanAttributes,
           ResourceAttributes
         FROM traces
+      `,
+		}),
+	],
+})
+
+/**
+ * Populates `ai_trace_index` with only the spans the ingest gateway stamped as
+ * GenAI (`maple_ai.vendor.id`). This filter IS Agent Sessions' detection
+ * predicate, moved to insert time: the read side
+ * (`query-engine-integrations/src/ai/ai-sessions.ts`) carries no vendor
+ * predicate at all any more and treats membership in this table as the guard.
+ * Narrowing this filter narrows detection.
+ *
+ * A missing Map key reads back as `''`, so the single `!= ''` comparison is
+ * both the presence check and the non-empty check.
+ */
+export const aiTraceIndexMv = defineMaterializedView("ai_trace_index_mv", {
+	description:
+		"Populates ai_trace_index with GenAI agent spans (maple_ai.vendor.id stamped), pre-extracting the maple_ai.* identity to plain columns.",
+	datasource: aiTraceIndex,
+	nodes: [
+		node({
+			name: "ai_trace_index_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          Timestamp,
+          TraceId,
+          SpanAttributes['${MAPLE_AI_SESSION_ID_ATTR}'] AS SessionId,
+          SpanAttributes['${MAPLE_AI_VENDOR_ID_ATTR}'] AS VendorId,
+          ServiceName
+        FROM traces
+        WHERE SpanAttributes['${MAPLE_AI_VENDOR_ID_ATTR}'] != ''
       `,
 		}),
 	],
@@ -1428,6 +1465,15 @@ export const serviceOperationsMinutelyMv = defineMaterializedView("service_opera
 	description:
 		"Pre-aggregates every span by service operation and minute with normalized HTTP names, exact/estimated counts, errors, duration sum, and unweighted t-digest state.",
 	datasource: serviceOperationsMinutely,
+	// Migration 0023 adds three counter columns to the target. Without this,
+	// Tinybird treats a changed MV node as a reason to REBUILD the target by
+	// replaying its source — and the source here is `traces`, which keeps 30 days
+	// against this rollup's 90. The deploy warns and then drops eight months of
+	// history that cannot be reconstructed. `alter` applies the column addition
+	// with no data movement at promotion, which is what an additive change
+	// actually needs, and is also why these rollups need no FORWARD_QUERY (a
+	// leftover one makes every later deploy fail — see the note in datasources).
+	deploymentMethod: "alter",
 	nodes: [
 		node({
 			name: "service_operations_minutely_mv_node",
@@ -1443,7 +1489,10 @@ export const serviceOperationsMinutelyMv = defineMaterializedView("service_opera
           countIf(StatusCode = 'Error') AS ErrorCount,
           sumIf(SampleRate, StatusCode = 'Error') AS EstimatedErrorCount,
           sum(toFloat64(Duration)) AS DurationSum,
-          quantilesTDigestState(0.5, 0.95)(Duration) AS DurationQuantiles
+          quantilesTDigestState(0.5, 0.95)(Duration) AS DurationQuantiles,
+          count() AS ClassifiedSpanCount,
+          countIf(SpanKind IN ('Server', 'Consumer')) AS ServerSpanCount,
+          countIf(SpanAttributes['http.route'] != '') AS RoutedSpanCount
         FROM traces
         GROUP BY OrgId, Minute, ServiceName, DeploymentEnv, SpanName
       `,
@@ -1459,6 +1508,10 @@ export const serviceOperationsMinutelyMv = defineMaterializedView("service_opera
 export const serviceOperationsHourlyMv = defineMaterializedView("service_operations_hourly_mv", {
 	description: "Merges minutely service-operation aggregates into an hour-grain one-year rollup.",
 	datasource: serviceOperationsHourly,
+	// Same reason as the minutely view, one tier worse: this target keeps 365 days
+	// and its source keeps 90, so a rebuild silently truncates the annual rollup
+	// to a quarter.
+	deploymentMethod: "alter",
 	nodes: [
 		node({
 			name: "service_operations_hourly_mv_node",
@@ -1474,7 +1527,10 @@ export const serviceOperationsHourlyMv = defineMaterializedView("service_operati
           sum(ErrorCount) AS ErrorCount,
           sum(EstimatedErrorCount) AS EstimatedErrorCount,
           sum(DurationSum) AS DurationSum,
-          quantilesTDigestMergeState(0.5, 0.95)(DurationQuantiles) AS DurationQuantiles
+          quantilesTDigestMergeState(0.5, 0.95)(DurationQuantiles) AS DurationQuantiles,
+          sum(ClassifiedSpanCount) AS ClassifiedSpanCount,
+          sum(ServerSpanCount) AS ServerSpanCount,
+          sum(RoutedSpanCount) AS RoutedSpanCount
         FROM service_operations_minutely
         GROUP BY OrgId, Hour, ServiceName, DeploymentEnv, SpanName
       `,

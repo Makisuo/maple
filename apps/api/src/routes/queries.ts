@@ -14,6 +14,7 @@ import type {
 	CloudflareInfraZoneSecurityRequest,
 	CloudflareInfraZoneTimeseriesRequest,
 	CloudflareInfraZonesRequest,
+	ContainerInfraTimeseriesRequest,
 	FleetUtilizationTimeseriesRequest,
 	GetLogRequest,
 	NodeInfraTimeseriesRequest,
@@ -24,6 +25,7 @@ import type {
 	WorkloadInfraTimeseriesRequest,
 } from "@maple/domain/http"
 import {
+	containerMetricSpec,
 	hostMetricSpec,
 	nodeMetricSpec,
 	partitionWindowAround,
@@ -406,6 +408,58 @@ const hostInfraGaugeTimeseries = defineQuery({
 	},
 })
 
+// Same split as the host defs: sum metrics (network, block IO, memory bytes)
+// read metrics_sum, everything else the gauge family. Both keep the id
+// "containerInfraTimeseries" for span continuity.
+
+const containerInfraSumTimeseries = defineQuery({
+	id: "containerInfraTimeseries",
+	profile: "aggregation",
+	cache: 15,
+	compile: (payload: ContainerInfraTimeseriesRequest, orgId: string) => {
+		const spec = containerMetricSpec(payload.metric)
+		return CH.compile(
+			CH.containerSumTimeseriesQuery({
+				containerName: payload.containerName,
+				hostName: payload.hostName,
+				metricNames: spec.metricNames,
+				metricLabels: spec.metricLabels,
+				groupByAttributeKey: spec.groupByAttributeKey,
+				average: spec.average,
+			}),
+			{
+				orgId,
+				startTime: payload.startTime,
+				endTime: payload.endTime,
+				bucketSeconds: payload.bucketSeconds ?? 60,
+			},
+		)
+	},
+})
+
+const containerInfraGaugeTimeseries = defineQuery({
+	id: "containerInfraTimeseries",
+	profile: "aggregation",
+	cache: 15,
+	compile: (payload: ContainerInfraTimeseriesRequest, orgId: string) => {
+		const spec = containerMetricSpec(payload.metric)
+		return CH.compile(
+			CH.containerGaugeTimeseriesQuery({
+				containerName: payload.containerName,
+				hostName: payload.hostName,
+				metricName: spec.metricNames[0]!,
+				divideBy: spec.divideBy,
+			}),
+			{
+				orgId,
+				startTime: payload.startTime,
+				endTime: payload.endTime,
+				bucketSeconds: payload.bucketSeconds ?? 60,
+			},
+		)
+	},
+})
+
 const zoneBreakdownParams = (payload: CloudflareInfraZoneBreakdownRequest, orgId: string) => ({
 	orgId,
 	serviceName: payload.serviceName,
@@ -646,6 +700,8 @@ export const Queries = {
 	cloudflareInfraZoneFacets,
 	hostInfraNetworkTimeseries,
 	hostInfraGaugeTimeseries,
+	containerInfraSumTimeseries,
+	containerInfraGaugeTimeseries,
 	cloudflareInfraZoneBreakdownTotals,
 	cloudflareInfraZoneBreakdownCoverage,
 	cloudflareInfraZoneBreakdownZoneTotal,

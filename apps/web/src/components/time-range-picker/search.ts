@@ -37,3 +37,19 @@ export function applyTimeRangeSearch<T extends Record<string, unknown>>(prev: T,
 		timePreset: undefined,
 	}
 }
+
+/** The decoded shape of `TimeRangeSearchFields` — what a link carries to keep the window. */
+export interface TimeRangeSearch {
+	startTime?: string
+	endTime?: string
+	timePreset?: string
+}
+
+/**
+ * Just the window, nothing else. For a link between sibling pages whose other
+ * search params don't transfer — a pod filter means nothing on the nodes list —
+ * and for "clear filters", which must keep the window and drop the rest.
+ */
+export function pickTimeRangeSearch(search: TimeRangeSearch): TimeRangeSearch {
+	return { startTime: search.startTime, endTime: search.endTime, timePreset: search.timePreset }
+}

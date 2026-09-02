@@ -8,6 +8,7 @@ import {
 	primaryKey,
 	text,
 	timestamp,
+	uniqueIndex,
 } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 import type { AnomalyIncidentId, ErrorIssueId, OrgId, UserId } from "@maple/domain/primitives"
@@ -133,6 +134,13 @@ export const anomalyIncidents = pgTable(
 		index("anomaly_incidents_org_triggered_idx").on(table.orgId, table.lastTriggeredAt),
 		index("anomaly_incidents_org_detector_idx").on(table.orgId, table.detectorKey),
 		index("anomaly_incidents_org_issue_idx").on(table.orgId, table.errorIssueId),
+		// One open incident per detector: the org claim is a bare lastTickAt CAS
+		// with no renewal, so a tick that outruns ORG_LOCK_TTL_MS can overlap the
+		// next one — this turns the duplicate open into a no-op/loud conflict
+		// instead of two incidents, two triages, two pages.
+		uniqueIndex("anomaly_incidents_open_detector_idx")
+			.on(table.orgId, table.detectorKey)
+			.where(sql`${table.status} = 'open'`),
 	],
 )
 

@@ -335,3 +335,80 @@ describe("stampCurrentVersion", () => {
 		expect(encoded.schemaVersion).toBe(CURRENT_DASHBOARD_SCHEMA_VERSION)
 	})
 })
+
+describe("the v1 -> v2 step recurses into display.sparkline.dataSource", () => {
+	// The sparkline embeds a FULL v1 data source, open transform included. Left
+	// unclosed, one legacy value there kept the whole document undecodable under
+	// v2/v3 — and the writable path then refused the entire dashboard.
+	const sparklineDocument = {
+		...legacyDocument,
+		widgets: [
+			{
+				...legacyDocument.widgets[0],
+				display: {
+					title: "Requests",
+					sparkline: {
+						enabled: true,
+						dataSource: {
+							endpoint: "custom_query_builder_timeseries",
+							params: {
+								queries: [{ id: "a", name: "A", dataSource: "traces", aggregation: "count" }],
+							},
+							transform: {
+								reduceToValue: { field: "value", aggregate: "median" },
+								sortBy: { field: "value", direction: "descending" },
+							},
+						},
+					},
+				},
+			},
+		],
+	}
+
+	it("closes the sparkline's open transform values", () => {
+		const display = firstWidget(migrateToLatest(sparklineDocument)).display
+		expect(display).toMatchObject({
+			sparkline: {
+				dataSource: {
+					transform: {
+						reduceToValue: { field: "value", aggregate: "first" },
+						sortBy: { field: "value", direction: "asc" },
+					},
+				},
+			},
+		})
+	})
+
+	it("is idempotent on the sparkline too", () => {
+		for (const migration of DASHBOARD_MIGRATIONS) {
+			const once = migration.migrate(sparklineDocument)
+			expect(migration.migrate(once)).toEqual(once)
+		}
+	})
+
+	it("makes the full document decode through the stored upgrade", () => {
+		expect(parse(sparklineDocument)._tag).toBe("Decoded")
+	})
+})
+
+describe("upgradeStoredDocument with a document from a newer build", () => {
+	// `migrateToLatest` refuses to migrate a future document, but the combined
+	// upgrader used to run the v3 rewrite on it anyway and restamp it 3 —
+	// erasing the version marker and re-encoding shapes it cannot know.
+	const fromTheFuture = {
+		...legacyDocument,
+		schemaVersion: 99,
+		widgets: [
+			{
+				...legacyDocument.widgets[0],
+				// A hypothetical future data source with no string `kind`: the v3
+				// rewrite would have destructively re-read it as a legacy source.
+				dataSource: { kind: 7, spec: { future: true } },
+			},
+		],
+	}
+
+	it("returns it untouched instead of downstamping and rewriting it", () => {
+		expect(upgradeStoredDocument(fromTheFuture)).toEqual(fromTheFuture)
+	})
+})

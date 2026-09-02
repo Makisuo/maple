@@ -2,6 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { UserId } from "../../primitives"
 import {
+	IntegrationReturnPath,
 	IntegrationsConfigurationError,
 	IntegrationsNotConnectedError,
 	IntegrationsPersistenceError,
@@ -193,10 +194,9 @@ export const V2PlanetScaleIntegration = Schema.Struct({
 export type V2PlanetScaleIntegration = Schema.Schema.Type<typeof V2PlanetScaleIntegration>
 
 export const V2PlanetScaleConnectRequest = Schema.Struct({
-	return_to: Schema.optionalKey(Schema.String).annotate({
+	return_to: Schema.optionalKey(IntegrationReturnPath).annotate({
 		description:
-			"Path in the Maple dashboard to send the user back to after the callback completes. Ignored for headless callers.",
-		examples: ["/integrations"],
+			"Relative path in the Maple dashboard to send the user back to after the callback completes — absolute URLs are rejected. Ignored for headless callers.",
 	}),
 }).annotate({
 	identifier: "PlanetScaleConnectRequest",

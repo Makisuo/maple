@@ -1,9 +1,10 @@
+import { useCallback } from "react"
 import { Link } from "@tanstack/react-router"
 
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { formatRelativeTimeOrDate, toEpochMs } from "@maple/ui/lib/time-format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
-import { ChatBubbleSparkleIcon } from "@/components/icons"
+import { SquareSparkleIcon } from "@/components/icons"
 import { vendorIcon } from "@/lib/agent-sessions/vendor-icon"
 import { sessionRowId } from "@/lib/agent-sessions/session-window"
 import { vendorLabel } from "@/lib/agent-sessions/vendor-label"
@@ -29,17 +30,57 @@ function absoluteTs(startTime: string): string {
 
 interface AgentSessionsListProps {
 	sessions: ReadonlyArray<AgentSessionRow>
-	/** The request's limit — rows at the cap mean older sessions were cut off. */
-	limit: number
+	/** Fetch the next page — invoked when the bottom sentinel scrolls into view. */
+	onReachEnd?: () => void
+	/** Whether more pages remain (renders the sentinel + footer). */
+	hasMore?: boolean
+	/** Whether a next page is currently in flight. */
+	loadingMore?: boolean
+	/** The client retention guard stopped pagination before the backend ended. */
+	isCapped?: boolean
 }
 
-export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
+function observeReachEnd(element: HTMLDivElement, onReachEnd: () => void): () => void {
+	const observer = new IntersectionObserver(
+		(entries) => {
+			if (entries[0]?.isIntersecting) onReachEnd()
+		},
+		{ rootMargin: "400px 0px" },
+	)
+	observer.observe(element)
+	return () => observer.disconnect()
+}
+
+function SessionsSentinel({
+	onReachEnd,
+	loadingMore,
+}: Pick<AgentSessionsListProps, "onReachEnd" | "loadingMore">) {
+	const elementRef = useCallback(
+		(element: HTMLDivElement | null) => {
+			if (!element) return
+			return observeReachEnd(element, () => {
+				if (!loadingMore) onReachEnd?.()
+			})
+		},
+		[loadingMore, onReachEnd],
+	)
+
+	return <div ref={elementRef} aria-hidden className="h-px w-full" />
+}
+
+export function AgentSessionsList({
+	sessions,
+	onReachEnd,
+	hasMore = false,
+	loadingMore = false,
+	isCapped = false,
+}: AgentSessionsListProps) {
 	if (sessions.length === 0) {
 		return (
 			<Empty>
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
-						<ChatBubbleSparkleIcon />
+						<SquareSparkleIcon />
 					</EmptyMedia>
 					<EmptyTitle>No agent sessions yet</EmptyTitle>
 					<EmptyDescription>
@@ -151,11 +192,20 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 				)
 			})}
 
-			{sessions.length >= limit && (
+			{hasMore && <SessionsSentinel onReachEnd={onReachEnd} loadingMore={loadingMore} />}
+
+			{isCapped && (
 				<p className="py-3 text-sm text-muted-foreground">
-					Showing the {limit.toLocaleString()} most recent sessions — narrow the time range to see
-					older ones
+					Showing the {sessions.length.toLocaleString()} most recent sessions — narrow the time
+					range to see older ones
 				</p>
+			)}
+
+			{loadingMore && (
+				<div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+					<span className="size-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+					Loading more sessions…
+				</div>
 			)}
 		</div>
 	)

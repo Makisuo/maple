@@ -123,6 +123,18 @@ export function buildAttrFilterCondition(
 	const colExpr: CH.Expr<string> = coalescedMapGet(mapExpr, keys)
 	const value = af.value ?? ""
 
+	/**
+	 * OR one index prefilter per aliased key. `undefined` when there are no keys
+	 * to prefilter on, in which case the exact predicate stands alone — an
+	 * alias table never yields an empty list, but a prefilter over no keys is
+	 * `has(…, NULL)` rather than a wider read.
+	 */
+	const orOverKeys = (make: (key: string) => CH.Condition): CH.Condition | undefined =>
+		keys.reduce<CH.Condition | undefined>(
+			(acc, key) => (acc === undefined ? make(key) : acc.or(make(key))),
+			undefined,
+		)
+
 	const positive = ((): CH.Condition => {
 		if (af.mode === "exists") {
 			// ClickHouse `Map` lookups return the value type's default (`''`) for a
@@ -133,11 +145,8 @@ export function buildAttrFilterCondition(
 			// makes `!exists` (the `NOT (...)` wrapper below) mean "absent or empty".
 			const exact = anyMapContains(mapExpr, keys).and(colExpr.neq(""))
 			if (af.negated || indexMode === "none") return exact
-			let candidate = CH.has(CH.mapKeys(mapExpr), CH.lit(keys[0]!))
-			for (let i = 1; i < keys.length; i++) {
-				candidate = candidate.or(CH.has(CH.mapKeys(mapExpr), CH.lit(keys[i]!)))
-			}
-			return candidate.and(exact)
+			const candidate = orOverKeys((key) => CH.has(CH.mapKeys(mapExpr), CH.lit(key)))
+			return candidate === undefined ? exact : candidate.and(exact)
 		}
 		if (af.mode === "contains") {
 			return CH.positionCaseInsensitive(colExpr, CH.lit(value)).gt(0)
@@ -179,22 +188,19 @@ export function buildAttrFilterCondition(
 				ResourceAttributes: "ResourceAttributeItems",
 			} as const
 			const items = CH.dynamicColumn<ReadonlyArray<string>>(itemColumnByMap[mapName])
-			let candidate = CH.has(items, CH.concat(keys[0]!, CH.rawExpr("char(31)", T.string), value))
-			for (let i = 1; i < keys.length; i++) {
-				candidate = candidate.or(
-					CH.has(items, CH.concat(keys[i]!, CH.rawExpr("char(31)", T.string), value)),
-				)
-			}
-			return candidate.and(exact)
+			const candidate = orOverKeys((key) =>
+				CH.has(items, CH.concat(key, CH.rawExpr("char(31)", T.string), value)),
+			)
+			return candidate === undefined ? exact : candidate.and(exact)
 		}
 
 		// Bloom filters index keys and values independently. The original map
 		// equality remains as exact confirmation, preventing cross-key matches.
-		let keyCandidate = CH.has(CH.mapKeys(mapExpr), CH.lit(keys[0]!))
-		for (let i = 1; i < keys.length; i++) {
-			keyCandidate = keyCandidate.or(CH.has(CH.mapKeys(mapExpr), CH.lit(keys[i]!)))
-		}
-		return keyCandidate.and(CH.has(CH.mapValues(mapExpr), CH.lit(value))).and(exact)
+		const keyCandidate = orOverKeys((key) => CH.has(CH.mapKeys(mapExpr), CH.lit(key)))
+		const valueCandidate = CH.has(CH.mapValues(mapExpr), CH.lit(value))
+		return keyCandidate === undefined
+			? valueCandidate.and(exact)
+			: keyCandidate.and(valueCandidate).and(exact)
 	})()
 
 	return af.negated ? CH.not(positive) : positive

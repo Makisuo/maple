@@ -115,8 +115,27 @@ export function compilePipeQuery(
 	const startTime = String(params.start_time ?? "2023-01-01 00:00:00")
 	const endTime = String(params.end_time ?? "2099-12-31 23:59:59")
 	const str = (key: string) => (params[key] != null ? String(params[key]) : undefined)
-	const int = (key: string, def?: number) => (params[key] != null ? Number(params[key]) : def)
+	// Overloaded rather than `def?: number`: with an optional default every
+	// defaulted call still typed as `number | undefined` and every call site paid
+	// for it with a `!`.
+	function int(key: string): number | undefined
+	function int(key: string, def: number): number
+	function int(key: string, def?: number): number | undefined {
+		return params[key] != null ? Number(params[key]) : def
+	}
 	const bool = (key: string) => params[key] === true || params[key] === "1" || params[key] === "true"
+
+	/** A single-valued param as the one-element list the query filters take. */
+	const strList = (key: string): string[] | undefined => {
+		const value = str(key)
+		return value === undefined ? undefined : [value]
+	}
+
+	/** An `equals` attribute filter, present only when its key param is. */
+	const equalsFilter = (keyParam: string, valueParam: string) => {
+		const key = str(keyParam)
+		return key === undefined ? undefined : [{ key, value: str(valueParam), mode: "equals" as const }]
+	}
 
 	// The service-free constraint is `CompiledQueryRowSchema`'s, pushed one level
 	// up: a row schema decodes bytes off a socket, so it cannot ask for a service,
@@ -195,7 +214,7 @@ export function compilePipeQuery(
 							errorsOnly: bool("has_error"),
 							minDurationMs: int("min_duration_ms"),
 							maxDurationMs: int("max_duration_ms"),
-							environments: str("deployment_env") ? [str("deployment_env")!] : undefined,
+							environments: strList("deployment_env"),
 							matchModes: {
 								serviceName:
 									str("service_match_mode") === "contains" ? "contains" : undefined,
@@ -203,24 +222,11 @@ export function compilePipeQuery(
 								deploymentEnv:
 									str("deployment_env_match_mode") === "contains" ? "contains" : undefined,
 							},
-							attributeFilters: str("attribute_filter_key")
-								? [
-										{
-											key: str("attribute_filter_key")!,
-											value: str("attribute_filter_value"),
-											mode: "equals" as const,
-										},
-									]
-								: undefined,
-							resourceAttributeFilters: str("resource_filter_key")
-								? [
-										{
-											key: str("resource_filter_key")!,
-											value: str("resource_filter_value"),
-											mode: "equals" as const,
-										},
-									]
-								: undefined,
+							attributeFilters: equalsFilter("attribute_filter_key", "attribute_filter_value"),
+							resourceAttributeFilters: equalsFilter(
+								"resource_filter_key",
+								"resource_filter_value",
+							),
 						}),
 						{ orgId, startTime, endTime },
 					),
@@ -317,7 +323,7 @@ export function compilePipeQuery(
 							cursor: str("cursor"),
 							search: str("search"),
 							limit: int("limit", 50),
-							environments: str("deployment_env") ? [str("deployment_env")!] : undefined,
+							environments: strList("deployment_env"),
 							matchModes:
 								str("deployment_env_match_mode") === "contains"
 									? { deploymentEnv: "contains" }
@@ -338,7 +344,7 @@ export function compilePipeQuery(
 							traceId: str("trace_id"),
 							spanId: str("span_id"),
 							search: str("search"),
-							environments: str("deployment_env") ? [str("deployment_env")!] : undefined,
+							environments: strList("deployment_env"),
 							matchModes:
 								str("deployment_env_match_mode") === "contains"
 									? { deploymentEnv: "contains" }
@@ -354,7 +360,7 @@ export function compilePipeQuery(
 						logsFacetsQuery({
 							serviceName: str("service"),
 							severity: str("severity"),
-							environments: str("deployment_env") ? [str("deployment_env")!] : undefined,
+							environments: strList("deployment_env"),
 							matchModes:
 								str("deployment_env_match_mode") === "contains"
 									? { deploymentEnv: "contains" }
@@ -374,6 +380,7 @@ export function compilePipeQuery(
 					compile(
 						serviceOverviewQuery({
 							environments: str("environments")?.split(",").filter(Boolean),
+							namespaces: str("namespaces")?.split(",").filter(Boolean),
 							commitShas: str("commit_shas")?.split(",").filter(Boolean),
 						}),
 						{ orgId, startTime, endTime },
@@ -384,6 +391,7 @@ export function compilePipeQuery(
 				compileCompare(
 					serviceOverviewQuery({
 						environments: str("environments")?.split(",").filter(Boolean),
+						namespaces: str("namespaces")?.split(",").filter(Boolean),
 						commitShas: str("commit_shas")?.split(",").filter(Boolean),
 					}),
 					{
@@ -399,7 +407,7 @@ export function compilePipeQuery(
 				eraseType(compileUnion(servicesFacetsQuery(), { orgId, startTime, endTime })),
 			),
 			Match.when("service_releases_timeline", () => {
-				const bucketSeconds = int("bucket_seconds", 300)!
+				const bucketSeconds = int("bucket_seconds", 300)
 				return eraseType(
 					compile(
 						serviceReleasesTimelineQuery({
@@ -411,7 +419,7 @@ export function compilePipeQuery(
 				)
 			}),
 			Match.when("service_apdex_time_series", () => {
-				const bucketSeconds = int("bucket_seconds", 60)!
+				const bucketSeconds = int("bucket_seconds", 60)
 				return eraseType(
 					compile(
 						serviceApdexTimeseriesQuery({
@@ -425,16 +433,21 @@ export function compilePipeQuery(
 			}),
 			Match.when("get_service_usage", () =>
 				eraseType(
-					compile(serviceUsageQuery({ serviceName: str("service") }), {
-						orgId,
-						startTime,
-						endTime,
-					}),
+					compile(
+						serviceUsageQuery({
+							serviceName: str("service"),
+							serviceNames: str("services")?.split(",").filter(Boolean),
+						}),
+						{ orgId, startTime, endTime },
+					),
 				),
 			),
 			Match.when("get_service_usage_compare", () =>
 				compileCompare(
-					serviceUsageQuery({ serviceName: str("service") }),
+					serviceUsageQuery({
+						serviceName: str("service"),
+						serviceNames: str("services")?.split(",").filter(Boolean),
+					}),
 					{
 						currentStart: str("current_start_time") ?? startTime,
 						currentEnd: str("current_end_time") ?? endTime,
@@ -475,7 +488,7 @@ export function compilePipeQuery(
 							fingerprintHash: String(params.fingerprint_hash),
 							services: str("services")?.split(",").filter(Boolean),
 						}),
-						{ orgId, startTime, endTime, bucketSeconds: int("bucket_seconds", 3600)! },
+						{ orgId, startTime, endTime, bucketSeconds: int("bucket_seconds", 3600) },
 					),
 				),
 			),
@@ -539,7 +552,7 @@ export function compilePipeQuery(
 						startTime,
 						endTime,
 						fingerprintHash: String(params.fingerprint_hash),
-						bucketSeconds: int("bucket_seconds", 3600)!,
+						bucketSeconds: int("bucket_seconds", 3600),
 					}),
 				),
 			),
@@ -686,7 +699,7 @@ export function compilePipeQuery(
 						orgId,
 						startTime,
 						endTime,
-						bucketSeconds: int("bucket_seconds", 60)!,
+						bucketSeconds: int("bucket_seconds", 60),
 					}),
 				)
 			}),
@@ -702,7 +715,7 @@ export function compilePipeQuery(
 					compile(
 						topOperationsQuery({
 							metric: (str("metric") ?? "count") as TracesMetric,
-							limit: int("limit", 20)!,
+							limit: int("limit", 20),
 						}),
 						{ orgId, startTime, endTime, serviceName: str("service_name") ?? "" },
 					),
@@ -829,6 +842,7 @@ function pipeParamsToTracesTimeseriesOpts(params: PipeParams): TracesTimeseriesO
 
 		errorsOnly: errorsOnlyParam(str("errors_only")),
 		environments: str("environments")?.split(",").filter(Boolean),
+		namespaces: str("namespaces")?.split(",").filter(Boolean),
 		commitShas: str("commit_shas")?.split(",").filter(Boolean),
 		attributeFilters: buildAttributeFiltersFromParams(params, "attribute_filter"),
 		resourceAttributeFilters: buildAttributeFiltersFromParams(params, "resource_filter"),
@@ -841,7 +855,10 @@ function pipeParamsToTracesBreakdownOpts(params: PipeParams): TracesBreakdownOpt
 
 	let groupBy = "service"
 	let groupByAttributeKey: string | undefined
-	if (str("group_by_service")) groupBy = "service"
+	if (str("group_by_all")) groupBy = "all"
+	else if (str("group_by_namespace")) groupBy = "namespace"
+	else if (str("group_by_environment")) groupBy = "environment"
+	else if (str("group_by_service")) groupBy = "service"
 	else if (str("group_by_span_name")) groupBy = "span_name"
 	else if (str("group_by_status_code")) groupBy = "status_code"
 	else if (str("group_by_http_method")) groupBy = "http_method"
@@ -863,6 +880,7 @@ function pipeParamsToTracesBreakdownOpts(params: PipeParams): TracesBreakdownOpt
 
 		errorsOnly: errorsOnlyParam(str("errors_only")),
 		environments: str("environments")?.split(",").filter(Boolean),
+		namespaces: str("namespaces")?.split(",").filter(Boolean),
 		commitShas: str("commit_shas")?.split(",").filter(Boolean),
 		attributeFilters: buildAttributeFiltersFromParams(params, "attribute_filter"),
 		resourceAttributeFilters: buildAttributeFiltersFromParams(params, "resource_filter"),

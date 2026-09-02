@@ -1,6 +1,9 @@
 "use client"
 
 import { useSyncExternalStore } from "react"
+import { Option } from "effect"
+
+import { readLocalStorage, writeLocalStorage } from "../lib/local-storage"
 
 export type Theme = "light" | "dark"
 
@@ -19,13 +22,13 @@ function readInitialTheme(): Theme {
 		if (root.classList.contains("light")) return "light"
 		if (root.classList.contains("dark")) return "dark"
 	}
-	try {
-		const stored = localStorage.getItem(STORAGE_KEY)
-		if (stored === "light" || stored === "dark") return stored
-	} catch {
-		// localStorage unavailable (private mode / non-browser) — use the default.
-	}
-	return DEFAULT_THEME
+	// localStorage may be unavailable (private mode / non-browser), and a
+	// hand-edited entry may be neither theme — both fall through to the default.
+	const stored = Option.filter(
+		readLocalStorage(STORAGE_KEY),
+		(value): value is Theme => value === "light" || value === "dark",
+	)
+	return Option.getOrElse(stored, () => DEFAULT_THEME)
 }
 
 let current: Theme = readInitialTheme()
@@ -73,11 +76,7 @@ function getServerSnapshot(): Theme {
 /** Set the active theme, persist it, and apply the `light`/`dark` class to <html>. */
 export function setTheme(theme: Theme): void {
 	current = theme
-	try {
-		localStorage.setItem(STORAGE_KEY, theme)
-	} catch {
-		// Ignore persistence failures.
-	}
+	writeLocalStorage(STORAGE_KEY, theme)
 	applyTheme(theme)
 	notify()
 }

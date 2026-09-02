@@ -45,6 +45,12 @@ export const ALERT_TEMPLATES: readonly AlertTemplate[] = [
 			comparator: "gt",
 			threshold: "5",
 			windowMinutes: "5",
+			// Group per service unless the draft already carries a service scope or
+			// grouping (they are mutually exclusive server-side). Ungrouped, the rule
+			// evaluates one org-wide ratio — a small service can fail outright without
+			// moving a 5% aggregate. Mirrors the MCP template's default.
+			groupBy:
+				base.serviceNames.length > 0 || base.groupBy.length > 0 ? base.groupBy : ["service.name"],
 		}),
 	},
 	{
@@ -106,6 +112,11 @@ export const ALERT_TEMPLATES: readonly AlertTemplate[] = [
 			comparator: "lt",
 			threshold: "100",
 			windowMinutes: "5",
+			// The evaluator skips windows whose sample count is below the minimum
+			// BEFORE comparing the threshold, and for throughput the sample count IS
+			// the signal — the blank form's default of 50 would skip exactly the
+			// severe drops (0–49 samples), including a total outage.
+			minimumSampleCount: "0",
 		}),
 	},
 ] as const

@@ -175,21 +175,23 @@ export function AnomalyTimeseriesChart({
 				focusDot(data, at, value, stroke, chromeColors),
 				focusCrosshair(chromeColors),
 			],
-			x: {
-				scale: scalePoint,
-				axis: {
-					line: false,
-					ticks: {
-						size: 0,
-						padding: 8,
-						format: (v: string) => formatBucketLabel(v, axisContext, "tick"),
+			scales: {
+				x: {
+					scale: scalePoint,
+					axis: {
+						line: false,
+						ticks: {
+							size: 0,
+							padding: 8,
+							format: (v: string) => formatBucketLabel(v, axisContext, "tick"),
+						},
+						tickLabels: { thin: { minGap: 12 } },
 					},
-					tickLabels: { thin: { minGap: 12 } },
 				},
-			},
-			y: {
-				scale: scaleLinear().domain(yDomain),
-				axis: { line: false, ticks: { size: 0, padding: 8, format: valueFormatter } },
+				y: {
+					scale: scaleLinear().domain(yDomain),
+					axis: { line: false, ticks: { size: 0, padding: 8, format: valueFormatter } },
+				},
 			},
 			// `bottom` is left unset: an authored side is a hard lock, and `bottom: 0`
 			// (carried over from Recharts, which sized the axis separately) clipped

@@ -78,15 +78,9 @@ export function PodsFilterSidebarView({
 				<FilterSidebarFrame waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={onClearFilters} />
 					<FilterSidebarBody>
-						<SearchableFilterSection
-							title="Pod"
-							options={f.pods}
-							selected={filters.podNames ?? []}
-							onChange={(val) => onFilterChange("podNames", val)}
-							excluded={filters.excludedPodNames ?? []}
-							onExcludedChange={(val) => onFilterChange("excludedPodNames", val)}
-							defaultOpen
-						/>
+						{/* Namespace leads: it is the cut people actually make. The pod
+						    name section sits second and closed, since the toolbar search
+						    already covers the common case and this one exists for exclusions. */}
 						<FilterSection
 							title="Namespace"
 							options={f.namespaces}
@@ -94,6 +88,16 @@ export function PodsFilterSidebarView({
 							onChange={(val) => onFilterChange("namespaces", val)}
 							excluded={filters.excludedNamespaces ?? []}
 							onExcludedChange={(val) => onFilterChange("excludedNamespaces", val)}
+							defaultOpen
+						/>
+						<SearchableFilterSection
+							title="Pod"
+							options={f.pods}
+							selected={filters.podNames ?? []}
+							onChange={(val) => onFilterChange("podNames", val)}
+							excluded={filters.excludedPodNames ?? []}
+							onExcludedChange={(val) => onFilterChange("excludedPodNames", val)}
+							defaultOpen={false}
 						/>
 						<SearchableFilterSection
 							title="Node"

@@ -18,9 +18,10 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { serverErrorSpanMiddleware } from "./http/server-error-span"
 import { v2WorkerUnavailableResponse } from "./http/v2-worker-unavailable"
 import { API_CORS_RESPONSE_HEADERS, apiCorsPreflightResponse } from "./http/api-cors"
-import { persistSession, preloadSession, type SessionsBinding } from "./mcp/lib/session-store"
+import { persistSession, preloadSession } from "./mcp/lib/session-store"
 import { makeRecoverablePromiseMemo } from "./platform/recoverable-promise-memo"
 import { classifyWorkerQueue } from "./queue-dispatch"
+import type { MapleApiWorkerEnv } from "../alchemy.run.ts"
 
 const WorkerFileSystemLive = FileSystem.layerNoop({})
 
@@ -143,7 +144,7 @@ const handlerMemo = makeRecoverablePromiseMemo(buildHandler)
 // RPC has no HttpApi request to construct the application services for it, so
 // it gets a sibling isolate-wide ManagedRuntime. Its headless service graph
 // stays behind a dynamic import, preserving the worker's startup-CPU budget.
-const buildRpcRuntime = async (env: Record<string, unknown>) => {
+const buildRpcRuntime = async (env: MapleApiWorkerEnv) => {
 	const [{ InvestigationServicesLive }, { layerPg }] = await Promise.all([
 		import("./runtime/mcp-service-graph"),
 		import("@/platform/DatabasePgLive"),
@@ -196,7 +197,7 @@ const encodeRpcError = (error: unknown): unknown => {
 const runInternalRpc = async (
 	method: InternalRpcMethod,
 	input: unknown,
-	env: Record<string, unknown>,
+	env: MapleApiWorkerEnv,
 	ctx: ExecutionContext,
 ) => {
 	const [runtime, { callMcpToolRpc, listMcpToolsRpc, submitDiagnosisRpc }] = await Promise.all([
@@ -269,14 +270,6 @@ const healthResponse = (): Response =>
 		headers: { ...API_CORS_RESPONSE_HEADERS, "content-type": "text/plain; charset=utf-8" },
 	})
 
-const readMcpSessionsBinding = (env: Record<string, unknown>): SessionsBinding | undefined => {
-	const candidate = env.MCP_SESSIONS
-	if (candidate && typeof candidate === "object" && "get" in candidate && "put" in candidate) {
-		return candidate as SessionsBinding
-	}
-	return undefined
-}
-
 type McpFrame = { method: string; id: string }
 
 // Peek the JSON-RPC body without consuming the request stream. Returns the
@@ -305,16 +298,12 @@ const peekMcpFrame = (body: string): McpFrame => {
 // no-ops in some paths — sessions stay in-memory only and the next isolate 404s.
 // Driving the KV preload+put from this outer async context means the bindings
 // come from `env` directly — no AsyncLocalStorage required.
-const handle = async (
-	request: Request,
-	env: Record<string, unknown>,
-	ctx: ExecutionContext,
-): Promise<Response> => {
+const handle = async (request: Request, env: MapleApiWorkerEnv, ctx: ExecutionContext): Promise<Response> => {
 	if (isHealthRequest(request)) return healthResponse()
 	if (request.method === "OPTIONS") return apiCorsPreflightResponse()
 
 	const isMcp = isMcpPost(request)
-	const kv = isMcp ? readMcpSessionsBinding(env) : undefined
+	const kv = isMcp ? env.MCP_SESSIONS : undefined
 	const reqSid = isMcp ? request.headers.get("mcp-session-id") : null
 	// Start the expensive cold handler build and the independent KV read before
 	// buffering an MCP body. Warm requests resolve both promises immediately;
@@ -418,7 +407,7 @@ export { ChatSession } from "./chat/ChatSession"
 // as the route graph above) to keep module-scope evaluation light.
 const handleQueue = async (
 	batch: MessageBatch<unknown>,
-	env: Record<string, unknown>,
+	env: MapleApiWorkerEnv,
 	ctx: ExecutionContext,
 ): Promise<void> => {
 	const queueKind = classifyWorkerQueue(batch.queue, env)
@@ -462,8 +451,8 @@ const handleQueue = async (
 	}
 }
 
-// Cron handler. Three schedules (see wrangler.jsonc / alchemy.run.ts
-// `triggers.crons`), dispatched on `event.cron`:
+// Cron handler. Three schedules (see `crons` in alchemy.run.ts), dispatched on
+// `event.cron`:
 //   "0 */12 * * *" — enqueue a periodic VCS sync per installation
 //   "0 * * * *"    — apply scrape-check retention
 //   "0 */6 * * *"  — Slack workspace reconciliation
@@ -478,7 +467,7 @@ const SLACK_RECONCILE_CRON = "0 */6 * * *"
 
 const handleScheduled = async (
 	event: ScheduledController,
-	env: Record<string, unknown>,
+	env: MapleApiWorkerEnv,
 	ctx: ExecutionContext,
 ): Promise<void> => {
 	if (event.cron === SCRAPE_RETENTION_CRON) {
@@ -486,19 +475,15 @@ const handleScheduled = async (
 		const { runScrapeCheckRetention } = await import("@/services/integrations/scrape-check-retention")
 		const { runPlanetScaleEventRetention } =
 			await import("@/services/integrations/planetscale-event-retention")
-		const { runAuditLogRetention } = await import("@/services/audit/audit-log-retention")
 		try {
-			// All three sweeps ride this one cron: each new cron string costs an entry
-			// in wrangler.jsonc and alchemy.run.ts, and none needs its own beat.
+			// Both sweeps ride this one cron: each new cron string costs an entry in
+			// alchemy.run.ts and a branch here, and neither needs its own beat.
 			// Sequential, not concurrent — they share one Postgres socket for the
 			// whole tick, so running them concurrently would only queue on it.
 			await runScheduledEffect(
 				buildScrapeRetentionLayer(env),
 				await scoped(
-					Effect.andThen(
-						runScrapeCheckRetention,
-						Effect.andThen(runPlanetScaleEventRetention, runAuditLogRetention),
-					),
+					Effect.andThen(runScrapeCheckRetention, runPlanetScaleEventRetention),
 				),
 				ctx,
 				{ onInterrupt: "graceful" },
@@ -544,7 +529,7 @@ const handleScheduled = async (
  * encoded with Alchemy's wire envelope so a plain Worker caller can recover tagged
  * Effect errors via `toRpcAsync`.
  */
-export default class MapleApiWorker extends WorkerEntrypoint<Record<string, unknown>> {
+export default class MapleApiWorker extends WorkerEntrypoint<MapleApiWorkerEnv> {
 	override fetch(request: Request): Promise<Response> {
 		return handle(request, this.env, this.ctx)
 	}

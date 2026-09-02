@@ -1,5 +1,8 @@
 "use client"
 
+import { Option } from "effect"
+
+import { trySync } from "../../lib/try-sync"
 import * as React from "react"
 
 import { useCopy, type CopyStatus, type UseCopyOptions } from "../../hooks/use-copy"
@@ -224,11 +227,7 @@ export interface CopyButtonProps
  * `JSON.stringify`, say) escape as an uncaught click handler error. */
 function resolveValue(value: string | (() => string)): string | null {
 	if (typeof value !== "function") return value
-	try {
-		return value()
-	} catch {
-		return null
-	}
+	return Option.getOrNull(trySync(value))
 }
 
 /**
@@ -308,7 +307,9 @@ export function CopyButton({
 	return (
 		<Tooltip>
 			<TooltipTrigger render={button} />
-			<TooltipPopup>{copyTooltipText(status, label, { copiedLabel, errorLabel: errorText })}</TooltipPopup>
+			<TooltipPopup>
+				{copyTooltipText(status, label, { copiedLabel, errorLabel: errorText })}
+			</TooltipPopup>
 		</Tooltip>
 	)
 }

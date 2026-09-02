@@ -154,11 +154,13 @@ export const ApdexAreaChart = memo(function ApdexAreaChart({
 				focusDot(plotRows, (row: TimeseriesRow) => row.date, value, color, chromeColors),
 				focusCrosshair(chromeColors),
 			],
-			x: timeseriesXAxis(axisContext),
-			// Apdex is a 0–1 score: the axis is the SCALE, not the data extent, so
-			// both bounds are pinned and a good hour does not silently rescale into
-			// looking like a bad one.
-			y: timeseriesYAxis({ rows: plotRows, visibleKeys: VALUE_KEYS, softMin: 0, softMax: 1 }).y,
+			scales: {
+				x: timeseriesXAxis(axisContext),
+				// Apdex is a 0–1 score: the axis is the SCALE, not the data extent, so
+				// both bounds are pinned and a good hour does not silently rescale into
+				// looking like a bad one.
+				y: timeseriesYAxis({ rows: plotRows, visibleKeys: VALUE_KEYS, softMin: 0, softMax: 1 }).y,
+			},
 			focus: "group-x",
 			focusRing: false,
 			tooltip: tooltip === "hidden" ? false : maybeTooltip(suppressed, focusStore.anchor),

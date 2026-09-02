@@ -24,7 +24,8 @@ import {
 	investigationLensRuns,
 	investigations,
 } from "@maple/db"
-import { createMaplePgliteClient, type MaplePgClient } from "@maple/db/client"
+import type { MaplePgClient } from "@maple/db/client"
+import { createMaplePgliteClient } from "@maple/db/pglite"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { eq } from "drizzle-orm"
 import { Env } from "@/platform/Env"
@@ -176,6 +177,44 @@ describe("InvestigationService", () => {
 			assert.strictEqual(rediagnosed.status, "diagnosed")
 		}).pipe(Effect.provide(makeLayer())),
 	)
+
+	it.effect("submit_diagnosis records the turn's tokens on the row without metering them", () => {
+		// The chat-session runner meters that turn in full, keyed on the turn. A second
+		// meter here billed the same tokens twice; billing here *instead* lost the charge
+		// whenever a superseding diagnosis deduplicated against the first one's key.
+		const realFetch = globalThis.fetch
+		const calls: Array<string> = []
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			calls.push(String(input instanceof Request ? input.url : input))
+			return new Response("{}", { status: 200 })
+		}) as typeof fetch
+		const harness = makeHarness({
+			AUTUMN_SECRET_KEY: "autumn-sk",
+			AUTUMN_API_URL: "https://autumn.test",
+		})
+		return Effect.gen(function* () {
+			const service = yield* InvestigationService
+			const created = yield* service.createInvestigation(ORG, null, freeformRequest("token spike"))
+
+			const diagnosed = yield* service.submitDiagnosis(
+				ORG,
+				created.id,
+				new SubmitDiagnosisRequest({
+					report: sampleReport(),
+					model: "test-model",
+					inputTokens: 4321,
+					outputTokens: 210,
+				}),
+			)
+
+			assert.strictEqual(diagnosed.inputTokens, 4321)
+			assert.strictEqual(diagnosed.outputTokens, 210)
+			assert.deepStrictEqual(calls, [])
+		}).pipe(
+			Effect.provide(harness.layer),
+			Effect.ensuring(Effect.sync(() => void (globalThis.fetch = realFetch))),
+		)
+	})
 
 	it.effect("getInvestigation fails with InvestigationNotFoundError for an unknown id", () =>
 		Effect.gen(function* () {

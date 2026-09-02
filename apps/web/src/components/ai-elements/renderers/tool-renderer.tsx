@@ -172,14 +172,14 @@ export function ToolRenderer({ data: output }: { data: StructuredToolOutput }) {
 			return (
 				<DataTable
 					props={{
-						headers: ["Source", "Target", "Calls", "Errors", "Avg Duration", "P95 Duration"],
+						headers: ["Source", "Target", "Calls", "Errors", "Avg Duration", "Max Duration"],
 						rows: output.data.edges.map((edge) => [
 							edge.sourceService,
 							edge.targetService,
 							String(edge.callCount),
 							String(edge.errorCount),
 							`${edge.avgDurationMs.toFixed(1)}ms`,
-							`${edge.p95DurationMs.toFixed(1)}ms`,
+							`${edge.maxDurationMs.toFixed(1)}ms`,
 						]),
 						title: `Service Map (${output.data.serviceCount} services, ${output.data.edges.length} edges)`,
 					}}

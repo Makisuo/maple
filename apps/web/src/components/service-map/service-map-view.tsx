@@ -798,12 +798,18 @@ function formatQueryLabel(value: string): string {
  * Database query volume and latency over the same window.
  *
  * TWO plots, joined by the linked cursor, where this used to be one chart with a
- * left "count" axis and a right "latency" axis. `@tanstack/charts` carries a
- * single y scale per chart — `StoredChartSpec` has exactly `x` and `y`, and no
- * mark can select a scale of its own — so a second axis is not expressible.
+ * left "count" axis and a right "latency" axis.
  *
- * That constraint landed somewhere better than a workaround. Every other place
- * in the product that shows volume beside latency already does it this way:
+ * That was once forced: `@tanstack/charts` carried a single y scale per chart
+ * until 0.16.0, which added named scales (`scales: { …, latency: { channel: "y",
+ * side: "right" } }` with marks binding `yScale`). So this is now a CHOICE.
+ *
+ * It stays split, and a right-hand axis was tried and backed out elsewhere on
+ * the same reasoning: on a card this size a second axis means the shape of a
+ * line says nothing until the reader has worked out which axis it belongs to.
+ * The split landed somewhere better than the workaround it replaced, and every
+ * other place in the product that shows volume beside latency already does it
+ * this way:
  * `MetricsGrid` on the service detail page, host detail, infra correlation, the
  * Cloudflare zone panels. This chart was the outlier. Two plots also give each
  * series a full readable range instead of one axis squashing the other, and the
@@ -1183,7 +1189,10 @@ function DatabaseDetailPanel({
 	const errorRate = totalCalls > 0 ? totalErrors / totalCalls : 0
 	const avgLatencyMs =
 		totalCalls > 0 ? callers.reduce((sum, e) => sum + e.avgDurationMs * e.callCount, 0) / totalCalls : 0
-	const p95LatencyMs = callers.reduce((max, e) => Math.max(max, e.p95DurationMs), 0)
+	// Sample-weighted, to match the summary this stands in for. Summing the raw
+	// `callCount` here put a raw number under the same tile that shows an
+	// estimate once the summary lands, so the headline jumped by the sample rate.
+	const estimatedCalls = callers.reduce((sum, e) => sum + e.estimatedCallCount, 0)
 	const bucketSeconds = pickDbSummaryBucketSeconds(durationSeconds)
 	const summaryResult = useRefreshableAtomValue(
 		getServiceDbQuerySummaryResultAtom({
@@ -1200,12 +1209,16 @@ function DatabaseDetailPanel({
 	)
 	const summaryResponse = Result.isSuccess(summaryResult) ? summaryResult.value : null
 	const summary = summaryResponse?.summary ?? null
-	const metricQueryCount = summary?.estimatedQueryCount ?? totalCalls
+	const metricQueryCount = summary?.estimatedQueryCount ?? estimatedCalls
 	const metricCallsPerSecond = metricQueryCount / Math.max(durationSeconds, 1)
 	const metricErrorRate = summary?.errorRate ?? errorRate
 	const metricAvgLatencyMs = summary?.avgDurationMs ?? avgLatencyMs
-	const metricP50LatencyMs = summary?.p50DurationMs ?? avgLatencyMs
-	const metricP95LatencyMs = summary?.p95DurationMs ?? p95LatencyMs
+	// Quantiles have NO edge-level fallback, on purpose. The edges carry a max and
+	// a mean, and substituting either renders a different statistic under a "P50" /
+	// "P95" label until the summary resolves — which is how this panel showed 3s
+	// beside the same node's real 7ms p95. Null renders as an em dash instead.
+	const metricP50LatencyMs = summary?.p50DurationMs ?? null
+	const metricP95LatencyMs = summary?.p95DurationMs ?? null
 	const metricHasSampling = summary
 		? summary.estimatedQueryCount > summary.queryCount + 1
 		: callers.some((caller) => caller.hasSampling)
@@ -1287,10 +1300,12 @@ function DatabaseDetailPanel({
 								<p
 									className={cn(
 										"text-xl font-semibold tabular-nums font-mono",
-										latencyToneClass(metricP50LatencyMs, "p50"),
+										metricP50LatencyMs === null
+											? "text-muted-foreground"
+											: latencyToneClass(metricP50LatencyMs, "p50"),
 									)}
 								>
-									{formatLatency(metricP50LatencyMs)}
+									{metricP50LatencyMs === null ? "—" : formatLatency(metricP50LatencyMs)}
 								</p>
 							</div>
 							<div className="space-y-0.5">
@@ -1298,14 +1313,17 @@ function DatabaseDetailPanel({
 								<p
 									className={cn(
 										"text-xl font-semibold tabular-nums font-mono",
-										// A p95 far above this node's own p50 is a tail problem
-										// worth flagging even at a fine absolute magnitude.
-										metricP95LatencyMs > metricP50LatencyMs * 3
-											? "text-severity-warn"
-											: latencyToneClass(metricP95LatencyMs, "p95"),
+										metricP95LatencyMs === null
+											? "text-muted-foreground"
+											: // A p95 far above this node's own p50 is a tail problem
+												// worth flagging even at a fine absolute magnitude.
+												metricP50LatencyMs !== null &&
+												  metricP95LatencyMs > metricP50LatencyMs * 3
+												? "text-severity-warn"
+												: latencyToneClass(metricP95LatencyMs, "p95"),
 									)}
 								>
-									{formatLatency(metricP95LatencyMs)}
+									{metricP95LatencyMs === null ? "—" : formatLatency(metricP95LatencyMs)}
 								</p>
 							</div>
 							<div className="space-y-0.5">
@@ -2571,9 +2589,7 @@ export function ServiceMapView({
 	const memberServices = useMemo(() => {
 		if (pinnedNamespace === null) return null
 		return new Set(
-			allOverviews
-				.filter((o) => o.serviceNamespace === pinnedNamespace)
-				.map((o) => o.serviceName),
+			allOverviews.filter((o) => o.serviceNamespace === pinnedNamespace).map((o) => o.serviceName),
 		)
 	}, [pinnedNamespace, allOverviews])
 	const overviews = useMemo(

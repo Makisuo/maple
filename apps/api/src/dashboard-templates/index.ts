@@ -18,6 +18,7 @@ import { cloudflareTemplate } from "./infrastructure/cloudflare"
 import { planetscaleTemplate } from "./infrastructure/planetscale"
 import { hostMetricsTemplate } from "./infrastructure/host-metrics"
 import { kubernetesClusterTemplate } from "./infrastructure/kubernetes-cluster"
+import { dockerContainersTemplate } from "./infrastructure/docker-containers"
 import { kubernetesPodTemplate } from "./infrastructure/kubernetes-pod"
 import { kafkaTemplate } from "./messaging/kafka"
 import { natsTemplate } from "./messaging/nats"
@@ -47,6 +48,7 @@ export const DASHBOARD_TEMPLATES: ReadonlyArray<TemplateDefinition> = [
 	hostMetricsTemplate,
 	kubernetesClusterTemplate,
 	kubernetesPodTemplate,
+	dockerContainersTemplate,
 	// Messaging
 	kafkaTemplate,
 	natsTemplate,

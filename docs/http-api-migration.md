@@ -70,7 +70,7 @@ The following v1 groups are dashboard workflows or protocol surfaces. Do not por
 
 Three consequences, all deliberate:
 
-- **No scope.** `requiredScopeForRequest` would derive the family `share` from the path, but it is only called by `ApiAuthorizationV2Layer`, which these routes never run. There is no `share:read` scope and nothing issues one.
+- **No scope.** `requiredScopeForRoute` would derive the family `share` from the path, but it is only called by `ApiAuthorizationV2Layer`, which these routes never run. There is no `share:read` scope and nothing issues one.
 - **`security: []` and no `401`** in the OpenAPI spec. `openapi.test.ts` exempts the two operations by operationId through `PUBLIC_OPERATION_IDS` — an allowlist, so a third public operation cannot appear without someone editing it. Every other operation guarantee still applies to them.
 - **The v2 rate limiter never runs.** These routes carry their own per-token and per-IP limiter in the handler; it is the only one on the path, not a supplement.
 

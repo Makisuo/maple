@@ -28,12 +28,14 @@ Sign in at `https://web.localhost` with the Clerk test account `david+clerk_test
 `Maple-Dev-Kx92qZ!` when you need an authenticated browser session.
 
 ```bash
-bun dev                        # all apps via turbo → https://[<worktree>.]<app>.localhost
-bun --filter=@maple/web dev:app # single app, raw port, no portless proxy
+bun dev                        # everything, ONE `alchemy dev` stack → https://[<worktree>.]<app>.localhost
+bun dev api web                # a subset (api, alerting, electric-sync, web, landing, ingest, local-ui, scraper)
+bun --filter=@maple/web dev    # single app on its raw port, no portless proxy
 bun run test                   # Vitest via turbo (NOT `bun test` — that's Bun's own runner)
 bun typecheck
 bun run tinybird:manifest      # regenerate after editing datasources.ts
-bun db:up && bun db:migrate:local   # docker Postgres for wrangler dev (vitest uses embedded PGlite)
+bun run local-schema:bump <slug>   # scaffold the local chDB schema bump a datasources.ts change needs
+bun db:up && bun db:migrate:local   # docker Postgres for `alchemy dev` (vitest uses embedded PGlite)
 bun run --cwd apps/api tinybird:deploy   # tinybird:dev / :build / :deploy live in apps/api
 ```
 
@@ -108,16 +110,17 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
   dial is bounded so a stall lands as `error.type = CONNECT_TIMEOUT` instead of hanging.
 - Migrations: `bun run --cwd packages/db db:generate`; CI applies them against the branch's DIRECT
   port 5432 (never a pooler) before `alchemy deploy`. PGlite applies them at layer build.
-- **PR preview deploys are disabled** (2026-08, cost). `deploy-pr-preview.yml` triggers on the
-  `closed` event only, so it tears down pre-cutover stacks and never deploys a new one; restore
-  `types: [opened, synchronize, reopened, closed]` to re-enable.
-- **PR previews have no application database** either (PS-DEV branches billed continuously and
-  ate the Hyperdrive config cap) — this is the state previews return to when re-enabled.
-  `resolveDatabaseMode` in
-  `packages/infra/src/cloudflare/stage.ts` returns `"none"` for `pr`, so no `MAPLE_DB` is bound
-  and `DatabasePgLive` fails every query with a `DatabaseError` — DB-backed routes 500, the rest
-  of the preview works. To restore: return `"managed"` for `pr` and re-add the PlanetScale +
-  Electric steps to `.github/workflows/deploy-pr-preview.yml` (the scripts are kept, dormant).
+- **PR preview deploys are label-gated** (2026-08, cost — re-enabled by `fd00bcd412`). A PR gets a
+  preview only while it carries the `preview` label; `deploy-pr-preview.yml` triggers on
+  `opened, reopened, synchronize, labeled, unlabeled, closed` and tears the stack down the moment
+  the label is removed or the PR closes. `cleanup-preview-orphans.yml` is the backstop for PRs that
+  close without a teardown run.
+- **PR previews still have no application database** (PS-DEV branches billed continuously and ate
+  the Hyperdrive config cap). `resolveDatabaseMode` in `packages/infra/src/cloudflare/stage.ts`
+  returns `"none"` for `pr`, so no `MAPLE_DB` is bound and `DatabasePgLive` fails every query with a
+  `DatabaseError` — DB-backed routes 500, the rest of the preview works. To restore: return
+  `"managed"` for `pr` and re-add the PlanetScale + Electric steps to
+  `.github/workflows/deploy-pr-preview.yml` (the scripts are kept, dormant).
 - The ingest gateway resolves ingest keys from the same Postgres via PSBouncer (6432, no Hyperdrive).
 
 ## Conventions
@@ -188,6 +191,9 @@ there is no Prometheus `/metrics` endpoint. At high QPS set `OTEL_TRACES_SAMPLER
 `api-v2.md` (v2 public API spec) · `error-issue-lifecycle.md` (how an error becomes an issue,
 gets diagnosed, fixed and verified — read before touching `apps/api/src/services/errors/`) ·
 `sampling-throughput.md` · `persistence.md` ·
+`ingest-wal-durability.md` (WAL segments, the S3 tier, and what survives a task dying) ·
+`docker-container-monitoring.md` (Docker agent → `/infra/containers` lifecycle + its invariants) ·
+`service-map-architecture.md` (the map's tiers, its splice invariant, and what a new overlay costs) ·
 `warehouse-rollups.md` (MV/rollup tiering contract — read before adding a materialized view) ·
 `sst-fork-workflow.md` · `local-mode.md` (single-binary CLI + embedded chDB) ·
 `tinybird-pr-branches.md` · `otel-spec/` (OTel spec map @ v1.58.0 — start at its README).

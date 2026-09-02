@@ -13,8 +13,8 @@ import {
 	VcsWebhookParseError,
 	VcsWebhookSignatureError,
 } from "@maple/domain/http"
-import { Clock, Effect, Exit, Layer, Option, Schema } from "effect"
-import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "@/platform/test-pglite"
+import { Array as Arr, Clock, Effect, Exit, Layer, Option, Schema } from "effect"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import {
 	COMMIT_PAGES_PER_INVOCATION,
 	GithubAppClient,
@@ -1091,6 +1091,70 @@ describe("VcsRepository", () => {
 		},
 	)
 
+	// Regression: a queue worker resolved its installation/repo, waited on GitHub,
+	// and raced a purge — its late writes used to recreate rows under a deleted
+	// parent, and a purged private commit stayed queryable by (org, sha). With no
+	// FK (house style), the repo layer must make the stale write a silent no-op
+	// and shield the (org, sha) reads from any orphan.
+	it.effect("stale snapshots cannot resurrect purged data, and orphans are unreadable", () => {
+		const testDb = createTestDb(trackedDbs)
+		const SHA = "c".repeat(40)
+		const commitFixture = {
+			sha: SHA,
+			message: "m",
+			authorName: null,
+			authorEmail: null,
+			authorLogin: null,
+			authorAvatarUrl: null,
+			authoredAt: null,
+			committedAt: 1,
+			htmlUrl: `https://github.com/octo/repo/commit/${SHA}`,
+			branch: "main",
+		}
+		const countRows = (table: string) =>
+			Effect.promise(() =>
+				queryFirstRow<{ n: number }>(testDb, `SELECT count(*)::int AS n FROM ${table}`),
+			).pipe(Effect.map((row) => row?.n ?? 0))
+		return Effect.gen(function* () {
+			const repo = yield* VcsRepository
+			const orgId = asOrgId("org_fk")
+			const installation = yield* repo.upsertInstallation({ orgId, ...installationSeed("42", "100") })
+			yield* repo.upsertRepositories(installation, [repoFixture()])
+			const r = yield* repoFor(repo, orgId, "7")
+			assert.strictEqual(yield* repo.upsertCommits(r, [commitFixture]), 1)
+
+			// Purge the repo, then replay the writes of a worker still holding `r`:
+			// every one must be a no-op, not a resurrection.
+			assert.ok(yield* repo.purgeRepository(orgId, r.id))
+			assert.strictEqual(yield* repo.upsertCommits(r, [commitFixture]), 0)
+			yield* repo.upsertBranches(r, [{ name: "main", headSha: null }])
+			assert.strictEqual(yield* countRows("vcs_commits"), 0)
+			assert.strictEqual(yield* countRows("vcs_repository_branches"), 0)
+			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA))))
+
+			// Purge the installation, then replay a repo upsert from a stale snapshot.
+			yield* repo.purgeInstallation(orgId, installation.id)
+			yield* repo.upsertRepositories(installation, [repoFixture()])
+			assert.strictEqual(yield* countRows("vcs_repositories"), 0)
+			assert.ok(Option.isNone(yield* repo.resolveRepository(orgId, "github", "7")))
+
+			// Read shield: even a manufactured orphan (no parent repo row) must not
+			// surface through the (org, sha) lookups. The shield is application-level:
+			// there is deliberately no FK, so the row inserts and only the join hides it.
+			yield* Effect.promise(() =>
+				executeSql(
+					testDb,
+					`INSERT INTO vcs_commits
+						(id, org_id, provider, repository_id, sha, message, html_url, committed_at, created_at)
+					 VALUES ($1,$2,$3,$4,$5,$6,$7, now(), now())`,
+					[randomUUID(), orgId, "github", randomUUID(), SHA, "m", "https://example.com"],
+				),
+			)
+			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA))))
+			assert.strictEqual((yield* repo.findCommitsByShas(orgId, [decodeGitCommitSha(SHA)])).length, 0)
+		}).pipe(Effect.provide(repoLayer(testDb)))
+	})
+
 	const installationSeed = (externalInstallationId: string, externalAccountId: string) => ({
 		provider: "github" as const,
 		externalInstallationId,
@@ -1332,6 +1396,12 @@ describe("VcsSyncService orchestrator", () => {
 			isArchived: boolean
 		}>
 		readonly commits?: ReadonlyArray<ReturnType<typeof commit>>
+		/**
+		 * Runs inside the stubbed provider's fetchCommits, before it answers —
+		 * the hook point for simulating a concurrent write (e.g. a tracked-branch
+		 * retarget) landing while the sync is mid-flight at the provider.
+		 */
+		readonly onFetchCommits?: () => Promise<void>
 		readonly commitFetchNext?: {
 			untilMs: number
 			retryAfterSeconds: number
@@ -1359,12 +1429,16 @@ describe("VcsSyncService orchestrator", () => {
 			fetchRepositories: () =>
 				opts.fetchReposError ? Effect.fail(opts.fetchReposError) : Effect.succeed(opts.repos ?? []),
 			fetchCommits: () =>
-				opts.fetchCommitsError
-					? Effect.fail(opts.fetchCommitsError)
-					: Effect.succeed({
-							commits: opts.commits ?? [],
-							...(opts.commitFetchNext ? { next: opts.commitFetchNext } : undefined),
-						}),
+				Effect.promise(async () => opts.onFetchCommits?.()).pipe(
+					Effect.andThen(
+						opts.fetchCommitsError
+							? Effect.fail(opts.fetchCommitsError)
+							: Effect.succeed({
+									commits: opts.commits ?? [],
+									...(opts.commitFetchNext ? { next: opts.commitFetchNext } : undefined),
+								}),
+					),
+				),
 			fetchBranches: () =>
 				opts.fetchBranchesError
 					? Effect.fail(opts.fetchBranchesError)
@@ -1961,6 +2035,15 @@ describe("VcsSyncService orchestrator", () => {
 			const STALE_SHA = "c".repeat(40)
 			yield* upsertCommitsFor(repo, orgId, "70", [commit(STALE_SHA, 1)])
 
+			// The stale row predates the new install in reality; backdate it so the
+			// strict-order purge (strictly-older siblings only) applies even when both
+			// test seeds land in the same clock millisecond.
+			yield* Effect.promise(() =>
+				executeSql(
+					testDb,
+					`UPDATE vcs_installations SET created_at = created_at - interval '1 hour' WHERE external_installation_id = '11'`,
+				),
+			)
 			yield* seedInstallation(repo, orgId)
 			const job: VcsSyncJob = {
 				kind: "installation-sync",
@@ -2912,6 +2995,126 @@ describe("VcsSyncService orchestrator", () => {
 			const updated = yield* repoFor(repo, orgId, "7")
 			assert.strictEqual(updated.trackedBranch, "release")
 			assert.strictEqual(sent.length, 0)
+		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent })))
+	})
+
+	// Regression: a sync-commits job enqueued for the previously tracked branch
+	// (queued, delayed, or a continuation) must never repopulate the wiped commit
+	// set or flip the new backfill's status.
+	it.effect("drops a sync-commits job whose branch is no longer tracked", () => {
+		const testDb = createTestDb(trackedDbs)
+		const sent: Array<VcsSyncJob> = []
+		return Effect.gen(function* () {
+			const svc = yield* VcsSyncService
+			const repo = yield* VcsRepository
+			const orgId = asOrgId("org_orch")
+			yield* seedInstallation(repo, orgId)
+			yield* seedRepo(repo)
+			const r = yield* repoFor(repo, orgId, "7")
+			yield* repo.changeTrackedBranch(orgId, r.id, "release")
+			// The queued job still names the old tracked branch ("main").
+			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(backfillJob))
+			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
+			const stored = yield* reposOfInstallation(repo, "42", "all")
+			const head = Option.getOrThrow(Arr.head(stored))
+			assert.strictEqual(head.syncStatus, "pending") // untouched — not "ready"
+		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent, commits: [commit(SHA_A, 1)] })))
+	})
+
+	it.effect("a retarget landing during the provider fetch invalidates the walk before it writes", () => {
+		const testDb = createTestDb(trackedDbs)
+		const sent: Array<VcsSyncJob> = []
+		return Effect.gen(function* () {
+			const svc = yield* VcsSyncService
+			const repo = yield* VcsRepository
+			const orgId = asOrgId("org_orch")
+			yield* seedInstallation(repo, orgId)
+			yield* seedRepo(repo)
+			// The retarget (simulated inside the provider fetch below) wins the race:
+			// the stale walk must not write its old-branch commits or mark it ready.
+			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(backfillJob))
+			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
+			const stored = yield* reposOfInstallation(repo, "42", "all")
+			const head = Option.getOrThrow(Arr.head(stored))
+			assert.notStrictEqual(head.syncStatus, "ready")
+		}).pipe(
+			Effect.provide(
+				orchestratorLayer(testDb, {
+					sent,
+					commits: [commit(SHA_A, 1)],
+					onFetchCommits: () =>
+						executeSql(
+							testDb,
+							`UPDATE vcs_repositories SET tracked_branch = 'release' WHERE external_repo_id = '7'`,
+						),
+				}),
+			),
+		)
+	})
+
+	it.effect("an exhausted stale-branch job does not mark the new branch's backfill errored", () => {
+		const testDb = createTestDb(trackedDbs)
+		const sent: Array<VcsSyncJob> = []
+		return Effect.gen(function* () {
+			const svc = yield* VcsSyncService
+			const repo = yield* VcsRepository
+			const orgId = asOrgId("org_orch")
+			yield* seedInstallation(repo, orgId)
+			yield* seedRepo(repo)
+			const r = yield* repoFor(repo, orgId, "7")
+			yield* repo.changeTrackedBranch(orgId, r.id, "release")
+			// The exhausted job walked the OLD branch; the new backfill is untouched.
+			yield* svc.recordExhaustedFailure(Schema.encodeSync(VcsSyncJob)(backfillJob))
+			const stored = yield* reposOfInstallation(repo, "42", "all")
+			const head = Option.getOrThrow(Arr.head(stored))
+			assert.strictEqual(head.syncStatus, "pending")
+			assert.strictEqual(head.lastSyncError, null)
+		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent })))
+	})
+
+	// Regression: two near-simultaneous created/updated jobs for different
+	// installations used to each see the other as a sibling and mutually purge
+	// both. "Supersedes" is now a strict order — only strictly-older siblings are
+	// purged — so the newest installation deterministically survives.
+	it.effect("a created job never purges a newer sibling installation", () => {
+		const testDb = createTestDb(trackedDbs)
+		const sent: Array<VcsSyncJob> = []
+		return Effect.gen(function* () {
+			const svc = yield* VcsSyncService
+			const repo = yield* VcsRepository
+			const orgId = asOrgId("org_orch")
+			yield* seedInstallation(repo, orgId) // external id "42"
+			yield* repo.upsertInstallation({
+				orgId,
+				provider: "github",
+				externalInstallationId: "43",
+				accountLogin: "octo2",
+				accountType: "organization",
+				externalAccountId: "101",
+				accountAvatarUrl: null,
+				repositorySelection: "all",
+				installedByUserId: asUserId("user_1"),
+			})
+			// Make "42" strictly older so the winner is deterministic.
+			yield* Effect.promise(() =>
+				executeSql(
+					testDb,
+					`UPDATE vcs_installations SET created_at = created_at - interval '1 hour' WHERE external_installation_id = '42'`,
+				),
+			)
+			const createdJob = (id: string): VcsSyncJob => ({
+				kind: "installation-sync",
+				provider: "github",
+				externalInstallationId: id,
+				reason: "created",
+			})
+			// The OLDER installation's job must NOT purge the newer sibling.
+			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(createdJob("42")))
+			assert.ok(Option.isSome(yield* repo.resolveInstallation("github", "43")))
+			// The NEWER installation's job supersedes and purges the older.
+			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(createdJob("43")))
+			assert.ok(Option.isNone(yield* repo.resolveInstallation("github", "42")))
+			assert.ok(Option.isSome(yield* repo.resolveInstallation("github", "43")))
 		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent })))
 	})
 })

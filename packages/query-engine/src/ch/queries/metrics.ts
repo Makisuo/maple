@@ -87,11 +87,10 @@ export function metricsTimeseriesQuery(opts: MetricsTimeseriesOpts) {
 				: opts.groupByAttributeKey
 					? $.Attributes.get(opts.groupByAttributeKey)
 					: CH.lit(""),
-			groupName:
-				opts.groupByAttributeKey || opts.groupByResourceAttributeKey
-					? opts.groupByResourceAttributeKey
-						? $.ResourceAttributes.get(opts.groupByResourceAttributeKey)
-						: $.Attributes.get(opts.groupByAttributeKey!)
+			groupName: opts.groupByResourceAttributeKey
+				? $.ResourceAttributes.get(opts.groupByResourceAttributeKey)
+				: opts.groupByAttributeKey
+					? $.Attributes.get(opts.groupByAttributeKey)
 					: $.ServiceName,
 			...metricsSelectExprs($, isHistogram),
 		}))
@@ -393,11 +392,10 @@ export function metricsTimeseriesRateQuery(
 				: opts.groupByAttributeKey
 					? $.Attributes.get(opts.groupByAttributeKey)
 					: CH.lit(""),
-			groupName:
-				opts.groupByAttributeKey || opts.groupByResourceAttributeKey
-					? opts.groupByResourceAttributeKey
-						? $.resourceAttributeValue
-						: $.Attributes.get(opts.groupByAttributeKey!)
+			groupName: opts.groupByResourceAttributeKey
+				? $.resourceAttributeValue
+				: opts.groupByAttributeKey
+					? $.Attributes.get(opts.groupByAttributeKey)
 					: $.ServiceName,
 			rateValue: CH.sumIf($.delta.div($.time_delta), $.delta.gte(0).and($.time_delta.gt(0))),
 			increaseValue: CH.sumIf($.delta, $.delta.gte(0)),

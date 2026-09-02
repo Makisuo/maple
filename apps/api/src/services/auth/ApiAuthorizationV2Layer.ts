@@ -1,8 +1,8 @@
-import { HttpServerRequest } from "effect/unstable/http"
+import { HttpRouter, HttpServerRequest } from "effect/unstable/http"
 import { CurrentTenant, RoleName } from "@maple/domain/http"
 import {
 	AuthorizationV2,
-	requiredScopeForRequest,
+	requiredScopeForRoute,
 	scopeAllows,
 	V2InsufficientScope,
 	V2InvalidCredentials,
@@ -42,16 +42,26 @@ const getBearerToken = (headers: Record<string, string | undefined>): string | u
 const getOrgSelectionHeader = (headers: Record<string, string | undefined>): string | undefined =>
 	headers[ORG_SELECTION_HEADER]
 
-const requestPath = (url: string): string => {
-	const queryStart = url.indexOf("?")
-	return queryStart === -1 ? url : url.slice(0, queryStart)
-}
+/**
+ * A protected v2 route the scope derivation cannot classify. Every group behind
+ * `AuthorizationV2` is prefixed `/v2/<family>`, so this is unreachable by
+ * construction — it is a defect (500), never a silently unscoped request.
+ */
+class V2UnclassifiableRoute extends Schema.TaggedError<V2UnclassifiableRoute>()(
+	"@maple/api/auth/V2UnclassifiableRoute",
+	{
+		message: Schema.String,
+		method: Schema.String,
+		routePath: Schema.String,
+	},
+) {}
 
 /**
  * v2 flavor of `ApiAuthorizationLayer`: same credential resolution (API key
  * first, then Clerk/self-hosted session token), but errors use the v2
  * envelope and restricted API keys are scope-checked mechanically from the
- * request (family = first path segment under /v2, GET/HEAD → read else write).
+ * matched route template (family = first path segment under /v2, GET/HEAD →
+ * read else write).
  * Session tokens and legacy null-scope keys bypass scope checks.
  */
 export const ApiAuthorizationV2Layer = Layer.effect(
@@ -143,8 +153,27 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 							)
 						}
 
-						const required = requiredScopeForRequest(request.method, requestPath(request.url))
-						if (required !== null && !scopeAllows(resolved.scopes, required)) {
+						// The route *template* the router matched, not `request.url`: the
+						// router lowercases, percent-decodes, collapses `//` and strips
+						// `;`-suffixes before matching, so a raw URL that reaches this
+						// handler need not look like the path the scope check expects.
+						const { route } = yield* HttpRouter.RouteContext
+						const required = requiredScopeForRoute(request.method, route.path)
+						if (required === null) {
+							// Fail closed. Every scope-protected v2 route matches the family
+							// pattern, so reaching here means a route was registered outside the
+							// shape the scope check understands, and answering the request would
+							// mean skipping the check entirely.
+							// oxlint-disable-next-line maple/no-effect-die
+							return yield* Effect.die(
+								new V2UnclassifiableRoute({
+									message: "Cannot derive a scope family for a scope-protected v2 route.",
+									method: request.method,
+									routePath: route.path,
+								}),
+							)
+						}
+						if (!scopeAllows(resolved.scopes, required)) {
 							const message = `This API key does not have the "${required.family}:${required.access}" scope required for this request.`
 							yield* recordDenied(message)
 							return yield* Effect.fail(V2InsufficientScope.make(message))

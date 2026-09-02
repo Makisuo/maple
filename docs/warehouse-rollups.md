@@ -1,6 +1,6 @@
 # Warehouse rollups and materialized views
 
-We have 39 materialized views across 37 datasources. They accreted one product feature at a
+We have 41 materialized views across 39 datasources. They accreted one product feature at a
 time, and for a long time nobody could answer "should this be an MV?" without re-deriving it
 from scratch. This is that answer.
 
@@ -84,6 +84,39 @@ back to a raw scan measured at ~7s p95.
 A rollup whose target is empty is indistinguishable from a rollup nobody queries. Neither the
 schema lint nor the SQL catalog can catch this; only looking at row counts can.
 
+### A two-tier read takes its boundary from `rollup-splice`, never by hand
+
+The raw edge and the rollup interior have to tile the window exactly once. Written by hand
+that is two inequalities which must stay each other's exact complement, and when they drift
+nothing errors — the counts simply come out wrong, on a chart that looks fine.
+
+`packages/query-engine/src/ch/queries/rollup-splice.ts` owns that boundary:
+`interiorConditions(bucketColumn, grain)` for the rollup branch, `edgeCondition(tsColumn,
+grain)` for the raw branch, defined as its complement. Traces, logs, services and
+service-operations use them.
+
+The service-map family did not, and drifted in both directions at once. `serviceDependencies`
+hand-rolled the boundary correctly. `serviceDbEdges`, `serviceExternalEdges` and the
+db-query-shape drill-down hand-rolled the same boundary with the interior floored to
+`toStartOfHour(startTime)` while their raw branch covered only the trailing hour — so every
+window whose start was not hour-aligned counted the whole leading hour, including spans
+outside the window. The web app snaps a 12h range to a 5-minute grid, so the start was
+essentially never aligned. The DB nodes on the service map read high against the service
+edges drawn beside them, permanently, and the boundary-exact e2e reproduces it as a *phantom
+database node* built entirely from rows before the window began.
+
+Two things made it survive: nothing forced the shared helper, and those queries had no
+fixture in the SQL catalog at all, so neither the DESCRIBE sweep nor any structural gate ever
+looked at them.
+
+Both are closed now. `unsplicedTwoTierQueries` in `sql-catalog.ts` fails any query naming both
+a rollup table and a raw table whose boundary is not a computed `firstFullBucket`, and
+`service-map-parity.clickhouse.e2e.test.ts` compares the spliced result against a flat scan
+with spans seeded exactly on each seam. **There is no allowlist on that gate.** A single-tier
+query never trips it, and a deliberately-approximate one (`serviceHealthSnapshot` floors to
+the hour on purpose) reads only its rollup and never trips it either. A new query that needs
+an exemption is the gate finding something, not the gate needing a hole.
+
 ### A routing guard must be tested on the tier it selects, not on a table name
 
 `canUseAnnualServiceOverview` required `allMetrics === true`. Alert evaluation
@@ -111,10 +144,13 @@ like a real alert rule, not just a dashboard query.
    missing target and wedges ingest with `Code: 60 UNKNOWN_TABLE`.
 6. Set `requiredForIngest: false` unless the Rust gateway writes the table directly.
    Bumping `clickHouseSchemaVersion` un-readies ingest routing for every BYO-ClickHouse org.
-7. Bump `LOCAL_SCHEMA_VERSION`, retain the snapshot, and add the local-store migration edge —
-   including explicit drops, because `assertPhysicalSchema` fails on leftover objects too.
+7. `bun run local-schema:bump <slug>` to bump `LOCAL_SCHEMA_VERSION`, retain the snapshot,
+   append the history identity, and scaffold the local-store migration edge from the previous
+   one. It writes every mechanical edit — including the pinned literals in the bun test and the
+   native probe — and leaves the edge's `apply` for you. Write the DDL there, including explicit
+   drops, because `assertPhysicalSchema` fails on leftover objects too.
 
-Because step 5–7 are expensive, **batch removals into one migration** rather than shipping
+Because step 5–6 are expensive, **batch removals into one migration** rather than shipping
 them one at a time. Migration `0019_mv_sweep` is the worked example.
 
 ---

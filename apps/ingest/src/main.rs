@@ -11,6 +11,7 @@
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 mod autumn;
+mod task_protection;
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -40,6 +41,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use hmac::{Hmac, Mac};
 use maple_ingest::ai_session;
+use maple_ingest::aws::CredentialsProvider as AwsCredentialsProvider;
 use maple_ingest::clickhouse_insert_mappings::SCHEMA_VERSION as CLICKHOUSE_SCHEMA_VERSION;
 use maple_ingest::metrics;
 use maple_ingest::otel::{
@@ -59,6 +61,7 @@ use maple_ingest::telemetry::{
     TinybirdMirrorConfig,
 };
 use maple_ingest::usage_metrics::{billable_gb, usage_cardinality_view, UsageMetrics};
+use maple_ingest::wal_store::WalSegmentStore;
 use moka::future::Cache;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
@@ -124,6 +127,18 @@ struct ReplayBlobStoreConfig {
     timeout: Duration,
 }
 
+/// Where sealed WAL segments are shipped so a task that dies without draining
+/// does not take its backlog with it. Unset means the WAL is local-only, which
+/// is what self-hosted and local runs use.
+#[derive(Clone, Debug)]
+struct WalStoreSettings {
+    store: maple_ingest::wal_store::WalStoreConfig,
+    /// Static credentials, when the deployment supplies them instead of relying
+    /// on the task role.
+    access_key_id: Option<String>,
+    secret_access_key: Option<String>,
+}
+
 #[derive(Clone)]
 struct AppConfig {
     port: u16,
@@ -168,6 +183,11 @@ struct AppConfig {
     /// terminated by Cloudflare. Off simply writes `''`, which is what the
     /// column held before this existed — it cannot regress anything.
     trust_proxy_geo: bool,
+    /// How long a graceful shutdown may spend exporting the WAL backlog before
+    /// exiting anyway. Must fit inside the ECS `stopTimeout` (SIGTERM → SIGKILL
+    /// window) or the drain is cut off mid-flight.
+    shutdown_drain_secs: u64,
+    wal_store: Option<WalStoreSettings>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -310,6 +330,14 @@ impl AppConfig {
             })
         };
 
+        // Shared by the pipeline (which runs the heartbeat task) and the store
+        // config (which decides how stale a heartbeat has to be).
+        let heartbeat_secs = parse_u64(
+            "INGEST_WAL_S3_HEARTBEAT_SECS",
+            std::env::var("INGEST_WAL_S3_HEARTBEAT_SECS").ok(),
+            maple_ingest::wal_store::DEFAULT_HEARTBEAT_INTERVAL.as_secs(),
+        )?;
+
         let tinybird = TinybirdConfig {
             endpoint: std::env::var("TINYBIRD_HOST")
                 .unwrap_or_default()
@@ -345,6 +373,12 @@ impl AppConfig {
                 std::env::var("INGEST_WAL_SHARDS").ok(),
                 (num_cpus::get().max(1) * 2).max(2),
             )?,
+            wal_segment_max_bytes: parse_u64(
+                "INGEST_WAL_SEGMENT_MAX_BYTES",
+                std::env::var("INGEST_WAL_SEGMENT_MAX_BYTES").ok(),
+                maple_ingest::telemetry::WAL_SEGMENT_MAX_BYTES,
+            )?,
+            wal_store_heartbeat_interval: Duration::from_secs(heartbeat_secs),
             batch_max_rows: parse_usize(
                 "INGEST_BATCH_MAX_ROWS",
                 std::env::var("INGEST_BATCH_MAX_ROWS").ok(),
@@ -569,6 +603,66 @@ impl AppConfig {
             false,
         )?;
 
+        // 90s fits inside the deployed 120s stopTimeout with margin for the
+        // in-flight-request drain that runs before it.
+        // WAL durability tier. An unset bucket keeps the WAL local-only, which
+        // is the self-hosted and local-dev shape; on ECS the task role signs the
+        // requests, so credentials are optional here.
+        let wal_store = match std::env::var("INGEST_WAL_S3_BUCKET")
+            .ok()
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty())
+        {
+            None => None,
+            Some(bucket) => {
+                let region = std::env::var("INGEST_WAL_S3_REGION")
+                    .ok()
+                    .map(|v| v.trim().to_owned())
+                    .filter(|v| !v.is_empty())
+                    .or_else(|| std::env::var("AWS_REGION").ok())
+                    .ok_or_else(|| {
+                        "INGEST_WAL_S3_REGION is required when INGEST_WAL_S3_BUCKET is set"
+                            .to_owned()
+                    })?;
+                let endpoint = std::env::var("INGEST_WAL_S3_ENDPOINT")
+                    .ok()
+                    .map(|v| v.trim().to_owned())
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or_else(|| format!("https://s3.{region}.amazonaws.com"));
+                Some(WalStoreSettings {
+                    store: maple_ingest::wal_store::WalStoreConfig {
+                        endpoint,
+                        bucket,
+                        region,
+                        prefix: std::env::var("INGEST_WAL_S3_PREFIX")
+                            .ok()
+                            .map(|v| v.trim().to_owned())
+                            .filter(|v| !v.is_empty())
+                            .unwrap_or_else(|| "wal".to_owned()),
+                        timeout: Duration::from_millis(parse_u64(
+                            "INGEST_WAL_S3_TIMEOUT_MS",
+                            std::env::var("INGEST_WAL_S3_TIMEOUT_MS").ok(),
+                            10_000,
+                        )?),
+                        orphan_after: Duration::from_secs(parse_u64(
+                            "INGEST_WAL_S3_ORPHAN_AFTER_SECS",
+                            std::env::var("INGEST_WAL_S3_ORPHAN_AFTER_SECS").ok(),
+                            maple_ingest::wal_store::DEFAULT_ORPHAN_AFTER.as_secs(),
+                        )?),
+                        heartbeat_interval: Duration::from_secs(heartbeat_secs),
+                    },
+                    access_key_id: std::env::var("INGEST_WAL_S3_ACCESS_KEY_ID").ok(),
+                    secret_access_key: std::env::var("INGEST_WAL_S3_SECRET_ACCESS_KEY").ok(),
+                })
+            }
+        };
+
+        let shutdown_drain_secs = parse_u64(
+            "INGEST_SHUTDOWN_DRAIN_SECS",
+            std::env::var("INGEST_SHUTDOWN_DRAIN_SECS").ok(),
+            90,
+        )?;
+
         Ok(Self {
             port,
             otlp_grpc_port,
@@ -593,6 +687,8 @@ impl AppConfig {
             replay_blob_store,
             internal_org_id,
             trust_proxy_geo,
+            shutdown_drain_secs,
+            wal_store,
         })
     }
 }
@@ -2019,12 +2115,43 @@ async fn main() {
             None
         };
 
+    // Credentials come from the ECS task role unless the deployment supplies a
+    // key pair — the same choice the replay bucket makes, except that on ECS the
+    // role is the default rather than the exception.
+    let wal_segment_store = config.wal_store.as_ref().and_then(|settings| {
+        let credentials = match (&settings.access_key_id, &settings.secret_access_key) {
+            (Some(key), Some(secret)) => Some(AwsCredentialsProvider::from_static(
+                key.clone(),
+                secret.clone(),
+            )),
+            _ => AwsCredentialsProvider::from_ecs_environment(http_client.clone()),
+        };
+        let Some(credentials) = credentials else {
+            warn!(
+                bucket = settings.store.bucket,
+                "INGEST_WAL_S3_BUCKET is set but no credentials are available; the WAL stays local-only"
+            );
+            return None;
+        };
+        info!(
+            bucket = settings.store.bucket,
+            prefix = settings.store.prefix,
+            "WAL segments will be shipped to the durability object store"
+        );
+        Some(Arc::new(WalSegmentStore::new(
+            http_client.clone(),
+            &settings.store,
+            Arc::new(credentials),
+        )))
+    });
+
     let telemetry_pipeline = if config.write_mode.uses_tinybird() || direct_clickhouse_possible {
-        match TelemetryPipeline::new_with_clickhouse_validation(
+        match TelemetryPipeline::new_with_object_store(
             config.tinybird.clone(),
             http_client.clone(),
             clickhouse_target_provider,
             config.write_mode.uses_tinybird(),
+            wal_segment_store,
         )
         .await
         {
@@ -2037,6 +2164,14 @@ async fn main() {
     } else {
         None
     };
+
+    // Handle kept out of AppState for the post-shutdown WAL drain, plus the
+    // scale-in protection loop (a no-op off ECS — see `task_protection`).
+    let drain_pipeline = telemetry_pipeline.clone();
+    let drain_deadline = Duration::from_secs(config.shutdown_drain_secs);
+    if let Some(pipeline) = telemetry_pipeline.clone() {
+        task_protection::spawn(pipeline);
+    }
 
     let autumn_tracker = config.autumn_secret_key.as_ref().map(|key| {
         AutumnTracker::spawn(
@@ -2227,6 +2362,35 @@ async fn main() {
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await;
+
+    // Intake has stopped (graceful shutdown drained in-flight requests), but
+    // the WAL sits on ephemeral storage that dies with the task — export what
+    // it still holds before exiting. The export workers stay alive until the
+    // process ends, so this only has to wait for them.
+    if let Some(pipeline) = drain_pipeline {
+        let remaining = pipeline.drain_wal(drain_deadline).await;
+        if remaining == 0 {
+            info!("WAL drained clean on shutdown");
+        } else {
+            warn!(
+                remaining_bytes = remaining,
+                deadline_secs = drain_deadline.as_secs(),
+                "Shutdown drain deadline hit with WAL backlog remaining"
+            );
+        }
+        // Even a clean drain runs this: it retires the owner heartbeat, so a
+        // successor claims anything left instead of waiting out the staleness
+        // window. With a backlog it also seals and ships the tail, which is the
+        // difference between "replays if this task's storage survives" (it does
+        // not — Fargate ephemeral storage dies with the task) and "replays".
+        let shipped = pipeline.flush_wal_to_object_store().await;
+        if shipped > 0 {
+            info!(
+                shipped_bytes = shipped,
+                "Shipped the undrained WAL tail to the object store"
+            );
+        }
+    }
 
     if let Some(providers) = telemetry_providers {
         // Flush buffered spans on graceful exit. Errors here are non-fatal —
@@ -2446,6 +2610,17 @@ async fn accept_grpc_decoded(
     resolved: &ResolvedIngestKey,
     decoded_bytes: usize,
 ) -> Result<(), tonic::Status> {
+    // The sentinel token is a PUBLIC constant, so anything it carries is
+    // attacker-authored and must never be stored. Discarded here for the same
+    // reasons and with the same shape as `handle_signal_inner`'s HTTP
+    // short-circuit: success to the client, nothing resolved, nothing forwarded.
+    if resolved.org_id == SENTINEL_ORG_ID {
+        metrics::sentinel(signal.path());
+        Span::current().record("maple.ingest.key_type", "sentinel");
+        debug!("Sentinel token; skipping forward");
+        return Ok(());
+    }
+
     let _org_inflight_permit = state
         .org_inflight_limiter
         .try_acquire(&resolved.org_id)
@@ -7099,6 +7274,8 @@ mod tests {
             org_queue_max_bytes: 1024 * 1024,
             queue_channel_capacity: 10,
             wal_shards: 1,
+            wal_segment_max_bytes: maple_ingest::telemetry::WAL_SEGMENT_MAX_BYTES,
+            wal_store_heartbeat_interval: maple_ingest::wal_store::DEFAULT_HEARTBEAT_INTERVAL,
             batch_max_rows: 100,
             batch_max_bytes: 1024 * 1024,
             batch_max_wait: Duration::from_millis(1),
@@ -7221,6 +7398,8 @@ mod tests {
                 replay_max_session_bytes: 1024 * 1024 * 1024,
                 replay_blob_store: None,
                 trust_proxy_geo: false,
+                shutdown_drain_secs: 1,
+            wal_store: None,
             },
             #[expect(
                 clippy::useless_conversion,
@@ -8258,6 +8437,97 @@ mod tests {
                 error.kind()
             );
         }
+    }
+
+    /// `MAPLE_TEST` is a PUBLIC constant, so a sentinel export is
+    /// attacker-authored: it must look successful and store nothing. The HTTP
+    /// path discards in `handle_signal_inner`; this pins the gRPC twin, which
+    /// used to run `process_decoded_payload` unconditionally.
+    #[tokio::test]
+    async fn sentinel_grpc_export_writes_nothing() {
+        let (forward_tx, mut forward_rx) = tokio::sync::mpsc::unbounded_channel();
+        let forward_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let forward_addr = forward_listener.local_addr().unwrap();
+        let forward_app = Router::new()
+            .route("/v1/logs", post(fake_forward_collector))
+            .with_state(forward_tx);
+        tokio::spawn(async move {
+            axum::serve(forward_listener, forward_app).await.unwrap();
+        });
+
+        let queue_dir = unique_main_test_dir("grpc-sentinel");
+        let store = Arc::new(FakeKeyStore::default());
+        let raw_key = "maple_sk_test_grpc_sentinel";
+        store.insert_private(
+            raw_key,
+            KeyRow {
+                org_id: "org_grpc_sentinel".to_owned(),
+                self_managed: false,
+                clickhouse_ready: false,
+            },
+        );
+        let state = test_app_state(
+            Arc::clone(&store),
+            queue_dir.clone(),
+            format!("http://{forward_addr}"),
+            Duration::from_millis(5),
+        )
+        .await;
+
+        let mut metadata = tonic::metadata::MetadataMap::new();
+        metadata.insert("authorization", "Bearer MAPLE_TEST".parse().unwrap());
+        let sentinel = resolve_grpc_ingest_key(&state, &metadata)
+            .await
+            .expect("the sentinel token authenticates");
+        assert_eq!(sentinel.org_id, SENTINEL_ORG_ID);
+
+        let payload = test_log_request("sentinel over grpc");
+        let decoded_bytes = payload.encoded_len();
+        accept_grpc_decoded(
+            &state,
+            Signal::Logs,
+            DecodedPayload::Logs(payload),
+            &sentinel,
+            decoded_bytes,
+        )
+        .await
+        .expect("a sentinel export must look successful to the client");
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), forward_rx.recv())
+                .await
+                .is_err(),
+            "the sentinel org must not write telemetry"
+        );
+
+        // The same harness with a real key, so the assertion above cannot pass
+        // because nothing was ever wired up.
+        let resolved = state
+            .resolver
+            .resolve_ingest_key(raw_key)
+            .await
+            .expect("resolution should not fail")
+            .expect("the test key resolves");
+        let real = test_log_request("real key over grpc");
+        let real_bytes = real.encoded_len();
+        accept_grpc_decoded(
+            &state,
+            Signal::Logs,
+            DecodedPayload::Logs(real),
+            &resolved,
+            real_bytes,
+        )
+        .await
+        .expect("a real export is accepted");
+        let forwarded = tokio::time::timeout(Duration::from_secs(2), forward_rx.recv())
+            .await
+            .expect("a real key forwards")
+            .expect("forward channel should stay open");
+        assert!(forwarded.body_len > 0);
+
+        drop(std::fs::remove_dir_all(&queue_dir));
     }
 
     #[tokio::test]

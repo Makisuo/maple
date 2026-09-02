@@ -77,7 +77,7 @@ export function canvasSafeThresholdColor(color: string | undefined): string {
  *
  * The dasharray is the plain `"4 4"` the predecessor drew. `roundCapDasharray`
  * does not belong here: only `lineY` hard-codes `lineCap: "round"`
- * (`dist/line.js:123`), while `ruleY` emits rule nodes with no cap at all
+ * (`dist/line.js:126` at 0.16.0), while `ruleY` emits rule nodes with no cap at all
  * (`dist/rule.js`), so compensating for a cap that is not applied just paints
  * 3-on/5-off dashes where 4/4 was asked for.
  *

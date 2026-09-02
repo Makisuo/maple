@@ -174,6 +174,18 @@ export class OrgClickHouseApplySchemaStatus extends Schema.Class<OrgClickHouseAp
 	stepsTotal: Schema.NullOr(Schema.Number),
 	stepsDone: Schema.NullOr(Schema.Number),
 	appliedVersions: Schema.Array(Schema.Number),
+	/**
+	 * Non-gating (performance) migrations and optional features the run could
+	 * not apply. A "succeeded" run with entries here left work undone — e.g. a
+	 * dropped materialized view whose CREATE failed — and needs a re-apply, so
+	 * the status must say so rather than reporting an unqualified success.
+	 */
+	skipped: Schema.Array(
+		Schema.Struct({
+			id: Schema.String,
+			reason: Schema.String,
+		}),
+	),
 	errorMessage: Schema.NullOr(Schema.String),
 	startedAt: Schema.NullOr(Schema.Number),
 	finishedAt: Schema.NullOr(Schema.Number),
@@ -190,7 +202,7 @@ export class OrgClickHouseApplySchemaStatus extends Schema.Class<OrgClickHouseAp
  *     -e MAPLE_CLICKHOUSE_PASSWORD=$PASS \
  *     -v ./collector.yaml:/etc/otel/config.yaml \
  *     -p 4317:4317 -p 4318:4318 \
- *     ghcr.io/makisuo/maple/otel-collector-maple:latest
+ *     ghcr.io/mapletechlabs/maple/otel-collector-maple:latest
  *
  * The password is intentionally NOT inlined — the body references
  * `${env:MAPLE_CLICKHOUSE_PASSWORD}` so the file is safe to share.

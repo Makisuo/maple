@@ -10,7 +10,25 @@
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 import cloudflareWorkers from "./cloudflare-workers.ts"
+
+/**
+ * A binding the worker was deployed without.
+ *
+ * Raised as a defect: bindings are declared in `wrangler.jsonc` at deploy time,
+ * so a missing one is a deployment that should not have shipped, not a request
+ * a caller could retry or handle. The tag and `binding` are what let the crash
+ * name the entry to add.
+ */
+export class MissingWorkerBindingError extends Schema.TaggedError<MissingWorkerBindingError>()(
+	"@maple/effect-cloudflare/MissingWorkerBindingError",
+	{
+		binding: Schema.String,
+		kind: Schema.String,
+		message: Schema.String,
+	},
+) {}
 
 export class WorkerEnvironment extends Context.Service<WorkerEnvironment, Record<string, unknown>>()(
 	"Cloudflare.Workers.WorkerEnvironment",

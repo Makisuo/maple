@@ -98,6 +98,8 @@ export interface SessionModelUsage {
 export interface SessionToolUsage {
 	readonly name: string
 	readonly calls: number
+	/** Of those calls, the ones whose span reported a failure. */
+	readonly failed: number
 	/** `gen_ai.tool.description`, from the first span that stamped one. */
 	readonly description: string | undefined
 }
@@ -609,19 +611,6 @@ function sessionCost(
 	return bySpan.size === 0 ? undefined : sumCosts(bySpan.values())
 }
 
-/**
- * One turn's reported spend, by the same rules `countTurnTokens` follows: the
- * deepest reporter counts, and a span reporting for more than this turn counts
- * for none of them.
- */
-export function countTurnCost(turn: SessionTurn, turns: readonly SessionTurn[]): number | undefined {
-	const byId = new Map(turn.spans.map((span) => [span.spanId, span]))
-	const bySpan = [...costBySpan(turn.spans, byId)].filter(
-		([spanId]) => !isSessionLevelReporter(byId.get(spanId)!, turns),
-	)
-	return bySpan.length === 0 ? undefined : sumCosts(bySpan.map(([, cost]) => cost))
-}
-
 /** Per bucket, what `reported` claims over `counted`. Never negative: a wrapper
  *  that under-reports its own children adds nothing rather than subtracting. */
 function excessTokens(reported: SessionTokenTotals, counted: SessionTokenTotals): SessionTokenTotals {
@@ -742,19 +731,25 @@ function modelUsage(
  * disappearing from a column whose total says 63.
  */
 function toolUsage(spans: readonly AiSessionSpan[]): readonly SessionToolUsage[] {
-	const calls = new Map<string, { count: number; description: string | undefined }>()
+	const calls = new Map<string, { count: number; failed: number; description: string | undefined }>()
 	for (const span of spans) {
 		if (classifyAiSpan(span) !== "tool") continue
 		const name = span.genAi.toolName ?? span.spanName
-		const entry = calls.get(name) ?? { count: 0, description: undefined }
+		const entry = calls.get(name) ?? { count: 0, failed: 0, description: undefined }
 		entry.count += 1
+		if (spanFailed(span)) entry.failed += 1
 		// The first stamped description speaks for the tool: emitters send the
 		// same definition on every call, so later ones only repeat it.
 		entry.description ??= span.genAi.toolDescription
 		calls.set(name, entry)
 	}
 	return [...calls]
-		.map(([name, entry]) => ({ name, calls: entry.count, description: entry.description }))
+		.map(([name, entry]) => ({
+			name,
+			calls: entry.count,
+			failed: entry.failed,
+			description: entry.description,
+		}))
 		.sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name))
 }
 

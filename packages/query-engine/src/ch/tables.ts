@@ -48,10 +48,7 @@ const spanId = T.custom("String", SpanId)
  * the point: a new table without one is a type error, not a table that silently
  * compiles every query as `cross-tenant`.
  */
-const table = <
-	const Name extends string,
-	const Columns extends ColumnDefs & { OrgId: T.CHStringLike },
->(
+const table = <const Name extends string, const Columns extends ColumnDefs & { OrgId: T.CHStringLike }>(
 	name: Name,
 	columns: Columns,
 ): Table<Name, Columns> => chTable(name, columns, { tenantColumn: "OrgId" })
@@ -104,6 +101,21 @@ export const TraceDetailSpans = table("trace_detail_spans", {
 	StatusMessage: T.string,
 	SpanAttributes: T.map(T.string, T.string),
 	ResourceAttributes: T.map(T.string, T.string),
+})
+
+/**
+ * Filtered projection of GenAI agent spans (`maple_ai.vendor.id` stamped),
+ * pre-extracted to plain columns — the Agent Sessions detection/facet surface.
+ * `SessionId` is `''` on most rows: vendors stamp the session key only on the
+ * turn-owning spans, so session resolution stays per-trace at read time.
+ */
+export const AiTraceIndex = table("ai_trace_index", {
+	OrgId: orgId,
+	Timestamp: dateTime64,
+	TraceId: T.string,
+	SessionId: T.string,
+	VendorId: T.string,
+	ServiceName: T.string,
 })
 
 export const TraceListMv = table("trace_list_mv", {
@@ -433,6 +445,10 @@ export const ServiceOperationsMinutely = table("service_operations_minutely", {
 	DurationSum: T.float64,
 	// AggregateFunction(quantilesTDigest(0.5, 0.95), UInt64) — opaque state.
 	DurationQuantiles: T.string,
+	// Added by migration 0023; 0 across all three means the bucket predates it.
+	ClassifiedSpanCount: T.uint64,
+	ServerSpanCount: T.uint64,
+	RoutedSpanCount: T.uint64,
 })
 
 export const LogsAggregatesHourly = table("logs_aggregates_hourly", {
@@ -556,6 +572,10 @@ export const ServiceOperationsHourly = table("service_operations_hourly", {
 	EstimatedErrorCount: T.float64,
 	DurationSum: T.float64,
 	DurationQuantiles: T.string,
+	// Added by migration 0023; 0 across all three means the bucket predates it.
+	ClassifiedSpanCount: T.uint64,
+	ServerSpanCount: T.uint64,
+	RoutedSpanCount: T.uint64,
 })
 
 export const AlertChecks = table("alert_checks", {

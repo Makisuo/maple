@@ -1,7 +1,16 @@
 import type { IconProps } from "./icon"
 
+interface NodejsIconProps extends IconProps {
+	/**
+	 * Render the mark in `currentColor` instead of the brand color — the service
+	 * map draws runtime glyphs in its muted text color so the branded platform
+	 * icon beside them stays the node's only color accent.
+	 */
+	monochrome?: boolean
+}
+
 // Source: simple-icons (MIT) — https://simpleicons.org/icons/nodedotjs
-function NodejsIcon({ size = 24, className, ...props }: IconProps) {
+function NodejsIcon({ size = 24, className, monochrome = false, ...props }: NodejsIconProps) {
 	return (
 		<svg
 			xmlns="http://www.w3.org/2000/svg"
@@ -9,7 +18,7 @@ function NodejsIcon({ size = 24, className, ...props }: IconProps) {
 			width={size}
 			height={size}
 			className={className}
-			fill="#5FA04E"
+			fill={monochrome ? "currentColor" : "#5FA04E"}
 			aria-hidden="true"
 			{...props}
 		>
@@ -18,4 +27,12 @@ function NodejsIcon({ size = 24, className, ...props }: IconProps) {
 	)
 }
 
-export { NodejsIcon }
+/**
+ * Monochrome Node.js mark as a plain icon component — for the
+ * `ComponentType<{ size, className }>` slots that can't pass `monochrome`.
+ */
+function NodejsMonoIcon({ size = 24, className, ...props }: IconProps) {
+	return <NodejsIcon size={size} className={className} monochrome {...props} />
+}
+
+export { NodejsIcon, NodejsMonoIcon }

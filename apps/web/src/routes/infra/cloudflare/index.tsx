@@ -1,7 +1,7 @@
 import { useDeferredValue, useMemo, useState, type ReactNode } from "react"
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result } from "@/lib/effect-atom"
 
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
@@ -15,6 +15,11 @@ import {
 	CloudflareKpiCards,
 	CloudflareKpiCardsLoading,
 } from "@/components/infra/cloudflare/cloudflare-kpi-cards"
+import {
+	CloudflareIngestBanner,
+	CloudflareIngestEmpty,
+	CloudflareStalledAction,
+} from "@/components/infra/cloudflare/cloudflare-ingest-status"
 import { CloudflareNotConnected } from "@/components/infra/cloudflare/cloudflare-not-connected"
 import { CloudflarePlatformSection } from "@/components/infra/cloudflare/cloudflare-platform-table"
 import {
@@ -34,7 +39,8 @@ import {
 	cloudflareZonesResultAtom,
 	cloudflareZoneTimeseriesResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
-import { retainedQuery } from "@/lib/services/common/atom-client"
+import { useCloudflareIngestPhase } from "@/components/infra/cloudflare/use-cloudflare-ingest-phase"
+import type { CloudflareIngestPhase } from "@/components/infra/cloudflare/ingest-phase"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
@@ -71,12 +77,9 @@ function CloudflarePage() {
 	}
 
 	// Integration-gated (not infra-agent-gated): the page is useful exactly when
-	// the org has the Cloudflare integration connected with analytics scopes.
-	const statusResult = useAtomValue(
-		retainedQuery("integrations", "cloudflareStatus", {
-			reactivityKeys: ["cloudflareIntegrationStatus"],
-		}),
-	)
+	// the org has the Cloudflare integration connected with analytics scopes. The hook also
+	// carries the ingest phase, and polls while a fresh connection is still filling up.
+	const { statusResult, phase } = useCloudflareIngestPhase()
 
 	return (
 		<PageRefreshProvider timePreset={search.timePreset ?? "12h"}>
@@ -116,7 +119,13 @@ function CloudflarePage() {
 										if (!status.analyticsCapable) {
 											return <CloudflareNotConnected variant="needs-permissions" />
 										}
-										return <CloudflareData startTime={startTime} endTime={endTime} />
+										return (
+											<CloudflareData
+												startTime={startTime}
+												endTime={endTime}
+												phase={phase}
+											/>
+										)
 									})
 									.render()}
 							</div>
@@ -128,7 +137,15 @@ function CloudflarePage() {
 	)
 }
 
-function CloudflareData({ startTime, endTime }: { startTime: string; endTime: string }) {
+function CloudflareData({
+	startTime,
+	endTime,
+	phase,
+}: {
+	startTime: string
+	endTime: string
+	phase: CloudflareIngestPhase | null
+}) {
 	const bucketSeconds = chartBucketSeconds(startTime, endTime)
 
 	// Retained so a manual refresh or a time-range nudge fades the current numbers instead of
@@ -176,6 +193,16 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 		.orElse(() => false)
 
 	if (zonesEmpty && workersEmpty) {
+		// Two different empties wear the same face otherwise: a connection that has never
+		// produced anything (say why, and when to expect it) versus a live one whose selected
+		// window happens to be quiet (say that, and offer the fix — a wider window).
+		if (phase != null && phase.kind !== "live" && phase.kind !== "backfilling") {
+			return (
+				<CloudflareIngestEmpty phase={phase}>
+					{phase.kind === "stalled" ? <CloudflareStalledAction /> : null}
+				</CloudflareIngestEmpty>
+			)
+		}
 		return (
 			<Empty className="py-16">
 				<EmptyHeader>
@@ -184,8 +211,8 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 					</EmptyMedia>
 					<EmptyTitle>No Cloudflare traffic in this window</EmptyTitle>
 					<EmptyDescription>
-						Analytics ingest in 5-minute batches shortly after the integration connects. Widen the
-						time range or check back in a few minutes.
+						This zone set reported no requests over the selected range. Widen the time range, or
+						check back once more traffic has been collected.
 					</EmptyDescription>
 				</EmptyHeader>
 			</Empty>
@@ -194,6 +221,7 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 
 	return (
 		<div className="space-y-6">
+			{phase == null ? null : <CloudflareIngestBanner phase={phase} />}
 			{Result.builder(zonesResult)
 				.onInitial(() => (
 					<div className="space-y-4">

@@ -1,6 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import {
+	IngestAttributeMappingForbiddenError,
 	IngestAttributeMappingNotFoundError,
 	IngestAttributeMappingPersistenceError,
 	IngestAttributeMappingValidationError,
@@ -154,10 +155,11 @@ export const V2AttributeMappingDeleteResponse = Schema.Struct({
 })
 export type V2AttributeMappingDeleteResponse = Schema.Schema.Type<typeof V2AttributeMappingDeleteResponse>
 
-const [mappingNotFound, mappingValidation, mappingPersistence] = publicErrors(
+const [mappingNotFound, mappingValidation, mappingPersistence, mappingForbidden] = publicErrors(
 	IngestAttributeMappingNotFoundError,
 	IngestAttributeMappingValidationError,
 	IngestAttributeMappingPersistenceError,
+	IngestAttributeMappingForbiddenError,
 )
 
 const AttributeMappingList = ListOf(V2AttributeMapping).annotate({
@@ -185,7 +187,7 @@ export class V2AttributeMappingsApiGroup extends HttpApiGroup.make("attributeMap
 		HttpApiEndpoint.post("create", "/", {
 			payload: V2AttributeMappingCreateParams,
 			success: V2AttributeMapping,
-			error: [mappingValidation, mappingPersistence],
+			error: [mappingForbidden, mappingValidation, mappingPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "createAttributeMapping",
@@ -214,7 +216,7 @@ export class V2AttributeMappingsApiGroup extends HttpApiGroup.make("attributeMap
 			params: { id: AttributeMappingPublicId },
 			payload: V2AttributeMappingUpdateParams,
 			success: V2AttributeMapping,
-			error: [mappingNotFound, mappingValidation, mappingPersistence],
+			error: [mappingForbidden, mappingNotFound, mappingValidation, mappingPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "updateAttributeMapping",
@@ -228,7 +230,7 @@ export class V2AttributeMappingsApiGroup extends HttpApiGroup.make("attributeMap
 		HttpApiEndpoint.delete("delete", "/:id", {
 			params: { id: AttributeMappingPublicId },
 			success: V2AttributeMappingDeleteResponse,
-			error: [mappingNotFound, mappingPersistence],
+			error: [mappingForbidden, mappingNotFound, mappingPersistence],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "deleteAttributeMapping",

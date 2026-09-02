@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { siblingUrl } from "./dev-urls.ts"
+import { DEV_APPS, selectedDevApps, siblingUrl } from "./dev-urls.ts"
 
 describe("siblingUrl", () => {
 	const original = process.env.PORTLESS_URL
@@ -37,5 +37,29 @@ describe("siblingUrl", () => {
 	it("returns undefined when the hostname has no app label before localhost", () => {
 		process.env.PORTLESS_URL = "https://localhost"
 		expect(siblingUrl("api")).toBeUndefined()
+	})
+})
+
+describe("selectedDevApps", () => {
+	const saved = process.env.MAPLE_DEV_APPS
+
+	beforeEach(() => {
+		delete process.env.MAPLE_DEV_APPS
+	})
+
+	afterEach(() => {
+		if (saved === undefined) delete process.env.MAPLE_DEV_APPS
+		else process.env.MAPLE_DEV_APPS = saved
+	})
+
+	it("selects every app when MAPLE_DEV_APPS is unset or empty", () => {
+		expect([...selectedDevApps()]).toEqual([...DEV_APPS])
+		process.env.MAPLE_DEV_APPS = " "
+		expect([...selectedDevApps()]).toEqual([...DEV_APPS])
+	})
+
+	it("selects the listed apps and drops names it does not know", () => {
+		process.env.MAPLE_DEV_APPS = "api, web,nope"
+		expect([...selectedDevApps()]).toEqual(["api", "web"])
 	})
 })

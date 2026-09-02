@@ -191,6 +191,36 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	},
 	{ pipe: "custom_traces_breakdown", label: "by-service", params: { group_by_service: "1" } },
 	{
+		// The digest's summary row: one row for the whole window, so the P95 is a
+		// real merged quantile rather than a mean of per-service quantiles.
+		pipe: "custom_traces_breakdown",
+		label: "all-root-only",
+		params: { group_by_all: "1", root_only: "1", limit: 1 },
+	},
+	{
+		// True namespace grain — service_overview's namespace column is a dominant
+		// argMax, so per-namespace totals cannot be summed out of it.
+		pipe: "custom_traces_breakdown",
+		label: "by-namespace",
+		params: { group_by_namespace: "1", root_only: "1", limit: 10 },
+	},
+	{
+		pipe: "custom_traces_breakdown",
+		label: "by-environment",
+		params: { group_by_environment: "1", root_only: "1", limit: 10 },
+	},
+	{
+		pipe: "custom_traces_breakdown",
+		label: "all-scoped",
+		params: {
+			group_by_all: "1",
+			root_only: "1",
+			limit: 1,
+			environments: "production",
+			namespaces: "commerce",
+		},
+	},
+	{
 		pipe: "custom_traces_breakdown",
 		label: "by-attribute",
 		params: { group_by_attribute: "http.route" },
@@ -216,6 +246,11 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 		params: { environments: "production,staging", commit_shas: "abc123,def456" },
 	},
 	{
+		pipe: "service_overview",
+		label: "namespace-scoped",
+		params: { environments: "production", namespaces: "commerce,edge" },
+	},
+	{
 		pipe: "service_overview_compare",
 		label: "default",
 		params: {
@@ -223,6 +258,18 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 			current_end_time: END_TIME,
 			previous_start_time: "2025-12-30 10:30:00",
 			previous_end_time: "2026-01-01 14:15:00",
+		},
+	},
+	{
+		pipe: "service_overview_compare",
+		label: "namespace-scoped",
+		params: {
+			current_start_time: START_TIME,
+			current_end_time: END_TIME,
+			previous_start_time: "2025-12-30 10:30:00",
+			previous_end_time: "2026-01-01 14:15:00",
+			environments: "production",
+			namespaces: "commerce",
 		},
 	},
 	{ pipe: "services_facets", label: "default", params: {} },
@@ -243,6 +290,24 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	},
 	{ pipe: "get_service_usage", label: "default", params: { service: "api" } },
 	{
+		// `service_usage` has no env/namespace column, so a scoped digest narrows
+		// it by the service membership it resolved from the overview rows.
+		pipe: "get_service_usage",
+		label: "by-services",
+		params: { services: "api,checkout" },
+	},
+	{
+		pipe: "get_service_usage_compare",
+		label: "by-services",
+		params: {
+			services: "api,checkout",
+			current_start_time: START_TIME,
+			current_end_time: END_TIME,
+			previous_start_time: "2025-12-30 10:30:00",
+			previous_end_time: "2026-01-01 14:15:00",
+		},
+	},
+	{
 		pipe: "get_service_usage_compare",
 		label: "default",
 		params: {
@@ -256,6 +321,11 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 	{ pipe: "service_dependencies", label: "default", params: { deployment_env: "production" } },
 
 	{ pipe: "errors_by_type", label: "default", params: {} },
+	{
+		pipe: "errors_by_type",
+		label: "fingerprint-scoped",
+		params: { fingerprint_hashes: FINGERPRINT, deployment_envs: "production", limit: 1 },
+	},
 	{ pipe: "errors_timeseries", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 	{ pipe: "errors_facets", label: "default", params: {} },
 	{ pipe: "errors_summary", label: "default", params: {} },
@@ -339,7 +409,7 @@ export function collectPipeCatalog(): ReadonlyArray<CatalogEntry> {
 	const entries: Array<CatalogEntry> = []
 
 	for (const fixture of pipeFixtures) {
-		const variants = fixture.allCapabilities ? capabilityVariants : [capabilityVariants[0]!]
+		const variants = fixture.allCapabilities ? capabilityVariants : capabilityVariants.slice(0, 1)
 		for (const variant of variants) {
 			const params = {
 				org_id: ORG_ID,
@@ -860,7 +930,7 @@ export function collectQuerySpecCatalog(): ReadonlyArray<CatalogEntry> {
 	const tenant: QueryTenant = { orgId: OrgId.make(ORG_ID) }
 
 	for (const fixture of querySpecFixtures) {
-		const variants = fixture.allCapabilities ? capabilityVariants : [capabilityVariants[0]!]
+		const variants = fixture.allCapabilities ? capabilityVariants : capabilityVariants.slice(0, 1)
 		for (const variant of variants) {
 			const { warehouse, captured } = makeCapturingWarehouse(variant.capabilities)
 			const execute = makeQueryEngineExecute(warehouse)
@@ -999,6 +1069,52 @@ export function undecodedColumns(
 }
 
 /** Pipe names in `warehouseQueries` that no fixture covers. */
+/**
+ * Tables that hold pre-aggregated buckets, and the raw per-row tables a query
+ * splices against them. A query naming BOTH is reconstructing a window from two
+ * tiers, and its boundary is the thing `./ch/queries/rollup-splice` exists to
+ * own.
+ */
+const ROLLUP_TABLE_RE = /\b(\w+_(?:hourly|minutely|daily)|\w+_aggregates_\w+)\b/
+const RAW_TABLE_RE =
+	/\bFROM\s+(?:traces|logs|service_map_spans|service_map_children|service_overview_spans)\b/
+
+/**
+ * The `firstFullBucket` fragment `makeGrain` emits. Structural rather than a
+ * string match on the whole expression: what matters is that the boundary is
+ * *computed* — floor, compare to the unrounded start, advance one bucket only
+ * when it is not already aligned — not that it is spelled a particular way.
+ */
+const SPLICE_BOUNDARY_RE = /=\s*toStartOf\w+\([\s\S]*?\+ INTERVAL 1 (?:HOUR|MINUTE)\)/
+
+/**
+ * Two-tier queries whose window boundary does not come from `rollup-splice`.
+ *
+ * A rollup tier and a raw tier have to tile the window exactly once — no gap, no
+ * overlap. Written by hand that is two inequalities that must stay each other's
+ * complement, and the failure is silent: counts inflate or drop, nothing errors.
+ * The service-map family carried both outcomes at once — `serviceDependencies`
+ * hand-rolled it correctly, `serviceDbEdges` hand-rolled the same boundary with
+ * the start floored to the hour, and for every non-aligned window the DB numbers
+ * read high against the service edges drawn beside them.
+ *
+ * There is deliberately no allowlist. A single-tier query never trips this (it
+ * names one class of table); a genuinely approximate one — `serviceHealthSnapshot`
+ * floors to the hour on purpose — reads only its rollup and so never trips it
+ * either. If a new query needs to be exempt, that is a signal the rule found
+ * something, not that the rule needs a hole.
+ */
+export function unsplicedTwoTierQueries(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<string> {
+	return entries
+		.filter(
+			(entry) =>
+				ROLLUP_TABLE_RE.test(entry.sql) &&
+				RAW_TABLE_RE.test(entry.sql) &&
+				!SPLICE_BOUNDARY_RE.test(entry.sql),
+		)
+		.map((entry) => entry.id)
+}
+
 export function uncoveredPipes(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<WarehouseQueryName> {
 	const covered = new Set(entries.map((entry) => entry.name))
 	return warehouseQueries.filter((name) => !covered.has(name))

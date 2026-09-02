@@ -32,12 +32,15 @@ export const minIf = defineFn<[Expr<number>, Condition], number>("minIf", T.floa
 
 // These hand back one of their arguments unchanged, so they decode as it does.
 // `sameAs(0)` is that rule by name — each of them used to carry its own copy.
+//
+// min/max over a Nullable column stay nullable: ClickHouse skips NULLs but
+// returns NULL when every contributing value is NULL, so stripping the `| null`
+// here (as an earlier version did with `NonNullable<T>`) lied to every caller
+// while `sameAs(0)` kept the nullable runtime codec.
 
-export const min_ = <T>(expr: Expr<T>): Expr<NonNullable<T>> =>
-	defineFn<[Expr<T>], NonNullable<T>>("min", sameAs(0))(expr)
+export const min_ = <T>(expr: Expr<T>): Expr<T> => defineFn<[Expr<T>], T>("min", sameAs(0))(expr)
 
-export const max_ = <T>(expr: Expr<T>): Expr<NonNullable<T>> =>
-	defineFn<[Expr<T>], NonNullable<T>>("max", sameAs(0))(expr)
+export const max_ = <T>(expr: Expr<T>): Expr<T> => defineFn<[Expr<T>], T>("max", sameAs(0))(expr)
 
 export const any_ = <T>(expr: Expr<T>): Expr<T> => defineFn<[Expr<T>], T>("any", sameAs(0))(expr)
 

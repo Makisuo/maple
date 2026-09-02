@@ -76,6 +76,16 @@ const parseRetryAfterSeconds = (value: string | null): number | null => {
 	return Number.isFinite(seconds) && seconds >= 0 ? seconds : null
 }
 
+/**
+ * Mutation options for the scrape-target write paths. Integration-owned rows
+ * (`managedBy` set) are refused by default so a generic `scrape_targets:write`
+ * caller cannot delete, disable, or re-credential a row an integration owns;
+ * the owning integration passes `allowManaged` for its own writes.
+ */
+export interface ScrapeTargetMutationOptions {
+	readonly allowManaged?: boolean
+}
+
 export interface ScrapeTargetsServiceApi {
 	readonly list: (
 		orgId: OrgId,
@@ -101,6 +111,7 @@ export interface ScrapeTargetsServiceApi {
 		orgId: OrgId,
 		targetId: ScrapeTargetId,
 		request: UpdateScrapeTargetRequest,
+		options?: ScrapeTargetMutationOptions,
 	) => Effect.Effect<
 		ScrapeTargetResponse,
 		| ScrapeTargetNotFoundError
@@ -110,6 +121,23 @@ export interface ScrapeTargetsServiceApi {
 		| ScrapeTargetStoredConfigInvalidError
 	>
 	readonly delete: (
+		orgId: OrgId,
+		targetId: ScrapeTargetId,
+		options?: ScrapeTargetMutationOptions,
+	) => Effect.Effect<
+		ScrapeTargetDeleteResponse,
+		ScrapeTargetNotFoundError | ScrapeTargetValidationError | ScrapeTargetPersistenceError
+	>
+	/**
+	 * Delete a target the calling integration owns, skipping the managed-ownership
+	 * guard rather than opting out of it with a flag.
+	 *
+	 * `delete(…, { allowManaged: true })` could not fire `ScrapeTargetValidationError`
+	 * but still declared it, which left every integration caller either widening its
+	 * own contract with an impossible 400 or killing the branch as a defect. The
+	 * caller is responsible for having checked `managedBy` first.
+	 */
+	readonly deleteManaged: (
 		orgId: OrgId,
 		targetId: ScrapeTargetId,
 	) => Effect.Effect<ScrapeTargetDeleteResponse, ScrapeTargetNotFoundError | ScrapeTargetPersistenceError>
@@ -407,6 +435,37 @@ const validateUrl = (url: string) => {
 		),
 	)
 }
+
+/**
+ * Scheme + host + port equality over parsed URLs (a string compare would miss
+ * normalization and default ports). An unparseable side counts as a change:
+ * failing closed keeps a stored credential from following an unknown origin.
+ */
+const isSameOrigin = (left: string, right: string): boolean => {
+	const parse = Option.liftThrowable((value: string) => new URL(value))
+	const a = parse(left)
+	const b = parse(right)
+	if (Option.isNone(a) || Option.isNone(b)) return false
+	return (
+		a.value.protocol === b.value.protocol &&
+		a.value.hostname === b.value.hostname &&
+		a.value.port === b.value.port
+	)
+}
+
+/** Integration-owned rows are edited through the owning integration, not the generic API. */
+const rejectManaged = (
+	row: ScrapeTargetRow,
+	options: ScrapeTargetMutationOptions | undefined,
+	verb: string,
+) =>
+	options?.allowManaged !== true && row.managedBy !== null
+		? Effect.fail(
+				new ScrapeTargetValidationError({
+					message: `This scrape target is managed by an integration (${row.managedBy}); ${verb} it through that integration instead`,
+				}),
+			)
+		: Effect.void
 
 const validateInterval = (seconds: number | undefined) => {
 	if (seconds === undefined) return Effect.void
@@ -797,9 +856,11 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				orgId: OrgId,
 				targetId: ScrapeTargetId,
 				request: UpdateScrapeTargetRequest,
+				options?: ScrapeTargetMutationOptions,
 			) {
 				yield* Effect.annotateCurrentSpan({ orgId, scrapeTargetId: targetId })
 				const existing = yield* requireTarget(orgId, targetId)
+				yield* rejectManaged(existing, options, "edit")
 				const isPlanetScale = existing.targetType === "planetscale"
 
 				if (isPlanetScale && request.url !== undefined) {
@@ -860,8 +921,15 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					unknown
 				>
 
+				// Tracked separately from `updates` so the origin check below reads a
+				// typed value rather than digging back out of the untyped patch.
+				let nextUrl: string | null = null
+
 				if (request.name !== undefined) updates.name = request.name.trim()
-				if (request.url !== undefined && request.url !== null) updates.url = request.url.trim()
+				if (request.url !== undefined && request.url !== null) {
+					nextUrl = request.url.trim()
+					updates.url = nextUrl
+				}
 
 				if (
 					isPlanetScale &&
@@ -895,7 +963,8 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 						request.excludeBranches !== undefined
 							? yield* validateBranchPatterns(request.excludeBranches, "excludeBranches")
 							: (existingConfig?.excludeBranches ?? [])
-					updates.url = planetScaleDiscoveryUrl(organization)
+					nextUrl = planetScaleDiscoveryUrl(organization)
+					updates.url = nextUrl
 					updates.discoveryConfigJson = buildDiscoveryConfig(
 						organization,
 						includeBranches,
@@ -935,6 +1004,24 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					}
 				}
 
+				// A stored credential is bound to the origin it was issued for. Carrying
+				// it across a scheme/host/port change would hand the secret to whoever
+				// controls the new host on the very next scrape or probe.
+				const credentialsRewritten = "authCredentialsCiphertext" in updates
+				if (
+					nextUrl !== null &&
+					existing.authCredentialsCiphertext !== null &&
+					!credentialsRewritten &&
+					!isSameOrigin(existing.url, nextUrl)
+				) {
+					return yield* Effect.fail(
+						new ScrapeTargetValidationError({
+							message:
+								"Changing a scrape target's scheme, host, or port requires re-supplying authCredentials — stored credentials are never carried to a new origin",
+						}),
+					)
+				}
+
 				yield* database
 					.execute((db) =>
 						db
@@ -963,11 +1050,18 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				return yield* rowToResponse(row.value)
 			})
 
-			const remove = Effect.fn("ScrapeTargetsService.delete")(function* (
+			/**
+			 * The delete itself, past the managed-ownership question.
+			 *
+			 * Split out so `deleteManaged` can expose a channel without
+			 * `ScrapeTargetValidationError` in it: that error comes only from
+			 * `rejectManaged`, so a caller that never runs the guard cannot receive
+			 * it, and shouldn't have to say what it would do if it did.
+			 */
+			const removeRow = Effect.fn("ScrapeTargetsService.deleteRow")(function* (
 				orgId: OrgId,
 				targetId: ScrapeTargetId,
 			) {
-				yield* Effect.annotateCurrentSpan({ orgId, scrapeTargetId: targetId })
 				const rows = yield* database
 					.execute((db) =>
 						db
@@ -993,6 +1087,24 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				return new ScrapeTargetDeleteResponse({
 					id: decodeTargetIdSync(deleted.value.id),
 				})
+			})
+
+			const remove = Effect.fn("ScrapeTargetsService.delete")(function* (
+				orgId: OrgId,
+				targetId: ScrapeTargetId,
+				options?: ScrapeTargetMutationOptions,
+			) {
+				yield* Effect.annotateCurrentSpan({ orgId, scrapeTargetId: targetId })
+				yield* rejectManaged(yield* requireTarget(orgId, targetId), options, "remove")
+				return yield* removeRow(orgId, targetId)
+			})
+
+			const removeManaged = Effect.fn("ScrapeTargetsService.deleteManaged")(function* (
+				orgId: OrgId,
+				targetId: ScrapeTargetId,
+			) {
+				yield* Effect.annotateCurrentSpan({ orgId, scrapeTargetId: targetId })
+				return yield* removeRow(orgId, targetId)
 			})
 
 			const listAllEnabled = Effect.fn("ScrapeTargetsService.listAllEnabled")(function* (
@@ -1410,6 +1522,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				create,
 				update,
 				delete: remove,
+				deleteManaged: removeManaged,
 				listAllEnabled,
 				scrapeForCollector,
 				recordScrapeResults,

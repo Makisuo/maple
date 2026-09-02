@@ -30,7 +30,7 @@ import { layerWorkersAi } from "./WorkersAiHttpClient"
 /**
  * Default triage/chat model on OpenRouter — the provider agents run on by default.
  */
-export const DEFAULT_OPENROUTER_MODEL = "openai/gpt-5.6-luna"
+export const DEFAULT_OPENROUTER_MODEL = "z-ai/glm-5.3-flash:nitro"
 
 /**
  * OpenRouter app attribution. `HTTP-Referer` is the header that actually creates the app page —
@@ -184,6 +184,10 @@ const withUsageAccounting = (model: LanguageModel): LanguageModel =>
 const MODEL_LIMITS: Record<string, { readonly context: number; readonly output: number }> = {
 	// Verified against OpenRouter's public model catalogue.
 	"openai/gpt-5.6-luna": { context: 1_050_000, output: 128_000 },
+	// Context set from the operator-supplied figure, not the catalogue. Output is not stated with
+	// it, so it stays at the conservative default; raise it with `MAPLE_TRIAGE_MODEL_OUTPUT` if
+	// completions are being cut short.
+	"z-ai/glm-5.3-flash:nitro": { context: 130_000, output: 8_000 },
 	// Moonshot's own `kimi-k2.6` is 262_144, but Cloudflare does not publish the window its Workers
 	// AI deployment actually serves, and a serving deployment is usually narrower than upstream's
 	// maximum. Held at the conservative default until someone measures it; override with

@@ -18,6 +18,7 @@ import { getErrorsByType, getErrorsFacets, getErrorsSpark, getErrorsSummary } fr
 import {
 	getLog,
 	getLogAttributeKeys,
+	getLogsCount,
 	getLogsFacetValues,
 	getLogsFacets,
 	listLogs,
@@ -33,9 +34,15 @@ import {
 	fleetUtilizationTimeseries,
 	getNodeFacets,
 	getPodFacets,
+	getContainerFacets,
 	getWorkloadFacets,
+	containersSummary,
+	containerDetailSummary,
+	containerInfraTimeseries,
+	listContainers,
 	hostDetailSummary,
 	hostInfraTimeseries,
+	infraPresence,
 	listHosts,
 	listPods,
 	podsSummary,
@@ -49,6 +56,7 @@ import {
 	workloadInfraTimeseries,
 } from "@/api/warehouse/infra"
 import { getServiceUsage } from "@/api/warehouse/service-usage"
+import { getServiceEndpoints } from "@/api/warehouse/service-endpoints"
 import { getServiceOperations } from "@/api/warehouse/service-operations"
 import {
 	getServiceDependenciesBundle,
@@ -153,7 +161,11 @@ type GlobalNamespaceScope = "top" | "filters"
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 
-const pinIntoData = (data: Record<string, unknown>, scope: GlobalNamespaceScope, ns: string): Record<string, unknown> => {
+const pinIntoData = (
+	data: Record<string, unknown>,
+	scope: GlobalNamespaceScope,
+	ns: string,
+): Record<string, unknown> => {
 	if (scope === "filters") {
 		const prevFilters = isRecord(data.filters) ? data.filters : {}
 		return { ...data, filters: { ...prevFilters, namespaces: [ns], excludedNamespaces: undefined } }
@@ -171,7 +183,10 @@ const pinIntoData = (data: Record<string, unknown>, scope: GlobalNamespaceScope,
 
 /** Merge the pinned global namespace into a `{ data }` query input, if any.
  * Exported for its unit tests — production callers go through the families. */
-export const applyGlobalNamespace = (input: unknown, scope: GlobalNamespaceScope): Record<string, unknown> => {
+export const applyGlobalNamespace = (
+	input: unknown,
+	scope: GlobalNamespaceScope,
+): Record<string, unknown> => {
 	const base = isRecord(input) ? input : {}
 	const ns = getGlobalNamespace()
 	if (ns === null) return base
@@ -237,7 +252,10 @@ function makeQueryAtomFamily<Input, Output>(query: QueryEffect<Input, Output>, o
 	const scope = options?.globalNamespace
 	return (input: Input) =>
 		family(
-			encodeOrgScopedKey(getActiveOrgId(), scope === undefined ? input : applyGlobalNamespace(input, scope)),
+			encodeOrgScopedKey(
+				getActiveOrgId(),
+				scope === undefined ? input : applyGlobalNamespace(input, scope),
+			),
 		)
 }
 
@@ -246,6 +264,10 @@ export const getServiceUsageResultAtom = makeQueryAtomFamily(getServiceUsage, {
 })
 
 export const getServiceOperationsResultAtom = makeQueryAtomFamily(getServiceOperations, {
+	staleTime: 30_000,
+})
+
+export const getServiceEndpointsResultAtom = makeQueryAtomFamily(getServiceEndpoints, {
 	staleTime: 30_000,
 })
 
@@ -409,6 +431,11 @@ export const getLogResultAtom = makeQueryAtomFamily(getLog, {
 	staleTime: 60_000,
 })
 
+export const getLogsCountResultAtom = makeQueryAtomFamily(getLogsCount, {
+	staleTime: 60_000,
+	globalNamespace: "top",
+})
+
 export const getLogsFacetsResultAtom = makeQueryAtomFamily(getLogsFacets, {
 	staleTime: 30_000,
 	globalNamespace: "top",
@@ -456,6 +483,13 @@ export const getMetricAttributeKeysResultAtom = makeQueryAtomFamily(getMetricAtt
 
 export const getMetricAttributeValuesResultAtom = makeQueryAtomFamily(getMetricAttributeValues, {
 	staleTime: 60_000,
+})
+
+// Long idle TTL on purpose: this gates the sidebar, so it is mounted on every
+// page, and an org growing a new infra surface is not something the nav has to
+// notice within the minute. Matches the 300s server-side cache on the query.
+export const infraPresenceResultAtom = makeQueryAtomFamily(infraPresence, {
+	staleTime: 300_000,
 })
 
 export const listHostsResultAtom = makeQueryAtomFamily(listHosts, {
@@ -523,6 +557,26 @@ export const nodeFacetsResultAtom = makeQueryAtomFamily(getNodeFacets, {
 })
 
 export const workloadFacetsResultAtom = makeQueryAtomFamily(getWorkloadFacets, {
+	staleTime: 30_000,
+})
+
+export const listContainersResultAtom = makeQueryAtomFamily(listContainers, {
+	staleTime: 30_000,
+})
+
+export const containersSummaryResultAtom = makeQueryAtomFamily(containersSummary, {
+	staleTime: 30_000,
+})
+
+export const containerDetailSummaryResultAtom = makeQueryAtomFamily(containerDetailSummary, {
+	staleTime: 30_000,
+})
+
+export const containerInfraTimeseriesResultAtom = makeQueryAtomFamily(containerInfraTimeseries, {
+	staleTime: 30_000,
+})
+
+export const containerFacetsResultAtom = makeQueryAtomFamily(getContainerFacets, {
 	staleTime: 30_000,
 })
 

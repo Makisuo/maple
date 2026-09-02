@@ -1,4 +1,4 @@
-import { Config, Context, Effect, Layer, Redacted } from "effect"
+import { Config, Context, Effect, Layer, Redacted, Schema } from "effect"
 
 export interface ScraperEnvConfig {
 	/** Base URL of the Maple API, e.g. `https://api.maple.dev`. */
@@ -31,23 +31,33 @@ export interface ScraperEnvConfig {
 // configuration instead of crashing the turbo dev TUI. Production overrides
 // all three (see apps/scraper/railway.json deploy notes); a missing override
 // degrades to visible per-reconcile warnings, never a crash loop.
+//
+// Numeric settings ARE validated at layer build, unlike the URLs: a missing
+// URL fails loudly every reconcile, but SCRAPER_CONCURRENCY=0 builds a
+// semaphore that never grants a permit — every target silently suspended
+// while /health keeps answering 200 — and a fractional or non-positive
+// interval/chunk size misbehaves just as quietly. Failing startup is the
+// only visible place for those.
+const positiveInt = (name: string, maximum: number) =>
+	Config.schema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum })), name)
+
 const envConfig = Config.all({
 	MAPLE_API_URL: Config.string("MAPLE_API_URL").pipe(Config.withDefault("http://127.0.0.1:3472")),
 	SD_INTERNAL_TOKEN: Config.redacted("SD_INTERNAL_TOKEN").pipe(
 		Config.withDefault(Redacted.make("maple-sd-dev-token")),
 	),
 	MAPLE_INGEST_URL: Config.string("MAPLE_INGEST_URL").pipe(Config.withDefault("http://127.0.0.1:3474")),
-	SCRAPER_CONCURRENCY: Config.number("SCRAPER_CONCURRENCY").pipe(Config.withDefault(10)),
-	SCRAPER_RECONCILE_INTERVAL_SECONDS: Config.number("SCRAPER_RECONCILE_INTERVAL_SECONDS").pipe(
+	SCRAPER_CONCURRENCY: positiveInt("SCRAPER_CONCURRENCY", 10_000).pipe(Config.withDefault(10)),
+	SCRAPER_RECONCILE_INTERVAL_SECONDS: positiveInt("SCRAPER_RECONCILE_INTERVAL_SECONDS", 24 * 60 * 60).pipe(
 		Config.withDefault(60),
 	),
 	// 10k points is ~2 MB of OTLP/JSON at the attribute density Prometheus
 	// exporters produce — a 10x margin under the gateway's 20 MB limit, so
 	// even an unusually attribute-heavy exporter stays inside it.
-	SCRAPER_OTLP_MAX_DATA_POINTS: Config.number("SCRAPER_OTLP_MAX_DATA_POINTS").pipe(
+	SCRAPER_OTLP_MAX_DATA_POINTS: positiveInt("SCRAPER_OTLP_MAX_DATA_POINTS", 10_000_000).pipe(
 		Config.withDefault(10_000),
 	),
-	PORT: Config.number("PORT").pipe(Config.withDefault(3475)),
+	PORT: positiveInt("PORT", 65_535).pipe(Config.withDefault(3475)),
 })
 
 export class ScraperEnv extends Context.Service<ScraperEnv, ScraperEnvConfig>()("@maple/scraper/Env", {

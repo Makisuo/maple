@@ -5,8 +5,13 @@ import { Env } from "@/platform/Env"
 import { ProductEventsService, type ProductEventInput } from "@/services/product-events/ProductEventsService"
 import { signSvix } from "@/services/product-events/svix"
 import { AuditLogService, type AuditLogRecordInput } from "@/services/audit/AuditLogService"
+import {
+	MembershipRevocationService,
+	MembershipRevocationError,
+	type MembershipRevocationSummary,
+} from "@/services/auth/MembershipRevocationService"
 import { AutumnWebhookRouter } from "./autumn.http"
-import { ClerkWebhookRouter } from "./clerk.http"
+import { ClerkWebhookRoute } from "./clerk.http"
 
 const CLERK_SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
 const AUTUMN_SECRET = "whsec_" + Buffer.alloc(24, 7).toString("base64")
@@ -44,14 +49,52 @@ const recordingAudit = () => {
 	return { recorded, layer }
 }
 
+const EMPTY_SUMMARY: MembershipRevocationSummary = {
+	apiKeysRevoked: 0,
+	mcpFamiliesRevoked: 0,
+	cliAuthorizationsDeleted: 0,
+	mcpAuthorizationsDeleted: 0,
+	emailDestinationsUpdated: 0,
+	mobileDevicesDeleted: 0,
+}
+
+/** Records the sweeps the route asks for, and can be made to fail on demand. */
+const recordingRevocation = (fail = false) => {
+	const calls: Array<string> = []
+	const run = (label: string) =>
+		fail
+			? Effect.fail(new MembershipRevocationError({ message: "boom" }))
+			: Effect.sync(() => {
+					calls.push(label)
+					return EMPTY_SUMMARY
+				})
+	const layer = Layer.succeed(MembershipRevocationService, {
+		revokeMembership: (orgId, userId) => run(`revoke:${orgId}:${userId}`),
+		revokeUser: (userId) => run(`revokeUser:${userId}`),
+		demoteMembership: (orgId, userId, roles) =>
+			run(`demote:${orgId}:${userId}:${roles.join(",")}`).pipe(
+				Effect.map(() => ({ apiKeysRevoked: 0, mcpFamiliesRevoked: 0 })),
+			),
+		invalidateMembership: (userId) =>
+			fail
+				? Effect.void
+				: Effect.sync(() => {
+						calls.push(`invalidate:${userId}`)
+					}),
+	})
+	return { calls, layer }
+}
+
 const makeRouterLayer = (
-	router: typeof ClerkWebhookRouter,
+	router: typeof ClerkWebhookRoute | typeof AutumnWebhookRouter,
 	config: Record<string, string>,
 	productEvents: Layer.Layer<ProductEventsService>,
+	revocation: Layer.Layer<MembershipRevocationService> = recordingRevocation().layer,
 	audit: Layer.Layer<AuditLogService> = recordingAudit().layer,
 ) =>
 	router.pipe(
 		Layer.provide(productEvents),
+		Layer.provide(revocation),
 		Layer.provide(audit),
 		Layer.provide(Env.layer),
 		Layer.provide(makeConfig(config)),
@@ -190,7 +233,7 @@ describe("ClerkWebhookRouter", () => {
 			Effect.gen(function* () {
 				const events = recordingProductEvents()
 				const unconfigured = HttpRouter.toWebHandler(
-					makeRouterLayer(ClerkWebhookRouter, {}, events.layer),
+					makeRouterLayer(ClerkWebhookRoute, {}, events.layer),
 					{
 						disableLogger: true,
 					},
@@ -206,7 +249,7 @@ describe("ClerkWebhookRouter", () => {
 				}).pipe(Effect.ensuring(Effect.promise(unconfigured.dispose)))
 
 				const configured = HttpRouter.toWebHandler(
-					makeRouterLayer(ClerkWebhookRouter, { CLERK_WEBHOOK_SECRET: CLERK_SECRET }, events.layer),
+					makeRouterLayer(ClerkWebhookRoute, { CLERK_WEBHOOK_SECRET: CLERK_SECRET }, events.layer),
 					{ disableLogger: true },
 				)
 				yield* Effect.gen(function* () {
@@ -258,6 +301,109 @@ describe("ClerkWebhookRouter", () => {
 					assert.strictEqual(events.tracked.length, 1)
 				}).pipe(Effect.ensuring(Effect.promise(configured.dispose)))
 			}),
+	)
+	it.effect("sweeps a removed member, only invalidates on a role change, and 500s a failed sweep", () =>
+		Effect.gen(function* () {
+			const events = recordingProductEvents()
+			const revocation = recordingRevocation()
+			const { handler, dispose } = HttpRouter.toWebHandler(
+				makeRouterLayer(
+					ClerkWebhookRoute,
+					{ CLERK_WEBHOOK_SECRET: CLERK_SECRET },
+					events.layer,
+					revocation.layer,
+				),
+				{ disableLogger: true },
+			)
+			yield* Effect.gen(function* () {
+				const now = Date.now()
+				const membership = (type: string, role?: string) =>
+					JSON.stringify({
+						type,
+						data: {
+							organization: { id: "org_9" },
+							public_user_data: { user_id: "user_9" },
+							...(role === undefined ? undefined : { role }),
+						},
+					})
+
+				const deleted = membership("organizationMembership.deleted")
+				const deletedHeaders = yield* signedHeaders(CLERK_SECRET, deleted, now, "msg_del")
+				const deletedResponse = yield* post(handler, "/webhooks/clerk", deleted, deletedHeaders)
+				assert.strictEqual(deletedResponse.status, 200)
+
+				const updated = membership("organizationMembership.updated", "org:member")
+				const updatedHeaders = yield* signedHeaders(CLERK_SECRET, updated, now, "msg_upd")
+				const updatedResponse = yield* post(handler, "/webhooks/clerk", updated, updatedHeaders)
+				assert.strictEqual(updatedResponse.status, 200)
+
+				const userDeleted = JSON.stringify({ type: "user.deleted", data: { id: "user_9" } })
+				const userHeaders = yield* signedHeaders(CLERK_SECRET, userDeleted, now, "msg_user_del")
+				const userResponse = yield* post(handler, "/webhooks/clerk", userDeleted, userHeaders)
+				assert.strictEqual(userResponse.status, 200)
+
+				// A role change goes to the demotion sweep carrying the *new* role, so
+				// keys pinned to the role the member just lost are retired.
+				assert.deepStrictEqual(revocation.calls, [
+					"revoke:org_9:user_9",
+					"demote:org_9:user_9:org:member",
+					"revokeUser:user_9",
+				])
+
+				// No role in the payload: we cannot tell demotion from promotion, so
+				// the caches are evicted and nothing is revoked on a guess.
+				const roleless = membership("organizationMembership.updated")
+				const rolelessHeaders = yield* signedHeaders(CLERK_SECRET, roleless, now, "msg_upd_norole")
+				const rolelessResponse = yield* post(handler, "/webhooks/clerk", roleless, rolelessHeaders)
+				assert.strictEqual(rolelessResponse.status, 200)
+				assert.strictEqual(revocation.calls.at(-1), "invalidate:user_9")
+
+				// Clerk's delete envelope may omit the id. Nothing to sweep and no
+				// retry can produce one, so it is a logged 200, not a 400 that burns
+				// the retry budget and ends as a failed delivery nobody sees.
+				const idless = JSON.stringify({
+					type: "user.deleted",
+					data: { object: "user", deleted: true },
+				})
+				const idlessHeaders = yield* signedHeaders(CLERK_SECRET, idless, now, "msg_user_noid")
+				const idlessResponse = yield* post(handler, "/webhooks/clerk", idless, idlessHeaders)
+				assert.strictEqual(idlessResponse.status, 200)
+				assert.strictEqual(revocation.calls.at(-1), "invalidate:user_9")
+
+				// An unrecognized membership shape is a 400, not a silent 200.
+				const malformed = JSON.stringify({
+					type: "organizationMembership.deleted",
+					data: { organization: {} },
+				})
+				const malformedHeaders = yield* signedHeaders(CLERK_SECRET, malformed, now, "msg_bad")
+				const malformedResponse = yield* post(handler, "/webhooks/clerk", malformed, malformedHeaders)
+				assert.strictEqual(malformedResponse.status, 400)
+			}).pipe(Effect.ensuring(Effect.promise(dispose)))
+
+			// A half-run sweep must be loud: 500 so Clerk retries the delivery.
+			const failing = recordingRevocation(true)
+			const broken = HttpRouter.toWebHandler(
+				makeRouterLayer(
+					ClerkWebhookRoute,
+					{ CLERK_WEBHOOK_SECRET: CLERK_SECRET },
+					events.layer,
+					failing.layer,
+				),
+				{ disableLogger: true },
+			)
+			yield* Effect.gen(function* () {
+				const body = JSON.stringify({
+					type: "organizationMembership.deleted",
+					data: {
+						organization: { id: "org_9" },
+						public_user_data: { user_id: "user_9" },
+					},
+				})
+				const headers = yield* signedHeaders(CLERK_SECRET, body, Date.now(), "msg_fail")
+				const response = yield* post(broken.handler, "/webhooks/clerk", body, headers)
+				assert.strictEqual(response.status, 500)
+			}).pipe(Effect.ensuring(Effect.promise(broken.dispose)))
+		}),
 	)
 })
 

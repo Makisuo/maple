@@ -155,9 +155,17 @@ function DiagnosedVerdict({ investigation }: { investigation: V2Investigation })
 						<ConfidenceMeter confidence={report.confidence} />
 					</Stat>
 					<Stat label="AI severity">
-						<span className={cn("font-medium", SEVERITY_TEXT_TONE[report.severityAssessment])}>
-							{SEVERITY_LABEL[report.severityAssessment]}
-						</span>
+						{report.severityAssessment ? (
+							<span
+								className={cn("font-medium", SEVERITY_TEXT_TONE[report.severityAssessment])}
+							>
+								{SEVERITY_LABEL[report.severityAssessment]}
+							</span>
+						) : (
+							// The report judged no severity. "—" rather than a stand-in level,
+							// which would read as an assessment nobody made.
+							<span className="text-muted-foreground">—</span>
+						)}
 					</Stat>
 					<Stat label="Time to diagnosis" last>
 						{timeToDiagnosis ? (

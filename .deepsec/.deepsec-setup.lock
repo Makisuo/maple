@@ -1,0 +1,14 @@
+{
+  "pid": 47045,
+  "startedAt": "2026-08-31T18:46:33.897Z",
+  "command": [
+    "/Users/makisuo/.npm/_npx/4efdaa121ebfeaf0/node_modules/.bin/deepsec",
+    "init",
+    "--agent",
+    "codex",
+    "--model",
+    "gpt-5.6-sol",
+    "--model-auth",
+    "local"
+  ]
+}

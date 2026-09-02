@@ -101,7 +101,7 @@ export default {
 
 		if (twinUrl && wantsMarkdown(request)) {
 			const candidate = await env.ASSETS.fetch(new Request(twinUrl, request))
-			// `not_found_handling: "single-page-application"` in wrangler.jsonc can
+			// Workers Assets with SPA not-found handling (`notFoundHandling`) can
 			// answer a missing asset with the SPA shell at status 200, so the
 			// content-type is the real test of whether the twin exists.
 			const isMarkdown = candidate.headers.get("Content-Type")?.includes("text/markdown")

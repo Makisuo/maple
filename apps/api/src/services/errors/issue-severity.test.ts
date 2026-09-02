@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AiTriageResult } from "@maple/domain/http"
 import { ErrorIssueId, OrgId } from "@maple/domain/primitives"
-import { actors, errorIssues, errorIssueEvents, issueEscalations, runMigrations } from "@maple/db"
-import { createMaplePgliteClient, type MaplePgClient } from "@maple/db/client"
+import { actors, errorIssues, errorIssueEvents, issueEscalations } from "@maple/db"
+import { runMigrations } from "@maple/db/migrate"
+import type { MaplePgClient } from "@maple/db/client"
+import { createMaplePgliteClient } from "@maple/db/pglite"
 import { eq } from "drizzle-orm"
 import { Schema } from "effect"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
@@ -138,6 +140,34 @@ describe("applyTriageSeverity", () => {
 		const issue = await loadIssue()
 		expect(issue?.severity).toBe("low")
 		expect(issue?.severitySource).toBe("manual")
+
+		const escalations = await db
+			.select()
+			.from(issueEscalations)
+			.where(eq(issueEscalations.issueId, issueId))
+		expect(escalations).toHaveLength(0)
+	})
+
+	/**
+	 * The partial: a validator that promoted nothing has no cause whose severity it
+	 * could assess, so the report omits the field. Before it was optional the agent
+	 * had to fabricate a level here, and an inconclusive run could quietly downgrade
+	 * an issue a detector had already ranked.
+	 */
+	it("leaves the issue untouched when the report carried no assessment", async () => {
+		await db
+			.update(errorIssues)
+			.set({ severity: "critical", severitySource: "detector" })
+			.where(eq(errorIssues.id, issueId))
+
+		const outcome = await applyTriageSeverity(db, baseInput({ severity: undefined }))
+		expect(outcome.applied).toBe(false)
+		// The actor still comes back: the caller records that triage ran.
+		expect(outcome.actorId).not.toBeNull()
+
+		const issue = await loadIssue()
+		expect(issue?.severity).toBe("critical")
+		expect(issue?.severitySource).toBe("detector")
 
 		const escalations = await db
 			.select()

@@ -70,11 +70,12 @@ const noOpHandle: ClientSessionHandle = { stop: () => Promise.resolve() }
 export const startClientSession = (config: ClientSessionConfig): ClientSessionHandle => {
 	configurePrivacy(config.privacy)
 	if (!hasConsent()) clearPendingEvents()
-	if (typeof window === "undefined" || !config.ingestKey || readSessionSink()) return noOpHandle
+	const ingestKey = config.ingestKey
+	if (typeof window === "undefined" || !ingestKey || readSessionSink()) return noOpHandle
 
 	const engineConfig = {
 		endpoint: config.endpoint.replace(/\/$/, ""),
-		ingestKey: config.ingestKey,
+		ingestKey,
 		sdk: CLIENT_SDK_HINT,
 		maskAllInputs: config.replay?.maskAllInputs ?? true,
 		maskAllText: config.replay?.maskAllText ?? false,
@@ -124,7 +125,7 @@ export const startClientSession = (config: ClientSessionConfig): ClientSessionHa
 					}
 					next.replay = startReplaySession({
 						endpoint: config.endpoint,
-						ingestKey: config.ingestKey!,
+						ingestKey,
 						sdk: CLIENT_SDK_HINT,
 						serviceName: config.serviceName,
 						environment: config.environment,

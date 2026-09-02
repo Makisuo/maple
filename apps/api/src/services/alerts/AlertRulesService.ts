@@ -24,7 +24,7 @@ import {
 	alertRuleStates,
 } from "@maple/db"
 import { and, desc, eq, inArray, sql } from "drizzle-orm"
-import { Array as Arr, Context, Effect, HashSet, Layer, Schema } from "effect"
+import { Array as Arr, Context, Effect, HashSet, Layer, Match, Schema } from "effect"
 import { Database, type DatabaseApi } from "@/platform/DatabaseLive"
 import { makeDbExecute } from "@/platform/db-execute"
 import { readTxid, txidColumn } from "@/platform/electric-txid"
@@ -152,7 +152,6 @@ export const makeAlertRulePersistence = (options: {
 		request: AlertRuleUpsertRequest,
 	) {
 		const normalized = yield* normalizeRule(orgId, request)
-		yield* requireDestinationIds(orgId, normalized.destinationIds)
 		const ruleId = existingId ?? normalized.id
 		const timestamp = yield* runtime.now
 		const ruleFields = {
@@ -191,6 +190,26 @@ export const makeAlertRulePersistence = (options: {
 		const writeResult = yield* dbExecute((db) =>
 			db.transaction(async (tx) => {
 				await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${orgId}))`)
+				// Destination existence is checked INSIDE the lock: destination
+				// deletion takes the same per-org advisory lock around its reference
+				// scan, so a rule can no longer commit a reference to a destination
+				// whose deletion validated "unreferenced" concurrently.
+				if (normalized.destinationIds.length > 0) {
+					const destinationRows = await tx
+						.select({ id: alertDestinations.id })
+						.from(alertDestinations)
+						.where(
+							and(
+								eq(alertDestinations.orgId, orgId),
+								inArray(alertDestinations.id, [...normalized.destinationIds]),
+							),
+						)
+					const existingIds = new Set(destinationRows.map((destination) => destination.id))
+					const missingDestinationId = normalized.destinationIds.find((id) => !existingIds.has(id))
+					if (missingDestinationId !== undefined) {
+						return { _tag: "MissingDestination" as const, destinationId: missingDestinationId }
+					}
+				}
 				if (normalized.enabled) {
 					const activeRows = await tx
 						.select({ id: alertRules.id })
@@ -199,7 +218,7 @@ export const makeAlertRulePersistence = (options: {
 					const alreadyActive =
 						existingId != null && activeRows.some((row) => row.id === existingId)
 					if (!alreadyActive && activeRows.length >= MAX_ACTIVE_ALERT_RULES_PER_ORG) {
-						return { limitExceeded: true as const, writeRows: [] }
+						return { _tag: "LimitExceeded" as const }
 					}
 				}
 
@@ -220,22 +239,38 @@ export const makeAlertRulePersistence = (options: {
 								.set(ruleFields)
 								.where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, existingId)))
 								.returning(txidColumn)
-				return { limitExceeded: false as const, writeRows }
+				return { _tag: "Written" as const, writeRows }
 			}),
 		)
-		if (writeResult.limitExceeded) {
-			return yield* Effect.fail(
-				makeAlertValidationError(
-					`Organizations may have at most ${MAX_ACTIVE_ALERT_RULES_PER_ORG} active alert rules`,
+		// The transaction runs in Promise-land, so it reports its outcome as a tagged
+		// value and the failures are raised out here — `Match.exhaustive` is what makes
+		// a fourth outcome a compile error rather than a silently ignored branch.
+		return yield* Match.value(writeResult).pipe(
+			Match.tag("MissingDestination", (outcome) =>
+				Effect.fail(
+					new AlertRuleDestinationNotFoundError({
+						message: "Alert rule references an unknown destination",
+						destinationId: outcome.destinationId,
+					}),
 				),
-			)
-		}
-		return {
-			normalized,
-			ruleId,
-			timestamp,
-			txid: readTxid(writeResult.writeRows),
-		}
+			),
+			Match.tag("LimitExceeded", () =>
+				Effect.fail(
+					makeAlertValidationError(
+						`Organizations may have at most ${MAX_ACTIVE_ALERT_RULES_PER_ORG} active alert rules`,
+					),
+				),
+			),
+			Match.tag("Written", (outcome) =>
+				Effect.succeed({
+					normalized,
+					ruleId,
+					timestamp,
+					txid: readTxid(outcome.writeRows),
+				}),
+			),
+			Match.exhaustive,
+		)
 	})
 
 	const upsertRuleRow = Effect.fn("AlertsService.upsertRuleRow")(function* (

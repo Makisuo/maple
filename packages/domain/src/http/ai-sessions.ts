@@ -10,7 +10,8 @@ import { warehouseReadHttpErrors } from "./warehouse"
 //
 // Backed by the `maple_ai.*` span attributes the ingest gateway stamps at
 // decode time; a session is resolved at trace granularity by
-// `aiSessionListQuery` in the query-engine integrations layer. The Agent
+// `aiSessionPageQuery` (which ranks a page) and `aiSessionListQuery` (which
+// aggregates it) in the query-engine integrations layer. The Agent
 // Sessions page is behind the `agent_tracing` org rollout flag and these
 // shapes exist for it alone, so they live in the internal tier where they can
 // follow the UI.
@@ -21,9 +22,19 @@ export class ListAiSessionsRequest extends Schema.Class<ListAiSessionsRequest>("
 	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 100 })),
 	),
-	// Both filters land on the session-detection subquery, so `serviceNames`
-	// means "the session-bearing spans came from this service", not "the trace
-	// touched it" — see `aiSessionListQuery`.
+	/**
+	 * Rows to skip, for the list's infinite scroll. Offset-based like the replays
+	 * list, and applied on the index-only page ranking (`aiSessionPageQuery`),
+	 * which is cheap to re-run at the volumes an org's agent traffic reaches
+	 * (~10k index rows a day). The span aggregation only ever covers the page
+	 * that ranking returned, so the offset costs nothing there.
+	 */
+	offset: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
+	// Both filters land on the `ai_trace_index` level of both stages, each as
+	// its own per-trace existence test: `serviceNames` means "some agent span
+	// of the trace came from this service", not "the trace touched it", and a
+	// vendor and a service given together may be matched by different spans of
+	// the trace — see `aiSessionPageQuery`.
 	vendorIds: Schema.optional(Schema.Array(Schema.String)),
 	serviceNames: Schema.optional(Schema.Array(Schema.String)),
 }) {}
@@ -49,6 +60,18 @@ export const AiSessionListItem = Schema.Struct({
 
 export class ListAiSessionsResponse extends Schema.Class<ListAiSessionsResponse>("ListAiSessionsResponse")({
 	data: Schema.Array(AiSessionListItem),
+	/**
+	 * How many sessions the page RANKED, which `data` can fall short of: the
+	 * ranking reads `ai_trace_index` and the rows read `trace_detail_spans`,
+	 * two materialized views written one after the other from the same insert,
+	 * so the newest session can be ranked a moment before its spans are
+	 * readable. A client paging on `data.length` would take that short page for
+	 * the end of the list and skip nothing but stop scrolling; it should page on
+	 * this instead — the next offset is the sum of `ranked`, and a page is the
+	 * last one when `ranked` is under the limit. Optional only for a client
+	 * built before the field existed.
+	 */
+	ranked: Schema.optionalKey(Schema.Number),
 }) {}
 
 export class ListAiSessionsFacetsRequest extends Schema.Class<ListAiSessionsFacetsRequest>(

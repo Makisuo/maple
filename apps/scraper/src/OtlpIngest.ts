@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Duration, Effect, Layer, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { countDataPoints, splitExportRequest, type OtlpExportRequest } from "./prometheus/otlp"
 import { ScraperEnv } from "./Env"
@@ -28,6 +28,14 @@ export class OtlpIngest extends Context.Service<OtlpIngest, OtlpIngestApi>()("@m
 		const env = yield* ScraperEnv
 		const client = yield* HttpClient.HttpClient
 
+		// Bound every chunk round-trip, like ApiClient does: `FetchHttpClient`
+		// sets no timeout, and each scrape holds a global concurrency permit
+		// through delivery — a gateway that accepts connections but never
+		// answers would otherwise pin permits until SCRAPER_CONCURRENCY stalled
+		// sends halt every target, with /health still reporting ok. A timeout
+		// fails the chunk as a retryable OtlpIngestError instead.
+		const REQUEST_TIMEOUT = Duration.seconds(30)
+
 		/**
 		 * Resolves to `null` on success, or to the error for a rejection the span
 		 * must NOT be blamed for. Carrying a 4xx out of the span as a *value* is
@@ -45,6 +53,7 @@ export class OtlpIngest extends Context.Service<OtlpIngest, OtlpIngestApi>()("@m
 
 				const response = yield* client.execute(httpRequest).pipe(
 					Effect.annotateSpans("peer.service", "ingest"),
+					Effect.timeout(REQUEST_TIMEOUT),
 					Effect.mapError(
 						(error) =>
 							new OtlpIngestError({
@@ -54,7 +63,12 @@ export class OtlpIngest extends Context.Service<OtlpIngest, OtlpIngestApi>()("@m
 					),
 				)
 				if (response.status < 200 || response.status >= 300) {
-					const text = yield* response.text.pipe(Effect.orElseSucceed(() => ""))
+					// The body read is bounded too — a stalled response stream after
+					// the status line would otherwise hang past the request timeout.
+					const text = yield* response.text.pipe(
+						Effect.timeout(REQUEST_TIMEOUT),
+						Effect.orElseSucceed(() => ""),
+					)
 					const error = new OtlpIngestError({
 						message:
 							response.status === 402

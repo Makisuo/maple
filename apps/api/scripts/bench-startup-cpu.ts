@@ -30,7 +30,8 @@
 // `wrangler check startup`, which profiles the real worker on workerd).
 
 import { spawnSync } from "node:child_process"
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { Predicate, Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
@@ -354,13 +355,26 @@ const runWorker = (explicitProfile: string | undefined, json: boolean) => {
 	}
 	const since = Date.now() - 1000
 	const outfile = join(process.cwd(), "worker-startup.cpuprofile")
+	// The repo has no wrangler config; startup validation only evaluates module
+	// scope, so a throwaway one naming the entry is enough.
+	const configPath = join(mkdtempSync(join(tmpdir(), "maple-startup-check-")), "wrangler.json")
+	writeFileSync(
+		configPath,
+		JSON.stringify({
+			name: "maple-api-startup-check",
+			main: join(process.cwd(), "src", "worker.ts"),
+			compatibility_date: "2026-04-08",
+			compatibility_flags: ["nodejs_compat"],
+		}),
+	)
 	console.error("→ running `wrangler check startup` (this builds the worker)…\n")
 	// Repo-pinned wrangler (not @latest); deterministic --outfile so we parse the
 	// exact file rather than guessing.
-	const res = spawnSync("bunx", ["wrangler", "check", "startup", "--outfile", outfile], {
-		stdio: "inherit",
-		cwd: process.cwd(),
-	})
+	const res = spawnSync(
+		"bunx",
+		["wrangler", "check", "startup", "--config", configPath, "--outfile", outfile],
+		{ stdio: "inherit", cwd: process.cwd() },
+	)
 	if (res.status !== 0) {
 		console.error(
 			`\nwrangler exited ${res.status ?? "?"}. If it produced a .cpuprofile anyway, parse it with:` +

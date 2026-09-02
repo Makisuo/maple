@@ -156,8 +156,43 @@ export interface FacetOutput {
 	readonly facetType: string
 }
 
+// A conditional aggregate over a metric family the entity never emitted returns
+// `nan`, which ClickHouse serializes as JSON `null` — and one null against a
+// numeric row schema fails the decode for the whole page, not just that row.
+// Shared by the infra (host/pod/node/workload) and container queries.
+export const avgIfOrZero = (value: CH.Expr<number>, condition: CH.Condition): CH.Expr<number> =>
+	CH.ifNotFinite(CH.avgIf(value, condition), 0)
+
+export const maxIfOrZero = (value: CH.Expr<number>, condition: CH.Condition): CH.Expr<number> =>
+	CH.ifNotFinite(CH.maxIf(value, condition), 0)
+
+/**
+ * Facet dimensions are plain `ResourceAttributes` keys, with one exception: the
+ * deployment environment has two semconv spellings, so it resolves to the
+ * coalescing expression instead of a single map lookup. Shared by every infra
+ * facet builder so a future renamed-key coalesce lands in one place.
+ */
+export const facetAttrExpr = (
+	resourceAttributes: { get(key: string): CH.Expr<string> },
+	attrKey: string,
+): CH.Expr<string> =>
+	attrKey === "deployment.environment.name"
+		? deploymentEnvExpr(resourceAttributes)
+		: resourceAttributes.get(attrKey)
+
+/**
+ * The sole element of a one-element list, else `undefined`.
+ *
+ * Every "one value narrows to a substring/equality match, more than one is set
+ * membership" branch in this file asks the same question, and `length === 1`
+ * answers it for the reader without answering it for the type system.
+ */
+export const soleValue = <A>(values: readonly A[]): A | undefined =>
+	values.length === 1 ? values[0] : undefined
+
 export function inclusionCondition(col: CH.Expr<string>, values: readonly string[]): CH.Condition {
-	return values.length === 1 ? col.eq(values[0]!) : CH.inList(col, values)
+	const only = soleValue(values)
+	return only === undefined ? CH.inList(col, values) : col.eq(only)
 }
 
 /**
@@ -170,9 +205,10 @@ export function inclusionCondition(col: CH.Expr<string>, values: readonly string
  * multi-select means (there it is set membership, not fuzzy matching).
  */
 export function matchOrIn(col: CH.Expr<string>, values: readonly string[], contains: boolean): CH.Condition {
-	return contains && values.length === 1
-		? CH.positionCaseInsensitive(col, CH.lit(values[0]!)).gt(0)
-		: inclusionCondition(col, values)
+	const only = contains ? soleValue(values) : undefined
+	return only === undefined
+		? inclusionCondition(col, values)
+		: CH.positionCaseInsensitive(col, CH.lit(only)).gt(0)
 }
 
 /**
@@ -235,11 +271,12 @@ export function tracesBaseWhereConditions(
 				$.SpanAttributes.get("http.route"),
 				$.SpanAttributes.get("url.path"),
 			)
-			return mm?.spanName === "contains" && v.length === 1
-				? CH.positionCaseInsensitive($.SpanName, CH.lit(v[0]!))
+			const needle = mm?.spanName === "contains" ? soleValue(v) : undefined
+			return needle === undefined
+				? inclusionCondition($.SpanName, v).or(inclusionCondition(display, v))
+				: CH.positionCaseInsensitive($.SpanName, CH.lit(needle))
 						.gt(0)
-						.or(CH.positionCaseInsensitive(display, CH.lit(v[0]!)).gt(0))
-				: inclusionCondition($.SpanName, v).or(inclusionCondition(display, v))
+						.or(CH.positionCaseInsensitive(display, CH.lit(needle)).gt(0))
 		}),
 		CH.when(opts.statusCode, (v: string) => $.StatusCode.eq(v)),
 		CH.whenTrue(!!opts.rootOnly, () => $.SpanKind.in_("Server", "Consumer").or($.ParentSpanId.eq(""))),
@@ -484,11 +521,7 @@ export function tracesAggregatesWhereConditions(
 		CH.when(services, (v: readonly string[]) =>
 			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),
-		CH.when(spanNames, (v: readonly string[]) =>
-			mm?.spanName === "contains" && v.length === 1
-				? CH.positionCaseInsensitive($.SpanName, CH.lit(v[0]!)).gt(0)
-				: inclusionCondition($.SpanName, v),
-		),
+		CH.when(spanNames, (v: readonly string[]) => matchOrIn($.SpanName, v, mm?.spanName === "contains")),
 		CH.whenTrue(!!opts.rootOnly, () => $.IsEntryPoint.eq(1)),
 		errorsOnlyCondition($.StatusCode, opts.errorsOnly),
 	]
@@ -549,8 +582,11 @@ export function metricsSelectExprs($: ColumnAccessor<typeof MetricsSum.columns>,
 		const $h = $ as unknown as ColumnAccessor<typeof MetricsHistogram.columns>
 		return {
 			avgValue: CH.if_(CH.sum($h.Count).gt(0), CH.sum($h.Sum).div(CH.sum($h.Count)), CH.lit(0)),
-			minValue: CH.min_($h.Min),
-			maxValue: CH.max_($h.Max),
+			// Min/Max are Nullable (OTel histograms may omit extrema), and min/max
+			// over an all-NULL bucket return NULL — fall back to 0 like avgValue so
+			// the declared non-null Float64 row contract holds.
+			minValue: CH.ifNull(CH.min_($h.Min), CH.lit(0)),
+			maxValue: CH.ifNull(CH.max_($h.Max), CH.lit(0)),
 			sumValue: CH.sum($h.Sum),
 			dataPointCount: CH.sum($h.Count),
 		}

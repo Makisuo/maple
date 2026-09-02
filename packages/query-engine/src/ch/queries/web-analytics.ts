@@ -496,6 +496,14 @@ export interface WebAnalyticsSummaryOutput {
  * Within that population `PageViews <= 1` rather than `= 1`, so a session whose
  * only row is still the v1 start row counts as a bounce instead of vanishing
  * from both sides of the ratio.
+ *
+ * It is counted as "identified, minus those with a page view above one" rather
+ * than directly, because `session_replays` is a `ReplacingMergeTree(Version)`
+ * whose v1 start row and v2 end row coexist until a merge. A direct
+ * `uniqIf(SessionId, PageViews <= 1)` matches a session if ANY visible version
+ * satisfies it, so every multi-page session was a bounce for as long as its
+ * start row survived — the same class of error the `avgDurationMs` predicate
+ * already guards against.
  */
 export function webAnalyticsSummaryQuery(
 	filters: WebAnalyticsFilters = {},
@@ -505,7 +513,9 @@ export function webAnalyticsSummaryQuery(
 			visitors: CH.uniqIf($.VisitorId, $.VisitorId.neq("")),
 			sessions: CH.uniq($.SessionId),
 			newSessions: CH.uniqIf($.SessionId, $.VisitorIsNew.eq(1)),
-			bouncedSessions: CH.uniqIf($.SessionId, $.PageViews.lte(1).and($.VisitorId.neq(""))),
+			bouncedSessions: CH.uniqIf($.SessionId, $.VisitorId.neq("")).sub(
+				CH.uniqIf($.SessionId, $.PageViews.gt(1).and($.VisitorId.neq(""))),
+			),
 			identifiedSessions: CH.uniqIf($.SessionId, $.VisitorId.neq("")),
 			botSessions: CH.uniqIf($.SessionId, isBotCond($.UserAgent)),
 			// avgIf over the ended rows only: the v1 row's DurationMs is NULL, and
@@ -614,7 +624,9 @@ export function webAnalyticsTimeseriesQuery(
 			visitors: CH.uniqIf($.VisitorId, $.VisitorId.neq("")),
 			sessions: CH.uniq($.SessionId),
 			newSessions: CH.uniqIf($.SessionId, $.VisitorIsNew.eq(1)),
-			bouncedSessions: CH.uniqIf($.SessionId, $.PageViews.lte(1).and($.VisitorId.neq(""))),
+			bouncedSessions: CH.uniqIf($.SessionId, $.VisitorId.neq("")).sub(
+				CH.uniqIf($.SessionId, $.PageViews.gt(1).and($.VisitorId.neq(""))),
+			),
 			identifiedSessions: CH.uniqIf($.SessionId, $.VisitorId.neq("")),
 			// avgIf over the ended rows only — same as the summary: the v1 row's
 			// DurationMs is NULL and would average in as a NULL.

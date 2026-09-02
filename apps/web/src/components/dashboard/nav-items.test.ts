@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { isNavItemActive, isPathActive, navGroups, paletteNavItems, type NavItem } from "./nav-items"
+import {
+	isNavItemActive,
+	isPathActive,
+	navGroups,
+	paletteNavItems,
+	partitionInfraSubItems,
+	type NavItem,
+	type NavSurface,
+} from "./nav-items"
 import {
 	DISABLED_ORGANIZATION_FEATURE_FLAGS,
 	ENABLED_ORGANIZATION_FEATURE_FLAGS,
@@ -110,12 +118,41 @@ describe("navGroups", () => {
 		)
 	})
 
-	it("keeps Infrastructure's preview to four marks once repeats collapse", () => {
-		// Six glyphs beside "Infrastructure" overflow the 16rem sidebar and
-		// truncate the label to "Infrastruct…". The three k8s pages sharing one
-		// mark is what buys the room back — `NavRow` dedupes by icon identity.
+	it("keeps Infrastructure at five children with five unique glyphs", () => {
+		// Five is exactly NavRow's all-or-nothing preview cap, so a sixth unique
+		// glyph here would drop the closed row's miniatures entirely rather than
+		// truncate them. A new Kubernetes view goes in `views` (free); a new
+		// child with a new glyph is not free.
 		const infra = findItem("Infrastructure")
-		expect(new Set(infra.subItems?.map((sub) => sub.icon)).size).toBe(4)
+		expect(infra.subItems?.map((sub) => sub.title)).toEqual([
+			"Hosts",
+			"Containers",
+			"Kubernetes",
+			"Cloudflare",
+			"PlanetScale",
+		])
+		expect(new Set(infra.subItems?.map((sub) => sub.icon)).size).toBe(5)
+	})
+
+	it("folds the Kubernetes views behind one row that points at the section root", () => {
+		const k8s = findItem("Infrastructure").subItems?.find((sub) => sub.title === "Kubernetes")
+		expect(k8s?.href).toBe("/infra/kubernetes")
+		expect(k8s?.views?.map((view) => view.href)).toEqual([
+			"/infra/kubernetes/pods",
+			"/infra/kubernetes/workloads",
+			"/infra/kubernetes/nodes",
+			"/infra/kubernetes/services",
+		])
+		// The one row lights on every view and every detail page beneath it.
+		for (const path of [
+			"/infra/kubernetes",
+			"/infra/kubernetes/pods",
+			"/infra/kubernetes/nodes/ip-10-0-0-1",
+			"/infra/kubernetes/workloads/deployment/api",
+			"/infra/kubernetes/services/checkout",
+		]) {
+			expect(isPathActive(path, k8s?.href ?? "")).toBe(true)
+		}
 	})
 })
 
@@ -128,13 +165,26 @@ describe("paletteNavItems", () => {
 			"Metrics",
 			"Replays",
 			"Hosts",
-			"K8s Pods",
-			"K8s Nodes",
-			"K8s Workloads",
+			"Containers",
+			"Kubernetes",
 			"Cloudflare",
 			"PlanetScale",
 		]) {
 			expect(titles).toContain(title)
+		}
+	})
+
+	it("keeps every folded Kubernetes view typeable by name", () => {
+		// The sidebar shows one Kubernetes row; the palette must not. Someone who
+		// types "nodes" expects to land on the nodes list, not the section root.
+		const entries = paletteNavItems()
+		for (const [title, href] of [
+			["Kubernetes Pods", "/infra/kubernetes/pods"],
+			["Kubernetes Workloads", "/infra/kubernetes/workloads"],
+			["Kubernetes Nodes", "/infra/kubernetes/nodes"],
+			["Kubernetes Services", "/infra/kubernetes/services"],
+		]) {
+			expect(entries.find((entry) => entry.title === title)?.href).toBe(href)
 		}
 	})
 
@@ -147,5 +197,118 @@ describe("paletteNavItems", () => {
 	it("emits no duplicate ids", () => {
 		const ids = paletteNavItems().map((entry) => entry.id)
 		expect(new Set(ids).size).toBe(ids.length)
+	})
+})
+
+describe("partitionInfraSubItems", () => {
+	const subItems = () => findItem("Infrastructure").subItems ?? []
+	const titles = (items: ReadonlyArray<{ title: string }>) => items.map((item) => item.title)
+	const present = (...surfaces: NavSurface[]) => new Set<NavSurface>(surfaces)
+
+	it("shows every child while the org's surfaces are unknown", () => {
+		const { shown, suggested, hidden } = partitionInfraSubItems(subItems(), null, "/infra")
+		expect(shown).toHaveLength(5)
+		expect(suggested).toEqual([])
+		expect(hidden).toEqual([])
+	})
+
+	it("shows the surfaces the org reports first, then pads to four", () => {
+		const { shown, suggested, hidden } = partitionInfraSubItems(
+			subItems(),
+			present("hosts", "containers"),
+			"/infra",
+		)
+		expect(titles(shown)).toEqual(["Hosts", "Containers"])
+		expect(titles(suggested)).toEqual(["Kubernetes", "Cloudflare"])
+		expect(titles(hidden)).toEqual(["PlanetScale"])
+	})
+
+	// The floor is a floor, not a cap: five reporting sources are five rows.
+	it("never pads a section that already has four rows", () => {
+		const { shown, suggested, hidden } = partitionInfraSubItems(
+			subItems(),
+			present("hosts", "containers", "k8sPods", "cloudflare"),
+			"/infra",
+		)
+		expect(titles(shown)).toEqual(["Hosts", "Containers", "Kubernetes", "Cloudflare"])
+		expect(suggested).toEqual([])
+		expect(titles(hidden)).toEqual(["PlanetScale"])
+
+		const all = partitionInfraSubItems(
+			subItems(),
+			present("hosts", "containers", "k8sPods", "cloudflare", "planetscale"),
+			"/infra",
+		)
+		expect(all.shown).toHaveLength(5)
+		expect(all.suggested).toEqual([])
+		expect(all.hidden).toEqual([])
+	})
+
+	it("keeps the connected integration pages ahead of the suggestions", () => {
+		const { shown, suggested } = partitionInfraSubItems(
+			subItems(),
+			present("hosts", "planetscale"),
+			"/infra",
+		)
+		expect(titles(shown)).toEqual(["Hosts", "PlanetScale"])
+		expect(titles(suggested)).toEqual(["Containers", "Kubernetes"])
+	})
+
+	// Landing on a page whose row the gate would hide has to leave the section
+	// pointing at where you are, not at nothing — and as a row you have, not a
+	// suggestion.
+	it("always shows the row for the current route", () => {
+		const { shown, suggested, hidden } = partitionInfraSubItems(
+			subItems(),
+			present("hosts"),
+			"/infra/kubernetes/nodes",
+		)
+		expect(titles(shown)).toEqual(["Hosts", "Kubernetes"])
+		expect(titles(suggested)).toEqual(["Containers", "Cloudflare"])
+		expect(titles(hidden)).toEqual(["PlanetScale"])
+	})
+
+	// Off the section (say, on /services) nothing is the current route, so all
+	// four rows are offers. On /infra the Hosts row is where you are.
+	it("offers four starters when the org reports nothing", () => {
+		const away = partitionInfraSubItems(subItems(), present(), "/services")
+		expect(away.shown).toEqual([])
+		expect(titles(away.suggested)).toEqual(["Hosts", "Containers", "Kubernetes", "Cloudflare"])
+		expect(titles(away.hidden)).toEqual(["PlanetScale"])
+
+		const home = partitionInfraSubItems(subItems(), present(), "/infra")
+		expect(titles(home.shown)).toEqual(["Hosts"])
+		expect(titles(home.suggested)).toEqual(["Containers", "Kubernetes", "Cloudflare"])
+	})
+
+	// A cluster that only ships node metrics is still a cluster: the row gates on
+	// any of its three surfaces, not on pods specifically.
+	it("shows Kubernetes when any of its surfaces reports", () => {
+		for (const surface of ["k8sPods", "k8sNodes", "k8sWorkloads"] as const) {
+			const { shown } = partitionInfraSubItems(subItems(), present("hosts", surface), "/infra")
+			expect(titles(shown)).toEqual(["Hosts", "Kubernetes"])
+		}
+	})
+
+	// Every child stays reachable — the split shortens the default list, it does
+	// not remove pages.
+	it("loses nothing between the three parts", () => {
+		for (const surfaces of [null, present(), present("hosts"), present("k8sPods", "cloudflare")]) {
+			const { shown, suggested, hidden } = partitionInfraSubItems(subItems(), surfaces, "/infra")
+			expect([...titles(shown), ...titles(suggested), ...titles(hidden)].sort()).toEqual(
+				titles(subItems()).sort(),
+			)
+			expect(shown.length + suggested.length).toBeGreaterThanOrEqual(4)
+		}
+	})
+
+	// Sections whose children carry no gate must come back untouched — the
+	// function runs over all of them, not just Infrastructure.
+	it("leaves ungated sections whole", () => {
+		const explore = findItem("Explore").subItems ?? []
+		const { shown, suggested, hidden } = partitionInfraSubItems(explore, present(), "/traces")
+		expect(shown).toEqual([...explore])
+		expect(suggested).toEqual([])
+		expect(hidden).toEqual([])
 	})
 })

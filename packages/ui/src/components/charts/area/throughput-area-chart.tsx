@@ -31,6 +31,20 @@ import type { ThroughputAreaChartProps } from "../_shared/chart-types"
 import { throughputTimeSeriesData } from "../_shared/sample-data"
 
 const THROUGHPUT_KEY = "throughput"
+/**
+ * Failing requests as a COUNT — `throughput × errorRate` — not the rate itself.
+ *
+ * ONE y axis, deliberately. A right-hand percent axis was tried (0.16.0 added
+ * named scales) and read worse: two axes on a chart this size means the shape of
+ * the red line says nothing until you have worked out which axis it belongs to,
+ * and the plot loses a gutter to labels. Errors per second is a count in the same
+ * unit as throughput, so it shares the axis honestly rather than being rescaled
+ * onto it — the line sits under the band it is a part of, which is the reading.
+ *
+ * `errorRate` is a FRACTION (errors / requests), not a percentage. An earlier
+ * revision divided by 100 as well and drew the overlay two orders of magnitude
+ * too small on the overview; `throughput-series.test.tsx` pins that down.
+ */
 const ERROR_KEY = "errorThroughput"
 const TRACED_KEY = "tracedThroughput"
 
@@ -54,11 +68,10 @@ const THROUGHPUT_TOKENS = {
 } as const satisfies Record<string, readonly [PlotColorToken, string]>
 
 /**
- * One row with the rate conversion applied and the derived series attached.
+ * One row with the rate conversion applied and the derived error count attached.
  *
- * `errorThroughput` is `throughput × errorRate`, and `errorRate` is a FRACTION
- * (errors / requests), not a percentage — an earlier revision divided by 100 and
- * drew the error line two orders of magnitude too low.
+ * See `ERROR_KEY` for why the overlay is a count rather than the rate, and for
+ * the fraction-versus-percentage trap in the multiplication below.
  */
 function deriveRows(rows: readonly TimeseriesRow[], divisor: number): TimeseriesRow[] {
 	return rows.map((row) => {
@@ -297,14 +310,16 @@ export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 				...(hasErrors ? [focusDot(rows, at, value(ERROR_KEY), colors.error, chromeColors)] : []),
 				focusCrosshair(chromeColors),
 			],
-			x: timeseriesXAxis(axisContext),
-			y: timeseriesYAxis({
-				rows,
-				// Every plotted series widens the axis, including the derived ones —
-				// a traced line above the sampled estimate must not run off the top.
-				visibleKeys: [THROUGHPUT_KEY, ERROR_KEY, TRACED_KEY],
-				format: (tick: number) => formatThroughput(tick, rateLabel),
-			}).y,
+			scales: {
+				x: timeseriesXAxis(axisContext),
+				y: timeseriesYAxis({
+					rows,
+					// Every plotted series widens the axis, including the derived ones —
+					// a traced line above the sampled estimate must not run off the top.
+					visibleKeys: [THROUGHPUT_KEY, ERROR_KEY, TRACED_KEY],
+					format: (tick: number) => formatThroughput(tick, rateLabel),
+				}).y,
+			},
 			focus: "group-x",
 			focusRing: false,
 			tooltip: tooltip === "hidden" ? false : maybeTooltip(suppressed, focusStore.anchor),

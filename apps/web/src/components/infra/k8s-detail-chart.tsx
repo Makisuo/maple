@@ -24,7 +24,7 @@ import { displayError } from "@/lib/error-messages"
  */
 const CHART_HEIGHT = 280
 
-type Unit = "percent" | "cores" | "seconds"
+type Unit = "percent" | "cores" | "seconds" | "bytes"
 
 // Human label for each metric, used as the tooltip/legend "type" for the single
 // unnamed series (gauges with no group-by attribute, e.g. a pod's CPU usage).
