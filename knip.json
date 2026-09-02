@@ -19,7 +19,7 @@
 			]
 		},
 		"apps/landing": {
-			"entry": ["src/worker.ts", "alchemy.run.ts", "tools/**/*.ts", "tools/**/*.js"],
+			"entry": ["src/worker.ts", "tools/**/*.ts", "tools/**/*.js"],
 			"ignoreDependencies": ["@paper-design/shaders"]
 		},
 		"apps/api": {
@@ -29,16 +29,16 @@
 			// Shelled out to by scripts/bench-startup-cpu.ts, never imported.
 			"ignoreDependencies": ["cloudflare", "wrangler"]
 		},
+		// Single-module Workers: the root alchemy.run.ts imports src/worker.ts, and
+		// alchemy bundles it, so it is the app's one entry.
 		"apps/alerting": {
-			"entry": ["src/worker.ts", "alchemy.run.ts"]
+			"entry": ["src/worker.ts"]
 		},
 		"apps/electric-sync": {
-			// Single-module Worker: the root alchemy.run.ts imports it, and alchemy
-			// bundles it, so it is the app's one entry.
 			"entry": ["src/worker.ts"]
 		},
 		"apps/local-ui": {
-			"entry": ["src/worker.ts", "alchemy.run.ts"]
+			"entry": ["src/worker.ts"]
 		},
 		"apps/cli": {
 			"entry": [
