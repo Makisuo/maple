@@ -165,7 +165,7 @@ const makeHarness = (
 		Layer.provide(SlackIntegrationServiceStubLayer),
 		Layer.provide(PlanetScaleServiceStubsLayer),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
-		Layer.provideMerge(AuditLogService.layer),
+		Layer.provideMerge(AuditLogService.layerMemory),
 		Layer.provideMerge(ApiV2RateLimiterAllowAllLayer),
 		Layer.provideMerge(servicesLive),
 	)

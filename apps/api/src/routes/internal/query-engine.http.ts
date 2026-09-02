@@ -90,6 +90,7 @@ import { Clock, Effect, Match, Option, Schema } from "effect"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { isMissingProductEvents, isMissingServiceOperationsRollup } from "@/services/warehouse/missing-table"
 import { makeDirectRouteCachePolicy, makeExecuteRawSql } from "@maple/query-engine/runtime"
+import { describeFailure, recordRawSqlAudit } from "@/services/audit/audit-access"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { traceCacheTtlSeconds } from "@/services/warehouse/trace-detail-cache"
 import {
@@ -2073,6 +2074,15 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 						const autoBucketSeconds = computeAutoBucketSeconds(payload.startTime, payload.endTime)
 						const granularitySeconds = payload.granularitySeconds ?? autoBucketSeconds
 
+						const audit = (result: Parameters<typeof recordRawSqlAudit>[0]["result"]) =>
+							recordRawSqlAudit({
+								tenant,
+								sql: payload.sql,
+								context: "rawSql",
+								startTime: payload.startTime,
+								endTime: payload.endTime,
+								result,
+							})
 						const result = yield* mapExecError(
 							executeRawSql(tenant, {
 								sql: payload.sql,
@@ -2082,7 +2092,17 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								granularitySeconds,
 								workload: "interactive",
 								context: "rawSql",
-							}),
+							}).pipe(
+								// Every statement is audited, however it ended: a refused one as `denied`.
+								Effect.tap((executed) => audit({ _tag: "rows", rowCount: executed.rowCount })),
+								Effect.tapError((error) =>
+									audit(
+										error._tag === "@maple/http/errors/RawSqlValidationError"
+											? { _tag: "rejected", reason: error.message }
+											: { _tag: "failed", error: describeFailure(error) },
+									),
+								),
+							),
 							"rawSql query failed",
 						)
 

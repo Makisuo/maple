@@ -191,7 +191,7 @@ const makeHarness = (options: {
 		Layer.provide(AlertsServiceStubLayer),
 		Layer.provide(ConfigResourceServiceStubsLayer),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
-		Layer.provideMerge(AuditLogService.layer),
+		Layer.provideMerge(AuditLogService.layerMemory),
 		Layer.provideMerge(ApiV2RateLimiterAllowAllLayer),
 		Layer.provideMerge(servicesLive),
 	)

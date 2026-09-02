@@ -1,5 +1,5 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { AuditChanges, CurrentTenant } from "@maple/domain/http"
+import { CurrentTenant } from "@maple/domain/http"
 import { ActorId, ApiKeyId, UserId } from "@maple/domain/primitives"
 import {
 	decodePublicId,
@@ -12,7 +12,7 @@ import {
 	V2ParameterInvalid,
 } from "@maple/domain/http/v2"
 import type { V2AuditLogEntry } from "@maple/domain/http/v2"
-import type { AuditLogEntryRow } from "@maple/db"
+import type { AuditLogEntry } from "@/services/audit/audit-event"
 import { Effect, Option, Schema } from "effect"
 import { AuditLogService } from "@/services/audit/AuditLogService"
 import { requireAdmin } from "@/services/auth/auth"
@@ -54,13 +54,8 @@ const actorIdentityFilter = (publicActorId: string) => {
 	})
 }
 
-const isJsonRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null && !Array.isArray(value)
-
-const decodeChangesOption = Schema.decodeUnknownOption(AuditChanges)
-
 /** The actor's public identifier, matching the ID style of its own resource. */
-const publicActorId = (row: AuditLogEntryRow): string | null => {
+const publicActorId = (row: AuditLogEntry): string | null => {
 	switch (row.actorType) {
 		case "api_key":
 			return row.apiKeyId === null ? null : encodePublicId(PublicIdPrefixes.apiKey, row.apiKeyId)
@@ -74,7 +69,7 @@ const publicActorId = (row: AuditLogEntryRow): string | null => {
 	}
 }
 
-const toV2AuditLogEntry = (row: AuditLogEntryRow): V2AuditLogEntry => ({
+const toV2AuditLogEntry = (row: AuditLogEntry): V2AuditLogEntry => ({
 	id: row.id,
 	object: "audit_log_entry",
 	action: row.action,
@@ -87,8 +82,8 @@ const toV2AuditLogEntry = (row: AuditLogEntryRow): V2AuditLogEntry => ({
 	source: row.source,
 	resource_type: row.resourceType,
 	resource_id: row.resourceId,
-	changes: Option.getOrNull(decodeChangesOption(row.changesJson)),
-	metadata: isJsonRecord(row.metadataJson) ? row.metadataJson : null,
+	changes: row.changes,
+	metadata: row.metadata,
 	request_id: row.requestId,
 	origin_ip: row.originIp,
 	origin_country: row.originCountry,

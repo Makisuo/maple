@@ -197,9 +197,10 @@ describe("ClerkWebhookRouter", () => {
 			const audit = recordingAudit()
 			const configured = HttpRouter.toWebHandler(
 				makeRouterLayer(
-					ClerkWebhookRouter,
+					ClerkWebhookRoute,
 					{ CLERK_WEBHOOK_SECRET: CLERK_SECRET },
 					events.layer,
+					recordingRevocation().layer,
 					audit.layer,
 				),
 				{ disableLogger: true },

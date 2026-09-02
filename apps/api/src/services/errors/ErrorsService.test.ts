@@ -210,7 +210,7 @@ const makeErrorsLayer = (
 	const databaseLive = testDb.layer
 	const errorActorsLive = ErrorActorsService.layer.pipe(Layer.provide(databaseLive))
 	const errorIssueWorkflowLive = ErrorIssueWorkflowService.layer.pipe(
-		Layer.provide(AuditLogService.layer),
+		Layer.provide(AuditLogService.layerMemory),
 		Layer.provide(databaseLive),
 		Layer.provide(errorActorsLive),
 	)
@@ -301,7 +301,7 @@ const makeGatingLayer = (opts: {
 	const databaseLive = testDb.layer
 	const errorActorsLive = ErrorActorsService.layer.pipe(Layer.provide(databaseLive))
 	const errorIssueWorkflowLive = ErrorIssueWorkflowService.layer.pipe(
-		Layer.provide(AuditLogService.layer),
+		Layer.provide(AuditLogService.layerMemory),
 		Layer.provide(databaseLive),
 		Layer.provide(errorActorsLive),
 	)

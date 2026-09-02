@@ -48,7 +48,7 @@ afterEach(() => cleanupTestDbs(createdDbs))
 const makeLayer = () => {
 	const database = createTestDb(createdDbs).layer
 	const actors = ErrorActorsService.layer.pipe(Layer.provide(database))
-	const audit = AuditLogService.layer.pipe(Layer.provide(database))
+	const audit = AuditLogService.layerMemory
 	const workflow = databaseAndActorsOnly.pipe(Layer.provide(Layer.mergeAll(database, actors, audit)))
 	return Layer.mergeAll(workflow, actors).pipe(Layer.provideMerge(database))
 }
@@ -99,7 +99,9 @@ const makeFaultyLayer = (failTable: unknown) => {
 		}),
 	).pipe(Layer.provide(database))
 	const actors = ErrorActorsService.layer.pipe(Layer.provide(faulty))
-	const workflow = databaseAndActorsOnly.pipe(Layer.provide(Layer.mergeAll(faulty, actors)))
+	const workflow = databaseAndActorsOnly.pipe(
+		Layer.provide(Layer.mergeAll(faulty, actors, AuditLogService.layerMemory)),
+	)
 	return Layer.mergeAll(workflow, actors).pipe(Layer.provideMerge(faulty))
 }
 

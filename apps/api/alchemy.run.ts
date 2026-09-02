@@ -197,8 +197,6 @@ const apiConfiguredEnv = (stage: MapleStage, domains: MapleDomains) =>
 		// Agent LLM path. `MAPLE_LLM_PROVIDER` flips between OpenRouter (default) and
 		// Workers AI; both stay wired, so a switch is this one var plus a redeploy.
 		// See `@/platform/Llm` for the provider-scoped model overrides.
-		// Audit log retention horizon in days; the sweep defaults to 400 when unset.
-		optionalPlain("AUDIT_LOG_RETENTION_DAYS"),
 		optionalPlain("MAPLE_LLM_PROVIDER"),
 		optionalPlain("MAPLE_TRIAGE_MODEL_OPENROUTER"),
 		optionalPlain("MAPLE_TRIAGE_MODEL_WORKERS_AI"),

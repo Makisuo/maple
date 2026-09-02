@@ -69,7 +69,7 @@ const makeLayer = (
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 	const actorsLive = ErrorActorsService.layer.pipe(Layer.provide(databaseLive))
 	const workflowLive = ErrorIssueWorkflowService.layer.pipe(
-		Layer.provide(AuditLogService.layer),
+		Layer.provide(AuditLogService.layerMemory),
 		Layer.provide(databaseLive),
 		Layer.provide(actorsLive),
 	)

@@ -7,6 +7,7 @@ import type { McpToolRuntimeRequirements } from "./tools/runtime-requirements"
 import { CurrentMcpTenant } from "./lib/query-warehouse"
 import { recordExpectedMcpFailure } from "./expected-failures"
 import type { TenantContext } from "@/services/auth/tenant-context"
+import { recordMcpToolAudit } from "@/services/audit/audit-access"
 
 /**
  * Built on first use, not at module scope.
@@ -172,10 +173,20 @@ export class McpToolExecutor extends Context.Service<McpToolExecutor, McpToolExe
 					"maple.mcp.tool": name,
 					"maple.mcp.surface": surface,
 				})
-				return yield* callMcpToolUnscoped(name, input).pipe(
+				const result = yield* callMcpToolUnscoped(name, input).pipe(
 					Effect.provideService(CurrentMcpTenant, tenant),
 					Effect.provide(runtimeServices),
 				)
+				// Every tool call is a read of (or change to) org data; the entry
+				// carries the tool, its parameters, and whether it failed in-band.
+				yield* recordMcpToolAudit({
+					tenant,
+					name,
+					input,
+					surface,
+					isError: result.isError === true,
+				}).pipe(Effect.provide(runtimeServices))
+				return result
 			})
 
 			return { execute }

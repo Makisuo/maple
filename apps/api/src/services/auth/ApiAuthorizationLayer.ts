@@ -7,6 +7,7 @@ import { annotateAuthSpan } from "@/services/auth/auth-span"
 import { CurrentAuditActor } from "@/services/auth/audit-actor"
 import { AuditLogService } from "@/services/audit/AuditLogService"
 import { recordApiDenial } from "@/services/auth/audit-denial"
+import { withAuditedRead } from "@/services/audit/audit-access"
 import { Env } from "@/platform/Env"
 
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
@@ -29,7 +30,7 @@ export const ApiAuthorizationLayer = Layer.effect(
 		const resolveTenant = makeResolveTenant(env)
 
 		return CurrentTenant.Authorization.of({
-			bearer: (httpEffect) =>
+			bearer: (httpEffect, options) =>
 				Effect.gen(function* () {
 					const request = yield* HttpServerRequest.HttpServerRequest
 
@@ -87,6 +88,11 @@ export const ApiAuthorizationLayer = Layer.effect(
 								apiKeyId: resolved.keyId,
 								source: "api",
 							}),
+							withAuditedRead(audit, request, options, {
+								orgId: resolved.orgId,
+								actor: { type: "api_key", userId: resolved.userId, apiKeyId: resolved.keyId },
+								source: "api",
+							}),
 						)
 					}
 
@@ -95,6 +101,11 @@ export const ApiAuthorizationLayer = Layer.effect(
 					return yield* httpEffect.pipe(
 						Effect.provideService(CurrentTenant.Context, new CurrentTenant.TenantSchema(tenant)),
 						Effect.provideService(CurrentAuditActor, { type: "user", source: "dashboard" }),
+						withAuditedRead(audit, request, options, {
+							orgId: tenant.orgId,
+							actor: { type: "user", userId: tenant.userId },
+							source: "dashboard",
+						}),
 					)
 				}),
 		})

@@ -68,7 +68,7 @@ const makeHarness = (checkRateLimit: RateLimiterApi["check"] = () => Effect.succ
 		Layer.provide(ConfigResourceServiceStubsLayer),
 		Layer.provide(TelemetryServiceStubsLayer),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
-		Layer.provideMerge(AuditLogService.layer),
+		Layer.provideMerge(AuditLogService.layerMemory),
 		Layer.provideMerge(Layer.succeed(ApiV2RateLimiter, { check: checkRateLimit })),
 		Layer.provideMerge(servicesLive),
 		Layer.provideMerge(HttpRouter.cors(API_CORS_OPTIONS)),

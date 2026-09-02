@@ -178,10 +178,9 @@ export function AuditLogSection() {
 					))}
 				</div>
 				<div className="flex-1" />
-				{/* Deliberately not "every change": this records configuration and
-				    access changes plus refused attempts, not reads or telemetry. */}
 				<p className="text-muted-foreground text-xs">
-					Configuration and access changes, from the dashboard, API, and MCP.
+					Changes, refused attempts, and every read of telemetry or session replays — from the
+					dashboard, API, and MCP.
 				</p>
 			</div>
 
@@ -215,7 +214,7 @@ export function AuditLogSection() {
 							</EmptyMedia>
 							<EmptyTitle>No audit log entries</EmptyTitle>
 							<EmptyDescription>
-								Actions performed by users, API keys, and agents will appear here.
+								Actions and data reads by users, API keys, and agents will appear here.
 							</EmptyDescription>
 						</EmptyHeader>
 					</Empty>

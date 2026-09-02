@@ -79,7 +79,7 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2ErrorIssuesLive,
 	HttpV2AttributeMappingsLive,
 	// Real service, no stub: it needs only the Database every harness already provides.
-	HttpV2AuditLogLive.pipe(Layer.provide(AuditLogService.layer)),
+	HttpV2AuditLogLive.pipe(Layer.provide(AuditLogService.layerMemory)),
 	HttpV2ScrapeTargetsLive,
 	HttpV2InstrumentationRecommendationsLive,
 	HttpV2InstrumentationAuditLive,
@@ -125,7 +125,7 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 ).pipe(
 	// Mutation handlers across the groups record audit entries; the real service
 	// needs only the Database every harness already provides.
-	Layer.provide(AuditLogService.layer),
+	Layer.provide(AuditLogService.layerMemory),
 )
 
 export const ApiV2RateLimiterAllowAllLayer = Layer.succeed(ApiV2RateLimiter, {

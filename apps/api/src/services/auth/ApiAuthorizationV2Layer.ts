@@ -18,6 +18,7 @@ import { annotateAuthSpan } from "@/services/auth/auth-span"
 import { CurrentAuditActor } from "@/services/auth/audit-actor"
 import { AuditLogService } from "@/services/audit/AuditLogService"
 import { recordApiDenial } from "@/services/auth/audit-denial"
+import { withAuditedRead } from "@/services/audit/audit-access"
 import { Env } from "@/platform/Env"
 import {
 	API_V2_RATE_LIMIT_PERIOD_SECONDS,
@@ -87,7 +88,7 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 		)
 
 		return AuthorizationV2.of({
-			bearer: (httpEffect) =>
+			bearer: (httpEffect, options) =>
 				Effect.gen(function* () {
 					const request = yield* HttpServerRequest.HttpServerRequest
 
@@ -204,6 +205,12 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 								apiKeyId: resolved.keyId,
 								source: "api",
 							}),
+							// Telemetry and replay reads are recorded (see `AuditedRead`).
+							withAuditedRead(audit, request, options, {
+								orgId: resolved.orgId,
+								actor: { type: "api_key", userId: resolved.userId, apiKeyId: resolved.keyId },
+								source: "api",
+							}),
 						)
 					}
 
@@ -216,6 +223,11 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 					return yield* httpEffect.pipe(
 						Effect.provideService(CurrentTenant.Context, new CurrentTenant.TenantSchema(tenant)),
 						Effect.provideService(CurrentAuditActor, { type: "user", source: "dashboard" }),
+						withAuditedRead(audit, request, options, {
+							orgId: tenant.orgId,
+							actor: { type: "user", userId: tenant.userId },
+							source: "dashboard",
+						}),
 					)
 				}),
 		})

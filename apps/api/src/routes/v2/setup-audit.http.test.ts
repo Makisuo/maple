@@ -143,7 +143,7 @@ const makeHarness = (warehouse: WarehouseQueryServiceApi = warehouseStub()) => {
 		Layer.provide(TelemetryServiceStubsLayer),
 		Layer.provide(warehouseLive),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
-		Layer.provideMerge(AuditLogService.layer),
+		Layer.provideMerge(AuditLogService.layerMemory),
 		Layer.provideMerge(ApiV2RateLimiterAllowAllLayer),
 		Layer.provideMerge(servicesLive),
 	)

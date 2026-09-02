@@ -50,7 +50,7 @@ import { HttpV2MobileDevicesLive } from "@/routes/v2/mobile-devices.http"
 import { HttpV2OrganizationLive } from "@/routes/v2/organization.http"
 import { HttpV2InstrumentationRecommendationsLive } from "@/routes/v2/recommendations.http"
 import { HttpV2AuditLogLive } from "@/routes/v2/audit-log.http"
-import { AuditLogService } from "@/services/audit/AuditLogService"
+import { AuditLogServiceLive } from "@/runtime/service-graph"
 import { HttpV2ScrapeTargetsLive } from "@/routes/v2/scrape-targets.http"
 import { HttpV2InstrumentationAuditLive } from "@/routes/v2/setup-audit.http"
 import { HttpV2SessionReplaysLive } from "@/routes/v2/session-replays.http"
@@ -189,8 +189,8 @@ export const ApiAuthLive = Layer.mergeAll(
 	Layer.provideMerge(ApiV2RateLimiter.layer),
 	Layer.provideMerge(McpToolRateLimiter.layer),
 	Layer.provideMerge(ApiKeysService.layer),
-	// Denied attempts are audited from inside the auth layers themselves.
-	Layer.provideMerge(AuditLogService.layer),
+	// Denied attempts and audited reads are recorded from inside the auth layers.
+	Layer.provideMerge(AuditLogServiceLive),
 	// Membership verification for `x-maple-org-id`. Only the v2 layer asks for
 	// it; without it that layer cannot build, which is deliberate — the header
 	// must never end up silently ignored in a runtime that forgot to wire this.

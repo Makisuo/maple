@@ -51,6 +51,8 @@ const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(
 	Layer.provide(Layer.mergeAll(InfraLive, OrgClickHouseSettingsServiceLive, TinybirdOrgTokenServiceLive)),
 )
 
+const AuditLogServiceLive = AuditLogService.layer.pipe(Layer.provide(WarehouseQueryServiceLive))
+
 const BucketCacheServiceLive = BucketCacheService.layer.pipe(Layer.provideMerge(EdgeCacheServiceLive))
 
 const QueryEngineServiceLive = QueryEngineService.layer.pipe(
@@ -105,7 +107,7 @@ const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(
 
 const ErrorActorsServiceLive = ErrorActorsService.layer
 const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
-	Layer.provide(Layer.mergeAll(ErrorActorsServiceLive, AuditLogService.layer)),
+	Layer.provide(Layer.mergeAll(ErrorActorsServiceLive, AuditLogServiceLive)),
 )
 const ErrorPolicyServiceLive = ErrorPolicyService.layer
 const ErrorIssueReadModelsServiceLive = ErrorIssueReadModelsService.layer.pipe(
@@ -166,7 +168,7 @@ const McpRuntimeServicesLive = Layer.mergeAll(
 	AlertReadModelsServiceLive,
 	AlertRulesServiceLive,
 	AlertsServiceLive,
-	AuditLogService.layer,
+	AuditLogServiceLive,
 	DashboardPersistenceService.layer,
 	ErrorActorsServiceLive,
 	ErrorIssueReadModelsServiceLive,

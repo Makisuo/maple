@@ -68,7 +68,7 @@ const makeLayer = (contexts: Array<string>) => {
 	const database = createTestDb(createdDbs).layer
 	const actors = ErrorActorsService.layer.pipe(Layer.provide(database))
 	const workflow = ErrorIssueWorkflowService.layer.pipe(
-		Layer.provide(AuditLogService.layer),
+		Layer.provide(AuditLogService.layerMemory),
 		Layer.provide(database),
 		Layer.provide(actors),
 	)

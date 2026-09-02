@@ -143,7 +143,11 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 	const ErrorActorsServiceLive = ErrorActorsService.layer.pipe(Layer.provide(BaseLive))
 	const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
 		Layer.provide(
-			Layer.mergeAll(BaseLive, ErrorActorsServiceLive, AuditLogService.layer.pipe(Layer.provide(BaseLive))),
+			Layer.mergeAll(
+				BaseLive,
+				ErrorActorsServiceLive,
+				AuditLogService.layer.pipe(Layer.provide(WarehouseQueryServiceLive)),
+			),
 		),
 	)
 	const ErrorPolicyServiceLive = ErrorPolicyService.layer.pipe(Layer.provide(BaseLive))

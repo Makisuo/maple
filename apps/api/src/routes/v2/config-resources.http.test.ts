@@ -116,7 +116,7 @@ const makeHarness = () => {
 		// session_replays (in AllV2GroupLayersLive) needs the warehouse at the routes level.
 		Layer.provide(warehouseLive),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
-		Layer.provideMerge(AuditLogService.layer),
+		Layer.provideMerge(AuditLogService.layerMemory),
 		Layer.provideMerge(ApiV2RateLimiterAllowAllLayer),
 		Layer.provideMerge(servicesLive),
 	)
