@@ -203,6 +203,7 @@ export {
 	mapGet,
 	mapKeys,
 	mapValues,
+	mapFilterKeys,
 	mapLiteral,
 	// JSON
 	toJSONString,

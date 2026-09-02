@@ -24,6 +24,7 @@ export {
 } from "./ai-sessions"
 
 export {
+	aiSpanAttributeKeys,
 	genAiIntegration,
 	mapAiSpan,
 	mapAiSpans,

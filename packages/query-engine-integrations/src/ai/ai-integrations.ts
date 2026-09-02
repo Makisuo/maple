@@ -50,6 +50,12 @@ export interface AiIntegration {
 	 * field from something other than a single attribute.
 	 */
 	readonly refine?: (values: MutableAiGenAiValues, ctx: AiRefineContext) => void
+	/**
+	 * Attribute keys `refine` reads that no source list names. The span read
+	 * projects only the keys the mapper is known to read (`aiSpanAttributeKeys`),
+	 * so a key missing here is a key `refine` never sees.
+	 */
+	readonly refineKeys?: readonly string[]
 }
 
 /** An integration carrying a source list for every catalog field. */
@@ -238,6 +244,26 @@ const resolvedIntegrations = new Map<string, ResolvedAiIntegration>(
 		},
 	]),
 )
+
+/**
+ * Every attribute key the mapper can read off a span, across every integration:
+ * the envelope, each field's source keys, and what the refine hooks read. The
+ * span read projects the attribute map down to these (plus the
+ * `AI_PROMPT_VARIABLE_PREFIX` family, which has no fixed key), so a key not in
+ * this list never reaches `mapAiSpan` — in production the map's bulk is
+ * `db.query.text` and friends, which the mapper never looked at.
+ */
+export const aiSpanAttributeKeys: readonly string[] = [
+	...new Set([
+		MAPLE_AI_SESSION_ID_ATTR,
+		MAPLE_AI_VENDOR_ID_ATTR,
+		MAPLE_AI_VENDOR_VERSION_ATTR,
+		...[genAiIntegration, ...resolvedIntegrations.values()].flatMap((integration) =>
+			Object.values(integration.sources).flat(),
+		),
+		...Object.values(AI_VENDOR_INTEGRATIONS).flatMap((vendor) => vendor.refineKeys ?? []),
+	]),
+]
 
 /** The integration for a vendor stamp, or the default for a stamp with no entry. */
 export const resolveAiIntegration = (vendorId: string | undefined): ResolvedAiIntegration => {

@@ -102,11 +102,13 @@ import { AiTraceIndex, TraceDetailSpans, Traces } from "@maple/query-engine/ch/t
 import { CHNumber } from "@maple/query-engine/ch/schema"
 import { AI_SESSION_SPANS_MAX_SPANS } from "@maple/domain/http"
 import {
+	AI_PROMPT_VARIABLE_PREFIX,
 	MAPLE_AI_SESSION_ID_ATTR,
 	MAPLE_AI_TRACE_SESSION_PREFIX,
 	MAPLE_AI_VENDOR_ID_ATTR,
 	MAPLE_AI_VENDOR_VERSION_ATTR,
 } from "@maple/domain/gen-ai"
+import { aiSpanAttributeKeys } from "./ai-integrations"
 
 const SESSION_ID_ATTR = MAPLE_AI_SESSION_ID_ATTR
 const VENDOR_ID_ATTR = MAPLE_AI_VENDOR_ID_ATTR
@@ -524,7 +526,6 @@ export interface AiSessionSpansOutput {
 	readonly statusMessage: string
 	readonly timestamp: string
 	readonly spanAttributes: Record<string, string>
-	readonly resourceAttributes: Record<string, string>
 }
 
 export const aiSessionSpansRowSchema: CompiledQueryRowSchema<AiSessionSpansOutput> = Schema.Struct({
@@ -542,7 +543,6 @@ export const aiSessionSpansRowSchema: CompiledQueryRowSchema<AiSessionSpansOutpu
 	// so this is a plain Record. Not `Schema.fromJsonString(…)` — that is for the
 	// observability path, which reads maps already serialized to a string.
 	spanAttributes: Schema.Record(Schema.String, Schema.String),
-	resourceAttributes: Schema.Record(Schema.String, Schema.String),
 })
 
 /** Shared by both span reads, so a session keyed by id and one keyed by trace
@@ -558,8 +558,14 @@ const spanProjection = ($: ColumnAccessor<typeof TraceDetailSpans.columns>) => (
 	statusCode: $.StatusCode,
 	statusMessage: $.StatusMessage,
 	timestamp: CH.toString_($.Timestamp),
-	spanAttributes: $.SpanAttributes,
-	resourceAttributes: $.ResourceAttributes,
+	// The map cut down to what `mapAiSpan` reads. Measured on production's
+	// largest sessions, the whole map is dominated by keys the mapper never
+	// touches (`db.query.text` alone was half of one session's bytes), and
+	// `ResourceAttributes` — which the mapper deliberately ignores, see
+	// `mapAiSpan` — was another 60% on top. Neither is read any more.
+	spanAttributes: CH.mapFilterKeys($.SpanAttributes, (key) =>
+		key.in_(...aiSpanAttributeKeys).or(key.like(`${AI_PROMPT_VARIABLE_PREFIX}%`)),
+	),
 })
 
 /**
@@ -568,11 +574,10 @@ const spanProjection = ($: ColumnAccessor<typeof TraceDetailSpans.columns>) => (
  * `sessionId` is a compile param rather than an opts field, so one compiled SQL
  * string serves every session.
  *
- * Both attribute Maps come back whole: the integration layer that normalizes
- * these into gen_ai form needs keys this query cannot know in advance. Projecting
- * only the keys it wants is a later optimisation, and a real one — one production
- * trace already carries 250 spans with up to ~17KB of attributes each, so callers
- * should expect megabyte-scale payloads at the default limit.
+ * The attribute map is projected down to the keys the integration layer reads
+ * (`aiSpanAttributeKeys`); everything else on the span stays in the warehouse.
+ * Even so, a content-heavy vendor puts whole prompts in `gen_ai.input.messages`,
+ * so callers should still expect megabyte-scale payloads at the default limit.
  *
  * No scope columns: `trace_detail_spans` does not carry `ScopeName`/`ScopeVersion`,
  * and the read path does not need them. The ingest gateway already did the

@@ -24,6 +24,23 @@ export function mapValues(mapExpr: Expr<Record<string, string>>): Expr<ReadonlyA
 	return makeExpr(raw(`mapValues(${compile(mapExpr.toFragment())})`), STRINGS)
 }
 
+/**
+ * `mapFilter((k, v) -> <predicate>, map)` — the entries whose KEY passes.
+ *
+ * The predicate is built from the lambda's key parameter, so it can use every
+ * condition the DSL has (`in_`, `like`, `or`, …). Values are not inspected.
+ */
+export function mapFilterKeys(
+	mapExpr: Expr<Record<string, string>>,
+	predicate: (key: Expr<string>) => Condition,
+): Expr<Record<string, string>> {
+	const key = makeExpr(raw("k"), T.string.schema)
+	return makeExpr(
+		raw(`mapFilter((k, v) -> ${compile(predicate(key).toFragment())}, ${compile(mapExpr.toFragment())})`),
+		STRING_MAP,
+	)
+}
+
 export function mapLiteral(...pairs: Array<[string, Expr<string>]>): Expr<Record<string, string>> {
 	if (pairs.length === 0) return makeExpr(raw("map()"), STRING_MAP)
 	const args = pairs.map(([k, v]) => `${compile(str(k))}, ${compile(v.toFragment())}`).join(", ")

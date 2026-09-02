@@ -90,7 +90,7 @@ export {
 	has,
 } from "./array"
 
-export { mapContains, mapGet, mapKeys, mapValues, mapLiteral } from "./map"
+export { mapContains, mapFilterKeys, mapGet, mapKeys, mapValues, mapLiteral } from "./map"
 
 export { toJSONString } from "./json"
 

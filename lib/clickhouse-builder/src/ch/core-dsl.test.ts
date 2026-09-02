@@ -88,6 +88,14 @@ describe("expression functions", () => {
 		expect(sql).toContain("map('key1', Name, 'key2', 'val') AS m")
 	})
 
+	it("compiles mapFilterKeys with the DSL's own conditions on the key", () => {
+		const q = CH.from(TestTable).select(($) => ({
+			m: CH.mapFilterKeys($.Attrs, (k) => k.in_("a", "b").or(k.like("x.%"))),
+		}))
+		const { sql } = compileCHUnsafe(q, {})
+		expect(sql).toContain("mapFilter((k, v) -> (k IN ('a', 'b') OR k LIKE 'x.%'), Attrs) AS m")
+	})
+
 	it("compiles empty mapLiteral", () => {
 		const q = CH.from(TestTable).select(() => ({ m: CH.mapLiteral() }))
 		const { sql } = compileCHUnsafe(q, {})

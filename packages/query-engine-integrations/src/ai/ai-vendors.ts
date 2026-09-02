@@ -115,6 +115,7 @@ const openInferenceIntegration: AiIntegration = {
 		)
 		if (operation !== undefined) values.operationName = operation
 	},
+	refineKeys: ["openinference.span.kind"],
 }
 
 /**
@@ -130,6 +131,7 @@ const eveIntegration: AiIntegration = {
 		const turnId = ctx.attributes["eve.turn.id"]
 		if (turnId !== undefined && turnId !== "") values.conversationId = turnId
 	},
+	refineKeys: ["eve.turn.id"],
 }
 
 /**
@@ -147,6 +149,7 @@ const mapleIntegration: AiIntegration = {
 		const turnId = ctx.attributes[MAPLE_NATIVE_TURN_ID_ATTR]
 		if (turnId !== undefined && turnId !== "") values.conversationId = turnId
 	},
+	refineKeys: [MAPLE_NATIVE_TURN_ID_ATTR],
 }
 
 /**
