@@ -1,6 +1,7 @@
-// The Maple stack: one module per app, composed here — an alchemy Worker class
-// (`yield* Alerting`) where the app's props are stage-derived, a `create*`
-// factory where it still takes another resource as an argument.
+// The Maple stack: one module per app, composed here — a Worker's own
+// `src/worker.ts` (an alchemy Worker class, `yield* Alerting`) wherever its
+// props are stage-derived, a `create*` factory where it still takes another
+// resource as an argument (api, web) or is not a Worker (ingest, electric).
 //
 // Comments in these files explain what a reader needs in order not to break the
 // code. The history behind those decisions — the #378 deploy hang, the
@@ -33,13 +34,13 @@ import {
 } from "@maple/infra/cloudflare"
 import * as Portless from "@maple/alchemy-portless"
 import { DEV_PROCESS_APPS, selectedDevApps, type DevApp } from "@maple/infra/dev-urls"
-import Alerting from "./apps/alerting/alchemy.run.ts"
+import Alerting from "./apps/alerting/src/worker.ts"
 import { createMapleApi, createReplayBlobStore } from "./apps/api/alchemy.run.ts"
 import { createMapleElectric } from "./apps/electric/alchemy.run.ts"
 import ElectricSync from "./apps/electric-sync/src/worker.ts"
 import { createMapleIngest } from "./apps/ingest/alchemy.run.ts"
-import Landing from "./apps/landing/alchemy.run.ts"
-import LocalUi from "./apps/local-ui/alchemy.run.ts"
+import Landing from "./apps/landing/src/worker.ts"
+import LocalUi from "./apps/local-ui/src/worker.ts"
 import { createMapleWeb } from "./apps/web/alchemy.run.ts"
 
 // v1 read the account id from CLOUDFLARE_DEFAULT_ACCOUNT_ID (the name Infisical
@@ -252,8 +253,9 @@ export default Alchemy.Stack(
 				: undefined
 
 		// Standalone ElectricSQL shape-proxy worker (DB-free); its public origin is
-		// baked into the web build (VITE_ELECTRIC_SYNC_URL). Single-module form:
-		// its props read `MapleStack` and the module is also the bundle entry.
+		// baked into the web build (VITE_ELECTRIC_SYNC_URL). Like alerting, landing
+		// and local-ui below, a single module: its props read `MapleStack` and the
+		// module is also the bundle entry.
 		const electricSync = yield* ElectricSync
 		yield* serveWorker("electric-sync", electricSync)
 
