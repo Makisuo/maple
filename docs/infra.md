@@ -115,6 +115,41 @@ Gotchas worth knowing:
   reachable on `127.0.0.1:<port>` only; the inter-app URLs still name the `*.localhost`
   hosts, so start the proxy (`portless proxy start`) rather than work around it.
 
+## Effect-native Workers: piloted, measured, deferred
+
+Alchemy can host a Worker's runtime as an inline Effect (`Cloudflare.Worker(id, props,
+impl)`): no hand-written `export default { fetch }`, the bridge builds the app layer once
+per isolate on the first event, and config resolves from the Worker env automatically.
+**Spiked on electric-sync (PR #745, 2026-09-02), reached green CI and identical live
+behaviour, then deliberately reverted.** What was established, so the next attempt starts
+from facts:
+
+- **Runtime cost is a wash.** Measured A/B on local workerd: +15ms startup CPU (41→56ms,
+  budget ~1s), ~+8ms cold first request settled (55–63 → 63–73ms), ~+0.2ms/request warm
+  (the bridge's per-event scope + telemetry wiring). A request fired immediately after
+  script upload reads 700ms+ locally — workerd compiling the larger bundle, not real cold
+  start; prod compiles at upload.
+- **The blocker is structural, not performance.** Alchemy's sanctioned forms co-locate
+  props with the entry module (`main: import.meta.url`); Maple's props are
+  stage-parameterized in the factories, and the `dev` block imports portless, which must
+  not enter the bundle. The workaround is a second same-id construct as the bundle entry —
+  the bundler requires `main`'s default export to be a Worker construct, a bare impl never
+  registers a fetch handler — and collapsing that duplication means making `env`
+  runtime-resolvable (the bridge _yields_ env props per isolate) and redesigning the
+  stage-gated config groups: more machinery than it removes.
+- **It also couples CI**: the factory imports the runtime impl, pulling the worker graph
+  into the Alchemy-entrypoints typecheck, which then needs the sdk's built dist and the
+  app's install closure in the quality shard (bun nests workspace deps under the dependent
+  app, so a filtered install that omits the app leaves its imports unresolvable there).
+- Contract details that cost real digging: impl executes at plan time too (alchemy derives
+  the shape from it); init runs with no ambient Scope and the isolate build scope never
+  closes on workerd, so init layers must be value-shaped; `Effect.orDie` on the router's
+  http effect is exact error parity with `toWebHandler` (both leave the failure in the
+  cause the tracer records; the bridge converts Respondable defects to their responses).
+
+Revisit if alchemy grows a way to inject stack-side props into a single-module worker, or
+a seam for contributing services to the per-event handler context from init.
+
 ## The retired AWS opt-in flag (`MAPLE_DEPLOY_AWS_INGEST`)
 
 The Rust OTLP gateway (`apps/ingest`) moved from Railway to ECS Fargate. While the
