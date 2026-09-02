@@ -162,6 +162,12 @@ const apiConfiguredEnv = (stage: MapleStage, domains: MapleDomains) =>
 		// Dev-only escape hatch from per-org BYO rows; the runtime ignores it
 		// outside MAPLE_ENVIRONMENT=development, so binding it everywhere is safe.
 		optionalPlain("MAPLE_IGNORE_ORG_CLICKHOUSE"),
+		// Pins every request to one org (`resolve-tenant.ts`), which is how a
+		// developer's Clerk session reaches the org that holds the local data.
+		// Dev stages ONLY: wrangler used to hand the Worker every `.env.local` key,
+		// alchemy binds only what is declared here — and on a deploy an override
+		// would point the whole API at a single tenant.
+		...(stage.kind === "dev" ? [optionalPlain("MAPLE_ORG_ID_OVERRIDE")] : []),
 		authEnv,
 		ingestKeyCryptoEnv,
 		requireSecretEntry("MAPLE_SHARE_TOKEN_HMAC_KEY"),
