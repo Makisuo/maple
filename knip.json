@@ -33,7 +33,9 @@
 			"entry": ["src/worker.ts", "alchemy.run.ts"]
 		},
 		"apps/electric-sync": {
-			"entry": ["src/worker.ts", "alchemy.run.ts"]
+			// Single-module Worker: the root alchemy.run.ts imports it, and alchemy
+			// bundles it, so it is the app's one entry.
+			"entry": ["src/worker.ts"]
 		},
 		"apps/local-ui": {
 			"entry": ["src/worker.ts", "alchemy.run.ts"]

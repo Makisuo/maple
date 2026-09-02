@@ -201,8 +201,11 @@ jobs:
             fail-fast: false
             matrix:
                 include:
+                    # electric-sync too: the root alchemy.run.ts imports its
+                    # single-module Worker, so the Alchemy-entrypoints typecheck
+                    # resolves that graph through apps/electric-sync/node_modules.
                     - shard: quality
-                      install-filters: "@maple/api"
+                      install-filters: "@maple/api @maple/electric-sync"
                     - shard: effect-lint
                       install-filters: ""
                     - shard: build-web
@@ -335,6 +338,12 @@ jobs:
             # `turbo typecheck` does not cover tsconfig.alchemy.json (alchemy.run.ts and
             # every apps/*/alchemy.run.ts) — only the root `typecheck` script chains it,
             # and CI calls turbo directly. Without this they ship unchecked.
+            #
+            # That program now reaches electric-sync's single-module Worker, whose
+            # `@maple-dev/effect-sdk` import types from built dist, so the sdk builds first.
+            - name: Build the libraries the Alchemy entrypoints import
+              if: ${{ matrix.shard == 'quality' }}
+              run: bun turbo build --filter=@maple-dev/effect-sdk
             - name: Typecheck Alchemy entrypoints
               if: ${{ matrix.shard == 'quality' }}
               run: bunx tsc -p tsconfig.alchemy.json
