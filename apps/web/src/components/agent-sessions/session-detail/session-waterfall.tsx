@@ -9,6 +9,7 @@ import { formatSessionDuration } from "@maple/ui/lib/replay-format"
 import { cn } from "@maple/ui/lib/utils"
 
 import { useListNavigation } from "@/hooks/use-list-navigation"
+import type { SessionSpansState } from "@/hooks/use-session-spans"
 import { usePageScrollMargin } from "@/hooks/use-page-scroll-margin"
 import { buildSessionAxis, type AxisTick, type SessionAxis } from "@/lib/agent-sessions/session-axis"
 import {
@@ -79,6 +80,12 @@ interface SessionWaterfallProps {
 	/** Expansion state lives in SessionViews so a Trace → Flow → Trace round-trip keeps it. */
 	collapsedTurns: ReadonlySet<string>
 	onToggleTurn: (turnId: string) => void
+	/**
+	 * How a turn's app spans are fetched, for a session larger than one page —
+	 * its later turns hold the agent's spans alone until asked. Absent for a
+	 * session loaded whole.
+	 */
+	appSpans?: SessionSpansState["appSpans"]
 	/** The one span open in the popover (`?span=`). */
 	selectedSpanId: string | undefined
 	/** A span sent here from another view's inspection panel: its row is scrolled
@@ -104,6 +111,7 @@ export function SessionWaterfall({
 	collapseIdle,
 	collapsedTurns,
 	onToggleTurn,
+	appSpans,
 	selectedSpanId,
 	revealedSpanId,
 	revealedTurnId,
@@ -314,6 +322,10 @@ export function SessionWaterfall({
 											turns={turns}
 											axis={axis}
 											collapsed={collapsedTurns.has(row.turn.id)}
+											// App spans are hidden under the agent-only toggle, so
+											// offering to load them there would fetch rows the view
+											// then does not draw.
+											appSpans={agentSpansOnly ? undefined : appSpans}
 											revealed={revealedTurnId === row.turn.id}
 											onToggle={() => onToggleTurn(row.turn.id)}
 										/>
@@ -462,6 +474,7 @@ function TurnHeader({
 	collapsed,
 	revealed,
 	onToggle,
+	appSpans,
 }: {
 	row: Extract<WaterfallRow, { kind: "turn" }>
 	/** The whole session's turns: a reporter wider than this one belongs to none. */
@@ -471,6 +484,7 @@ function TurnHeader({
 	/** The turn the reader was sent here to see: marked until they move on. */
 	revealed: boolean
 	onToggle: () => void
+	appSpans: SessionSpansState["appSpans"] | undefined
 }) {
 	const { turn } = row
 	// Tokens and duration are facts about the turn, not about the rows on screen:
@@ -484,6 +498,7 @@ function TurnHeader({
 	// is a segment of the session, not an established exchange with the user.
 	const ordinal = `${turn.anchorKind === "trace" ? "Segment" : "Turn"} ${turn.index}`
 	const traceId = turn.traceIds[0]
+	const appLoad = appSpanLoad(turn, appSpans)
 
 	return (
 		<div
@@ -532,6 +547,23 @@ function TurnHeader({
 						</span>
 					)}
 				</button>
+				{appLoad !== undefined && (
+					<button
+						type="button"
+						onClick={appLoad.onClick}
+						disabled={appLoad.disabled}
+						// Every uncovered turn offers the same words; the ordinal is
+						// what tells them apart to a reader who cannot see the row.
+						aria-label={`${appLoad.label} for ${ordinal}`}
+						className={cn(
+							"shrink-0 rounded-sm border border-input px-1.5 py-px text-[10px] text-muted-foreground",
+							"hover:bg-accent hover:text-foreground disabled:opacity-60",
+							"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+						)}
+					>
+						{appLoad.label}
+					</button>
+				)}
 				{traceId !== undefined && (
 					<span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground uppercase tracking-wider">
 						<TraceLink traceId={traceId} timestamp={turn.anchor.timestamp} />
@@ -780,4 +812,31 @@ function spanTokens(span: AiSessionSpan): string {
 	if (buckets === undefined || buckets.total === 0) return "—"
 	const completion = buckets.output + buckets.reasoning
 	return `${formatNumber(buckets.total - completion)} → ${formatNumber(completion)}`
+}
+
+/**
+ * The header's "load app spans" control for one turn, or nothing when there
+ * is nothing to load: the session came whole, the turn already holds app
+ * spans from the first page, or every page of them has been fetched.
+ */
+function appSpanLoad(
+	turn: SessionTurn,
+	appSpans: SessionSpansState["appSpans"] | undefined,
+): { label: string; disabled: boolean; onClick: () => void } | undefined {
+	if (appSpans === undefined) return undefined
+	const state = appSpans.of(turn)
+	if (state === undefined) {
+		// The first page carried the session's opening whole, app spans and all,
+		// so a turn that already shows some was never cut.
+		if (turn.spans.some((span) => !span.isAiSpan)) return undefined
+		return { label: "Load app spans", disabled: false, onClick: () => appSpans.load(turn) }
+	}
+	if (state.loading) return { label: "Loading app spans…", disabled: true, onClick: () => undefined }
+	if (state.failed) return { label: "Retry app spans", disabled: false, onClick: () => appSpans.load(turn) }
+	if (state.complete) return undefined
+	return {
+		label: `Load more app spans (${state.loaded.toLocaleString("en-US")} loaded)`,
+		disabled: false,
+		onClick: () => appSpans.load(turn),
+	}
 }

@@ -80,6 +80,17 @@ export const traceSessionTraceId = (sessionId: string): string | undefined => {
 export const MAPLE_NATIVE_SESSION_ID_ATTR = "maple_ai.session.id"
 /** Groups one turn's spans inside a session; lifted into `conversationId` read-side. */
 export const MAPLE_NATIVE_TURN_ID_ATTR = "maple_ai.turn.id"
+
+// `gen_ai.operation.name` is an open set. These group the semantic convention's
+// operation names — plus `agent_step`, which the Vercel AI SDK emits and
+// production data carries — into the four readings the product distinguishes.
+// Shared between the session summary query and the web's span classifier so an
+// "llm call" is the same span on the server and on the page.
+export const AI_INFERENCE_OPERATIONS = ["chat", "generate_content", "text_completion", "fetch_response"] as const
+/** Inference-shaped work that is not a model turn: an embedding is never an "llm call". */
+export const AI_RETRIEVAL_OPERATIONS = ["embeddings", "retrieval"] as const
+export const AI_TOOL_OPERATIONS = ["execute_tool"] as const
+export const AI_AGENT_OPERATIONS = ["invoke_agent", "create_agent", "invoke_workflow", "plan", "agent_step"] as const
 /**
  * Count of whole oldest messages dropped from `gen_ai.input.messages` to fit
  * the emitter's attribute budget. Write-only diagnostics: nothing decodes it,

@@ -1,6 +1,10 @@
 import { Clock, Effect, Schema } from "effect"
 import {
+	AI_SESSION_SPANS_MAX_TRACE_IDS,
+	AiSessionSpanCursor,
+	AiSessionSpanScope,
 	GetAiSessionSpansRequest,
+	GetAiSessionSummaryRequest,
 	ListAiSessionsFacetsRequest,
 	ListAiSessionsRequest,
 } from "@maple/domain/http"
@@ -90,6 +94,13 @@ const AiSessionSpansInput = Schema.Struct({
 	// warehouse find the session by id across retention.
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
+	/** `all` when absent — the first page of a session. */
+	scope: Schema.optional(AiSessionSpanScope),
+	/** The previous page's `nextCursor`. */
+	after: Schema.optional(AiSessionSpanCursor),
+	/** A turn's traces, for its `app` spans — needs the window. */
+	traceIds: Schema.optional(Schema.Array(Schema.String).check(Schema.isMaxLength(AI_SESSION_SPANS_MAX_TRACE_IDS))),
+	limit: Schema.optional(Schema.Number),
 })
 export type AiSessionSpansInput = Schema.Schema.Type<typeof AiSessionSpansInput>
 
@@ -111,9 +122,44 @@ export const getAiSessionSpans = Effect.fn("AiSessions.aiSessionSpans")(function
 					...(input.startTime !== undefined && input.endTime !== undefined
 						? { startTime: input.startTime, endTime: input.endTime }
 						: undefined),
+					...(input.scope !== undefined && { scope: input.scope }),
+					...(input.after !== undefined && { after: input.after }),
+					...(input.traceIds !== undefined && { traceIds: input.traceIds }),
+					...(input.limit !== undefined && { limit: input.limit }),
 				}),
 			})
 		}),
 	)
-	return { data: result.data, truncated: result.truncated }
+	return { data: result.data, nextCursor: result.nextCursor }
+})
+export type AiSessionSpansPage = Effect.Success<ReturnType<typeof getAiSessionSpans>>
+
+const AiSessionSummaryInput = Schema.Struct({
+	sessionId: Schema.String.check(Schema.isMinLength(1)),
+	startTime: Schema.optional(WarehouseDateTimeString),
+	endTime: Schema.optional(WarehouseDateTimeString),
+})
+export type AiSessionSummaryInput = Schema.Schema.Type<typeof AiSessionSummaryInput>
+
+/** The whole session's totals, however many spans it has — see `GetAiSessionSummaryResponse`. */
+export const getAiSessionSummary = Effect.fn("AiSessions.aiSessionSummary")(function* ({
+	data,
+}: {
+	data: AiSessionSummaryInput
+}) {
+	const input = yield* decodeInput(AiSessionSummaryInput, data, "aiSessionSummary")
+	yield* Effect.annotateCurrentSpan("sessionId", input.sessionId)
+	return yield* runWarehouseQuery("aiSessionSummary", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleInternalAtomClient
+			return yield* client.aiSessionsInternal.summary({
+				payload: new GetAiSessionSummaryRequest({
+					sessionId: input.sessionId,
+					...(input.startTime !== undefined && input.endTime !== undefined
+						? { startTime: input.startTime, endTime: input.endTime }
+						: undefined),
+				}),
+			})
+		}),
+	)
 })

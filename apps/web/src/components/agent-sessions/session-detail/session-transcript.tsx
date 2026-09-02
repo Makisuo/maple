@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, type ReactNode } from "re
 import { useVirtualizer } from "@tanstack/react-virtual"
 
 import type { AiSessionSpan } from "@maple/domain/http"
+import { Button } from "@maple/ui/components/ui/button"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { formatBytes, formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
@@ -89,7 +90,9 @@ export function SessionTranscript({
 	query,
 	showThinking,
 	showPayloads,
-	truncated,
+	hasMore,
+	loadingMore,
+	onLoadMore,
 	collapsedTurns,
 	onToggleTurn,
 	openRows,
@@ -105,8 +108,10 @@ export function SessionTranscript({
 	showThinking: boolean
 	/** The toolbar's "Expand tool payloads" chip: arguments and results open by default. */
 	showPayloads: boolean
-	/** The response dropped the END of the session. */
-	truncated: boolean
+	/** Agent spans remain past the loaded pages: the END of the session is not here yet. */
+	hasMore: boolean
+	loadingMore: boolean
+	onLoadMore: (() => void) | undefined
 	collapsedTurns: ReadonlySet<string>
 	onToggleTurn: (turnId: string) => void
 	/** Rows whose disclosure the reader has flipped away from its default — held
@@ -129,10 +134,10 @@ export function SessionTranscript({
 				toolResults,
 				query: deferredQuery,
 				showThinking,
-				truncated,
+				hasMore,
 				collapsedTurns,
 			}),
-		[turns, toolResults, deferredQuery, showThinking, truncated, collapsedTurns],
+		[turns, toolResults, deferredQuery, showThinking, hasMore, collapsedTurns],
 	)
 
 	const virtualizer = useVirtualizer({
@@ -195,6 +200,8 @@ export function SessionTranscript({
 								<TranscriptBlock
 									row={row}
 									timeZone={effectiveTimezone}
+									loadingMore={loadingMore}
+									onLoadMore={onLoadMore}
 									showPayloads={showPayloads}
 									collapsed={row.kind === "turn" && collapsedTurns.has(row.turn.id)}
 									onToggleTurn={onToggleTurn}
@@ -213,6 +220,9 @@ export function SessionTranscript({
 }
 
 interface BlockProps {
+	/** For the terminal divider of a partly loaded session. */
+	loadingMore: boolean
+	onLoadMore: (() => void) | undefined
 	row: TranscriptRow
 	timeZone: string
 	showPayloads: boolean
@@ -1264,7 +1274,12 @@ function NoteBlock({ row }: { row: Extract<TranscriptRow, { kind: "note" }> }) {
 	)
 }
 
-function DividerBlock({ row, timeZone }: BlockProps & { row: Extract<TranscriptRow, { kind: "divider" }> }) {
+function DividerBlock({
+	row,
+	timeZone,
+	loadingMore,
+	onLoadMore,
+}: BlockProps & { row: Extract<TranscriptRow, { kind: "divider" }> }) {
 	if (row.dividerKind === "compaction") {
 		return (
 			<Row
@@ -1287,21 +1302,24 @@ function DividerBlock({ row, timeZone }: BlockProps & { row: Extract<TranscriptR
 		)
 	}
 
-	// Truncation drops the END of the session. Never a synthetic conclusion: the
-	// divider says the reading stops here, not that the agent did. The wording
-	// matches the page's own banner, so the two read as one fact stated twice
-	// rather than as two different problems.
+	// The pages end here, the session does not. Never a synthetic conclusion:
+	// the divider says the reading stops here, not that the agent did. The
+	// wording matches the page's own banner, so the two read as one fact stated
+	// twice rather than as two different problems.
 	return (
 		<div className="mt-8 flex flex-col items-center gap-3 border-input border-t border-dashed pt-6 pb-2">
 			<div className="flex items-center gap-2">
 				<AlertWarningIcon size={14} className="text-severity-warn" />
-				<span className={cn(LABEL, "text-severity-warn")}>Session truncated</span>
+				<span className={cn(LABEL, "text-severity-warn")}>More of this session follows</span>
 			</div>
 			<p className="text-center text-[13px] text-muted-foreground">
-				This session has more spans than one response carries — later activity is not shown, and this
-				is not where the session ended.
+				The agent's later spans are not loaded yet — this is not where the session ended.
 			</p>
-			<p className="text-muted-foreground text-xs">Narrow the time range to see the rest.</p>
+			{onLoadMore !== undefined && (
+				<Button variant="outline" size="sm" onClick={onLoadMore} disabled={loadingMore}>
+					{loadingMore ? "Loading…" : "Load more"}
+				</Button>
+			)}
 		</div>
 	)
 }

@@ -54,7 +54,7 @@ export type TranscriptNoteKind =
 	/** The emitting service changed and so did what it records. */
 	| "capture-boundary"
 
-export type TranscriptDividerKind = "compaction" | "truncated"
+export type TranscriptDividerKind = "compaction" | "more"
 
 /** Which halves of a call an emitter records. Mixed sessions have several. */
 export type CaptureCoverage = "both" | "input" | "output" | "none"
@@ -239,8 +239,8 @@ export interface TranscriptInput {
 	readonly query: string
 	/** The toolbar's "Thinking" chip. */
 	readonly showThinking: boolean
-	/** `GetAiSessionSpansResponse.truncated` — the END of the session is missing. */
-	readonly truncated: boolean
+	/** Agent spans remain past the loaded pages — the END of the session is not here yet. */
+	readonly hasMore: boolean
 	readonly collapsedTurns: ReadonlySet<string>
 }
 
@@ -327,9 +327,23 @@ export function buildTranscript(input: TranscriptInput): readonly TranscriptRow[
 		}
 	}
 
+	// Pages are the session's oldest spans first, so what is missing is the END
+	// of the session and the divider is terminal: it says where the reading
+	// stops, not where the agent did.
+	const moreDivider: TranscriptRow = {
+		kind: "divider",
+		key: "divider:more",
+		depth: 0,
+		dividerKind: "more",
+		startMs: undefined,
+	}
+
 	// Nothing survived. The empty state says which of the two reasons it was, and
-	// a lone banner or a divider hanging over nothing would only muddy it.
-	if (body.length === 0) return []
+	// a lone banner hanging over nothing would only muddy it. The exception is a
+	// session with more still to load and no filter in the way: "no AI activity"
+	// is not yet true of it — the opening was the app's own work — so the
+	// divider stands alone as the honest row.
+	if (body.length === 0) return input.hasMore && input.query === "" ? [moreDivider] : []
 
 	const rows: TranscriptRow[] = []
 	if (bannerUp) {
@@ -344,17 +358,7 @@ export function buildTranscript(input: TranscriptInput): readonly TranscriptRow[
 	}
 	rows.push(...body)
 
-	// Truncation drops the END of the session, so the divider is terminal and
-	// unconditional: it says where the reading stops, not where the agent did.
-	if (input.truncated) {
-		rows.push({
-			kind: "divider",
-			key: "divider:truncated",
-			depth: 0,
-			dividerKind: "truncated",
-			startMs: undefined,
-		})
-	}
+	if (input.hasMore) rows.push(moreDivider)
 	return rows
 }
 

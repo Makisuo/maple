@@ -17,7 +17,7 @@ function transcript(spans: readonly AiSessionSpan[], overrides: Partial<Transcri
 		toolResults: sessionToolResults(spans),
 		query: "",
 		showThinking: true,
-		truncated: false,
+		hasMore: false,
 		collapsedTurns: new Set(),
 		...overrides,
 	})
@@ -917,11 +917,11 @@ describe("buildTranscript — session-level states", () => {
 	})
 
 	// The END of the session is what truncation drops, so the divider is last.
-	it("closes a truncated session on a terminal divider", () => {
-		const rows = transcript(simple, { truncated: true })
+	it("closes a partly loaded session on a terminal divider", () => {
+		const rows = transcript(simple, { hasMore: true })
 		const last = rows.at(-1)
 		if (last?.kind !== "divider") throw new Error("expected a terminal divider")
-		expect(last.dividerKind).toBe("truncated")
+		expect(last.dividerKind).toBe("more")
 	})
 
 	it("adds no divider to a whole session", () => {
@@ -1556,7 +1556,7 @@ describe("buildTranscript — filtering", () => {
 			durationMs: 5 * SECOND,
 			children: [llmSpan({ spanId: "l1", parentSpanId: "agent", startMs: 0, durationMs: SECOND })],
 		})
-		expect(transcript(silent, { query: "zzz", truncated: true })).toHaveLength(0)
+		expect(transcript(silent, { query: "zzz", hasMore: true })).toHaveLength(0)
 	})
 })
 
@@ -1570,7 +1570,7 @@ describe("buildTranscript — row keys", () => {
 			toolResults: sessionToolResults(spans),
 			query: "",
 			showThinking: true,
-			truncated: true,
+			hasMore: true,
 			collapsedTurns: new Set(),
 		})
 		expect(rows.length).toBeGreaterThan(20)

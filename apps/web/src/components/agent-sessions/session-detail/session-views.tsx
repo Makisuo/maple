@@ -13,7 +13,10 @@ import { SearchInput } from "@maple/ui/components/ui/search-input"
 import { Switch } from "@maple/ui/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
 
+import type { GetAiSessionSummaryResponse } from "@maple/domain/http"
+
 import { useAppHotkey } from "@/hooks/use-app-hotkey"
+import type { SessionSpansState } from "@/hooks/use-session-spans"
 import type { SessionSummary } from "@/lib/agent-sessions/session-summary"
 import type { SessionTurn } from "@/lib/agent-sessions/session-turns"
 import { SessionFlow } from "./session-flow"
@@ -48,12 +51,25 @@ const DEBUG_VIEWS: readonly SessionView[] = ["trace", "flow"]
  * but not the span-kind toggle, which it has no use for: it never shows the
  * app's own HTTP spans at all.
  */
+/**
+ * How a session larger than one page continues: the next page of agent spans,
+ * and each turn's app spans on demand. Absent for a session that fit one page
+ * — then every view already holds the whole session.
+ */
+export interface SessionPaging {
+	readonly hasMore: boolean
+	readonly loadingMore: boolean
+	readonly onLoadMore: () => void
+	readonly appSpans: SessionSpansState["appSpans"]
+}
+
 export function SessionViews({
 	view,
 	onViewChange,
 	turns,
 	summary,
-	truncated,
+	paging,
+	totals,
 	selectedSpanId,
 	onSelectSpan,
 }: {
@@ -61,8 +77,10 @@ export function SessionViews({
 	onViewChange: (view: SessionView) => void
 	turns: readonly SessionTurn[]
 	summary: SessionSummary
-	/** The response dropped the END of the session — the transcript says so. */
-	truncated: boolean
+	/** Present while the session is only partly loaded. */
+	paging: SessionPaging | undefined
+	/** The whole session's totals, for the Overview of a partly loaded session. */
+	totals: GetAiSessionSummaryResponse | undefined
 	/** The span open in the inspection popover, in whichever view (`?span=`). */
 	selectedSpanId: string | undefined
 	/** Raised with a span id to open it, `undefined` to close. */
@@ -281,6 +299,7 @@ export function SessionViews({
 					<SessionOverview
 						turns={turns}
 						summary={summary}
+						totals={totals}
 						selectedSpanId={selectedSpanId}
 						onSelectSpan={selectSpan}
 						spanTab={spanTab}
@@ -301,6 +320,7 @@ export function SessionViews({
 						collapseIdle={collapseIdle}
 						collapsedTurns={collapsedTurns}
 						onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
+						appSpans={paging?.appSpans}
 						selectedSpanId={selectedSpanId}
 						revealedSpanId={revealedSpanId}
 						revealedTurnId={revealedTurnId}
@@ -337,7 +357,9 @@ export function SessionViews({
 						query={query}
 						showThinking={showThinking}
 						showPayloads={showPayloads}
-						truncated={truncated}
+						hasMore={paging?.hasMore === true}
+						loadingMore={paging?.loadingMore === true}
+						onLoadMore={paging?.onLoadMore}
 						collapsedTurns={collapsedTurns}
 						onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
 						openRows={openRows}

@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, type ReactNode } from "react"
 import { createFileRoute, Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import { Schema } from "effect"
 
-import type { AiSessionSpan } from "@maple/domain/http"
+import type { GetAiSessionSummaryResponse } from "@maple/domain/http"
 import { formatWarehouseDateTime } from "@maple/query-engine"
+import { toEpochMs } from "@maple/ui/lib/time-format"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatRelativeTimeOrDate } from "@maple/ui/lib/time-format"
 
@@ -22,6 +23,7 @@ import {
 	type SessionView,
 } from "@/components/agent-sessions/session-detail/session-views"
 import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
+import { useSessionSpans, type SessionSpansState } from "@/hooks/use-session-spans"
 import {
 	breadcrumbSessionId,
 	buildBackToSessionsHref,
@@ -33,7 +35,8 @@ import { vendorIcon } from "@/lib/agent-sessions/vendor-icon"
 import { vendorLabel } from "@/lib/agent-sessions/vendor-label"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { displayError } from "@/lib/error-messages"
-import { aiSessionSpansResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
+import { aiSessionSummaryResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 
 const agentSessionSearchSchema = Schema.Struct({
 	// Warehouse timestamps: the session's first and last span, carried in from
@@ -80,9 +83,17 @@ function AgentSessionDetailContent() {
 	const queryWindow = useMemo(() => resolveWindow(search.t, search.end), [search.t, search.end])
 	// `undefined` spreads to nothing, which is exactly the request the endpoint
 	// reads as "resolve this session from its id".
-	const result = useAtomValue(aiSessionSpansResultAtom({ data: { sessionId, ...queryWindow } }))
+	const spansState = useSessionSpans(sessionId, queryWindow)
+	// The whole session's totals — only for a session that did not fit the
+	// first page. One that did is complete in hand, and what the page computes
+	// from it IS the total; the extra warehouse read would buy nothing.
+	const summaryResult = useAtomValue(
+		spansState.partial
+			? aiSessionSummaryResultAtom({ data: { sessionId, ...queryWindow } })
+			: disabledResultAtom<GetAiSessionSummaryResponse>(),
+	)
 
-	return Result.builder(result)
+	return Result.builder(spansState.firstPage)
 		.onInitial(() => (
 			<SessionShell sessionId={sessionId}>
 				<DashboardLayout.Content>
@@ -151,7 +162,11 @@ function AgentSessionDetailContent() {
 					</DashboardLayout.Content>
 				</SessionShell>
 			) : (
-				<SessionDetailBody sessionId={sessionId} spans={value.data} truncated={value.truncated} />
+				<SessionDetailBody
+					sessionId={sessionId}
+					spansState={spansState}
+					totals={Result.isSuccess(summaryResult) ? summaryResult.value : undefined}
+				/>
 			),
 		)
 		.render()
@@ -159,13 +174,14 @@ function AgentSessionDetailContent() {
 
 function SessionDetailBody({
 	sessionId,
-	spans,
-	truncated,
+	spansState,
+	totals,
 }: {
 	sessionId: string
-	spans: readonly AiSessionSpan[]
-	truncated: boolean
+	spansState: SessionSpansState
+	totals: GetAiSessionSummaryResponse | undefined
 }) {
+	const { spans, partial, hasMore, loadingMore, loadMore, appSpans } = spansState
 	const turns = useMemo(() => buildSessionTurns(spans), [spans])
 	const summary = useMemo(() => buildSessionSummary({ spans, turns }), [spans, turns])
 
@@ -199,17 +215,25 @@ function SessionDetailBody({
 	// A session still being written gets the bounds it had at read time, exactly
 	// as a link from the list page does — the padding `resolveWindow` adds is the
 	// only slack either one has.
+	//
+	// For a session that did not fit the first page the bounds are the whole
+	// session's, from the totals read: stamping where the spans in hand end
+	// would make every later load of the link read a session cut short. Until
+	// that read answers — and if it never does — the link stays unstamped,
+	// which costs a resolve per load and lies to no one.
+	const startMs = totals?.startTime === undefined ? summary.startMs : toEpochMs(totals.startTime)
+	const endMs = totals?.endTime === undefined ? summary.endMs : toEpochMs(totals.endTime)
 	useEffect(() => {
-		if (search.t !== undefined) return
+		if (search.t !== undefined || (partial && totals === undefined)) return
 		navigate({
 			replace: true,
 			search: (prev: Record<string, unknown>) => ({
 				...prev,
-				t: formatWarehouseDateTime(summary.startMs),
-				end: formatWarehouseDateTime(summary.endMs),
+				t: formatWarehouseDateTime(startMs),
+				end: formatWarehouseDateTime(endMs),
 			}),
 		})
-	}, [navigate, search.t, summary.startMs, summary.endMs])
+	}, [navigate, search.t, partial, totals, startMs, endMs])
 
 	const selectSpan = useCallback(
 		(spanId: string | undefined) => {
@@ -272,13 +296,23 @@ function SessionDetailBody({
 				    `overflow-x-hidden` means a span that escapes its truncation can
 				    never make the whole page scroll sideways. */}
 				<DashboardLayout.Scroll className="overflow-x-hidden py-0 pr-6">
-					{truncated && (
+					{partial && (
 						<div className="shrink-0 py-4">
 							<Alert variant="warning">
-								<AlertDescription>
-									This session has more spans than one response carries — everything after
-									the {summary.spanCount.toLocaleString()} spans below is missing, so the
-									totals and the waterfall both stop early.
+								<AlertDescription className="flex flex-wrap items-center gap-x-3 gap-y-2">
+									<span>
+										{hasMore ? "Showing the first " : "Showing "}
+										{summary.spanCount.toLocaleString()}
+										{totals === undefined ? " spans" : ` of ${totals.spanCount.toLocaleString()} spans`}
+										{hasMore
+											? " — the agent's later spans load in pages, and a turn's app spans on demand in the Traces view."
+											: " — every agent span is loaded; a turn's app spans load on demand in the Traces view."}
+									</span>
+									{hasMore && (
+										<Button variant="outline" size="xs" onClick={loadMore} disabled={loadingMore}>
+											{loadingMore ? "Loading…" : "Load more agent spans"}
+										</Button>
+									)}
 								</AlertDescription>
 							</Alert>
 						</div>
@@ -294,7 +328,8 @@ function SessionDetailBody({
 							onViewChange={changeView}
 							turns={turns}
 							summary={summary}
-							truncated={truncated}
+							paging={partial ? { hasMore, loadingMore, onLoadMore: loadMore, appSpans } : undefined}
+							totals={partial ? totals : undefined}
 							selectedSpanId={search.span}
 							onSelectSpan={selectSpan}
 						/>

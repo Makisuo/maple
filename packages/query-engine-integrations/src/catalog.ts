@@ -131,6 +131,79 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 			),
 	},
 	{
+		// The second page of a large session's agent spans: the keyset cursor
+		// and the scope predicate, on the session-keyed form.
+		module: "ai-sessions",
+		name: "aiSessionSpansQuery",
+		label: "ai-scope-after-cursor",
+		compile: () =>
+			compileUnsafe(
+				CH.aiSessionSpansQuery({
+					scope: "ai",
+					after: { timestamp: "2026-01-01 10:30:00.123456789", spanId: "00000000000007d0" },
+				}),
+				{ ...window, sessionId: "wrun_sql_catalog" },
+				{ rowSchema: CH.aiSessionSpansRowSchema },
+			),
+	},
+	{
+		// One turn's app spans: the detail page names the turn's traces and asks
+		// for the complement of the agent spans it already holds.
+		module: "ai-sessions",
+		name: "aiTraceSpansQuery",
+		label: "traces-app-scope",
+		compile: () =>
+			compileUnsafe(
+				CH.aiTraceSpansQuery({ scope: "app", traceIds: [AI_TRACE_ID, "0123456789abcdef0123456789abcdef"] }),
+				window,
+				{ rowSchema: CH.aiSessionSpansRowSchema },
+			),
+	},
+	{
+		module: "ai-sessions",
+		name: "aiSessionSummaryQuery",
+		label: "default",
+		compile: () =>
+			compileUnsafe(
+				CH.aiSessionSummaryQuery(),
+				{ ...window, sessionId: "wrun_sql_catalog" },
+				{ rowSchema: CH.aiSessionSummaryRowSchema },
+			),
+	},
+	{
+		module: "ai-sessions",
+		name: "aiTraceSummaryQuery",
+		label: "default",
+		compile: () =>
+			compileUnsafe(
+				CH.aiTraceSummaryQuery(),
+				{ ...window, traceId: AI_TRACE_ID },
+				{ rowSchema: CH.aiSessionSummaryRowSchema },
+			),
+	},
+	{
+		module: "ai-sessions",
+		name: "aiSessionTotalsQuery",
+		label: "default",
+		compile: () =>
+			compileUnsafe(
+				CH.aiSessionTotalsQuery(),
+				{ ...window, sessionId: "wrun_sql_catalog" },
+				{ rowSchema: CH.aiSessionTotalsRowSchema },
+			),
+	},
+	{
+		module: "ai-sessions",
+		name: "aiTraceTotalsQuery",
+		label: "default",
+		compile: () =>
+			compileUnsafe(
+				CH.aiTraceTotalsQuery(),
+				{ ...window, traceId: AI_TRACE_ID },
+				{ rowSchema: CH.aiSessionTotalsRowSchema },
+			),
+	},
+	{
 		module: "cloudflare-infra",
 		name: "cloudflareZoneLatencySQL",
 		label: "default",
