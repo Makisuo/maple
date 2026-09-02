@@ -4,7 +4,6 @@ import {
 	InternalScrapeTargetList,
 	type InternalScrapeTarget,
 	type ScrapeResultReport,
-	type ScrapeTargetId,
 } from "@maple/domain/http"
 import { ScraperEnv } from "./Env"
 
@@ -13,25 +12,12 @@ export class ApiRequestError extends Schema.TaggedError<ApiRequestError>()("@map
 	status: Schema.NullOr(Schema.Number),
 }) {}
 
-export interface ScrapeProxyResponse {
-	readonly status: number
-	readonly body: string
-	/** Upstream `Retry-After` in seconds (delta-seconds form), or `null` when absent. */
-	readonly retryAfterSeconds: number | null
-}
-
 export interface ApiClientApi {
-	/** Enabled scrape targets from `/api/internal/scrape-targets`. */
-	readonly listTargets: () => Effect.Effect<ReadonlyArray<InternalScrapeTarget>, ApiRequestError>
 	/**
-	 * Fetch a target's exposition text through the API-side proxy. The proxy
-	 * decrypts credentials and applies SSRF protection; `status` is the
-	 * upstream target's HTTP status.
+	 * Enabled scrape targets from `/api/internal/scrape-targets`, each carrying
+	 * the URL to fetch and its decrypted auth headers (see {@link InternalScrapeTarget}).
 	 */
-	readonly scrapeTarget: (
-		targetId: ScrapeTargetId,
-		subTargetKey?: string | null,
-	) => Effect.Effect<ScrapeProxyResponse, ApiRequestError>
+	readonly listTargets: () => Effect.Effect<ReadonlyArray<InternalScrapeTarget>, ApiRequestError>
 	/** Report scrape outcomes to `/api/internal/scrape-results`. */
 	readonly reportResults: (
 		results: ReadonlyArray<ScrapeResultReport>,
@@ -96,27 +82,6 @@ export class ApiClient extends Context.Service<ApiClient, ApiClientApi>()("@mapl
 			)
 		})
 
-		const scrapeTarget = Effect.fn("ApiClient.scrapeTarget")(function* (
-			targetId: ScrapeTargetId,
-			subTargetKey?: string | null,
-		) {
-			const sub = subTargetKey ? `&sub=${encodeURIComponent(subTargetKey)}` : ""
-			const request = HttpClientRequest.get(
-				`${env.MAPLE_API_URL}/api/internal/prometheus-scrape?targetId=${encodeURIComponent(targetId)}${sub}`,
-				{ headers: authHeaders },
-			)
-			const response = yield* client
-				.execute(request)
-				.pipe(Effect.annotateSpans("peer.service", "maple-api"), Effect.timeout(REQUEST_TIMEOUT))
-			const body = yield* response.text
-			const retryAfterRaw = response.headers["retry-after"]
-			const retryAfterSeconds =
-				retryAfterRaw !== undefined && Number.isFinite(Number(retryAfterRaw))
-					? Number(retryAfterRaw)
-					: null
-			return { status: response.status, body, retryAfterSeconds } satisfies ScrapeProxyResponse
-		}, Effect.mapError(transportError))
-
 		const reportResults = Effect.fn("ApiClient.reportResults")(function* (
 			results: ReadonlyArray<ScrapeResultReport>,
 		) {
@@ -141,7 +106,7 @@ export class ApiClient extends Context.Service<ApiClient, ApiClientApi>()("@mapl
 			}
 		})
 
-		return { listTargets, scrapeTarget, reportResults } satisfies ApiClientApi
+		return { listTargets, reportResults } satisfies ApiClientApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

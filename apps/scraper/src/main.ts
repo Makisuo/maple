@@ -3,11 +3,12 @@
  * The Maple Prometheus scraper: a small standalone cron server that replaces
  * the prometheus receiver of the removed OTel collector.
  *
- * It polls the Maple API for enabled scrape targets, runs one scrape loop per
- * target at its configured interval (5–300s), fetches exposition text through
- * the API-side proxy (credentials and SSRF protection stay server-side),
- * converts it to Tinybird `metrics_*` rows, and reports scrape outcomes back
- * to the API. A `/health` endpoint serves the Railway healthcheck.
+ * It polls the Maple API for enabled scrape targets (each carrying the URL to
+ * fetch and its already-decrypted auth headers), runs one scrape loop per
+ * target at its configured interval (5–300s), fetches exposition text
+ * directly with SSRF protection, converts it to OTLP for the ingest gateway,
+ * and reports scrape outcomes back to the API. A `/health` endpoint serves
+ * the container healthcheck.
  */
 import { BunRuntime } from "@effect/platform-bun"
 import { Maple } from "@maple-dev/effect-sdk/server"
@@ -17,6 +18,7 @@ import { ApiClient } from "./ApiClient"
 import { OtlpIngest } from "./OtlpIngest"
 import { ScraperEnv } from "./Env"
 import { ScrapeScheduler } from "./ScrapeScheduler"
+import { TargetFetcher } from "./TargetFetcher"
 
 const TelemetryLayer = Maple.layer({
 	serviceName: "scraper",
@@ -26,7 +28,7 @@ const TelemetryLayer = Maple.layer({
 })
 
 const MainLayer = ScrapeScheduler.layer.pipe(
-	Layer.provide(Layer.mergeAll(ApiClient.layer, OtlpIngest.layer)),
+	Layer.provide(Layer.mergeAll(ApiClient.layer, OtlpIngest.layer, TargetFetcher.layer)),
 	Layer.provideMerge(ScraperEnv.layer),
 	Layer.provide(FetchHttpClient.layer),
 )
