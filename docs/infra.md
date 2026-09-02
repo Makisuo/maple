@@ -16,61 +16,71 @@ put it here instead. Git blame does not survive a refactor of the line it annota
   bindings, and nothing else's.
 - `packages/infra` — stage/region/domain/naming logic and the shared deploy-time env
   groups. Pure functions, unit-tested, no cloud calls.
-  - `cloudflare/stage.ts` — `MapleStage`, domains, worker names, Hyperdrive resolution.
-  - `aws/stage.ts` — `MapleRegion`, AWS naming, task sizing, Cloud Map.
-  - `env.ts` — the deploy-time env primitives and the shared groups the workers spread.
+    - `cloudflare/stage.ts` — `MapleStage`, domains, worker names, Hyperdrive resolution.
+    - `aws/stage.ts` — `MapleRegion`, AWS naming, task sizing, Cloud Map.
+    - `env.ts` — the deploy-time env primitives and the shared groups the workers spread.
 
 **Read deploy-time config through `@maple/infra/env`, not `process.env`.** Alchemy resolves
 config through a ConfigProvider built as `fromDotEnv(--env-file ?? ".env")` **orElse**
 `fromEnv()` (`alchemy/Util/ConfigProvider.ts`), and never copies the file-sourced values
 into `process.env`. A `process.env` read therefore silently ignores `.env` and
-`--env-file` — and does so *selectively*, since alchemy's own settings
+`--env-file` — and does so _selectively_, since alchemy's own settings
 (`CLOUDFLARE_ACCOUNT_ID`, `CI`, …) still pick them up, so half the deploy sees the file and
 half does not. `Config` also reports every missing key in one pass instead of throwing on
 the first, and keeps the failure in the typed error channel. `packages/alchemy-maple`'s
 `MapleEnvironment` is the same pattern inside a provider; the runtime worker env schemas
 use `@maple/effect-cloudflare/config-helpers`, which `env.ts` builds on.
 
-## Local dev, and the `alchemy dev` question
+## Local dev: `alchemy dev` for the Workers
 
-Local dev runs through **wrangler** today (`bun dev` → turbo → per-app `wrangler dev`
-behind the portless `.localhost` proxy). That is why each Worker app carries a
-`wrangler.jsonc` alongside its `alchemy.run.ts`, and why crons, DO classes, KV bindings and
-rate limiters are declared twice. The duplication is real and has already drifted:
-`apps/api/wrangler.jsonc` declares one of the three rate limiters the stack deploys.
+The three Worker apps — **api, alerting, electric-sync** — run under a single
+`alchemy dev` process:
 
-`alchemy dev` is the obvious way out — one definition, no mirroring. **Spiked 2026-08-23,
-result: promising but not yet proven.** What was established, running
-`alchemy dev spike.run.ts --stage dev_spike` against a throwaway stack containing only
-`apps/electric-sync`, with `ALCHEMY_LOCAL_STATE=1`:
+```bash
+bun run dev:workers   # api + alerting + electric-sync, one stack, one process
+bun dev               # everything else: web, landing, ingest, scraper, local-ui
+```
 
-- It works end to end at the stack level. Alchemy reconciled the Worker, wrote
-  `.alchemy/state/…/electric-sync.json` with `status: "created"`, and **started workerd**,
-  which listened on `localhost:1337`. No account state was touched.
-- The rendered bindings were correct, including the stage-derived `MAPLE_ENVIRONMENT:
-  "development"` and the correct *absence* of every unset optional key.
-- **But nothing served.** Every request to `localhost:1337` timed out (`curl` exit 28)
-  even after the resource reached `created`. The port was open; the request path was not.
-  Not diagnosed — could be the spike stack, the missing `ELECTRIC_URL`, or dev-mode
-  routing.
+`scripts/dev-workers.ts` reserves a free port per Worker, registers a static portless
+route at it (`portless alias <name> <port>`), and passes the ports into the stack, where
+each app's `dev: devServer("<app>")` picks its own up. **Ports are ephemeral by design**:
+portless exists so nobody has to care which port anything is on and so several worktrees
+can run the same app at once — a pinned port would reintroduce exactly the collision it
+removes. Linked worktrees get the same branch-prefixed hostnames portless itself
+produces (`fix-ui.api.localhost`), so both naming schemes agree.
 
-So it is not a "flip the switch" migration. Before committing, finish the spike and answer:
+The stack narrows itself under the dev server: `isDevServer` (`ALCHEMY_DEV=true`, set by
+`alchemy dev`) drops web, landing and local-ui, each of which is gated on a production
+`Command.Build` — their vite/astro dev servers serve them instead. It is not stage-derived,
+because a dev _stage_ can still be deployed to the cloud.
 
-- Why did the open port not serve? That is the blocker.
-- Do KV, DO (+ SQLite migrations), Workflows, `RateLimit`, `send_email`, the Queues
-  consumer and Assets all resolve locally? `Cloudflare/Local.ts` registers local providers
-  for Workers, Containers, Queues, Consumers, D1 and Secrets Store — **the rest of that
-  list is unverified**, and it is most of what `apps/api` binds.
-- Does it coexist with the portless proxy and `turbo dev`, or does it want to own the
-  process tree? Each Worker takes a `dev: { host, port, strictPort }`, which maps onto the
-  existing per-app ports, so this looks tractable.
-- Is `@alchemy.run/cloudflare-runtime` (a dependency of alchemy, pinned to the same beta)
-  stable enough to sit under everyone's dev loop?
+What this buys over the old per-app `wrangler dev`:
 
-**Until that lands**, do not hand-fix the mirroring — make it self-policing. A CI check
-that parses each `wrangler.jsonc` and asserts its crons, DO class names, KV bindings and
-rate-limit namespace ids match what the app's `create*` factory declares turns a silent
-drift into a failing build, and stays useful right up until the wrangler files are deleted.
+- **One definition.** Bindings come from the same `create*` factories that deploy.
+- **Crons fire on their real schedule.** `alchemy dev` runs each Worker's declared crons
+  itself, and `/cdn-cgi/handler/scheduled` triggers one on demand (Miniflare's path, always
+  on — no `--test-scheduled` flag).
+- **Almost everything is emulated locally.** Workers, KV, R2, Hyperdrive, queues + consumers,
+  Durable Objects, Workflows, rate limiters and `send_email` (written as `.eml` files under
+  `.alchemy/local/email/`) all come up `(local)`; storage lives under `.alchemy/local/`.
+  The AI Gateway is the one resource still created live in the account.
+
+Gotchas worth knowing:
+
+- **The dev Hyperdrive origin must set `sslmode: "disable"`.** Alchemy defaults a local
+  origin to `sslmode=prefer` (`Cloudflare/Hyperdrive/ConnectBinding.ts`), the driver then
+  attempts TLS against the docker Postgres, which has SSL off, and every DB call 503s with
+  `CONNECT_TIMEOUT` after the dial budget. See `createManagedMapleDb`.
+- **`MAPLE_OTEL_INGEST_KEY` is optional on dev stages only** (`selfObservabilityEnv`). The
+  local stack resolves the same env contract as a deploy, and no developer has a real
+  ingest key; without the exemption the whole stack refuses to start over a key whose only
+  job is exporting the Worker's own telemetry.
+- Dev stacks run with `ALCHEMY_LOCAL_STATE=1`, so they never touch the account state store.
+
+The six `wrangler.jsonc` files still exist and still carry the duplicated crons, DO classes,
+KV bindings and rate limiters. They are dead weight for api/alerting/electric-sync now — the
+next cleanup is deleting those three and the `dev:app`/`portless-wrangler.ts` plumbing behind
+them. web/landing/local-ui keep theirs until their dev servers move too.
 
 ## The retired AWS opt-in flag (`MAPLE_DEPLOY_AWS_INGEST`)
 
@@ -89,7 +99,7 @@ its PR carries the `preview` label.
 Do not reintroduce a global on/off env flag for this. If a stage should not have a fleet,
 say so in `stageDeploysIngest`, where it is typed, unit-tested and visible in review.
 
-**The #378 hang.** The flag was *also* introduced because turning the AWS half on wedged
+**The #378 hang.** The flag was _also_ introduced because turning the AWS half on wedged
 every production deploy with no log line and no network I/O. The cause was alchemy's
 env-credential path (`CI=true`): it discovered the account with an STS `GetCallerIdentity`
 issued while its own `AWSEnvironment` was still being constructed, and that call waited on
@@ -167,7 +177,7 @@ when reading old code or docs:
 These are cash-flow calls, not design ones, and should be revisited rather than treated as
 architecture:
 
-- **No NAT gateway** in the ingest VPC. NAT bills $0.045/GB *processed* on top of egress,
+- **No NAT gateway** in the ingest VPC. NAT bills $0.045/GB _processed_ on top of egress,
   and the gateway exists to push gzipped telemetry outbound — at current volume NAT alone
   would cost more than the compute and the egress combined, and it scales linearly with
   growth. Tasks therefore carry public IPs, which is why the security-group split between
@@ -185,7 +195,7 @@ architecture:
 - **PR previews get an ingest fleet, but no database.** PlanetScale PR branches billed
   continuously and consumed the account's Hyperdrive config cap, so `resolveDatabaseMode`
   returns `"none"` for `pr`: DB-backed routes 500 and the rest of the preview works. The
-  reverse path is documented on that function. The AWS half *is* deployed — a preview gets
+  reverse path is documented on that function. The AWS half _is_ deployed — a preview gets
   its own VPC + ALB + ECS fleet, which is real money, so it only runs while the PR carries
   the `preview` label and is destroyed the moment the label comes off or the PR closes.
   A preview has no ingest domain, so its ALB answers plain HTTP on 80 with no ACM
@@ -206,7 +216,7 @@ Short list; each has a comment at the site.
   it against the cwd — and each flip broke the deploy. Absolute paths pass through both.
 - **`listenerPort` vs `port`** on `ECS.Service`. `port` is the container port; the listener
   defaults to 443 once `certificateArn` is set. Setting `listenerPort: INGEST_PORT` puts
-  the listener on 3474, which Cloudflare's proxy does not forward to, *and* drops `port`
+  the listener on 3474, which Cloudflare's proxy does not forward to, _and_ drops `port`
   back to alchemy's default 3000 while the gateway binds 3474 — so no target ever passes
   `/health`.
 - **A security group that does not admit the listener port.** A stage without an ingest
@@ -217,7 +227,7 @@ Short list; each has a comment at the site.
   `runtimePlatform`.
 - **A cargo `--target-dir` inside the image context.** Alchemy hashes the context with
   `hashDirectory`, which has no `.dockerignore` support and derives exclusions from
-  gitignore rules *without* rebasing root-anchored ones onto the context dir —
+  gitignore rules _without_ rebasing root-anchored ones onto the context dir —
   `/apps/ingest/target` becomes the glob `apps/ingest/target/**` evaluated with
   `cwd=apps/ingest`, matching nothing. The whole target dir would be walked and hashed on
   every deploy.

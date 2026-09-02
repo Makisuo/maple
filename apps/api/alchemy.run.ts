@@ -7,6 +7,7 @@ import type { Rpc } from "alchemy/Rpc"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import type { MapleApiRpcContract } from "@maple/domain/internal-rpc"
+import { devServer } from "@maple/infra/dev-urls"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
@@ -251,6 +252,10 @@ const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleStage) {
 			database: "maple",
 			user: "maple",
 			password: Redacted.make("maple"),
+			// The local Hyperdrive shim defaults dev origins to `sslmode=prefer`, which
+			// makes the driver attempt TLS against the docker Postgres (SSL off) and
+			// stall until the dial timeout. Be explicit.
+			sslmode: "disable",
 		},
 	})
 })
@@ -332,6 +337,9 @@ export const createMapleApi = ({ stage, domains, replayBlobs }: CreateMapleApiOp
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
+			// Port comes from `bun run dev:workers`, which reserved it and pointed a
+			// portless route at it; undefined outside that (alchemy picks one).
+			dev: devServer("api"),
 			workersDev: true,
 			// alchemy ≥ beta.70 sets rolldown `strictExecutionOrder: true`, which wraps
 			// ~every chunk in a lazy `__esmMin` initializer. The DB module graph (drizzle

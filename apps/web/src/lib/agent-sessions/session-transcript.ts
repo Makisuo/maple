@@ -47,13 +47,6 @@ import {
 /** Why a lane exists, which is also how its header reads. */
 export type LaneKind = "lane" | "subagent"
 
-/** A note the transcript makes about itself — never about the agent's work. */
-export type TranscriptNoteKind =
-	/** No message content anywhere in this session (or in this turn). */
-	| "capture-off"
-	/** The emitting service changed and so did what it records. */
-	| "capture-boundary"
-
 export type TranscriptDividerKind = "compaction" | "truncated"
 
 /** Which halves of a call an emitter records. Mixed sessions have several. */

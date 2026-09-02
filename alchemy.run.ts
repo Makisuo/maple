@@ -54,6 +54,21 @@ const appendStepOutputs = (lines: string[]): void => {
 	}
 }
 
+/**
+ * Is this process `alchemy dev` (the local dev server) rather than a deploy?
+ *
+ * `alchemy dev` sets ALCHEMY_DEV on the exec child it spawns
+ * (`Cli/commands/dev.ts`). The distinction is not stage-derived: a dev *stage*
+ * can be deployed to the cloud, and this must stay false when it is.
+ *
+ * Under the dev server the stack narrows to the Workers that local development
+ * actually runs — api, alerting, electric-sync. The three asset-serving Workers
+ * (web, landing, local-ui) are excluded because each is fronted by a
+ * `Command.Build` that runs a full production build; their dev servers (vite,
+ * astro) are what serve them locally, under turbo/portless as before.
+ */
+const isDevServer = process.env.ALCHEMY_DEV === "true"
+
 const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStage>) =>
 	Effect.gen(function* () {
 		// Bootstrap these account/zone-wide resources in production first. Other
@@ -200,28 +215,37 @@ export default Alchemy.Stack(
 		// baked into the web build (VITE_ELECTRIC_SYNC_URL).
 		const electricSync = yield* createElectricSyncWorker({ stage, domains })
 
-		const web = yield* createMapleWeb({
-			stage,
-			domains,
-			apiUrl,
-			ingestUrl,
-			electricSyncUrl,
-		})
+		// See `isDevServer`: each of these three is gated on a production
+		// `Command.Build`, so including them would make `alchemy dev` build the
+		// whole frontend before serving anything.
+		const web = isDevServer
+			? undefined
+			: yield* createMapleWeb({
+					stage,
+					domains,
+					apiUrl,
+					ingestUrl,
+					electricSyncUrl,
+				})
 
-		const landing = yield* createLandingWorker({
-			stage,
-			domains,
-			ingestUrl,
-			logsDestination: shared.logsDestination,
-			tracesDestination: shared.tracesDestination,
-		})
+		const landing = isDevServer
+			? undefined
+			: yield* createLandingWorker({
+					stage,
+					domains,
+					ingestUrl,
+					logsDestination: shared.logsDestination,
+					tracesDestination: shared.tracesDestination,
+				})
 
-		const localUi = yield* createLocalUiWorker({
-			stage,
-			domains,
-			logsDestination: shared.logsDestination,
-			tracesDestination: shared.tracesDestination,
-		})
+		const localUi = isDevServer
+			? undefined
+			: yield* createLocalUiWorker({
+					stage,
+					domains,
+					logsDestination: shared.logsDestination,
+					tracesDestination: shared.tracesDestination,
+				})
 
 		const alerting = yield* createAlertingWorker({
 			stage,
@@ -280,9 +304,9 @@ export default Alchemy.Stack(
 			electricCertificateValidation: electric?.certificateValidation,
 			ingestCertificateValidation: ingest?.certificateValidation,
 			electricSyncWorker: electricSync.workerName,
-			webWorker: web.workerName,
-			landingWorker: landing.workerName,
-			localUiWorker: localUi.workerName,
+			webWorker: web?.workerName,
+			landingWorker: landing?.workerName,
+			localUiWorker: localUi?.workerName,
 			alertingWorker: alerting.workerName,
 		}
 	}),

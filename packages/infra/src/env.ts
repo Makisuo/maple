@@ -183,7 +183,25 @@ export const appUrlsEnv: Config.Config<WorkerEnv> = merge(
 export const selfObservabilityEnv = (stage: MapleStage): Config.Config<WorkerEnv> =>
 	merge(
 		// Bound under a different name than it is read from.
-		requiredSecret("MAPLE_OTEL_INGEST_KEY").pipe(Config.map((value) => ({ MAPLE_INGEST_KEY: value }))),
+		//
+		// Required on every stage that is actually deployed, and OPTIONAL on dev
+		// stages: `alchemy dev` resolves this same contract locally, where no
+		// developer has (or should need) a real ingest key. Without the exemption
+		// the whole local stack refuses to start on a key whose only job is
+		// exporting the worker's own telemetry. An absent key leaves
+		// MAPLE_INGEST_KEY unbound, which the runtime already treats as
+		// "self-observability off".
+		stage.kind === "dev"
+			? optionalSecret("MAPLE_OTEL_INGEST_KEY").pipe(
+					Config.map((record) =>
+						"MAPLE_OTEL_INGEST_KEY" in record
+							? { MAPLE_INGEST_KEY: record.MAPLE_OTEL_INGEST_KEY }
+							: {},
+					),
+				)
+			: requiredSecret("MAPLE_OTEL_INGEST_KEY").pipe(
+					Config.map((value) => ({ MAPLE_INGEST_KEY: value })),
+				),
 		optionalPlain("MAPLE_ENDPOINT"),
 		derived("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
 		// GITHUB_SHA is read as its own key and re-labelled, rather than passed to

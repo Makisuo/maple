@@ -1,6 +1,7 @@
 import path from "node:path"
 import * as Cloudflare from "alchemy/Cloudflare"
 import * as Effect from "effect/Effect"
+import { devServer } from "@maple/infra/dev-urls"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import { CLOUDFLARE_WORKER_PLACEMENT, resolveWorkerName } from "@maple/infra/cloudflare"
 import { authEnv, merge, optionalPlain, optionalSecret, selfObservabilityEnv } from "@maple/infra/env"
@@ -48,6 +49,9 @@ export const createElectricSyncWorker = ({ stage, domains }: CreateElectricSyncW
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
+			// Port comes from `bun run dev:workers`, which reserved it and pointed a
+			// portless route at it; undefined outside that (alchemy picks one).
+			dev: devServer("electric-sync"),
 			workersDev: true,
 			// Custom domain (not a zone route): routes don't create DNS records, so
 			// pr-stage hostnames would be authoritative NXDOMAIN. Custom domains
