@@ -52,6 +52,8 @@ export interface EnvConfig {
 	readonly MAPLE_ENVIRONMENT: string
 	/** Escape hatch: allow real email sends outside production (e.g. a dedicated stg test run). */
 	readonly MAPLE_EMAIL_ALLOW_NONPROD: string
+	/** Route every org to the managed warehouse; honoured only in development. */
+	readonly MAPLE_IGNORE_ORG_CLICKHOUSE: string
 	readonly CLERK_SECRET_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly CLERK_PUBLISHABLE_KEY: Option.Option<string>
 	readonly CLERK_JWT_KEY: Option.Option<Redacted.Redacted<string>>
@@ -171,6 +173,7 @@ const envConfig = Config.all({
 	MAPLE_API_BASE_URL: stringWithDefault("MAPLE_API_BASE_URL", "http://127.0.0.1:3472"),
 	MAPLE_ENVIRONMENT: stringWithDefault("MAPLE_ENVIRONMENT", "development"),
 	MAPLE_EMAIL_ALLOW_NONPROD: stringWithDefault("MAPLE_EMAIL_ALLOW_NONPROD", "false"),
+	MAPLE_IGNORE_ORG_CLICKHOUSE: stringWithDefault("MAPLE_IGNORE_ORG_CLICKHOUSE", "false"),
 	CLERK_SECRET_KEY: optionalRedacted("CLERK_SECRET_KEY"),
 	CLERK_PUBLISHABLE_KEY: optionalString("CLERK_PUBLISHABLE_KEY"),
 	CLERK_JWT_KEY: optionalRedacted("CLERK_JWT_KEY"),

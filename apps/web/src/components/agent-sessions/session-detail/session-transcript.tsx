@@ -1,9 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useRef, type ReactNode } from "react"
-import { Link } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
 import type { AiSessionSpan } from "@maple/domain/http"
-import { Button } from "@maple/ui/components/ui/button"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { formatBytes, formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
@@ -19,7 +17,6 @@ import {
 	CompactLinesIcon,
 	CornerDownLeftIcon,
 	DotsIcon,
-	ExternalLinkIcon,
 	FaceRobotIcon,
 	GearIcon,
 	PixelSparkleIcon,
@@ -99,7 +96,6 @@ export function SessionTranscript({
 	onToggleRow,
 	selectedSpanId,
 	onSelectSpan,
-	onOpenTraceView,
 }: {
 	turns: readonly SessionTurn[]
 	/** The session's captured tool results by call id (`sessionToolResults`). */
@@ -119,8 +115,6 @@ export function SessionTranscript({
 	onToggleRow: (key: string) => void
 	selectedSpanId: string | undefined
 	onSelectSpan: (spanId: string | undefined) => void
-	/** Switch to the Traces view with this span still selected. */
-	onOpenTraceView: () => void
 }) {
 	const { ref: listRef, getScrollElement, scrollMargin } = usePageScrollMargin()
 	const { effectiveTimezone } = useTimezonePreference()
@@ -208,7 +202,6 @@ export function SessionTranscript({
 									onToggleRow={onToggleRow}
 									selected={"span" in row && row.span.spanId === selectedSpanId}
 									onSelectSpan={onSelectSpan}
-									onOpenTraceView={onOpenTraceView}
 								/>
 							</div>
 						)
@@ -229,7 +222,6 @@ interface BlockProps {
 	onToggleRow: (key: string) => void
 	selected: boolean
 	onSelectSpan: (spanId: string | undefined) => void
-	onOpenTraceView: () => void
 }
 
 function TranscriptBlock(props: BlockProps) {
@@ -587,7 +579,6 @@ function AssistantBlock({
 	onToggleRow,
 	selected,
 	onSelectSpan,
-	onOpenTraceView,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "assistant" }> }) {
 	const tone = row.failed ? "text-destructive" : "text-chart-2"
 	const Glyph = row.failed ? CircleWarningIcon : PixelSparkleIcon
@@ -636,7 +627,6 @@ function AssistantBlock({
 						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
 					/>
 				)}
-				{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
 			</div>
 			{row.text !== undefined && (
 				<div className="pt-2.5">
@@ -811,7 +801,6 @@ function ToolBlock({
 	onToggleRow,
 	selected,
 	onSelectSpan,
-	onOpenTraceView,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "tool" }> }) {
 	const payloadsKey = `${row.key}:payloads`
 	const open = disclosed(openRows, payloadsKey, showPayloads)
@@ -860,10 +849,9 @@ function ToolBlock({
 							error.type {row.span.genAi.errorType}
 						</Pill>
 					)}
-					{!row.failed && row.callId !== undefined && !selected && (
+					{!row.failed && row.callId !== undefined && (
 						<span className={cn(META, "shrink-0")}>{row.callId}</span>
 					)}
-					{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
 					{/* The one control that opens the pair, in the header where the reader
 					    already is — not a footer they have to scroll the payloads to reach. */}
 					<button
@@ -1175,7 +1163,6 @@ function StructureRow({
 	timeZone,
 	selected,
 	onSelectSpan,
-	onOpenTraceView,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "structure" }> }) {
 	const category = row.label.startsWith("tool ")
 		? "tool"
@@ -1228,7 +1215,6 @@ function StructureRow({
 					<span className="grow" />
 					<span className={cn(META, "shrink-0")}>{formatDuration(row.span.durationMs)}</span>
 				</button>
-				{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
 			</div>
 		</Row>
 	)
@@ -1335,39 +1321,6 @@ function InlineNote({ children, className }: { children: ReactNode; className?: 
 			<CircleQuestionIcon size={13} className="mt-0.5 shrink-0 text-muted-foreground" />
 			<p className="min-w-0 text-muted-foreground text-xs leading-relaxed">{children}</p>
 		</div>
-	)
-}
-
-function OpenInTraces({ span, onOpenTraceView }: { span: AiSessionSpan; onOpenTraceView: () => void }) {
-	return (
-		<span className="flex shrink-0 items-center gap-1.5">
-			<Button
-				variant="outline"
-				size="sm"
-				className="h-5 px-1.5 text-[11px]"
-				onClick={(event) => {
-					event.stopPropagation()
-					onOpenTraceView()
-				}}
-			>
-				Waterfall
-			</Button>
-			<Button
-				variant="outline"
-				size="sm"
-				className="h-5 gap-1 px-1.5 text-[11px]"
-				render={
-					<Link
-						to="/traces/$traceId"
-						params={{ traceId: span.traceId }}
-						search={{ t: span.timestamp, spanId: span.spanId }}
-					/>
-				}
-			>
-				Open in Traces
-				<ExternalLinkIcon size={10} />
-			</Button>
-		</span>
 	)
 }
 

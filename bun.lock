@@ -9,6 +9,7 @@
         "@effect/platform-node": "4.0.0-rc.111",
         "@effect/tsgo": "0.36.4",
         "@effect/vitest": "catalog:effect",
+        "@maple/alchemy-portless": "workspace:*",
         "@maple/infra": "workspace:*",
         "@oxlint/plugins": "1.77.0",
         "@tinybirdco/sdk": "catalog:tinybird",
@@ -40,7 +41,6 @@
         "@types/node": "catalog:tooling",
         "typescript": "catalog:tooling",
         "vitest": "catalog:",
-        "wrangler": "^4.118.0",
       },
     },
     "apps/api": {
@@ -114,17 +114,16 @@
         "@maple/auth": "workspace:*",
         "@maple/domain": "workspace:*",
         "@maple/effect-cloudflare": "workspace:*",
+        "@maple/infra": "workspace:*",
         "effect": "catalog:effect",
       },
       "devDependencies": {
         "@cloudflare/workers-types": "4.20260603.1",
         "@effect/language-service": "catalog:effect",
         "@effect/vitest": "catalog:effect",
-        "@maple/infra": "workspace:*",
         "@types/node": "catalog:tooling",
         "typescript": "catalog:tooling",
         "vitest": "catalog:",
-        "wrangler": "^4.118.0",
       },
     },
     "apps/ingest": {
@@ -326,6 +325,19 @@
         "tailwindcss": "catalog:tailwind",
         "typescript": "catalog:tooling",
         "vite": "catalog:",
+      },
+    },
+    "lib/alchemy-portless": {
+      "name": "@maple/alchemy-portless",
+      "dependencies": {
+        "alchemy": "2.0.0-beta.74",
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@effect/language-service": "catalog:effect",
+        "@types/node": "catalog:tooling",
+        "typescript": "catalog:tooling",
+        "vitest": "catalog:",
       },
     },
     "lib/cache": {
@@ -599,7 +611,9 @@
     "packages/infra": {
       "name": "@maple/infra",
       "dependencies": {
+        "@maple/alchemy-portless": "workspace:*",
         "@maple/effect-cloudflare": "workspace:*",
+        "alchemy": "2.0.0-beta.74",
         "effect": "catalog:effect",
       },
       "devDependencies": {
@@ -1317,6 +1331,8 @@
     "@maple-examples/alchemy": ["@maple-examples/alchemy@workspace:examples/alchemy-maple"],
 
     "@maple-examples/effect-todo": ["@maple-examples/effect-todo@workspace:examples/effect-todo"],
+
+    "@maple/alchemy-portless": ["@maple/alchemy-portless@workspace:lib/alchemy-portless"],
 
     "@maple/alerting": ["@maple/alerting@workspace:apps/alerting"],
 

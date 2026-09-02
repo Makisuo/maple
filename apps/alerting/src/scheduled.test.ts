@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Fiber, Latch, Layer } from "effect"
 import { env as workerEnv } from "../test/stubs/cloudflare-workers"
-import { buildLayer, catchTickFailure, selectScheduledProgram, type ScheduledTickPrograms } from "./worker"
+import { buildLayer, catchTickFailure, selectScheduledProgram, type ScheduledTickPrograms } from "./scheduled"
 
 const cronCases = [
 	["*/5 * * * *", ["anomaly", "cloudflareAnalytics", "planetScale"]],

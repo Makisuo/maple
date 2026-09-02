@@ -148,18 +148,34 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 	Object.freeze({
-		// v15 rebuilds error_events_mv / error_events_by_time_mv so a span with
-		// no `exception` event is labelled from its exception.* / error.* span
-		// attributes (ClickHouse migration 0025). No part is rewritten and no row
-		// moves; rows already materialized keep their 'Unknown Error' label.
+		// v15 rebuilds the three service-overview views so `CommitSha` reads the
+		// semconv `vcs.ref.head.revision` instead of the retired vendor key
+		// `deployment.commit_sha` (ClickHouse migration 0025). View bodies only:
+		// no table or column changes, no row moves, and nothing is backfilled —
+		// rollup rows materialized with an empty commit age out with their TTL.
 		//
 		// projectRevision is carried forward deliberately — it is a hardcoded
 		// constant that no longer tracks the generator's header, and the identity
 		// this gate compares is the fingerprint/digest pair.
 		version: 15,
-		fingerprint: "67ab4cfa763f23d2",
-		digest: "67ab4cfa763f23d21ee49f4918fd605c09c24991badc51cf7d72161fb1dc8a0a",
-		manifestDigest: "c738cef8f18daead8b9eee6076655efdb41b6ada23d5a13a76e8efa579d88069",
+		fingerprint: "24710426938d7b4a",
+		digest: "24710426938d7b4adf615f87f78315c2a5c6145a0029c4f244a339888b25f6d3",
+		manifestDigest: "65f0bc9e91171fbefd4452373ad15f8139b56111ffff27f65ffa4a09ba82cdb2",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
+	Object.freeze({
+		// v16 rebuilds error_events_mv / error_events_by_time_mv so a span with
+		// no `exception` event is labelled from its exception.* / error.* span
+		// attributes (ClickHouse migration 0026). No part is rewritten and no row
+		// moves; rows already materialized keep their 'Unknown Error' label.
+		//
+		// projectRevision is carried forward deliberately — it is a hardcoded
+		// constant that no longer tracks the generator's header, and the identity
+		// this gate compares is the fingerprint/digest pair.
+		version: 16,
+		fingerprint: "a14b5b6129c98dc8",
+		digest: "a14b5b6129c98dc8da41cdf7bfbd60801eac3913a7611f591d33328b0ee4a27d",
+		manifestDigest: "cef5500916244498f443e68a5c0112f2b33b9bbf3e69e21d6e66b23bf96d4b1c",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 ] as const)

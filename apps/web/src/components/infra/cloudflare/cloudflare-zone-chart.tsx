@@ -116,6 +116,11 @@ export function CloudflareZoneChart({
 			...topZones.filter((z) => present.has(z)),
 			...(present.has(OTHER_ZONES_SERIES) ? [OTHER_ZONES_SERIES] : []),
 		]
+		// Cloudflare emits no row for a zone with no traffic in a bucket, so a hole
+		// is a zero reading — a null would break the line into fragments instead.
+		for (const point of transformed.data) {
+			for (const name of ordered) point[name] ??= 0
+		}
 		return { data: transformed.data, series: ordered }
 	}, [buckets, metric, topZones])
 
@@ -193,7 +198,10 @@ export function CloudflareZoneChart({
 					},
 				},
 			},
-			margin: { top: 12, right: 12, bottom: 4, left: 52 },
+			// `left` pinned so the four zone charts share a plot edge, wide enough for
+			// the byte labels. `bottom` stays unset: a set side is a hard lock, and the
+			// frame only reserves the x tick labels' height when it measures the side.
+			margin: { top: 12, right: 12, left: 60 },
 			focus: "group-x",
 			focusRing: false,
 			tooltip: cursorTooltip(focusStore.anchor),

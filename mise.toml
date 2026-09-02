@@ -38,7 +38,7 @@ run = [
 ]
 
 [tasks.dev]
-description = "Run all apps via turbo + portless (https://*.localhost)"
+description = "Run every app under one `alchemy dev` stack (https://*.localhost)"
 run = "bun dev"
 
 [tasks.build]

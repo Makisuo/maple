@@ -27,7 +27,7 @@ import {
 import { assertPhysicalSchema } from "../schema-physical"
 
 /** Stamped into the journal and matched on the way back out. */
-const MODULE_ID = "local-0014-to-0015-error-events-attribute-fallback" as const
+const MODULE_ID = "local-0014-to-0015-commit-sha-vcs-revision" as const
 
 const V14ToV15StateCodec = makeRawRowsState(MODULE_ID)
 
@@ -38,23 +38,20 @@ const decodeState = V14ToV15StateCodec.decode
 const decodeProgress = decodeInstalledProgress
 
 /**
- * The local mirror of ClickHouse migration 0025.
+ * The three views whose body pre-extracts `CommitSha`.
  *
- * The two error-events views took the exception type, message and stacktrace
- * from the first OTel `exception` span event alone, and fell through to
- * StatusMessage, then 'Unknown Error'. Cloudflare's native Workers tracing
- * records no span events and no status description — a custom span can only
- * `setAttribute()` — so every error span it exported hashed to one "Unknown
- * Error" issue per service. The rebuilt body reads the same three keys off
- * span attributes when there is no event, then semconv `error.type` /
- * `error.message`, before StatusMessage. A span WITH an event keeps exactly
- * the precedence it had.
+ * The bundled v15 DDL is `CREATE ... IF NOT EXISTS` throughout, so a view whose
+ * body changed has to be dropped first or the v14 version simply survives — the
+ * same trap the v9 -> v10 edge documents. No table or column changes here: the
+ * `TO` targets are identical in v14 and v15.
  *
- * NOTHING IS BACKFILLED. `error_events` keeps no span attributes, so the
- * historical rows cannot be re-derived, and recomputing FingerprintHash would
- * re-bucket every existing local issue. Forward-only, converging as the
- * retention window rolls.
+ * chDB materializes views as tables, so `DROP TABLE` is the right verb.
  */
+const DROPPED_VIEWS = [
+	"service_overview_hourly_mv",
+	"service_overview_minutely_mv",
+	"service_overview_spans_mv",
+] as const
 
 const preflight = async (context: MigrationModuleContext): Promise<V14ToV15State> => {
 	await context.ensureCapacity()
@@ -88,17 +85,22 @@ const prepareTarget = async (
 }
 
 /**
- * Like v7 -> v8, this edge replaces the body of two existing views rather than
- * adding anything. A materialized view's SELECT is frozen at creation and the
- * bundled DDL uses `CREATE ... IF NOT EXISTS`, so both views must be dropped
- * before the v15 schema can install its versions. Dropping a view never touches
- * rows already in its target table.
+ * The local mirror of ClickHouse migration 0025: the three service-overview
+ * views now pre-extract `CommitSha` from the semconv `vcs.ref.head.revision`
+ * instead of Maple's retired vendor key `deployment.commit_sha`. A service
+ * instrumented to the semconv key only wrote an empty commit into every
+ * rollup, so it had no release markers and no deploys.
+ *
+ * Forward-only. Rows already materialized keep what the v14 bodies wrote — an
+ * empty commit for such a service — and the targets converge as their TTL
+ * rolls. That is the same position a deployed cluster is in right after
+ * migration 0025, and rebuilding them would mean rewriting a store this edge
+ * has just promised to clone byte-for-byte.
  */
 const apply = async (context: MigrationModuleContext): Promise<V14ToV15Progress> => {
 	await context.openTarget(
 		(db) => {
-			db.exec("DROP TABLE IF EXISTS error_events_mv")
-			db.exec("DROP TABLE IF EXISTS error_events_by_time_mv")
+			for (const view of DROPPED_VIEWS) db.exec(`DROP TABLE IF EXISTS ${view}`)
 		},
 		{ schemaSql: LOCAL_SCHEMA_V14_SQL, bootstrapSchema: false },
 	)
@@ -134,9 +136,9 @@ const operations: ReadonlyArray<MigrationOperation> = [
 		phase: "target-created",
 	},
 	{
-		id: "rebuild-error-events-views",
+		id: "rebuild-commit-sha-views",
 		description:
-			"Drop and recreate the error-events views so an exception-less span is labelled from its exception.* / error.* attributes",
+			"Rebuild the three service-overview views so CommitSha reads vcs.ref.head.revision instead of the retired deployment.commit_sha",
 		requiresQuiescence: true,
 		phase: "copying",
 	},
@@ -153,58 +155,42 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 		name: "local store",
 		classification: "authoritative",
 		disposition: "preserve-exact",
-		guarantee: "The clean stopped v14 store is cloned byte-for-byte before the views are replaced.",
+		guarantee: "The clean stopped v14 store is cloned byte-for-byte before any view is replaced.",
 	},
 	{
 		name: "traces",
 		classification: "authoritative",
 		disposition: "preserve-exact",
 		guarantee:
-			"The source of the replaced views is neither read nor rewritten; only the view definitions change.",
+			"The source of every replaced view is neither read nor rewritten; only view definitions change.",
 	},
 	{
-		// Rows already materialized keep their 'Unknown Error' label and hash —
-		// error_events holds no span attributes to re-derive them from, and
-		// recomputing hashes would re-bucket every existing issue. Forward-only,
-		// and bounded by the tables' 90-day TTL.
-		name: "error_events",
+		name: "service overview rollups",
 		classification: "derived",
 		disposition: "rebuild-within-retention-horizon",
 		guarantee:
-			"Existing rows are preserved untouched; the attribute fallback applies to events materialized after the migration and converges as the retention window rolls.",
-		preservationInterval: "error retention horizon",
-		sourceRetentionDays: 90,
-		targetRetentionDays: 90,
-	},
-	{
-		name: "error_events_by_time",
-		classification: "derived",
-		disposition: "rebuild-within-retention-horizon",
-		guarantee:
-			"Same projection as error_events and treated identically: preserved rows, forward-only correction.",
-		preservationInterval: "error retention horizon",
-		sourceRetentionDays: 90,
-		targetRetentionDays: 90,
+			"Existing rows are preserved untouched; buckets materialized after the migration carry the commit under either key, and rows written with an empty CommitSha age out with the rollup TTL.",
+		preservationInterval: "rollup retention horizon",
+		sourceRetentionDays: 365,
+		targetRetentionDays: 365,
 	},
 ]
 
-export const v14ToV15ErrorEventsAttributeFallbackModule: LocalStoreMigrationModule<
-	V14ToV15State,
-	V14ToV15Progress
-> = {
-	id: MODULE_ID,
-	moduleVersion: 1,
-	description:
-		"Rebuild the error-events views so an exception-less span is labelled from its exception.* / error.* attributes",
-	from: LOCAL_SCHEMA_V14,
-	to: LOCAL_SCHEMA_V15,
-	operations,
-	dispositions,
-	decodeState,
-	decodeProgress,
-	preflight,
-	prepareTarget,
-	apply,
-	verify,
-	recover: async (_context, state, progress) => ({ state, progress }),
-}
+export const v14ToV15CommitShaVcsRevisionModule: LocalStoreMigrationModule<V14ToV15State, V14ToV15Progress> =
+	{
+		id: MODULE_ID,
+		moduleVersion: 1,
+		description:
+			"Rebuild the service-overview views so CommitSha reads vcs.ref.head.revision instead of the retired deployment.commit_sha",
+		from: LOCAL_SCHEMA_V14,
+		to: LOCAL_SCHEMA_V15,
+		operations,
+		dispositions,
+		decodeState,
+		decodeProgress,
+		preflight,
+		prepareTarget,
+		apply,
+		verify,
+		recover: async (_context, state, progress) => ({ state, progress }),
+	}

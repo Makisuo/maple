@@ -288,8 +288,8 @@ export const serviceMapSpansMv = defineMaterializedView("service_map_spans_mv", 
  * Materialized view projecting service entry point spans for service overview queries.
  * Includes Server/Consumer spans (service entry points per OTel semantics) plus root spans
  * as a fallback for services with Internal/unset SpanKind (cron jobs, workers).
- * Pre-extracts deployment.environment and deployment.commit_sha from ResourceAttributes
- * so the service overview query avoids scanning heavy Map columns.
+ * Pre-extracts the deployment environment (either semconv spelling) and `vcs.ref.head.revision`
+ * from ResourceAttributes so the service overview query avoids scanning heavy Map columns.
  */
 export const serviceOverviewSpansMv = defineMaterializedView("service_overview_spans_mv", {
 	description:
@@ -307,7 +307,7 @@ export const serviceOverviewSpansMv = defineMaterializedView("service_overview_s
           StatusCode,
           TraceState,
           ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
-          ResourceAttributes['deployment.commit_sha'] AS CommitSha,
+          ResourceAttributes['vcs.ref.head.revision'] AS CommitSha,
           SampleRate,
           ResourceAttributes['service.namespace'] AS ServiceNamespace
         FROM traces
@@ -335,7 +335,7 @@ export const serviceOverviewHourlyMv = defineMaterializedView("service_overview_
           ServiceName,
           ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           ResourceAttributes['service.namespace'] AS ServiceNamespace,
-          ResourceAttributes['deployment.commit_sha'] AS CommitSha,
+          ResourceAttributes['vcs.ref.head.revision'] AS CommitSha,
           count() AS SpanCount,
           sum(SampleRate) AS EstimatedSpanCount,
           countIf(StatusCode = 'Error') AS ErrorCount,
@@ -381,7 +381,7 @@ export const serviceOverviewMinutelyMv = defineMaterializedView("service_overvie
           ServiceName,
           ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
           ResourceAttributes['service.namespace'] AS ServiceNamespace,
-          ResourceAttributes['deployment.commit_sha'] AS CommitSha,
+          ResourceAttributes['vcs.ref.head.revision'] AS CommitSha,
           count() AS SpanCount,
           sum(SampleRate) AS EstimatedSpanCount,
           countIf(StatusCode = 'Error') AS ErrorCount,

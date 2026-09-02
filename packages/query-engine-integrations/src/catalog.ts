@@ -10,6 +10,7 @@
 
 import { Effect } from "effect"
 import { compileUnionUnsafe, compileUnsafe, type CompiledQuery } from "@maple/query-engine/ch"
+import { MAPLE_AI_TRACE_SESSION_PREFIX } from "@maple/domain/gen-ai"
 import * as CH from "./index"
 
 export interface IntegrationFixture {
@@ -56,7 +57,45 @@ const traceWindow = {
 	parentStart: "2026-01-01 08:30:00",
 }
 
+/** One page of sessions, as `aiSessionPageQuery` hands them to the fan-out: the
+ *  ids, and the extent of their agent spans. The bounds sit inside `window`
+ *  because the page was ranked inside it. */
+const AI_PAGE_SESSION_IDS = ["wrun_sql_catalog", `${MAPLE_AI_TRACE_SESSION_PREFIX}${AI_TRACE_ID}`]
+
+/** Stage two's whole param set — it never sees the caller's window. */
+const aiPageBounds = {
+	orgId: ORG_ID,
+	fanOutStart: "2026-01-02 10:30:00",
+	fanOutEnd: "2026-01-02 12:30:00",
+}
+
 export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
+	{
+		// The AI sessions list is two reads. This one ranks the page on
+		// `ai_trace_index` alone and is the only one that sees the caller's window.
+		module: "ai-sessions",
+		name: "aiSessionPageQuery",
+		label: "default",
+		compile: () => compileUnsafe(CH.aiSessionPageQuery(), window),
+	},
+	{
+		// The vendor/service filters the AI sessions list page sends, on its
+		// second page. They land here and are repeated verbatim on the fan-out, or
+		// the two stages resolve traces differently.
+		module: "ai-sessions",
+		name: "aiSessionPageQuery",
+		label: "filtered",
+		compile: () =>
+			compileUnsafe(
+				CH.aiSessionPageQuery({
+					limit: 25,
+					offset: 25,
+					vendorIds: ["eve"],
+					serviceNames: ["maple-slack-agent"],
+				}),
+				window,
+			),
+	},
 	{
 		module: "ai-sessions",
 		name: "aiSessionListQuery",
@@ -64,21 +103,23 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 		// The ClickHouse e2e sweep runs its quoted/unquoted 64-bit decode assertion
 		// for every fixture whose compiled query carries a row schema — which the
 		// builder derives from the SELECT, so nothing is declared here.
-		compile: () => compileUnsafe(CH.aiSessionListQuery(), window),
+		compile: () =>
+			compileUnsafe(CH.aiSessionListQuery({ sessionIds: AI_PAGE_SESSION_IDS }), aiPageBounds),
 	},
 	{
-		// The vendor/service filters the AI sessions list page sends.
+		// The same page under the list's filters — the aggregation runs with the
+		// filters the page ranked under, never without them.
 		module: "ai-sessions",
 		name: "aiSessionListQuery",
 		label: "filtered",
 		compile: () =>
 			compileUnsafe(
 				CH.aiSessionListQuery({
-					limit: 25,
+					sessionIds: AI_PAGE_SESSION_IDS,
 					vendorIds: ["eve"],
 					serviceNames: ["maple-slack-agent"],
 				}),
-				window,
+				aiPageBounds,
 			),
 	},
 	{

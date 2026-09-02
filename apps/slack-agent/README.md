@@ -374,7 +374,7 @@ eve's native idiom:
   source of truth for both.
 - **Telemetry:** `agent/instrumentation.ts` exports AI SDK spans to Maple's ingest as service
   `maple-slack-agent` when `MAPLE_INGEST_KEY` is set (no-op otherwise), with `service.version` +
-  `deployment.commit_sha` from Railway's `RAILWAY_GIT_COMMIT_SHA` so releases show up in the
+  `vcs.ref.head.revision` from Railway's `RAILWAY_GIT_COMMIT_SHA` so releases show up in the
   commit-hover UI. Model inputs/outputs are never recorded; Slack team/channel/thread/user land as
   `maple.slack.*` span attributes (omitted rather than empty-string when absent).
   `agent/hooks/outcome-log.ts` logs turn outcomes + tool failures unconditionally, through

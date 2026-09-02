@@ -24,7 +24,8 @@ import {
 	investigationLensRuns,
 	investigations,
 } from "@maple/db"
-import { createMaplePgliteClient, type MaplePgClient } from "@maple/db/client"
+import type { MaplePgClient } from "@maple/db/client"
+import { createMaplePgliteClient } from "@maple/db/pglite"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { eq } from "drizzle-orm"
 import { Env } from "@/platform/Env"

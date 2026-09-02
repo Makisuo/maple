@@ -1,5 +1,3 @@
-import type { PGlite } from "@electric-sql/pglite"
-import { drizzle as drizzlePglite } from "drizzle-orm/pglite"
 import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import * as schema from "./schema"
@@ -54,12 +52,12 @@ export interface MaplePgClientOptions extends MaplePgSocketOptions {
 	readonly onQuery?: (query: string) => void
 }
 
-const toDrizzleLogger = (onQuery: ((query: string) => void) | undefined) =>
+export const toDrizzleLogger = (onQuery: ((query: string) => void) | undefined) =>
 	onQuery ? { logQuery: (query: string, _params: unknown[]) => onQuery(query) } : undefined
 
 /**
  * Create one postgres.js client, for real Postgres (PlanetScale via Hyperdrive
- * in Workers, docker-compose Postgres in `wrangler dev`, direct URLs in
+ * in Workers, docker-compose Postgres under `alchemy dev`, direct URLs in
  * scripts).
  *
  * Creating one costs nothing: postgres.js connects lazily on the first query,
@@ -119,9 +117,5 @@ export const wrapMaplePgClient = (
 export type MaplePgClient = ReturnType<typeof drizzlePostgres<typeof schema>>
 
 /** Drizzle over an embedded PGlite instance — local dev and vitest. */
-export const createMaplePgliteClient = (pglite: PGlite, options?: Pick<MaplePgClientOptions, "onQuery">) =>
-	drizzlePglite(pglite, { schema, logger: toDrizzleLogger(options?.onQuery) })
-
-export type MaplePgliteClient = ReturnType<typeof createMaplePgliteClient>
 
 export type MapleDatabaseTransaction = Parameters<Parameters<MaplePgClient["transaction"]>[0]>[0]

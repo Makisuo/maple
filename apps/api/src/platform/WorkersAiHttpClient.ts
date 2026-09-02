@@ -40,9 +40,9 @@ export interface WorkersAiBinding {
  *
  * Worth being loud about, because the failure is silent: when this returns false the upstream
  * provider falls through to the REST endpoint with `BINDING_PLACEHOLDER` credentials and 401s at
- * the *end* of a turn, which reads like a model outage rather than a misconfiguration. Local dev
- * declares a plain `ai` binding in `wrangler.jsonc` while deploys attach an AI Gateway resource
- * (`apps/api/alchemy.run.ts`), so the two shapes have to satisfy the same check.
+ * the *end* of a turn, which reads like a model outage rather than a misconfiguration. A plain
+ * `ai` binding and the AI Gateway resource deploys attach (`apps/api/alchemy.run.ts`) both
+ * surface as `env.AI`, so the two shapes have to satisfy the same check.
  */
 export const isWorkersAiBinding = (value: unknown): value is WorkersAiBinding =>
 	typeof value === "object" && value !== null && typeof (value as { run?: unknown }).run === "function"
