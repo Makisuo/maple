@@ -115,6 +115,38 @@ Gotchas worth knowing:
   reachable on `127.0.0.1:<port>` only; the inter-app URLs still name the `*.localhost`
   hosts, so start the proxy (`portless proxy start`) rather than work around it.
 
+## Single-module Workers: electric-sync
+
+electric-sync ships in alchemy's single-module form. `apps/electric-sync/src/worker.ts` is
+both the resource the root stack yields (`yield* ElectricSync`) and the bundle alchemy builds
+(`main: import.meta.url`): no hand-written `export default { fetch }`, no per-app
+`alchemy.run.ts`. api and alerting keep the factory + async-entry shape — crons, queues and
+the cron event source's failure handling do not fit the Effect-native form yet.
+
+Alchemy evaluates that module in three places — the deploy process, `alchemy dev`, and the
+deployed isolate — and two rules keep it honest about which one it is in:
+
+- **Props are a plan-time Effect, guarded for the bundle.** The stage-derived props (`name`,
+  `domain`, `env`, the portless `dev` block) read `MapleStack` (`@maple/infra/cloudflare`), a
+  service the root stack provides once from `Alchemy.Stage`, so the module never imports
+  portless or parses the stage itself. Alchemy also evaluates props inside the deployed
+  bundle, where they are inert, so the props Effect returns early under
+  `globalThis.__ALCHEMY_RUNTIME__` — alchemy's bundler folds it to `true`, and the stack-side
+  branch plus the `@maple/infra` modules only it reaches are dead-code-eliminated. Check by
+  grepping the bundle under `.alchemy/bundles/electric-sync/` for a `maple.dev` hostname.
+- **The app layer is built on the first request, not in init.** `impl` (init) also runs at
+  plan time, and alchemy's plan-time ConfigProvider auto-binds every `Config` it sees read
+  during init onto the Worker as a secret — which would override the explicit `env` contract
+  (a PR preview deliberately gets no `ELECTRIC_URL`). So the route graph is dynamic-imported
+  and built once per isolate on the first `fetch` (`Effect.cached`), against a scope that is
+  never closed: workerd has no isolate teardown, so nothing in the layer may need releasing.
+
+What it costs: the root stack imports the worker module, so the Alchemy-entrypoints
+typecheck (`tsconfig.alchemy.json`) covers electric-sync's runtime graph and needs
+`@maple-dev/effect-sdk` built first and `@maple/electric-sync` installed in the quality
+shard (`ci.yml`). Measured on the pilot (#745, local workerd A/B): +15ms startup CPU
+(41→56ms, budget ~1s), ~+8ms cold first request, ~+0.2ms/request warm.
+
 ## The retired AWS opt-in flag (`MAPLE_DEPLOY_AWS_INGEST`)
 
 The Rust OTLP gateway (`apps/ingest`) moved from Railway to ECS Fargate. While the

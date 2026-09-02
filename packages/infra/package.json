@@ -2,6 +2,7 @@
 	"name": "@maple/infra",
 	"private": true,
 	"type": "module",
+	"sideEffects": false,
 	"exports": {
 		".": "./src/index.ts",
 		"./aws": "./src/aws/index.ts",
@@ -14,6 +15,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@maple/alchemy-portless": "workspace:*",
 		"@maple/effect-cloudflare": "workspace:*",
 		"effect": "catalog:effect"
 	},

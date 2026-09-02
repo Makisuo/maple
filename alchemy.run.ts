@@ -23,6 +23,7 @@ import {
 } from "@maple/infra/aws"
 import {
 	formatMapleStage,
+	MapleStack,
 	parseMapleStage,
 	resolveDatabaseMode,
 	resolveMapleDomains,
@@ -33,7 +34,7 @@ import { requiredPlain } from "@maple/infra/env"
 import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
 import { createManagedMapleDb, createMapleApi, createReplayBlobStore } from "./apps/api/alchemy.run.ts"
 import { createMapleElectric } from "./apps/electric/alchemy.run.ts"
-import { createElectricSyncWorker } from "./apps/electric-sync/alchemy.run.ts"
+import ElectricSync from "./apps/electric-sync/src/worker.ts"
 import { createMapleIngest } from "./apps/ingest/alchemy.run.ts"
 import { createLandingWorker } from "./apps/landing/alchemy.run.ts"
 import { createLocalUiWorker } from "./apps/local-ui/alchemy.run.ts"
@@ -81,6 +82,18 @@ const createDevRoute = (app: DevApp) => Portless.Route(`${app}-route`, { name: a
 /** Every resource is declared on every run; a subset run only leaves the others unserved. */
 const workerDev = (app: DevApp) =>
 	devApps === undefined ? undefined : devApps.has(app) ? Portless.workerDev(app) : Portless.workerUnserved
+
+/**
+ * What this deploy is, for the single-module Workers (`apps/*\/src/worker.ts`)
+ * whose props read it instead of taking factory arguments.
+ */
+const MapleStackLive = Layer.effect(
+	MapleStack,
+	Effect.map(Alchemy.Stage, (raw) => {
+		const stage = parseMapleStage(raw)
+		return { stage, domains: resolveMapleDomains(stage), workerDev }
+	}),
+)
 
 const serveWorker = (app: DevApp, worker: Cloudflare.Worker) =>
 	devApps?.has(app)
@@ -184,8 +197,7 @@ export default Alchemy.Stack(
 		state: process.env.ALCHEMY_LOCAL_STATE ? Alchemy.localState() : Cloudflare.state(),
 	},
 	Effect.gen(function* () {
-		const stage = parseMapleStage(yield* Alchemy.Stage)
-		const domains = resolveMapleDomains(stage)
+		const { stage, domains } = yield* MapleStack
 		const shared = yield* createProductionSharedResources(stage)
 
 		// Child-process routes; the Workers' routes follow their Workers below.
@@ -270,12 +282,9 @@ export default Alchemy.Stack(
 				: undefined
 
 		// Standalone ElectricSQL shape-proxy worker (DB-free); its public origin is
-		// baked into the web build (VITE_ELECTRIC_SYNC_URL).
-		const electricSync = yield* createElectricSyncWorker({
-			stage,
-			domains,
-			dev: workerDev("electric-sync"),
-		})
+		// baked into the web build (VITE_ELECTRIC_SYNC_URL). Single-module form:
+		// its props read `MapleStack` and the module is also the bundle entry.
+		const electricSync = yield* ElectricSync
 		yield* serveWorker("electric-sync", electricSync)
 
 		// See `isDevServer`: each of these three is gated on a production
@@ -383,5 +392,7 @@ export default Alchemy.Stack(
 			localUiWorker: localUi?.workerName,
 			alertingWorker: alerting.workerName,
 		}
-	}),
+		// The stack IS the entry point: the one place `MapleStack` is provided.
+		// oxlint-disable-next-line effecttsgo/strict-effect-provide
+	}).pipe(Effect.provide(MapleStackLive)),
 )
