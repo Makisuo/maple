@@ -133,18 +133,33 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 	Object.freeze({
-		// v14 rebuilds error_events_mv / error_events_by_time_mv so a span with
+		// `ai_trace_index` + `ai_trace_index_mv` (ClickHouse migration 0024): the
+		// filtered projection of GenAI agent spans that serves Agent Sessions
+		// detection and facets. Purely additive — a new empty table and the view
+		// that fills it forward — so the v13 -> v14 edge is two CREATEs and a
+		// verify, no data movement.
+		//
+		// projectRevision stays the hardcoded constant, as for v12 and v13 — the
+		// identity this gate compares is the fingerprint/digest pair.
+		version: 14,
+		fingerprint: "c46a599e1bfe417c",
+		digest: "c46a599e1bfe417c1e6f50d123779c6ca9c5f5f375ef9c6fe329c8a9676e3b5b",
+		manifestDigest: "faf78f67abd5901351ce6632cee59f22fadb3c1f7eb9b195dc2f9702d4c9c9bd",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
+	Object.freeze({
+		// v15 rebuilds error_events_mv / error_events_by_time_mv so a span with
 		// no `exception` event is labelled from its exception.* / error.* span
-		// attributes (ClickHouse migration 0024). No part is rewritten and no row
+		// attributes (ClickHouse migration 0025). No part is rewritten and no row
 		// moves; rows already materialized keep their 'Unknown Error' label.
 		//
 		// projectRevision is carried forward deliberately — it is a hardcoded
 		// constant that no longer tracks the generator's header, and the identity
 		// this gate compares is the fingerprint/digest pair.
-		version: 14,
-		fingerprint: "aef1753f010332a2",
-		digest: "aef1753f010332a242afbcb927e91c16c0699903d984c5fa152166fa5bd40940",
-		manifestDigest: "886da9fe0022ae39699da0de582989708406857b4f75d5d9303ef84cab5f6b90",
+		version: 15,
+		fingerprint: "67ab4cfa763f23d2",
+		digest: "67ab4cfa763f23d21ee49f4918fd605c09c24991badc51cf7d72161fb1dc8a0a",
+		manifestDigest: "c738cef8f18daead8b9eee6076655efdb41b6ada23d5a13a76e8efa579d88069",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 ] as const)

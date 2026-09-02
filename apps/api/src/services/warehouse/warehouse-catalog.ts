@@ -29,6 +29,12 @@ const TABLE_NOTES: Record<string, ReadonlyArray<string>> = {
 		"Sorting key starts with `(OrgId, ServiceName, Timestamp)` — filter on these first.",
 		"For service-level metrics (per-service throughput, latency), prefer `service_overview_spans` — it's pre-filtered to entry-point spans and ~10× smaller.",
 	],
+	ai_trace_index: [
+		"GenAI agent spans ONLY (every row carries a non-empty `VendorId`), with the `maple_ai.*` identity pre-extracted to plain columns. ALWAYS prefer this over `traces` + `mapContains(SpanAttributes, 'maple_ai.…')` for finding agent traces/sessions — the raw-traces scan reads the full attribute Map per span and times out on day-plus windows.",
+		"`SessionId` is '' on most rows: vendors stamp the session key only on turn-owning spans. Resolve a trace's session as `max(SessionId) GROUP BY TraceId`, and treat a trace whose max is '' as a sessionless single-trace session.",
+		"Holds only the agent spans, and only their identity — for every span of a detected trace, or for any span attribute (`StatusCode`, `error.type`, `gen_ai.*`), collect `TraceId`s here first, then read `trace_detail_spans` with `TraceId IN (…)` AND a `Timestamp` window.",
+		"Sorting key: `(OrgId, Timestamp, TraceId)`; filled forward by its MV, so windows predating the cluster's schema apply under-report.",
+	],
 	service_overview_spans: [
 		"Pre-materialized projection of entry-point spans only (Server/Consumer kinds + root spans). Use for per-service request count, error rate, p50/p95/p99 latency.",
 		"`Duration` is NANOSECONDS — divide by 1e6 for ms.",

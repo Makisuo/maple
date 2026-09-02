@@ -72,6 +72,7 @@ import { Route as InfraCloudflareIndexRouteImport } from './routes/infra/cloudfl
 import { Route as InfraCloudflareZoneNameRouteImport } from './routes/infra/cloudflare/$zoneName'
 import { Route as InfraContainersIndexRouteImport } from './routes/infra/containers/index'
 import { Route as InfraContainersContainerNameRouteImport } from './routes/infra/containers/$containerName'
+import { Route as InfraKubernetesIndexRouteImport } from './routes/infra/kubernetes/index'
 import { Route as InfraPlanetscaleIndexRouteImport } from './routes/infra/planetscale/index'
 import { Route as InfraPlanetscaleDbNameRouteImport } from './routes/infra/planetscale/$dbName'
 import { Route as LabBenchInfraRouteImport } from './routes/lab/bench/infra'
@@ -408,6 +409,11 @@ const InfraContainersContainerNameRoute =
     path: '/infra/containers/$containerName',
     getParentRoute: () => rootRouteImport,
   } as any)
+const InfraKubernetesIndexRoute = InfraKubernetesIndexRouteImport.update({
+  id: '/infra/kubernetes/',
+  path: '/infra/kubernetes/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InfraPlanetscaleIndexRoute = InfraPlanetscaleIndexRouteImport.update({
   id: '/infra/planetscale/',
   path: '/infra/planetscale/',
@@ -574,6 +580,7 @@ export interface FileRoutesByFullPath {
   '/errors/issues/': typeof ErrorsIssuesIndexRoute
   '/infra/cloudflare/': typeof InfraCloudflareIndexRoute
   '/infra/containers/': typeof InfraContainersIndexRoute
+  '/infra/kubernetes/': typeof InfraKubernetesIndexRoute
   '/infra/planetscale/': typeof InfraPlanetscaleIndexRoute
   '/dashboards/$dashboardId/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
@@ -655,6 +662,7 @@ export interface FileRoutesByTo {
   '/errors/issues': typeof ErrorsIssuesIndexRoute
   '/infra/cloudflare': typeof InfraCloudflareIndexRoute
   '/infra/containers': typeof InfraContainersIndexRoute
+  '/infra/kubernetes': typeof InfraKubernetesIndexRoute
   '/infra/planetscale': typeof InfraPlanetscaleIndexRoute
   '/dashboards/$dashboardId/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
@@ -738,6 +746,7 @@ export interface FileRoutesById {
   '/errors/issues/': typeof ErrorsIssuesIndexRoute
   '/infra/cloudflare/': typeof InfraCloudflareIndexRoute
   '/infra/containers/': typeof InfraContainersIndexRoute
+  '/infra/kubernetes/': typeof InfraKubernetesIndexRoute
   '/infra/planetscale/': typeof InfraPlanetscaleIndexRoute
   '/dashboards/$dashboardId_/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
@@ -822,6 +831,7 @@ export interface FileRouteTypes {
     | '/errors/issues/'
     | '/infra/cloudflare/'
     | '/infra/containers/'
+    | '/infra/kubernetes/'
     | '/infra/planetscale/'
     | '/dashboards/$dashboardId/widgets/$widgetId'
     | '/infra/kubernetes/nodes/$nodeName'
@@ -903,6 +913,7 @@ export interface FileRouteTypes {
     | '/errors/issues'
     | '/infra/cloudflare'
     | '/infra/containers'
+    | '/infra/kubernetes'
     | '/infra/planetscale'
     | '/dashboards/$dashboardId/widgets/$widgetId'
     | '/infra/kubernetes/nodes/$nodeName'
@@ -985,6 +996,7 @@ export interface FileRouteTypes {
     | '/errors/issues/'
     | '/infra/cloudflare/'
     | '/infra/containers/'
+    | '/infra/kubernetes/'
     | '/infra/planetscale/'
     | '/dashboards/$dashboardId_/widgets/$widgetId'
     | '/infra/kubernetes/nodes/$nodeName'
@@ -1052,6 +1064,7 @@ export interface RootRouteChildren {
   ErrorsIssuesIndexRoute: typeof ErrorsIssuesIndexRoute
   InfraCloudflareIndexRoute: typeof InfraCloudflareIndexRoute
   InfraContainersIndexRoute: typeof InfraContainersIndexRoute
+  InfraKubernetesIndexRoute: typeof InfraKubernetesIndexRoute
   InfraPlanetscaleIndexRoute: typeof InfraPlanetscaleIndexRoute
   DashboardsDashboardIdWidgetsWidgetIdRoute: typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   InfraKubernetesNodesNodeNameRoute: typeof InfraKubernetesNodesNodeNameRoute
@@ -1507,6 +1520,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InfraContainersContainerNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/infra/kubernetes/': {
+      id: '/infra/kubernetes/'
+      path: '/infra/kubernetes'
+      fullPath: '/infra/kubernetes/'
+      preLoaderRoute: typeof InfraKubernetesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/infra/planetscale/': {
       id: '/infra/planetscale/'
       path: '/infra/planetscale'
@@ -1726,6 +1746,7 @@ const rootRouteChildren: RootRouteChildren = {
   ErrorsIssuesIndexRoute: ErrorsIssuesIndexRoute,
   InfraCloudflareIndexRoute: InfraCloudflareIndexRoute,
   InfraContainersIndexRoute: InfraContainersIndexRoute,
+  InfraKubernetesIndexRoute: InfraKubernetesIndexRoute,
   InfraPlanetscaleIndexRoute: InfraPlanetscaleIndexRoute,
   DashboardsDashboardIdWidgetsWidgetIdRoute:
     DashboardsDashboardIdWidgetsWidgetIdRoute,

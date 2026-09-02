@@ -23,9 +23,13 @@ import {
 	LOCAL_SCHEMA_V10,
 	LOCAL_SCHEMA_V10_MANIFEST,
 	LOCAL_SCHEMA_V11,
+	LOCAL_SCHEMA_V11_MANIFEST,
 	LOCAL_SCHEMA_V12,
+	LOCAL_SCHEMA_V12_MANIFEST,
 	LOCAL_SCHEMA_V13,
+	LOCAL_SCHEMA_V13_MANIFEST,
 	LOCAL_SCHEMA_V14,
+	LOCAL_SCHEMA_V15,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -73,16 +77,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v14 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("aef1753f010332a2")
-		expect(SCHEMA_DIGEST).toBe("aef1753f010332a242afbcb927e91c16c0699903d984c5fa152166fa5bd40940")
+	it("matches the generated v15 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("67ab4cfa763f23d2")
+		expect(SCHEMA_DIGEST).toBe("67ab4cfa763f23d21ee49f4918fd605c09c24991badc51cf7d72161fb1dc8a0a")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(14)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V14)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(15)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V15)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -160,6 +164,8 @@ describe("current local schema identity", () => {
 			"web_events_mv",
 		])
 		expect([...currentNames].filter((name) => !v5Names.has(name))).toEqual([
+			"ai_trace_index",
+			"ai_trace_index_mv",
 			"identity_links",
 			"identity_links_mv",
 			"product_events",
@@ -235,7 +241,9 @@ describe("current local schema identity", () => {
 			"GroupId",
 		])
 		const v10Names = new Set(LOCAL_SCHEMA_V10_MANIFEST.objects.map((object) => object.name))
-		const v11Names = new Set(LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name))
+		// The frozen v11 manifest, not the current one: v14 adds objects of its
+		// own, and this assertion pins what v11 itself introduced.
+		const v11Names = new Set(LOCAL_SCHEMA_V11_MANIFEST.objects.map((object) => object.name))
 		expect([...v11Names].filter((name) => !v10Names.has(name))).toEqual([
 			"identity_links",
 			"identity_links_mv",
@@ -243,6 +251,33 @@ describe("current local schema identity", () => {
 			"product_events_mv",
 		])
 		expect([...v10Names].filter((name) => !v11Names.has(name))).toEqual(["web_events", "web_events_mv"])
+
+		// v12 replaces two view bodies and v13 adds columns to two rollups; neither
+		// adds an object. v14 is exactly the GenAI span index and its view, created
+		// empty and filled forward.
+		const v12Names = new Set(LOCAL_SCHEMA_V12_MANIFEST.objects.map((object) => object.name))
+		const v13Names = new Set(LOCAL_SCHEMA_V13_MANIFEST.objects.map((object) => object.name))
+		const currentSchemaNames = new Set(LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name))
+		expect([...v12Names].filter((name) => !v11Names.has(name))).toEqual([])
+		expect([...v13Names].filter((name) => !v12Names.has(name))).toEqual([])
+		expect([...v12Names].filter((name) => !v13Names.has(name))).toEqual([])
+		expect([...currentSchemaNames].filter((name) => !v13Names.has(name))).toEqual([
+			"ai_trace_index",
+			"ai_trace_index_mv",
+		])
+		expect([...v13Names].filter((name) => !currentSchemaNames.has(name))).toEqual([])
+		const aiTraceIndex = LOCAL_SCHEMA_MANIFEST.objects.find(
+			(object) => object.name === "ai_trace_index",
+		)
+		expect(aiTraceIndex?.engine).toBe("MergeTree")
+		expect(aiTraceIndex?.orderBy).toBe("(OrgId, Timestamp, TraceId)")
+		const aiTraceIndexView = LOCAL_SCHEMA_MANIFEST.objects.find(
+			(object) => object.name === "ai_trace_index_mv",
+		)
+		// Reads raw traces with the vendor stamp as its write filter — the same
+		// predicate Agent Sessions detection used to scan for at read time.
+		expect(aiTraceIndexView?.definition).toContain("FROM traces")
+		expect(aiTraceIndexView?.definition).toContain("SpanAttributes['maple_ai.vendor.id'] != ''")
 	})
 
 	it("recognises Apple crash frames at v8 but not before", () => {
@@ -275,7 +310,8 @@ describe("local migration registry", () => {
 			"local-0010-to-0011-product-events",
 			"local-0011-to-0012-service-map-edge-quantiles",
 			"local-0012-to-0013-service-operations-discriminators",
-			"local-0013-to-0014-error-events-attribute-fallback",
+			"local-0013-to-0014-ai-trace-index",
+			"local-0014-to-0015-error-events-attribute-fallback",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
@@ -322,7 +358,7 @@ describe("local migration registry", () => {
 				// One past the current tip — bump alongside LOCAL_SCHEMA_VERSION, or this
 				// stops testing the future-store guard and starts testing the
 				// unknown-fingerprint one.
-				{ ...CURRENT_LOCAL_SCHEMA, version: 15, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 16, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)
@@ -1324,7 +1360,8 @@ describe("v10 -> v11 product events module", () => {
 			"local-0010-to-0011-product-events",
 			"local-0011-to-0012-service-map-edge-quantiles",
 			"local-0012-to-0013-service-operations-discriminators",
-			"local-0013-to-0014-error-events-attribute-fallback",
+			"local-0013-to-0014-ai-trace-index",
+			"local-0014-to-0015-error-events-attribute-fallback",
 		])
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V11)
 		// The dropped table is declared, and the backfilled ones say what they

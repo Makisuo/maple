@@ -49,7 +49,8 @@ import { v9ToV10SemconvKeyRenamesModule } from "./local-store-migrations/v9-to-v
 import { v10ToV11ProductEventsModule } from "./local-store-migrations/v10-to-v11-product-events"
 import { v11ToV12ServiceMapEdgeQuantilesModule } from "./local-store-migrations/v11-to-v12-service-map-edge-quantiles"
 import { v12ToV13ServiceOperationsDiscriminatorsModule } from "./local-store-migrations/v12-to-v13-service-operations-discriminators"
-import { v13ToV14ErrorEventsAttributeFallbackModule } from "./local-store-migrations/v13-to-v14-error-events-attribute-fallback"
+import { v13ToV14AiTraceIndexModule } from "./local-store-migrations/v13-to-v14-ai-trace-index"
+import { v14ToV15ErrorEventsAttributeFallbackModule } from "./local-store-migrations/v14-to-v15-error-events-attribute-fallback"
 import type {
 	AnyLocalStoreMigrationModule,
 	LocalStoreMigration,
@@ -120,7 +121,8 @@ export const localStoreMigrations: ReadonlyArray<AnyLocalStoreMigrationModule> =
 	v10ToV11ProductEventsModule,
 	v11ToV12ServiceMapEdgeQuantilesModule,
 	v12ToV13ServiceOperationsDiscriminatorsModule,
-	v13ToV14ErrorEventsAttributeFallbackModule,
+	v13ToV14AiTraceIndexModule,
+	v14ToV15ErrorEventsAttributeFallbackModule,
 ]
 
 export const validateMigrationRegistry = (
