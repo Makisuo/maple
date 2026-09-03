@@ -131,7 +131,7 @@ export function serviceWorkloadsSQL(
     .where(($) => [
       $.OrgId.eq(param.string("orgId")),
       $.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("startTime")))),
-      $.Hour.lte(param.dateTimeString("endTime")),
+      $.Hour.lte(param.dateTimeSeconds("endTime")),
       CH.inList($.ServiceName, opts.services),
     ])
     .groupBy("serviceName");

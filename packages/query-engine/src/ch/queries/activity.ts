@@ -31,7 +31,7 @@ export interface ActiveOrgsOutput {
 export function activeOrgsByErrorEventsQuery() {
 	return from(ErrorEventsByTime)
 		.select(($) => ({ orgId: $.OrgId }))
-		.where(($) => [$.Timestamp.gte(param.dateTimeString("startTime"))])
+		.where(($) => [$.Timestamp.gte(param.dateTimeSeconds("startTime"))])
 		.groupBy("orgId")
 		.format("JSON")
 		.route("ingest")
@@ -42,7 +42,7 @@ export function activeOrgsByErrorEventsQuery() {
 export function activeOrgsByTracesQuery() {
 	return from(TracesAggregatesHourly)
 		.select(($) => ({ orgId: $.OrgId }))
-		.where(($) => [$.Hour.gte(param.dateTimeString("startTime"))])
+		.where(($) => [$.Hour.gte(param.dateTimeSeconds("startTime"))])
 		.groupBy("orgId")
 		.format("JSON")
 		.route("ingest")
@@ -53,7 +53,7 @@ export function activeOrgsByTracesQuery() {
 export function activeOrgsByLogsQuery() {
 	return from(LogsAggregatesHourly)
 		.select(($) => ({ orgId: $.OrgId }))
-		.where(($) => [$.Hour.gte(param.dateTimeString("startTime"))])
+		.where(($) => [$.Hour.gte(param.dateTimeSeconds("startTime"))])
 		.groupBy("orgId")
 		.format("JSON")
 		.route("ingest")

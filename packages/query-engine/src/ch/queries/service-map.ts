@@ -1318,7 +1318,7 @@ export function servicePlatformsSQL(
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("startTime")))),
-			$.Hour.lte(param.dateTimeString("endTime")),
+			$.Hour.lte(param.dateTimeSeconds("endTime")),
 			$.ServiceName.neq(""),
 			opts.deploymentEnv ? $.DeploymentEnv.eq(opts.deploymentEnv) : undefined,
 		])
