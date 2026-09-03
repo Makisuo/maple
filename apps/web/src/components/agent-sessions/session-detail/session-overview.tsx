@@ -154,7 +154,9 @@ function Verdict({
 									<span aria-hidden className="text-muted-foreground">
 										—
 									</span>
-									<span className="min-w-0 truncate font-mono text-[0.95em]">{verdict.label}</span>
+									<span className="min-w-0 truncate font-mono text-[0.95em]">
+										{verdict.label}
+									</span>
 									<span>on the final {turnWord}</span>
 								</>
 							)}
@@ -350,13 +352,7 @@ function TurnHealthStrip({
 /* Where the time went                                                        */
 /* -------------------------------------------------------------------------- */
 
-function TimeComposition({
-	summary,
-	turns,
-}: {
-	summary: SessionSummary
-	turns: readonly SessionTurn[]
-}) {
+function TimeComposition({ summary, turns }: { summary: SessionSummary; turns: readonly SessionTurn[] }) {
 	// Under half a percent a legend row reads "0%" and says nothing; the bar
 	// still draws the sliver in place, so nothing disappears from the timeline.
 	const legend = summary.occupancy
@@ -583,7 +579,10 @@ function ToolUsageRow({ tool, topToolCalls }: { tool: SessionToolUsage; topToolC
 				{disclosable && (
 					<ChevronRightIcon
 						size={10}
-						className={cn("shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
+						className={cn(
+							"shrink-0 text-muted-foreground transition-transform",
+							open && "rotate-90",
+						)}
 					/>
 				)}
 				<span className="min-w-0 truncate font-mono text-xs" title={tool.name}>

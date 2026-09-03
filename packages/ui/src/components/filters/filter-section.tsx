@@ -1,8 +1,9 @@
 import * as React from "react"
 
-import { ChevronDownIcon, type IconComponent, MagnifierIcon, XmarkIcon } from "../icons"
+import { ChevronDownIcon, CircleInfoIcon, type IconComponent, MagnifierIcon, XmarkIcon } from "../icons"
 import { Checkbox } from "../ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip"
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "../ui/input-group"
 import { Label } from "../ui/label"
 import { useSectionCollapse } from "../../hooks/use-section-collapse"
@@ -122,6 +123,21 @@ interface FilterSectionBaseProps {
 	 */
 	excluded?: ReadonlyArray<string>
 	onExcludedChange?: (excluded: string[]) => void
+	/**
+	 * Draw the options without their counts. For a section whose values come
+	 * from one place and whose rows are counted by another — a count there would
+	 * be a number about something other than what ticking the box filters.
+	 */
+	showCounts?: boolean
+	/**
+	 * What this section filters on, for a title that is a name rather than a
+	 * word — shown behind an info mark beside it. A node, so a legend can carry
+	 * its swatches. Most sections need none: a list of service names explains
+	 * itself.
+	 */
+	description?: React.ReactNode
+	/** Option-name → what that option means, as the row's hover text. */
+	getOptionDescription?: (name: string) => string | undefined
 }
 
 interface FilterSectionProps extends FilterSectionBaseProps {}
@@ -143,6 +159,9 @@ function FilterSectionBase({
 	getOptionLabel,
 	excluded = EMPTY,
 	onExcludedChange,
+	showCounts = true,
+	description,
+	getOptionDescription,
 }: FilterSectionBaseProps & { searchable: boolean }) {
 	const [isOpen, setIsOpen] = useSectionCollapse(persistKey ?? title, defaultOpen)
 	const [showAll, setShowAll] = React.useState(false)
@@ -227,7 +246,29 @@ function FilterSectionBase({
 					FILTER_SECTION_LABEL,
 				)}
 			>
-				<span className="truncate">{title}</span>
+				<span className="flex min-w-0 items-center gap-1.5">
+					<span className="truncate">{title}</span>
+					{description !== undefined && (
+						<Tooltip>
+							{/* A span, not the default button: this sits inside the
+							    collapse trigger, which is already a button. */}
+							<TooltipTrigger
+								render={
+									<span
+										className="inline-flex shrink-0 text-muted-foreground/50 hover:text-muted-foreground"
+										aria-label={`About ${title}`}
+									/>
+								}
+								onClick={(event) => event.stopPropagation()}
+							>
+								<CircleInfoIcon className="size-3" />
+							</TooltipTrigger>
+							<TooltipPopup className="max-w-72 text-left font-normal normal-case tracking-normal">
+								{description}
+							</TooltipPopup>
+						</Tooltip>
+					)}
+				</span>
 				<span className="flex items-center gap-1.5">
 					{!isOpen && selected.length > 0 && (
 						<span className="rounded-sm bg-muted px-1.5 py-0.5 text-[10px] tabular-nums tracking-normal text-foreground">
@@ -325,7 +366,11 @@ function FilterSectionBase({
 												? "text-muted-foreground/70 line-through decoration-1 decoration-muted-foreground/50"
 												: "text-foreground",
 										)}
-										title={isExcluded ? `${label} (excluded)` : label}
+										title={
+											isExcluded
+												? `${label} (excluded)`
+												: (getOptionDescription?.(option.name) ?? label)
+										}
 										// The power path, on the label rather than the row so it hangs
 										// off something already interactive. A plain click stays
 										// include-only on purpose: a checkbox that cycles into a third
@@ -367,16 +412,18 @@ function FilterSectionBase({
 									    them on hover alone would put exclusion out of keyboard reach
 									    entirely. */}
 									<span className="relative flex shrink-0 items-center justify-end">
-										<span
-											className={cn(
-												"text-xs text-muted-foreground tabular-nums transition-opacity",
-												onExcludedChange &&
-													"group-hover/option:opacity-0 group-focus-within/option:opacity-0",
-											)}
-											title={option.count.toLocaleString()}
-										>
-											{formatNumber(option.count)}
-										</span>
+										{showCounts ? (
+											<span
+												className={cn(
+													"text-xs text-muted-foreground tabular-nums transition-opacity",
+													onExcludedChange &&
+														"group-hover/option:opacity-0 group-focus-within/option:opacity-0",
+												)}
+												title={option.count.toLocaleString()}
+											>
+												{formatNumber(option.count)}
+											</span>
+										) : null}
 										{onExcludedChange && (
 											// Opaque, with the label fading out beneath its leading
 											// edge. The slot is only as wide as the count, so these

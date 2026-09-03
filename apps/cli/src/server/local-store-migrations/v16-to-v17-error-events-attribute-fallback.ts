@@ -17,28 +17,28 @@ import type {
 	StateDispositionEntry,
 } from "../local-store-migration-module"
 import {
-	LOCAL_SCHEMA_V15,
-	LOCAL_SCHEMA_V15_MANIFEST,
-	LOCAL_SCHEMA_V15_SQL,
 	LOCAL_SCHEMA_V16,
 	LOCAL_SCHEMA_V16_MANIFEST,
 	LOCAL_SCHEMA_V16_SQL,
+	LOCAL_SCHEMA_V17,
+	LOCAL_SCHEMA_V17_MANIFEST,
+	LOCAL_SCHEMA_V17_SQL,
 } from "../schema-identity"
 import { assertPhysicalSchema } from "../schema-physical"
 
 /** Stamped into the journal and matched on the way back out. */
-const MODULE_ID = "local-0015-to-0016-error-events-attribute-fallback" as const
+const MODULE_ID = "local-0016-to-0017-error-events-attribute-fallback" as const
 
-const V15ToV16StateCodec = makeRawRowsState(MODULE_ID)
+const V16ToV17StateCodec = makeRawRowsState(MODULE_ID)
 
-type V15ToV16State = typeof V15ToV16StateCodec.schema.Type
-type V15ToV16Progress = InstalledProgress
+type V16ToV17State = typeof V16ToV17StateCodec.schema.Type
+type V16ToV17Progress = InstalledProgress
 
-const decodeState = V15ToV16StateCodec.decode
+const decodeState = V16ToV17StateCodec.decode
 const decodeProgress = decodeInstalledProgress
 
 /**
- * The local mirror of ClickHouse migration 0026.
+ * The local mirror of ClickHouse migration 0027.
  *
  * The two error-events views took the exception type, message and stacktrace
  * from the first OTel `exception` span event alone, and fell through to
@@ -56,15 +56,15 @@ const decodeProgress = decodeInstalledProgress
  * retention window rolls.
  */
 
-const preflight = async (context: MigrationModuleContext): Promise<V15ToV16State> => {
+const preflight = async (context: MigrationModuleContext): Promise<V16ToV17State> => {
 	await context.ensureCapacity()
 	const retentionDays = readRawTelemetryRetentionDays(context.dataDir)
 	const rawRows = await context.openSource(
 		(db) => {
-			assertPhysicalSchema(db, expectedManifest(LOCAL_SCHEMA_V15_MANIFEST, retentionDays))
+			assertPhysicalSchema(db, expectedManifest(LOCAL_SCHEMA_V16_MANIFEST, retentionDays))
 			return rawRowCounts(db)
 		},
-		{ schemaSql: LOCAL_SCHEMA_V15_SQL, bootstrapSchema: false },
+		{ schemaSql: LOCAL_SCHEMA_V16_SQL, bootstrapSchema: false },
 	)
 	// Two literals rather than a conditional spread: `retentionDays` is an
 	// `optionalKey`, so an absent floor has to be an absent key, not a present
@@ -76,8 +76,8 @@ const preflight = async (context: MigrationModuleContext): Promise<V15ToV16State
 
 const prepareTarget = async (
 	context: MigrationModuleContext,
-	state: V15ToV16State,
-): Promise<V15ToV16State> => {
+	state: V16ToV17State,
+): Promise<V16ToV17State> => {
 	await context.closeStores()
 	const source = resolve(context.sourceDataDir)
 	const target = resolve(context.targetDataDir)
@@ -91,45 +91,45 @@ const prepareTarget = async (
  * Like v7 -> v8, this edge replaces the body of two existing views rather than
  * adding anything. A materialized view's SELECT is frozen at creation and the
  * bundled DDL uses `CREATE ... IF NOT EXISTS`, so both views must be dropped
- * before the v16 schema can install its versions. Dropping a view never touches
+ * before the v17 schema can install its versions. Dropping a view never touches
  * rows already in its target table.
  */
-const apply = async (context: MigrationModuleContext): Promise<V15ToV16Progress> => {
+const apply = async (context: MigrationModuleContext): Promise<V16ToV17Progress> => {
 	await context.openTarget(
 		(db) => {
 			db.exec("DROP TABLE IF EXISTS error_events_mv")
 			db.exec("DROP TABLE IF EXISTS error_events_by_time_mv")
 		},
-		{ schemaSql: LOCAL_SCHEMA_V15_SQL, bootstrapSchema: false },
+		{ schemaSql: LOCAL_SCHEMA_V16_SQL, bootstrapSchema: false },
 	)
 	return context.openTarget(() => ({ installed: true }), {
-		schemaSql: LOCAL_SCHEMA_V16_SQL,
+		schemaSql: LOCAL_SCHEMA_V17_SQL,
 		bootstrapSchema: true,
 	})
 }
 
 const verify = async (
 	context: MigrationModuleContext,
-	state: V15ToV16State,
-	_progress: V15ToV16Progress,
+	state: V16ToV17State,
+	_progress: V16ToV17Progress,
 ): Promise<void> => {
 	await context.openTarget(
 		(db) => {
-			assertPhysicalSchema(db, expectedManifest(LOCAL_SCHEMA_V16_MANIFEST, state.retentionDays))
+			assertPhysicalSchema(db, expectedManifest(LOCAL_SCHEMA_V17_MANIFEST, state.retentionDays))
 			const targetRows = rawRowCounts(db)
 			for (const table of RAW_TABLES) {
 				if (targetRows[table] !== state.rawRows[table])
-					throw new Error(`v15 -> v16 raw telemetry verification failed for ${table}`)
+					throw new Error(`v16 -> v17 raw telemetry verification failed for ${table}`)
 			}
 		},
-		{ schemaSql: LOCAL_SCHEMA_V16_SQL, bootstrapSchema: false },
+		{ schemaSql: LOCAL_SCHEMA_V17_SQL, bootstrapSchema: false },
 	)
 }
 
 const operations: ReadonlyArray<MigrationOperation> = [
 	{
-		id: "clone-v15-store",
-		description: "Clone the stopped v15 store into the staged migration target",
+		id: "clone-v16-store",
+		description: "Clone the stopped v16 store into the staged migration target",
 		requiresQuiescence: true,
 		phase: "target-created",
 	},
@@ -141,8 +141,8 @@ const operations: ReadonlyArray<MigrationOperation> = [
 		phase: "copying",
 	},
 	{
-		id: "verify-v16-schema",
-		description: "Verify the v16 physical schema and retained raw telemetry counts",
+		id: "verify-v17-schema",
+		description: "Verify the v17 physical schema and retained raw telemetry counts",
 		requiresQuiescence: true,
 		phase: "copy-verified",
 	},
@@ -153,7 +153,7 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 		name: "local store",
 		classification: "authoritative",
 		disposition: "preserve-exact",
-		guarantee: "The clean stopped v15 store is cloned byte-for-byte before the views are replaced.",
+		guarantee: "The clean stopped v16 store is cloned byte-for-byte before the views are replaced.",
 	},
 	{
 		name: "traces",
@@ -188,16 +188,16 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 	},
 ]
 
-export const v15ToV16ErrorEventsAttributeFallbackModule: LocalStoreMigrationModule<
-	V15ToV16State,
-	V15ToV16Progress
+export const v16ToV17ErrorEventsAttributeFallbackModule: LocalStoreMigrationModule<
+	V16ToV17State,
+	V16ToV17Progress
 > = {
 	id: MODULE_ID,
 	moduleVersion: 1,
 	description:
 		"Rebuild the error-events views so an exception-less span is labelled from its exception.* / error.* attributes",
-	from: LOCAL_SCHEMA_V15,
-	to: LOCAL_SCHEMA_V16,
+	from: LOCAL_SCHEMA_V16,
+	to: LOCAL_SCHEMA_V17,
 	operations,
 	dispositions,
 	decodeState,

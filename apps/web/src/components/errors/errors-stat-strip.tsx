@@ -55,7 +55,7 @@ export function ErrorsStatStrip({ filters }: { filters: GetErrorsSummaryInput })
 								<span className="text-muted-foreground">{stat.label}</span>
 							</span>
 						))}
-						<span className="text-muted-foreground/60">in the selected window</span>
+						<span className="text-muted-foreground/60">in the last 24 hours</span>
 					</div>
 				)
 			})

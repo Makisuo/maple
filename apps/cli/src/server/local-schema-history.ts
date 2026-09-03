@@ -164,18 +164,36 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 	Object.freeze({
-		// v16 rebuilds error_events_mv / error_events_by_time_mv so a span with
+		// `ai_trace_index` widened with the sidebar's filter dimensions
+		// (`DeploymentEnv`, `Model`, `AgentName`, `ToolName`) and the per-span
+		// measures the page ranks on (`IsError`, `IsLlmCall`, `IsToolCall`,
+		// `Tokens`, `Cost`, plus `SpanId`/`ParentSpanId`/`Duration`), and
+		// `ai_trace_index_mv` recreated to fill them (ClickHouse migration
+		// 0026). Metadata-only ALTERs plus a view swap — no part is rewritten and
+		// no row moves. Rows materialized under v15 keep ''/0 in the new columns;
+		// nothing is backfilled.
+		//
+		// projectRevision stays the hardcoded constant, as for v12 to v15 — the
+		// identity this gate compares is the fingerprint/digest pair.
+		version: 16,
+		fingerprint: "d975e674ce66af41",
+		digest: "d975e674ce66af417e4398d8ca336d41340c9c1aa7b26082a6c55ecd02effe38",
+		manifestDigest: "f7d559f0db216379db02bc78c4e50f180f40588e124adf65665bf7eaaf556735",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
+	Object.freeze({
+		// v17 rebuilds error_events_mv / error_events_by_time_mv so a span with
 		// no `exception` event is labelled from its exception.* / error.* span
-		// attributes (ClickHouse migration 0026). No part is rewritten and no row
+		// attributes (ClickHouse migration 0027). No part is rewritten and no row
 		// moves; rows already materialized keep their 'Unknown Error' label.
 		//
 		// projectRevision is carried forward deliberately — it is a hardcoded
 		// constant that no longer tracks the generator's header, and the identity
 		// this gate compares is the fingerprint/digest pair.
-		version: 16,
-		fingerprint: "a14b5b6129c98dc8",
-		digest: "a14b5b6129c98dc8da41cdf7bfbd60801eac3913a7611f591d33328b0ee4a27d",
-		manifestDigest: "cef5500916244498f443e68a5c0112f2b33b9bbf3e69e21d6e66b23bf96d4b1c",
+		version: 17,
+		fingerprint: "9135b2a26d977584",
+		digest: "9135b2a26d977584d621f4d3ba8cce1def47d98d55a3bf53dac493f93d2e0118",
+		manifestDigest: "2ef489448e313a603e842824c5918df76ced5fb509163f101a6288194dbbc552",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 ] as const)

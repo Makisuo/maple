@@ -58,7 +58,7 @@ import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
 import { forkRequestScoped } from "@/platform/fork-request-scoped"
 import { dateToMs } from "@/platform/time"
-import { validateExternalUrl } from "@/http/url-validator"
+import { validateExternalUrl } from "@maple/safe-fetch"
 
 /**
  * Resolved per-org backend config, returned to the runtime SQL layer.

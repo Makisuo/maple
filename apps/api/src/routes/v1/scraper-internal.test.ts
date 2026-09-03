@@ -21,15 +21,17 @@ describe("toInternalScrapeTarget", () => {
 		name: "Node Exporter",
 		serviceName: "node",
 		url: "https://node.example.com:9100/metrics",
+		targetType: "prometheus",
 		scrapeIntervalSeconds: 15,
 		labelsJson: { env: "prod" },
 	}
 
 	const INGEST_KEY = "maple_pk_test_key"
+	const NO_HEADERS: Record<string, string> = {}
 
 	it.effect("marshals a row with parsed labels and the org's ingest key", () =>
 		Effect.gen(function* () {
-			const result = yield* toInternalScrapeTarget(baseRow, INGEST_KEY)
+			const result = yield* toInternalScrapeTarget(baseRow, INGEST_KEY, NO_HEADERS)
 			assert.isTrue(Option.isSome(result))
 			if (Option.isNone(result)) return
 			assert.strictEqual(result.value.id, baseRow.id)
@@ -50,6 +52,7 @@ describe("toInternalScrapeTarget", () => {
 			const result = yield* toInternalScrapeTarget(
 				{ ...baseRow, labelsJson: driftedLabels },
 				INGEST_KEY,
+				NO_HEADERS,
 			)
 			assert.isTrue(Option.isSome(result))
 			if (Option.isNone(result)) return
@@ -62,6 +65,7 @@ describe("toInternalScrapeTarget", () => {
 			const result = yield* toInternalScrapeTarget(
 				{ ...baseRow, labelsJson: null, serviceName: null },
 				INGEST_KEY,
+				NO_HEADERS,
 			)
 			assert.isTrue(Option.isSome(result))
 			if (Option.isNone(result)) return
@@ -75,22 +79,55 @@ describe("toInternalScrapeTarget", () => {
 			const outOfRange = yield* toInternalScrapeTarget(
 				{ ...baseRow, scrapeIntervalSeconds: 2 },
 				INGEST_KEY,
+				NO_HEADERS,
 			)
 			assert.isTrue(Option.isNone(outOfRange))
+			const unknownType = yield* toInternalScrapeTarget(
+				{ ...baseRow, targetType: "graphite" },
+				INGEST_KEY,
+				NO_HEADERS,
+			)
+			assert.isTrue(Option.isNone(unknownType))
 		}),
 	)
 
-	it.effect("expands a discovered sub-target with its url, key, and merged labels", () =>
+	it.effect("scrapes a plain target at its own url with its decrypted auth headers", () =>
 		Effect.gen(function* () {
 			const result = yield* toInternalScrapeTarget(baseRow, INGEST_KEY, {
-				url: "https://branch-1.metrics.psdb.cloud/metrics",
-				subTargetKey: "branch-1",
-				labels: { planetscale_database_branch_id: "branch-1", env: "discovery" },
+				Authorization: "Bearer stored-token",
 			})
 			assert.isTrue(Option.isSome(result))
 			if (Option.isNone(result)) return
+			assert.strictEqual(result.value.targetType, "prometheus")
+			assert.strictEqual(result.value.scrapeUrl, baseRow.url)
+			assert.deepStrictEqual(result.value.authHeaders, { Authorization: "Bearer stored-token" })
+		}),
+	)
+
+	it.effect("expands a discovered sub-target with its signed url, key, and merged labels", () =>
+		Effect.gen(function* () {
+			const result = yield* toInternalScrapeTarget(
+				{ ...baseRow, targetType: "planetscale" },
+				INGEST_KEY,
+				NO_HEADERS,
+				{
+					url: "https://branch-1.metrics.psdb.cloud/metrics",
+					signedUrl: "https://branch-1.metrics.psdb.cloud/metrics?sig=abc&exp=123",
+					subTargetKey: "branch-1",
+					labels: { planetscale_database_branch_id: "branch-1", env: "discovery" },
+				},
+			)
+			assert.isTrue(Option.isSome(result))
+			if (Option.isNone(result)) return
 			assert.strictEqual(result.value.id, baseRow.id)
+			assert.strictEqual(result.value.targetType, "planetscale")
+			// Identity stays on the unsigned url; the signed form is what gets fetched.
 			assert.strictEqual(result.value.url, "https://branch-1.metrics.psdb.cloud/metrics")
+			assert.strictEqual(
+				result.value.scrapeUrl,
+				"https://branch-1.metrics.psdb.cloud/metrics?sig=abc&exp=123",
+			)
+			assert.deepStrictEqual(result.value.authHeaders, {})
 			assert.strictEqual(result.value.subTargetKey, "branch-1")
 			// The target's own labelsJson wins over discovery labels on conflicts.
 			assert.deepStrictEqual(result.value.labels, {
@@ -102,7 +139,7 @@ describe("toInternalScrapeTarget", () => {
 
 	it.effect("defaults subTargetKey to null for plain targets", () =>
 		Effect.gen(function* () {
-			const result = yield* toInternalScrapeTarget(baseRow, INGEST_KEY)
+			const result = yield* toInternalScrapeTarget(baseRow, INGEST_KEY, NO_HEADERS)
 			assert.isTrue(Option.isSome(result))
 			if (Option.isNone(result)) return
 			assert.isNull(result.value.subTargetKey)

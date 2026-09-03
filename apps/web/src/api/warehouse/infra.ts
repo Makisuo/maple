@@ -58,7 +58,10 @@ export type PodSortKey = "saturation" | "cpuUsage" | "cpuLimitPct" | "memoryLimi
 export type SortDirection = "asc" | "desc"
 
 /** One-click fleet scopes from the summary band. */
-export type PodScope = "saturated" | "elevated" | "unbounded" | "stale"
+export type PodScope = "saturated" | "elevated" | "unbounded"
+
+/** Which slice of the window's pods to list — see the domain contract. */
+export type PodLifecycle = "live" | "ended" | "all"
 
 export interface InfraPresenceInput {
 	startTime: string
@@ -207,6 +210,8 @@ export interface ListPodsInput {
 	workloadKind?: WorkloadKind
 	workloadName?: string
 	scope?: PodScope
+	/** Server-side default is `live`. */
+	lifecycle?: PodLifecycle
 	sortBy?: PodSortKey
 	sortDir?: SortDirection
 	limit?: number
@@ -245,6 +250,7 @@ export function listPods({ data }: { data: ListPodsInput }) {
 					workloadKind: data.workloadKind,
 					workloadName: data.workloadName,
 					scope: data.scope,
+					lifecycle: data.lifecycle,
 					sortBy: data.sortBy,
 					sortDir: data.sortDir,
 					limit: data.limit,

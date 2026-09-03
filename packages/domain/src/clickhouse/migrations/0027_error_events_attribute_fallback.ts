@@ -1,5 +1,5 @@
 /**
- * Migration 0026 — read the exception off span attributes when a span has no
+ * Migration 0027 — read the exception off span attributes when a span has no
  * `exception` event.
  *
  * `error_events_mv` / `error_events_by_time_mv` took the exception type,
@@ -34,15 +34,15 @@
  * under their real type from cutover forward.
  *
  * The CREATE statements below are the verbatim DDL as the schema emitter
- * produced it at v26. Frozen history: never re-derive them from a later
+ * produced it at v27. Frozen history: never re-derive them from a later
  * snapshot.
  *
  * `requiredForIngest: false` — nothing writes `error_events` directly, so this
  * is a read-path correction, and gating on it would un-ready every
  * BYO-ClickHouse org's ingest routing for a change the gateway never sees.
  */
-export const migration_0026_error_events_attribute_fallback = {
-	version: 26,
+export const migration_0027_error_events_attribute_fallback = {
+	version: 27,
 	description:
 		"Recreate the error_events MVs so an exception-less span is labelled from its exception.* / error.* attributes",
 	requiredForIngest: false,

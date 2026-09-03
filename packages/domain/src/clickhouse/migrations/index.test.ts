@@ -31,7 +31,8 @@ import { migration_0022_service_map_edge_quantiles } from "./0022_service_map_ed
 import { migration_0023_service_operations_discriminators } from "./0023_service_operations_discriminators"
 import { migration_0024_ai_trace_index } from "./0024_ai_trace_index"
 import { migration_0025_commit_sha_vcs_revision } from "./0025_commit_sha_vcs_revision"
-import { migration_0026_error_events_attribute_fallback } from "./0026_error_events_attribute_fallback"
+import { migration_0026_ai_trace_index_filter_columns } from "./0026_ai_trace_index_filter_columns"
+import { migration_0027_error_events_attribute_fallback } from "./0027_error_events_attribute_fallback"
 import { migration_0021_product_events } from "./0021_product_events"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
@@ -48,10 +49,10 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
 		expect(migrations.map((m) => m.version)).toEqual([
-			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
 		])
-		expect(migrations.at(-1)).toBe(migration_0026_error_events_attribute_fallback)
-		expect(latestMigrationVersion).toBe(26)
+		expect(migrations.at(-1)).toBe(migration_0027_error_events_attribute_fallback)
+		expect(latestMigrationVersion).toBe(27)
 		// 0010 and 0014-0020 are read-path only and skipped by the ingest-gating
 		// version; 0021 is not — the gateway writes `session_events`' new identity
 		// columns and `product_events` directly, so a BYO-CH org must apply it
@@ -74,13 +75,15 @@ describe("ClickHouse migrations", () => {
 		expect(migration_0023_service_operations_discriminators.requiredForIngest).toBe(false)
 		expect(migration_0024_ai_trace_index.requiredForIngest).toBe(false)
 		expect(migration_0025_commit_sha_vcs_revision.requiredForIngest).toBe(false)
-		// 0026 only recreates the error-events MVs.
-		expect(migration_0026_error_events_attribute_fallback.requiredForIngest).toBe(false)
+		// 0026 widens the same MV-populated ai_trace_index and rebuilds its view.
+		expect(migration_0026_ai_trace_index_filter_columns.requiredForIngest).toBe(false)
+		// 0027 only recreates the error-events MVs.
+		expect(migration_0027_error_events_attribute_fallback.requiredForIngest).toBe(false)
 	})
 
 	it("recreates both error-events MVs with the span-attribute exception fallback", () => {
 		const statements: ReadonlyArray<string> =
-			migration_0026_error_events_attribute_fallback.statements.filter((stmt) => !isBackfill(stmt))
+			migration_0027_error_events_attribute_fallback.statements.filter((stmt) => !isBackfill(stmt))
 		const sql = statements.join("\n")
 
 		// An MV's SELECT is frozen at creation, so both views are dropped before
@@ -114,7 +117,7 @@ describe("ClickHouse migrations", () => {
 		// Nothing is rewritten: error_events keeps no span attributes to re-derive
 		// from, and recomputing FingerprintHash would re-bucket every issue.
 		expect(sql).not.toContain("ALTER TABLE error_events")
-		expect(migration_0026_error_events_attribute_fallback.statements.some(isBackfill)).toBe(false)
+		expect(migration_0027_error_events_attribute_fallback.statements.some(isBackfill)).toBe(false)
 	})
 
 	it("recreates both error-events MVs with the 4xx guard and the widened frame redaction", () => {
@@ -648,5 +651,78 @@ describe("migration 0018 — Apple crash frames", () => {
 		expect(migration_0018_apple_crash_frames.statements.some((stmt) => stmt.includes("UPDATE"))).toBe(
 			false,
 		)
+	})
+})
+
+describe("migration 0026 — ai_trace_index filter columns", () => {
+	const statements = migration_0026_ai_trace_index_filter_columns.statements
+
+	it("widens the index with idempotent ALTERs before recreating its view", () => {
+		const alters = statements.filter((stmt) =>
+			stmt.startsWith("ALTER TABLE ai_trace_index ADD COLUMN IF NOT EXISTS"),
+		)
+		expect(alters.map((stmt) => stmt.split(" ")[8])).toEqual([
+			"DeploymentEnv",
+			"Model",
+			"AgentName",
+			"ToolName",
+			"SpanId",
+			"ParentSpanId",
+			"Duration",
+			"IsError",
+			"IsLlmCall",
+			"IsToolCall",
+			"Tokens",
+			"Cost",
+		])
+		// The facet dimensions are LowCardinality(String): never free text.
+		for (const stmt of alters.slice(0, 4)) expect(stmt).toMatch(/ LowCardinality\(String\)$/)
+		// The view's SELECT is frozen at creation, so the body change needs a drop
+		// — and the drop must come after the ALTERs and before the CREATE, or the
+		// recreated view maps a column its target does not yet have.
+		const drop = statements.indexOf("DROP VIEW IF EXISTS ai_trace_index_mv")
+		const create = statements.findIndex((stmt) => stmt.startsWith("CREATE MATERIALIZED VIEW"))
+		expect(drop).toBe(alters.length)
+		expect(create).toBe(drop + 1)
+		expect(statements).toHaveLength(alters.length + 2)
+	})
+
+	it("recreates the view with the coalesced GenAI identity, measures and the semconv environment", () => {
+		const create = statements.find((stmt) => stmt.startsWith("CREATE MATERIALIZED VIEW"))!
+		expect(create).toContain("TO ai_trace_index AS")
+		// The write filter is unchanged: membership in the table is still the
+		// detection predicate the read side relies on.
+		expect(create).toContain("WHERE SpanAttributes['maple_ai.vendor.id'] != ''")
+		expect(create).toContain(
+			"coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) AS DeploymentEnv",
+		)
+		// Response model before request model, canonical keys before dialects.
+		expect(create).toContain(
+			"coalesce(nullIf(SpanAttributes['gen_ai.response.model'], ''), nullIf(SpanAttributes['gen_ai.request.model'], ''), nullIf(SpanAttributes['ai.response.model'], ''), nullIf(SpanAttributes['ai.model.id'], ''), SpanAttributes['llm.model_name']) AS Model",
+		)
+		expect(create).toContain(
+			"coalesce(nullIf(SpanAttributes['gen_ai.agent.name'], ''), SpanAttributes['ai.telemetry.functionId']) AS AgentName",
+		)
+		expect(create).toContain(
+			"coalesce(nullIf(SpanAttributes['gen_ai.tool.name'], ''), nullIf(SpanAttributes['ai.toolCall.name'], ''), SpanAttributes['tool.name']) AS ToolName",
+		)
+		// The measures: the span's kind and failure as flags, its usage as sums
+		// the page can rank on, and the ids that let a roll-up be undone.
+		expect(create).toContain("SpanId,\n          ParentSpanId,\n          Duration,")
+		expect(create).toContain(
+			"toUInt8(((StatusCode = 'Error' OR SpanAttributes['error.type'] != '') OR SpanAttributes['gen_ai.response.status'] IN ('failed', 'error'))) AS IsError",
+		)
+		expect(create).toMatch(
+			/toUInt8\(.*IN \('chat', 'generate_content', 'text_completion', 'fetch_response'\).*\) AS IsLlmCall/,
+		)
+		expect(create).toMatch(/toUInt8\(.*IN \('execute_tool'\).*\) AS IsToolCall/)
+		expect(create).toMatch(
+			/toFloat64OrZero\(coalesce\(nullIf\(SpanAttributes\['gen_ai\.usage\.input_tokens'\], ''\).*\) AS Tokens/,
+		)
+		expect(create).toContain("SpanAttributes['llm.cost.total'])) AS Cost")
+	})
+
+	it("does not backfill", () => {
+		expect(statements.some((stmt) => typeof stmt !== "string" || stmt.includes("INSERT"))).toBe(false)
 	})
 })

@@ -464,13 +464,7 @@ function ReasoningPart({ part }: { part: Extract<SpanMessagePart, { kind: "reaso
 /* Tool calls                                                                 */
 /* -------------------------------------------------------------------------- */
 
-function ToolCallsSection({
-	span,
-	toolCalls,
-}: {
-	span: AiSessionSpan
-	toolCalls: readonly SpanToolCall[]
-}) {
+function ToolCallsSection({ span, toolCalls }: { span: AiSessionSpan; toolCalls: readonly SpanToolCall[] }) {
 	// The expansion does not virtualize, so one disclosure set for every card on
 	// the tab lives here — the same shape the transcript hands its rows.
 	const [openRows, setOpenRows] = useState<ReadonlySet<string>>(() => new Set())
@@ -649,13 +643,7 @@ const toSpanId = Schema.decodeSync(SpanId)
  * was read from — Details is where a reader looks first, and a failed call
  * whose evidence is only on another tab reads as a call that did not fail.
  */
-function DetailsSection({
-	span,
-	toolCalls,
-}: {
-	span: AiSessionSpan
-	toolCalls: readonly SpanToolCall[]
-}) {
+function DetailsSection({ span, toolCalls }: { span: AiSessionSpan; toolCalls: readonly SpanToolCall[] }) {
 	const detailResult = useAtomValue(
 		span.traceId !== "" && span.spanId !== ""
 			? getSpanDetailResultAtom({
@@ -675,9 +663,7 @@ function DetailsSection({
 	// tab. The span's OWN call only — a model span's tool calls are its OUTPUT,
 	// and their results say nothing about why the model call itself failed.
 	const failedToolResult =
-		failed && classifyAiSpan(span) === "tool"
-			? toolCalls.find((call) => call.own)?.resultText
-			: undefined
+		failed && classifyAiSpan(span) === "tool" ? toolCalls.find((call) => call.own)?.resultText : undefined
 
 	return (
 		<div className="flex flex-col gap-3 pb-1">
@@ -855,4 +841,3 @@ function collapsedText(parts: readonly SpanMessagePart[]): string {
 		.join("\n")
 		.trim()
 }
-

@@ -145,7 +145,7 @@ export function ErrorSignalHeader() {
 			<span className={LANE.severity} />
 			<span className={LANE.identity}>Error</span>
 			<span className={LANE.volume}>
-				<span className={LANE.spark}>Trend</span>
+				<span className={LANE.spark}>Trend · 24h</span>
 				<span className={LANE.count}>Events</span>
 			</span>
 			<span className={LANE.service}>Service</span>
@@ -300,8 +300,8 @@ export function ErrorSignalRow({
 							surging={isSurging}
 							label={
 								isSurging
-									? `Surging — ${formatNumber(signal.windowCount ?? 0)} occurrences, concentrated at the end of the window`
-									: `${formatNumber(signal.windowCount ?? 0)} occurrences over the window`
+									? `Surging — ${formatNumber(signal.windowCount ?? 0)} occurrences in the last 24 hours, concentrated at the end`
+									: `${formatNumber(signal.windowCount ?? 0)} occurrences in the last 24 hours`
 							}
 						/>
 					</span>
@@ -310,8 +310,8 @@ export function ErrorSignalRow({
 						className={cn(LANE.count, "text-xs tabular-nums")}
 						title={
 							signal.windowCount === null
-								? `No occurrences in this window · ${signal.totalCount.toLocaleString()} all time`
-								: `${signal.windowCount.toLocaleString()} in this window · ${signal.totalCount.toLocaleString()} all time`
+								? `None in the last 24 hours · ${signal.totalCount.toLocaleString()} all time`
+								: `${signal.windowCount.toLocaleString()} in the last 24 hours · ${signal.totalCount.toLocaleString()} all time`
 						}
 					>
 						{signal.windowCount === null ? (

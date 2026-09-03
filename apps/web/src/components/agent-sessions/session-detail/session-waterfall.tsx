@@ -230,16 +230,7 @@ export function SessionWaterfall({
 			)
 			row?.scrollIntoView({ block: "center" })
 		})
-	}, [
-		landingSpanId,
-		revealedTurnId,
-		rows,
-		spanRowIndexById,
-		setFocusedId,
-		virtualizer,
-		getScrollElement,
-	])
-
+	}, [landingSpanId, revealedTurnId, rows, spanRowIndexById, setFocusedId, virtualizer, getScrollElement])
 
 	return (
 		<div className="@container flex grow flex-col">

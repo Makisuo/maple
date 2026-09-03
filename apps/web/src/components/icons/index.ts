@@ -33,6 +33,7 @@ export {
 	FireIcon,
 	FolderOpenIcon,
 	GlobeIcon,
+	GlobePointerIcon,
 	LineHeightIcon,
 	LinkIcon,
 	LoaderIcon,
