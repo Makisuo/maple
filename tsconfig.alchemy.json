@@ -4,7 +4,7 @@
 		// alerting's ticks. workers-types alone lacks DOM-only members that code
 		// uses (`ResponseType` values, TextDecoder options), and `esnext` in place
 		// of ES2023 makes the DOM and workers-types stream globals disagree in
-		// lib/effect-cloudflare.
+		// packages/infra's worker-runtime modules.
 		"lib": ["ES2023", "DOM", "DOM.Iterable"],
 		"target": "esnext",
 		"module": "preserve",

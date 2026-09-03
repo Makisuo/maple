@@ -41,7 +41,7 @@ import {
 	type LensVerdict,
 } from "@maple/domain/http"
 import { InvestigationId, OrgId, UserId } from "@maple/domain/primitives"
-import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/effect-cloudflare"
+import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/infra/worker-runtime"
 import { randomUUID } from "node:crypto"
 import { and, eq, sql } from "drizzle-orm"
 import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect"

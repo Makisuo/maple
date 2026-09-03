@@ -59,9 +59,6 @@
 			"ignore": ["src/generated/**"],
 			"ignoreDependencies": ["tailwindcss"]
 		},
-		"lib/effect-cloudflare": {
-			"ignoreDependencies": ["cloudflare"]
-		},
 		"lib/alchemy-portless": {
 			// The dev-sidecar entry alchemy loads by URL, not by import.
 			"entry": ["src/Local.ts"]

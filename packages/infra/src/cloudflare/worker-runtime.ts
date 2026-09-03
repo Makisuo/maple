@@ -44,7 +44,7 @@ export const buildRequestRuntime = <R>(
 } => {
 	const runtime = ManagedRuntime.make(layer)
 	const services = runtime.context().catch((err) => {
-		console.error("[effect-cloudflare] runtime build failed:", err)
+		console.error("[worker-runtime] runtime build failed:", err)
 		throw err
 	})
 	const flush = async () => {
@@ -55,7 +55,7 @@ export const buildRequestRuntime = <R>(
 			Effect.result(Effect.tryPromise({ try: () => runtime.dispose(), catch: (cause) => cause })),
 		)
 		if (Result.isFailure(disposed)) {
-			console.error("[effect-cloudflare] runtime flush failed:", disposed.failure)
+			console.error("[worker-runtime] runtime flush failed:", disposed.failure)
 		}
 	}
 	return { services, flush }
@@ -125,7 +125,7 @@ export const runScheduledEffect = <A, E, R>(
 		.then((exit): A | undefined => {
 			if (Exit.isSuccess(exit)) return exit.value
 			if (options?.onInterrupt === "graceful" && Cause.hasInterruptsOnly(exit.cause)) {
-				console.warn("[effect-cloudflare] scheduled run interrupted — cancelled gracefully")
+				console.warn("[worker-runtime] scheduled run interrupted — cancelled gracefully")
 				return undefined
 			}
 			throw Cause.squash(exit.cause)
@@ -133,7 +133,7 @@ export const runScheduledEffect = <A, E, R>(
 		.finally(async () => {
 			await drainScheduler()
 			await runtime.dispose().catch((err) => {
-				console.error("[effect-cloudflare] scheduled runtime dispose failed:", err)
+				console.error("[worker-runtime] scheduled runtime dispose failed:", err)
 			})
 		})
 	ctx.waitUntil(done.catch(() => undefined))
@@ -146,3 +146,14 @@ export const runScheduledEffect = <A, E, R>(
  */
 export const layerFromEnv = (env: Record<string, unknown>): Layer.Layer<never, never, never> =>
 	ConfigProvider.layer(ConfigProvider.fromUnknown(env))
+
+// The worker env + Config surface lives next door, re-exported here so worker
+// code has a single specifier (`@maple/infra/worker-runtime`) for "things I
+// need to bootstrap an Effect runtime inside a Cloudflare Worker".
+export {
+	layerFromEnvRecord,
+	WorkerConfigProvider,
+	WorkerConfigProviderLayer,
+	WorkerEnvironment,
+	workerEnvironmentLayer,
+} from "./worker-env.ts"

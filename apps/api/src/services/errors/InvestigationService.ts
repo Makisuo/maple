@@ -34,7 +34,7 @@ import {
 	type InvestigationLensRunRow,
 	type InvestigationRow,
 } from "@maple/db"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm"
 import { Clock, Context, Duration, Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
 import { applyDiagnosisWrites, subjectTypeOf } from "@/services/errors/apply-diagnosis"

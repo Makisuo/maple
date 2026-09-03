@@ -11,7 +11,7 @@ Three roots, and the split is a rule, not a habit:
 - **`packages/*`** — shared code that **knows Maple**: its schema, tables, API, or product.
   `domain`, `query-engine`, `ui`, `db`, `auth`, `effect-sdk`, `browser`, …
 - **`lib/*`** — libraries with **zero Maple knowledge**, extractable to their own repo tomorrow.
-  `clickhouse-builder`, `effect-cloudflare`, `effect-db`, `effect-router`, `cache`,
+  `clickhouse-builder`, `effect-db`, `effect-router`, `cache`, `safe-fetch`,
   `otel-helpers`, `unitflow`.
 
 The test for `lib/` is "could this ship as a standalone OSS library?" — not "is it published?"
@@ -133,7 +133,7 @@ Workers via the Hyperdrive binding `MAPLE_DB`.
   JS plugin in `scripts/oxlint-plugins/maple.mjs`) and the repo is at zero — keep it there. Generic
   constraints (`<T extends Record<string, any>>`) are exempt: `unknown` does not work in that
   position. `typescript/no-explicit-any` is `warn` (75 left, all outside `lib/`). Both rules are off
-  under `lib/**`, whose builder DSLs (`clickhouse-builder`, `unitflow`, `effect-cloudflare`) use
+  under `lib/**`, whose builder DSLs (`clickhouse-builder`, `unitflow`) use
   `any` as a type-level placeholder in variance positions. `Record<string, unknown>` is _not_ banned —
   it forces narrowing at every read, which is the point.
 - **Effect:** source is vendored at `.context/effect/` (subtree of Effect-TS/effect-smol).

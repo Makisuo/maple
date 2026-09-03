@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { API_V2_RATE_LIMIT_PARTITION, makeApiV2RateLimitKey } from "./ApiV2RateLimiter"
 import { MCP_TOOLS_RATE_LIMIT_BINDING, McpToolRateLimiter } from "./McpToolRateLimiter"
 

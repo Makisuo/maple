@@ -1,4 +1,4 @@
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { Effect, Layer } from "effect"
 import { Database, type DatabaseClient, DatabaseError, type DatabaseApi } from "./DatabaseLive"
 import { executeOnFreshPgClient, PgConnectionScope } from "./pg-connection-scope"

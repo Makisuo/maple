@@ -47,7 +47,7 @@ import {
 	withPgConnectionScope,
 } from "@maple/api/alerting"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
-import { layerFromEnv, layerFromEnvRecord } from "@maple/effect-cloudflare"
+import { layerFromEnv, layerFromEnvRecord } from "@maple/infra/worker-runtime"
 import { Cause, Effect, Layer, Match } from "effect"
 import type { AlertingWorkerEnv } from "./worker.ts"
 

@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { makeRateLimitCheck, type RateLimiterApi } from "./ApiV2RateLimiter"
 
 export const MCP_TOOLS_RATE_LIMIT_BINDING = "MCP_TOOLS_RATE_LIMITER"

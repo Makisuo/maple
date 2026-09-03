@@ -1,4 +1,4 @@
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { Context, Duration, Effect, Layer, Schema } from "effect"
 import { Env } from "./Env"
 

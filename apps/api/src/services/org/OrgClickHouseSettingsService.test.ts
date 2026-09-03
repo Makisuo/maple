@@ -22,7 +22,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import type { TableDiffEntry } from "@maple/domain/clickhouse"
 import { Env } from "@/platform/Env"
 import { encryptAes256Gcm } from "@/platform/Crypto"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import {
 	type ClickHouseExecConfig,

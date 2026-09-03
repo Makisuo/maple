@@ -33,7 +33,7 @@ import {
 import { EdgeCacheService } from "@maple/cache"
 import { orgClickHouseSchemaApplyRuns, orgClickHouseSettings } from "@maple/db"
 import { and, eq, inArray, lt, notInArray, or } from "drizzle-orm"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import {
 	Array as Arr,
 	Clock,

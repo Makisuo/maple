@@ -46,7 +46,7 @@ import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/err
 import { isErrorTickClaimLost, persistErrorTickWindow } from "@/services/errors/error-tick-persistence"
 import { toPgText } from "@/platform/pg-text"
 import { SYSTEM_ERRORS_AGENT_NAME } from "@/services/auth/system-actors"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { Database } from "@/platform/DatabaseLive"
 import { selectDistinctOrgIds } from "@/platform/distinct-org-ids"
 import { Env } from "@/platform/Env"
