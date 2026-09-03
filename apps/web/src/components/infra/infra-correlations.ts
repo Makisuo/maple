@@ -84,7 +84,15 @@ const HOST_CHARTS: ReadonlyArray<{ label: string; metric: HostInfraMetric }> = [
 ]
 
 const CONTAINER_NAME_KEY = "container.name"
-const CONTAINER_RUNTIME_KEY = "container.runtime"
+/**
+ * Semconv v1.37.0 renamed `container.runtime` to `container.runtime.name`, and
+ * both spellings arrive: current collectors send `.name`, older ones and older
+ * SDKs send the bare key. Reading only one is not merely lossy here — an absent
+ * runtime *passes* the docker check below, so a containerd pod reporting the
+ * canonical spelling would render the empty docker chart stack that check
+ * exists to prevent.
+ */
+const CONTAINER_RUNTIME_KEYS = ["container.runtime.name", "container.runtime"] as const
 const POD_NAME_KEY = "k8s.pod.name"
 const POD_NAMESPACE_KEY = "k8s.namespace.name"
 const NODE_NAME_KEY = "k8s.node.name"
@@ -117,7 +125,10 @@ export function getActiveInfraCorrelations(
 	// and a declared non-docker runtime (containerd, cri-o, …) has no docker
 	// metrics either — both would render an empty duplicate chart stack.
 	const containerName = attr(resourceAttributes, CONTAINER_NAME_KEY)
-	const containerRuntime = attr(resourceAttributes, CONTAINER_RUNTIME_KEY)
+	const containerRuntime = CONTAINER_RUNTIME_KEYS.reduce<string | undefined>(
+		(found, key) => found ?? attr(resourceAttributes, key),
+		undefined,
+	)
 	if (containerName && !podName && (containerRuntime === undefined || containerRuntime === "docker")) {
 		out.push({
 			kind: "container",
