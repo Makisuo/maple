@@ -83,3 +83,24 @@ export function messagingDestinationExpr(spanAttributes: MapColumnLike): Expr<st
 export const MESSAGING_DESTINATION_SQL = compile(
 	messagingDestinationExpr(mapColumn("SpanAttributes")).toFragment(),
 )
+
+/**
+ * Canonical container-runtime expression.
+ *
+ * Semconv v1.37.0 renamed `container.runtime` to `container.runtime.name`. Both
+ * spellings are in the wild and will be for a long time: the OTel Collector's
+ * docker/k8s receivers and every SDK older than that release still send the bare
+ * key, while current ones send `.name`. Reading either alone leaves the runtime
+ * blank for half the fleet — which shows up as a container detail page with an
+ * empty Runtime row, and as a missing Container correlation group.
+ *
+ * Unlike the two expressions above, no materialized view pre-extracts this, so
+ * there is no SQL twin to keep byte-identical; the read paths are the only
+ * consumers.
+ */
+export function containerRuntimeExpr(resourceAttributes: MapColumnLike): Expr<string> {
+	return CH.coalesce(
+		CH.nullIf(resourceAttributes.get("container.runtime.name"), ""),
+		resourceAttributes.get("container.runtime"),
+	)
+}
