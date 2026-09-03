@@ -27,7 +27,7 @@
 			// wrangler configs were deleted; the Worker entries are now named here.
 			"entry": ["src/worker.ts", "alchemy.run.ts", "autumn.config.ts", "scripts/cold-path/*.mjs"],
 			// Shelled out to by scripts/bench-startup-cpu.ts, never imported.
-			"ignoreDependencies": ["cloudflare", "wrangler"]
+			"ignoreDependencies": ["cloudflare"]
 		},
 		// Single-module Workers: the root alchemy.run.ts imports src/worker.ts, and
 		// alchemy bundles it, so it is the app's one entry.
@@ -58,6 +58,10 @@
 			"entry": ["scripts/**/*.ts"],
 			"ignore": ["src/generated/**"],
 			"ignoreDependencies": ["tailwindcss"]
+		},
+		"packages/infra": {
+			// `cloudflare:workers` is a Workers runtime module, not a package.
+			"ignoreDependencies": ["cloudflare"]
 		},
 		"lib/alchemy-portless": {
 			// The dev-sidecar entry alchemy loads by URL, not by import.
