@@ -1,163 +1,132 @@
-import { Result, useAtomRefresh } from "@/lib/effect-atom"
+import { useMemo } from "react"
 import { getRouteApi } from "@tanstack/react-router"
 
+import type { IssueKind } from "@maple/domain/http"
+
+import { Result, useAtomValue } from "@/lib/effect-atom"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { FilterSection, SingleCheckboxFilter, serviceColorMap } from "@/components/traces/filter-section"
-import { getErrorsFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import {
 	FilterSidebarBody,
-	FilterSidebarError,
 	FilterSidebarFrame,
 	FilterSidebarHeader,
-	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
+import { getErrorsFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import { retainedQueryV2 } from "@/lib/services/common/v2-atom-client"
+import { ERRORS_WINDOW } from "@/components/errors/errors-hub"
+import { CLEARED_ERROR_FILTERS, KIND_LABEL, hasErrorFilters } from "@/lib/errors/error-filter-chips"
+import { SOURCES, SOURCE_COLOR, SOURCE_DESCRIPTION, SourceLegend } from "./issue-source"
+
+/**
+ * Filters over what the issue list is actually made of.
+ *
+ * The previous sidebar was the events view's: four warehouse facets over a time
+ * window plus two toggles about which spans to count. None of that is what the
+ * rows are. Issues are one per fingerprint, in Postgres, in every state, from
+ * every span — so a facet that ranked the window's top fingerprints dropped
+ * anything older than a day, and the root-only and scanner-noise toggles never
+ * changed a row at all. Every control here maps to a filter the issues API
+ * applies itself, which is what keeps paging honest under a filter.
+ *
+ * Single-select for now: the API takes one service and one environment. The
+ * counts beside services are open issues per service, from the one issue-side
+ * count the API has; environment and kind carry no count rather than a number
+ * about something else.
+ */
 
 const routeApi = getRouteApi("/errors/")
 
-function LoadingState() {
-	return <FilterSidebarLoading sectionCount={3} />
-}
+const KINDS: ReadonlyArray<IssueKind> = SOURCES
+const KIND_OPTIONS = KINDS.map((name) => ({ name, count: 0 }))
+const isIssueKind = (value: string): value is IssueKind => KINDS.includes(value as IssueKind)
+
+/** Checkbox lists, single-select: the newest tick replaces the current one. */
+const pickOne = (current: string | undefined, next: ReadonlyArray<string>): string | undefined =>
+	next.find((value) => value !== current) ?? (next.includes(current ?? "") ? current : undefined)
 
 export function ErrorsFilterSidebar() {
 	const navigate = routeApi.useNavigate()
 	const search = routeApi.useSearch()
-	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
-		search.startTime,
-		search.endTime,
-		search.timePreset ?? "12h",
+
+	const serviceCounts = useAtomValue(
+		retainedQueryV2("errorIssues", "serviceCounts", { reactivityKeys: ["errorIssues"] }),
+	)
+	const services = useMemo(
+		() =>
+			Result.isSuccess(serviceCounts)
+				? serviceCounts.value.data.map((row) => ({ name: row.service_name, count: row.open_count }))
+				: [],
+		[serviceCounts],
 	)
 
-	// Every active filter goes to the facets query, not just the time range: each
-	// section drops its own dimension server-side, so ticking `production` narrows
-	// the Service and Version counts while Environment still shows its
-	// alternatives. Without them the numbers never moved when a box was ticked.
-	const facetsAtom = getErrorsFacetsResultAtom({
-		data: {
-			startTime: effectiveStartTime,
-			endTime: effectiveEndTime,
-			showSpam: search.showSpam,
-			rootOnly: search.rootOnly !== false,
-			services: search.services ? [...search.services] : undefined,
-			deploymentEnvs: search.deploymentEnvs ? [...search.deploymentEnvs] : undefined,
-			errorLabels: search.errorTypes ? [...search.errorTypes] : undefined,
-			serviceVersions: search.serviceVersions ? [...search.serviceVersions] : undefined,
-			excludedServices: search.excludedServices ? [...search.excludedServices] : undefined,
-			excludedDeploymentEnvs: search.excludedDeploymentEnvs
-				? [...search.excludedDeploymentEnvs]
-				: undefined,
-			excludedErrorLabels: search.excludedErrorTypes ? [...search.excludedErrorTypes] : undefined,
-			excludedServiceVersions: search.excludedServiceVersions
-				? [...search.excludedServiceVersions]
-				: undefined,
-		},
-	})
-	const facetsResult = useRefreshableAtomValue(facetsAtom)
-	const refreshFacets = useAtomRefresh(facetsAtom)
+	// The environment vocabulary comes from the warehouse, since an issue does
+	// not carry one; the API resolves the filter itself over a month of
+	// fingerprints. The trend window is enough to list the names.
+	const trendWindow = useEffectiveTimeRange(undefined, undefined, ERRORS_WINDOW)
+	const facets = useRefreshableAtomValue(
+		getErrorsFacetsResultAtom({
+			data: { startTime: trendWindow.startTime, endTime: trendWindow.endTime },
+		}),
+	)
+	const environments = useMemo(
+		() =>
+			Result.isSuccess(facets)
+				? (facets.value.data.deploymentEnvs ?? []).map((env) => ({ name: env.name, count: 0 }))
+				: [],
+		[facets],
+	)
 
-	const updateFilter = <K extends keyof typeof search>(key: K, value: (typeof search)[K]) => {
-		navigate({
-			search: (prev) => ({
-				...prev,
-				[key]:
-					value === undefined || (Array.isArray(value) && value.length === 0) ? undefined : value,
-			}),
-		})
+	const setFilter = <K extends keyof typeof search>(key: K, value: (typeof search)[K]) => {
+		navigate({ search: (prev) => ({ ...prev, [key]: value }) })
 	}
 
-	const clearAllFilters = () => {
-		navigate({
-			search: {
-				startTime: search.startTime,
-				endTime: search.endTime,
-				timePreset: search.timePreset,
-			},
-		})
-	}
+	return (
+		<FilterSidebarFrame>
+			<FilterSidebarHeader
+				canClear={hasErrorFilters(search)}
+				onClear={() => navigate({ search: (prev) => ({ ...prev, ...CLEARED_ERROR_FILTERS }) })}
+			/>
+			<FilterSidebarBody>
+				<SingleCheckboxFilter
+					title="Regressed only"
+					checked={search.regressed ?? false}
+					onChange={(checked) => setFilter("regressed", checked || undefined)}
+				/>
 
-	const hasActiveFilters =
-		(search.services?.length ?? 0) > 0 ||
-		(search.deploymentEnvs?.length ?? 0) > 0 ||
-		(search.errorTypes?.length ?? 0) > 0 ||
-		(search.serviceVersions?.length ?? 0) > 0 ||
-		(search.excludedServices?.length ?? 0) > 0 ||
-		(search.excludedDeploymentEnvs?.length ?? 0) > 0 ||
-		(search.excludedErrorTypes?.length ?? 0) > 0 ||
-		(search.excludedServiceVersions?.length ?? 0) > 0
+				<FilterSection
+					title="Service"
+					options={services}
+					selected={search.service ? [search.service] : []}
+					onChange={(values) => setFilter("service", pickOne(search.service, values))}
+					colorMap={serviceColorMap(services)}
+				/>
 
-	return Result.builder(facetsResult)
-		.onInitial(() => <LoadingState />)
-		.onError((error) => <FilterSidebarError error={error} onRetry={refreshFacets} />)
-		.onSuccess((facetsResponse, result) => {
-			const facets = facetsResponse.data
-			const hasFacets =
-				(facets.services?.length ?? 0) > 0 ||
-				(facets.deploymentEnvs?.length ?? 0) > 0 ||
-				(facets.errorTypes?.length ?? 0) > 0 ||
-				(facets.serviceVersions?.length ?? 0) > 0
+				<FilterSection
+					title="Environment"
+					options={environments}
+					selected={search.env ? [search.env] : []}
+					onChange={(values) => setFilter("env", pickOne(search.env, values))}
+					showCounts={false}
+				/>
 
-			return (
-				<FilterSidebarFrame waiting={result.waiting}>
-					<FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
-					<FilterSidebarBody>
-						<SingleCheckboxFilter
-							title="All span errors"
-							checked={search.rootOnly === false}
-							onChange={(checked) => updateFilter("rootOnly", checked ? false : undefined)}
-						/>
-						<SingleCheckboxFilter
-							title="Show scanner noise"
-							checked={search.showSpam ?? false}
-							onChange={(checked) => updateFilter("showSpam", checked || undefined)}
-						/>
-
-						<FilterSection
-							title="Environment"
-							options={facets.deploymentEnvs ?? []}
-							selected={search.deploymentEnvs ?? []}
-							onChange={(val) => updateFilter("deploymentEnvs", val)}
-							excluded={search.excludedDeploymentEnvs ?? []}
-							onExcludedChange={(val) => updateFilter("excludedDeploymentEnvs", val)}
-						/>
-
-						<FilterSection
-							title="Service"
-							options={facets.services ?? []}
-							selected={search.services ?? []}
-							onChange={(val) => updateFilter("services", val)}
-							excluded={search.excludedServices ?? []}
-							onExcludedChange={(val) => updateFilter("excludedServices", val)}
-							colorMap={serviceColorMap(facets.services ?? [])}
-						/>
-
-						<FilterSection
-							title="Error Type"
-							options={facets.errorTypes ?? []}
-							selected={search.errorTypes ?? []}
-							onChange={(val) => updateFilter("errorTypes", val)}
-							excluded={search.excludedErrorTypes ?? []}
-							onExcludedChange={(val) => updateFilter("excludedErrorTypes", val)}
-						/>
-
-						{/* Which deploy the error was seen on — the fastest way to tell a
-						    regression from something that was always broken. */}
-						<FilterSection
-							title="Version"
-							options={facets.serviceVersions ?? []}
-							selected={search.serviceVersions ?? []}
-							onChange={(val) => updateFilter("serviceVersions", val)}
-							excluded={search.excludedServiceVersions ?? []}
-							onExcludedChange={(val) => updateFilter("excludedServiceVersions", val)}
-						/>
-
-						{!hasFacets && (
-							<p className="text-sm text-muted-foreground py-4">
-								No errors found in the selected time range
-							</p>
-						)}
-					</FilterSidebarBody>
-				</FilterSidebarFrame>
-			)
-		})
-		.render()
+				<FilterSection
+					title="Source"
+					description={<SourceLegend />}
+					colorMap={SOURCE_COLOR}
+					getOptionDescription={(name) =>
+						isIssueKind(name) ? SOURCE_DESCRIPTION[name] : undefined
+					}
+					options={KIND_OPTIONS}
+					selected={search.kind ? [search.kind] : []}
+					onChange={(values) => {
+						const next = pickOne(search.kind, values)
+						setFilter("kind", next !== undefined && isIssueKind(next) ? next : undefined)
+					}}
+					getOptionLabel={(name) => (isIssueKind(name) ? KIND_LABEL[name] : name)}
+					showCounts={false}
+				/>
+			</FilterSidebarBody>
+		</FilterSidebarFrame>
+	)
 }

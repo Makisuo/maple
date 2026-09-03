@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useRef, type ReactNode } from "react"
+import { memo, useDeferredValue, useEffect, useMemo, useRef, type ReactNode } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
 import type { AiSessionSpan } from "@maple/domain/http"
@@ -29,8 +29,9 @@ import { useTimezonePreference } from "@/hooks/use-timezone-preference"
 import { callMetaLine, callMetaParts } from "@/lib/agent-sessions/session-summary"
 import { spanModel, type SessionTurn } from "@/lib/agent-sessions/session-turns"
 import {
-	buildTranscript,
+	assembleTranscript,
 	type CaptureCoverage,
+	prepareTranscript,
 	type TranscriptPayload,
 	type TranscriptRow,
 } from "@/lib/agent-sessions/session-transcript"
@@ -127,17 +128,15 @@ export function SessionTranscript({
 	// The build parses every captured payload the query has to search, so it
 	// trails the input by a frame rather than running on the keystroke.
 	const deferredQuery = useDeferredValue(query)
+	// Two steps so a collapse re-runs only the cheap one: the read of every
+	// captured payload is per session and filter, the row list per collapse.
+	const prepared = useMemo(
+		() => prepareTranscript({ turns, toolResults, query: deferredQuery, showThinking }),
+		[turns, toolResults, deferredQuery, showThinking],
+	)
 	const rows = useMemo(
-		() =>
-			buildTranscript({
-				turns,
-				toolResults,
-				query: deferredQuery,
-				showThinking,
-				hasMore,
-				collapsedTurns,
-			}),
-		[turns, toolResults, deferredQuery, showThinking, hasMore, collapsedTurns],
+		() => assembleTranscript(prepared, { collapsedTurns, hasMore }),
+		[prepared, collapsedTurns, hasMore],
 	)
 
 	const virtualizer = useVirtualizer({
@@ -153,6 +152,11 @@ export function SessionTranscript({
 		// data swap re-fills mounted rows); without this the ResizeObserver path
 		// calls flushSync mid-lifecycle and React logs an error for every batch.
 		useAnimationFrameWithResizeObserver: true,
+		// Rows are positioned by writing their transform straight to the DOM, so
+		// the list re-renders only when the set of mounted rows changes — not on
+		// every measurement, which on a scroll is several times a frame, each
+		// one a synchronous re-render of every mounted block.
+		directDomUpdates: true,
 	})
 
 	// A pasted `?span=` link lands on the block it names. Once, on mount — after
@@ -184,7 +188,14 @@ export function SessionTranscript({
 		// every row by its height.
 		<div className="pt-2">
 			<div ref={listRef}>
-				<div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+				{/* The virtualizer writes each row's offset — `start` less the margin,
+				    back in this list's own coordinates — and this container's height
+				    itself, as rows are measured; React only mounts and unmounts. */}
+				<div
+					ref={virtualizer.containerRef}
+					className="relative w-full"
+					style={{ height: virtualizer.getTotalSize() }}
+				>
 					{virtualizer.getVirtualItems().map((item) => {
 						const row = rows[item.index]!
 						return (
@@ -192,10 +203,8 @@ export function SessionTranscript({
 								key={item.key}
 								ref={virtualizer.measureElement}
 								data-index={item.index}
+								data-slot="transcript-row"
 								className="absolute inset-x-0 top-0"
-								// `start` is in the page scroller's coordinates; the margin
-								// brings it back to this list's own.
-								style={{ transform: `translateY(${item.start - scrollMargin}px)` }}
 							>
 								<TranscriptBlock
 									row={row}
@@ -234,7 +243,10 @@ interface BlockProps {
 	onSelectSpan: (spanId: string | undefined) => void
 }
 
-function TranscriptBlock(props: BlockProps) {
+/** Memoized: the list re-renders whenever the mounted range moves, and a block
+ *  whose props have not changed — nearly all of them, on every scroll — has
+ *  nothing to redo. Every callback it takes is stable for the same reason. */
+const TranscriptBlock = memo(function TranscriptBlock(props: BlockProps) {
 	const { row } = props
 	switch (row.kind) {
 		case "turn":
@@ -268,7 +280,7 @@ function TranscriptBlock(props: BlockProps) {
 		case "divider":
 			return <DividerBlock {...props} row={row} />
 	}
-}
+})
 
 /* -------------------------------------------------------------------------- */
 /* Shell                                                                      */
@@ -500,7 +512,7 @@ function UserBlock({
 												part.kind === "text" ? part.text : `[${part.kind}]`,
 											)
 											.join("\n")}
-										clampClass="line-clamp-[6]"
+										clampLines={6}
 										expanded={disclosed(openRows, key, false)}
 										onToggleExpanded={() => onToggleRow(key)}
 									/>
@@ -656,15 +668,15 @@ function AssistantBlock({
 							<div className="min-w-0 grow">
 								<ClampedText
 									text={errorRaw ? row.span.statusMessage : error.formatted}
-									html={errorRaw ? undefined : error.highlighted}
+									rendering={!errorRaw && error.isJson ? "json" : "text"}
 									mono
-									clampClass="line-clamp-[14]"
+									clampLines={14}
 									toneClass="text-[13px] text-destructive/90"
 									expanded={disclosed(openRows, `${row.key}:error-text`, false)}
 									onToggleExpanded={() => onToggleRow(`${row.key}:error-text`)}
 								/>
 							</div>
-							{error.highlighted !== undefined && (
+							{error.isJson && (
 								<ViewSwitch
 									rendered="json"
 									raw={errorRaw}
@@ -915,7 +927,7 @@ function PayloadSection({
 	onToggleRow: (key: string) => void
 	textKey: string
 }) {
-	const { formatted, highlighted } = useJsonPayload(payload.text)
+	const { formatted, isJson } = useJsonPayload(payload.text)
 	const rawKey = `${textKey}:raw`
 	const raw = disclosed(openRows, rawKey, false)
 
@@ -945,7 +957,7 @@ function PayloadSection({
 				    The switch only appears where the two differ. */}
 				{payload.text !== "" && (
 					<span className="-my-1 ml-auto flex items-center">
-						{highlighted !== undefined && (
+						{isJson && (
 							<ViewSwitch
 								rendered="json"
 								raw={raw}
@@ -962,9 +974,9 @@ function PayloadSection({
 			{payload.text !== "" && (
 				<ClampedText
 					text={raw ? payload.text : formatted}
-					html={raw ? undefined : highlighted}
+					rendering={!raw && isJson ? "json" : "text"}
 					mono
-					clampClass="line-clamp-[14]"
+					clampLines={14}
 					toneClass={tone}
 					expanded={disclosed(openRows, textKey, false)}
 					onToggleExpanded={() => onToggleRow(textKey)}

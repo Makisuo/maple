@@ -1,0 +1,87 @@
+---
+/**
+ * 07 · Web analytics — the audience above the trace.
+ *
+ * KubernetesSection (06) is the pod underneath the slow span; this is the
+ * visitor on top of it, read from the sessions the browser SDK already
+ * records. The argument is one SDK, honest counts, and that every number
+ * opens into sessions and the traces they ran.
+ *
+ * The visual is a real capture of /analytics, not a live plate: the page is
+ * a KPI strip, a chart and breakdown tables, and a still of the real thing
+ * reads as more honest than an animated wireframe of it. Media-left,
+ * copy-right: Kubernetes above and Agents below are both copy-left /
+ * media-right on `bg-bg`, and three of those in a row read as a template.
+ *
+ * `bg-bg` with a hairline: the tone does not step from Kubernetes, so the
+ * rule is the separator (see Home.astro).
+ */
+import { getRelativeLocaleUrl } from "astro:i18n";
+import * as m from "../../paraglide/messages.js";
+import MediaFrame from "./MediaFrame.astro";
+
+const locale = Astro.currentLocale ?? "en";
+const l = (path: string) => getRelativeLocaleUrl(locale, path);
+
+const points = [
+	{ title: m.analytics_point_1_title(), body: m.analytics_point_1_body() },
+	{ title: m.analytics_point_2_title(), body: m.analytics_point_2_body() },
+	{ title: m.analytics_point_3_title(), body: m.analytics_point_3_body() },
+];
+---
+
+<section id="web-analytics" class="border-t border-border bg-bg">
+	<div class="shell py-16 md:py-32">
+		<div class="grid gap-12 lg:grid-cols-[1.22fr_0.78fr] lg:items-center lg:gap-20">
+			<!-- Copy first in the DOM so it reads first on mobile and for
+			     assistive tech; `lg:order-last` moves it right of the capture. -->
+			<div class="min-w-0 lg:order-last">
+				<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">
+					{m.analytics_eyebrow()}
+				</p>
+
+				<h2
+					class="mt-4 max-w-[20ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px]"
+				>
+					{m.analytics_title()}
+				</h2>
+				<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted">{m.analytics_lede()}</p>
+
+				<dl class="mt-8">
+					{
+						points.map((point) => (
+							<div class="border-t border-border py-4">
+								<dt class="text-[13px] font-medium text-fg">{point.title}</dt>
+								<dd class="mt-1.5 max-w-[52ch] text-[13px] leading-relaxed text-fg-muted">
+									{point.body}
+								</dd>
+							</div>
+						))
+					}
+				</dl>
+
+				<div class="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-[13px]">
+					<a href={l("/features/browser-sessions")} class="text-fg transition-colors hover:text-primary">
+						{m.analytics_link_feature()}
+					</a>
+					<a
+						href={l("/docs/session-replay/browser-sdk")}
+						class="text-fg-muted transition-colors hover:text-fg"
+					>
+						{m.analytics_link_docs()}
+					</a>
+				</div>
+			</div>
+
+			<!-- Captured headlessly from the local /analytics (2026-09-03) at a
+			     1424px viewport: header badges, bot notice, KPI strip and the
+			     visitors / page views chart, title block hidden. 896×696 @2x. -->
+			<MediaFrame
+				label="The Web Analytics page: unique visitors, sessions, page views and bounce rate over the last 7 days, with the live visitor badge and the visitors and page views chart"
+				src="/screenshots/surface-analytics.webp"
+				width={896}
+				height={696}
+			/>
+		</div>
+	</div>
+</section>

@@ -1,147 +1,82 @@
-import { API_ORIGIN } from "./lib/agent-resources"
-
-type Env = {
-	ASSETS: { fetch: (request: Request) => Promise<Response> }
-}
+/**
+ * The marketing site's Worker in alchemy's single-module form: this file is
+ * both the resource the root stack yields (`yield* Landing`) and the bundle
+ * alchemy deploys (`main: import.meta.url`). The Astro build is yielded from
+ * the props, and every request goes to `./handler` — the markdown-twin
+ * negotiation over the assets — which stays a plain function so its tests
+ * need no Worker runtime.
+ */
+import {
+	assetWorkerObservability,
+	CLOUDFLARE_WORKER_PLACEMENT,
+	MapleStack,
+	resolveWorkerName,
+	WorkersObservabilityDestinations,
+} from "@maple/infra/cloudflare"
+import * as Cloudflare from "alchemy/Cloudflare"
+import * as Command from "alchemy/Command"
+import * as Output from "alchemy/Output"
+import { Effect } from "effect"
+import { HttpServerResponse } from "effect/unstable/http"
+import { type AssetsBinding, handleRequest } from "./handler"
 
 /**
- * Every citable page ships a markdown twin at `<path>.md` (see
- * `src/lib/page-markdown.ts`). A client can ask for it two ways: by URL suffix,
- * which is a plain static asset and needs nothing from this worker, or by
- * `Accept: text/markdown` on the HTML URL, which is what this handles.
- *
- * The header must name `text/markdown` *literally*. Every browser's Accept ends
- * in a catch-all wildcard, so treating a wildcard as a match would serve
- * markdown to every human visitor.
+ * Alchemy evaluates a Worker's props wherever the class is yielded — the
+ * deployed bundle included, where they are inert. `__ALCHEMY_RUNTIME__` folds to
+ * `true` there, so the stack-side branch below, and the `@maple/infra` and
+ * `alchemy/Command` modules only it reaches, are dead-code-eliminated.
  */
-const wantsMarkdown = (request: Request): boolean => acceptHeader(request).includes("text/markdown")
-
-/**
- * Browsers always name `text/html`; `curl`, SDK HTTP clients, and agents send
- * `*\/*` or nothing. That difference picks the 404 representation: an HTML
- * page for a person, a short markdown note for everything else.
- */
-const acceptsHtml = (request: Request): boolean => {
-	const accept = acceptHeader(request)
-	return accept.includes("text/html") || accept.includes("application/xhtml+xml")
-}
-
-const acceptHeader = (request: Request): string => (request.headers.get("Accept") ?? "").toLowerCase()
-
-/** `/pricing` → `/pricing.md`; `/docs/x/y/` → `/docs/x/y.md`; `/` → `/index.md`. Extensions opt out. */
-export const markdownTwin = (pathname: string): string | null => {
-	const path = pathname.replace(/\/+$/, "") || "/"
-	if (path === "/") return "/index.md"
-	if (/\.[a-z0-9]+$/i.test(path)) return null
-	return `${path}.md`
-}
-
-/**
- * Paths that belong to the API, not the website. Nothing under them exists
- * here, and a client hitting them is a program expecting JSON — so the 404
- * uses the API's error envelope and says where the API actually lives.
- */
-const API_PATH = /^\/(api|v1|v2|rpc|mcp)(\/|$)/
-export const isApiPath = (pathname: string): boolean => API_PATH.test(pathname)
-
-/**
- * Mirrors `v2RouteNotFoundBody` from `@maple/domain/http/v2` (see
- * `worker.test.ts`, which asserts the two agree). Hand-written here because the
- * domain module drags Effect Schema into a worker whose entire job is header
- * negotiation — the API worker documents what that costs at startup.
- */
-export const apiNotFoundBody = (method: string, pathname: string, origin: string) => ({
-	error: {
-		_tag: "@maple/http/v2/RouteNotFoundError",
-		type: "not_found_error",
-		code: "route_not_found",
-		title: "No such route",
-		message: `No route matches ${method.toUpperCase()} ${pathname} on ${origin}, which serves the Maple website. The Maple API is at ${API_ORIGIN} — reference: ${API_ORIGIN}/v2/docs, OpenAPI: ${origin}/openapi.json, MCP server: ${API_ORIGIN}/mcp.`,
-		retryable: false,
-		recovery: "fix_request",
-	},
+const props = Effect.gen(function* () {
+	if (globalThis.__ALCHEMY_RUNTIME__) return { main: import.meta.url }
+	const { stage, domains, urls } = yield* MapleStack
+	const destinations = yield* WorkersObservabilityDestinations
+	// Astro static build (memoized on the app's source files, skipped on destroy).
+	const build = yield* Command.Build("landing-build", {
+		command: "bun run build",
+		cwd: new URL("..", import.meta.url).pathname,
+		outdir: "dist",
+		// Astro inlines PUBLIC_* at build time, so these belong to the build memo
+		// hash — a key or endpoint change has to produce a new bundle. Same
+		// ingest key the web app uses, so both surfaces land in one org and a
+		// visitor's marketing and product sessions sit side by side.
+		env: {
+			PUBLIC_MAPLE_INGEST_KEY: process.env.MAPLE_OTEL_PUBLIC_INGEST_KEY ?? "",
+			PUBLIC_INGEST_URL: urls.ingest,
+		},
+	})
+	return {
+		main: import.meta.url,
+		name: resolveWorkerName("landing", stage),
+		// The `assets` prop auto-adds the ASSETS binding the handler reads.
+		assets: {
+			directory: build.outdir,
+			hash: Output.map(build.hash, (h) => h.output ?? ""),
+			// Workers Assets serves a matching file *before* invoking the Worker,
+			// so without this the handler never sees a request for a real page
+			// and the `Accept: text/markdown` negotiation is dead code. Scoped to
+			// extensionless paths — the ones with a `.md` twin. Anything with a
+			// dot (hashed `/_astro/*`, images, the `.md` and `.txt` files
+			// themselves) still comes straight off the asset layer with no Worker
+			// invocation.
+			runWorkerFirst: ["/*", "!/_astro/*", "!/*.*"],
+		},
+		compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
+		placement: CLOUDFLARE_WORKER_PLACEMENT,
+		observability: assetWorkerObservability(destinations),
+		workersDev: true,
+		domain: domains.landing,
+	}
 })
 
-/** The markdown 404: what was asked for, and where to look instead. */
-export const notFoundMarkdown = (pathname: string, origin: string): string =>
-	[
-		"# 404 — Not found",
-		"",
-		`There is no page at \`${pathname}\` on ${origin}.`,
-		"",
-		"## Where to look next",
-		"",
-		`- [Site index for agents](${origin}/llms.txt) — every section of the site with its markdown URL`,
-		`- [Sitemap](${origin}/sitemap-index.xml)`,
-		`- [Documentation](${origin}/docs.md) · [Full docs, single file](${origin}/llms-full.txt)`,
-		`- [Pricing](${origin}/pricing.md) · [Changelog](${origin}/changelog.md) · [Roadmap](${origin}/roadmap.md)`,
-		`- [API reference](${API_ORIGIN}/v2/docs) · [OpenAPI spec](${origin}/openapi.json) · [MCP server manifest](${origin}/.well-known/mcp.json)`,
-		`- [About](${origin}/about.md) · [Contact](${origin}/contact.md)`,
-		"",
-		"Append `.md` to any page URL, or send `Accept: text/markdown`, to receive its markdown source.",
-		"",
-	].join("\n")
-
-const MARKDOWN_TYPE = "text/markdown; charset=utf-8"
-
-const withHeaders = (response: Response, set: Record<string, string>): Response => {
-	const headers = new Headers(response.headers)
-	for (const [name, value] of Object.entries(set)) headers.set(name, value)
-	return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
-}
-
-/** RFC 8288 alternate link, so a client that got HTML can find the markdown without guessing. */
-const alternateLink = (twinUrl: URL): string => `<${twinUrl}>; rel="alternate"; type="text/markdown"`
-
-export default {
-	async fetch(request: Request, env: Env): Promise<Response> {
-		const url = new URL(request.url)
-		const twin = markdownTwin(url.pathname)
-		const twinUrl = twin ? new URL(twin, url) : null
-
-		if (twinUrl && wantsMarkdown(request)) {
-			const candidate = await env.ASSETS.fetch(new Request(twinUrl, request))
-			// `not_found_handling: "single-page-application"` in wrangler.jsonc can
-			// answer a missing asset with the SPA shell at status 200, so the
-			// content-type is the real test of whether the twin exists.
-			const isMarkdown = candidate.headers.get("Content-Type")?.includes("text/markdown")
-			if (candidate.ok && isMarkdown) return withHeaders(candidate, { Vary: "Accept" })
-		}
-
-		const assetResponse = await env.ASSETS.fetch(request)
-		// Vary only on the paths that actually have two representations. Putting
-		// it on hashed CSS/JS/images would split their cache entries for nothing.
-		if (assetResponse.status !== 404) {
-			return twinUrl
-				? withHeaders(assetResponse, { Vary: "Accept", Link: alternateLink(twinUrl) })
-				: assetResponse
-		}
-
-		if (isApiPath(url.pathname)) {
-			return Response.json(apiNotFoundBody(request.method, url.pathname, url.origin), {
-				status: 404,
-				headers: { Vary: "Accept", "Cache-Control": "no-store" },
-			})
-		}
-
-		if (!acceptsHtml(request)) {
-			return new Response(notFoundMarkdown(url.pathname, url.origin), {
-				status: 404,
-				headers: {
-					"Content-Type": MARKDOWN_TYPE,
-					Vary: "Accept",
-					"X-Content-Type-Options": "nosniff",
-				},
-			})
-		}
-
-		// Deliberately *not* `new Request(url, request)`: the ASSETS.fetch above has
-		// already consumed the body stream, so re-deriving from `request` throws
-		// `Body has already been used` and the runtime answers 500. That is invisible
-		// for GETs (no body) and turned every POST to an unknown path into a 500.
-		const notFound = await env.ASSETS.fetch(new Request(new URL("/404.html", url)))
-		return withHeaders(new Response(notFound.body, { status: 404, headers: notFound.headers }), {
-			Vary: "Accept",
-		})
-	},
-}
+export default class Landing extends Cloudflare.Worker<Landing>()(
+	"landing",
+	props,
+	Effect.succeed({
+		fetch: Effect.gen(function* () {
+			const request = yield* Cloudflare.Workers.Request
+			const env = yield* Cloudflare.WorkerEnvironment
+			const assets: AssetsBinding = env.ASSETS
+			return HttpServerResponse.fromWeb(yield* Effect.promise(() => handleRequest(request, assets)))
+		}),
+	}),
+) {}

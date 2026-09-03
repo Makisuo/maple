@@ -549,7 +549,7 @@ export function listMetricsQuery(opts: ListMetricsOpts) {
 			// Floor the start bound to the hour so the oldest catalog bucket
 			// (Hour is already hour-truncated) isn't dropped for mid-hour ranges.
 			$.Hour.gte(CH.toStartOfInterval(CH.toDateTime(param.dateTimeString("startTime")), 3600)),
-			$.Hour.lte(param.dateTimeString("endTime")),
+			$.Hour.lte(param.dateTimeSeconds("endTime")),
 			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.metricType, (v: string) => $.MetricType.eq(v)),
 			CH.when(opts.search, (v: string) => $.MetricName.ilike(`%${v}%`)),
@@ -583,7 +583,7 @@ export function metricsSummaryQuery(opts?: MetricsSummaryOpts) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.Hour.gte(CH.toStartOfInterval(CH.toDateTime(param.dateTimeString("startTime")), 3600)),
-			$.Hour.lte(param.dateTimeString("endTime")),
+			$.Hour.lte(param.dateTimeSeconds("endTime")),
 			CH.when(opts?.serviceName, (v: string) => $.ServiceName.eq(v)),
 		])
 		.groupBy("metricType")

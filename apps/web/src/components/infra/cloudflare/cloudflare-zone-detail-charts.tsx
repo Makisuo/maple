@@ -1,7 +1,6 @@
 import { useMemo, type ReactNode } from "react"
 import { areaY, d3Curve, defineChart, lineY, stack } from "@tanstack/charts"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
-import { scalePoint } from "@tanstack/charts-scales/point"
 import { curveMonotoneX } from "d3-shape"
 
 import {
@@ -30,7 +29,7 @@ import type {
 } from "@/api/warehouse/cloudflare-infra"
 import { formatLatency, formatNumber } from "@maple/ui/lib/format"
 import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
-import { CHART_EMPTY_MESSAGE, makeBucketLabeler, transformRows } from "../chart-utils"
+import { CHART_EMPTY_MESSAGE, bucketDate, makeBucketAxis, transformRows } from "../chart-utils"
 import { CHART_HEIGHT, ChartCard, ChartCardMessage } from "../primitives/chart-card"
 import {
 	BREAKDOWN_OTHER_KEY,
@@ -99,10 +98,18 @@ function foldTail(rows: StackedBreakdownChartProps["rows"]): StackedBreakdownCha
 /** One band segment: a bucket row, the series it belongs to, and its value. */
 interface BreakdownCell {
 	row: Record<string, unknown>
-	time: string
+	bucket: string
+	date: Date
 	name: string
-	value: number | null
+	value: number
 }
+
+/**
+ * A key absent from a bucket row is a zero count (the API only writes keys it
+ * saw), and `stack()` starts a new segment at a null — so the band would tear
+ * wherever one status class went quiet for a bucket.
+ */
+const cellValue = (value: unknown): number => (typeof value === "number" ? value : 0)
 
 export function StackedBreakdownChart({
 	title,
@@ -115,7 +122,7 @@ export function StackedBreakdownChart({
 	const gradientPrefix = useChartId("breakdown")
 	const { data, series } = useMemo(() => {
 		const bounded = order.length > 0 ? rows : foldTail(rows)
-		const transformed = transformRows(bounded, makeBucketLabeler(bounded.map((r) => r.bucket)))
+		const transformed = transformRows(bounded)
 		const rank = new Map(order.map((name, idx) => [name, idx]))
 		// The pooled tail always sorts last — it is the leftovers, not a peer of the named series.
 		const rankOf = (name: string) =>
@@ -151,6 +158,10 @@ export function StackedBreakdownChart({
 	const colorOf = (name: string) => resolvedColors.get(name) ?? OTHER_ZONES_COLOR
 	const focusStore = useMemo(() => createTooltipFocusStore(), [])
 
+	// A time axis over the buckets' instants — see `makeBucketAxis` for why the
+	// label point scale this replaced folded a 24h window onto itself.
+	const axis = useMemo(() => makeBucketAxis(data.map((point) => point.bucket)), [data])
+
 	const yDomain = useMemo<[number, number]>(
 		() => niceLinearDomain(linearYDomain({ rows: data, keys: series, stacked: true })),
 		[data, series],
@@ -175,9 +186,10 @@ export function StackedBreakdownChart({
 		const cells: BreakdownCell[] = data.flatMap((row) =>
 			series.map((name) => ({
 				row,
-				time: String(row.time),
+				bucket: row.bucket,
+				date: row.date,
 				name,
-				value: typeof row[name] === "number" ? (row[name] as number) : null,
+				value: cellValue(row[name]),
 			})),
 		)
 
@@ -188,7 +200,7 @@ export function StackedBreakdownChart({
 			marks: [
 				dashedGridY(),
 				areaY(cells, {
-					x: (cell: BreakdownCell) => cell.time,
+					x: (cell: BreakdownCell) => cell.date,
 					y: (cell: BreakdownCell) => cell.value,
 					z: (cell: BreakdownCell) => cell.name,
 					fill: (cell: BreakdownCell) =>
@@ -201,14 +213,7 @@ export function StackedBreakdownChart({
 				focusCrosshair(chromeColors),
 			],
 			scales: {
-				x: {
-					scale: scalePoint,
-					axis: {
-						line: false,
-						ticks: { size: 0, padding: 8 },
-						tickLabels: { thin: { minGap: 12 } },
-					},
-				},
+				x: axis.x,
 				y: {
 					scale: scaleLinear().domain(yDomain),
 					axis: {
@@ -217,12 +222,14 @@ export function StackedBreakdownChart({
 					},
 				},
 			},
-			margin: { top: 12, right: 12, bottom: 4, left: 52 },
+			// `bottom` unset on purpose: a set side is a hard lock, and only a measured
+			// side reserves the x tick labels' height.
+			margin: { top: 12, right: 12, left: 60 },
 			focus: "group-x",
 			focusRing: false,
 			tooltip: cursorTooltip(focusStore.anchor),
 		})
-	}, [data, series, resolvedColors, chromeColors, gradientPrefix, yDomain, focusStore])
+	}, [data, series, axis, resolvedColors, chromeColors, gradientPrefix, yDomain, focusStore])
 
 	const legendChips = series.slice(0, MAX_LEGEND_CHIPS)
 	const legendOverflow = series.length - legendChips.length
@@ -271,7 +278,7 @@ export function StackedBreakdownChart({
 								points={points}
 								series={tooltipSeries}
 								focusStore={focusStore}
-								heading={(cell: BreakdownCell) => cell.time}
+								heading={(cell: BreakdownCell) => axis.heading(cell.bucket)}
 							/>
 						)}
 					/>
@@ -355,7 +362,7 @@ function LatencyLegendSwatch({ color, dashed }: { color: string; dashed?: boolea
 }
 
 /** One bucket of latency percentiles, keyed by series. */
-type LatencyPoint = { bucket: string; time: string } & Record<string, string | number>
+type LatencyPoint = { bucket: string; date: Date } & Record<string, string | number | Date>
 
 export function CloudflareZoneLatencyChart({
 	buckets,
@@ -367,10 +374,9 @@ export function CloudflareZoneLatencyChart({
 	scope?: ReactNode
 }) {
 	const { data, activeSeries } = useMemo(() => {
-		const labeler = makeBucketLabeler(buckets.map((b) => b.bucket))
 		const points = buckets.map((b) => ({
 			bucket: b.bucket,
-			time: labeler(b.bucket),
+			date: bucketDate(b.bucket),
 			...Object.fromEntries(LATENCY_SERIES.map((s) => [s.key, b[s.key]])),
 		}))
 		// Zones without plan-level quantiles (or without origin traffic) leave
@@ -378,6 +384,10 @@ export function CloudflareZoneLatencyChart({
 		const active = LATENCY_SERIES.filter((s) => buckets.some((b) => b[s.key] > 0))
 		return { data: points, activeSeries: active }
 	}, [buckets])
+
+	// A time axis over the buckets' instants — see `makeBucketAxis` for why the
+	// label point scale this replaced folded a 24h window onto itself.
+	const axis = useMemo(() => makeBucketAxis(buckets.map((b) => b.bucket)), [buckets])
 
 	const chromeColors = usePlotChromeColors()
 	const focusStore = useMemo(() => createTooltipFocusStore(), [])
@@ -407,7 +417,7 @@ export function CloudflareZoneLatencyChart({
 	)
 
 	const definition = useMemo(() => {
-		const at = (point: LatencyPoint) => point.time
+		const at = (point: LatencyPoint) => point.date
 		const valueOf = (key: string) => (point: LatencyPoint) => {
 			const value = point[key]
 			return typeof value === "number" ? value : null
@@ -436,14 +446,7 @@ export function CloudflareZoneLatencyChart({
 				focusCrosshair(chromeColors),
 			],
 			scales: {
-				x: {
-					scale: scalePoint,
-					axis: {
-						line: false,
-						ticks: { size: 0, padding: 8 },
-						tickLabels: { thin: { minGap: 12 } },
-					},
-				},
+				x: axis.x,
 				y: {
 					scale: scaleLinear().domain(yDomain),
 					axis: {
@@ -452,12 +455,14 @@ export function CloudflareZoneLatencyChart({
 					},
 				},
 			},
-			margin: { top: 12, right: 12, bottom: 4, left: 52 },
+			// `bottom` unset on purpose: a set side is a hard lock, and only a measured
+			// side reserves the x tick labels' height.
+			margin: { top: 12, right: 12, left: 60 },
 			focus: "group-x",
 			focusRing: false,
 			tooltip: cursorTooltip(focusStore.anchor),
 		})
-	}, [data, activeSeries, colors, chromeColors, yDomain, focusStore])
+	}, [data, activeSeries, axis, colors, chromeColors, yDomain, focusStore])
 
 	// Latency quantiles are plan-gated on Cloudflare's side — say so instead of
 	// silently omitting the panel (the operator shouldn't wonder where it went).
@@ -497,7 +502,7 @@ export function CloudflareZoneLatencyChart({
 							points={points}
 							series={tooltipSeries}
 							focusStore={focusStore}
-							heading={(point: LatencyPoint) => point.time}
+							heading={(point: LatencyPoint) => axis.heading(point.bucket)}
 						/>
 					)}
 				/>

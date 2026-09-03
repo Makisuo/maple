@@ -12,6 +12,7 @@
 		"@effect/platform-bun": "catalog:effect",
 		"@maple-dev/effect-sdk": "workspace:*",
 		"@maple/domain": "workspace:*",
+		"@maple/safe-fetch": "workspace:*",
 		"effect": "catalog:effect"
 	},
 	"devDependencies": {

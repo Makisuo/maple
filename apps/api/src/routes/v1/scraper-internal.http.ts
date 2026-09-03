@@ -6,6 +6,7 @@ import {
 	ScrapeIntervalSeconds,
 	ScrapeResultReportList,
 	ScrapeTargetId,
+	ScrapeTargetType,
 	UserId,
 } from "@maple/domain/http"
 import { Env } from "@/platform/Env"
@@ -20,12 +21,15 @@ import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsServi
 const decodeTargetIdSync = Schema.decodeUnknownSync(ScrapeTargetId)
 const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
 const decodeScrapeIntervalSecondsSync = Schema.decodeUnknownSync(ScrapeIntervalSeconds)
+const decodeTargetTypeSync = Schema.decodeUnknownSync(ScrapeTargetType)
 
 /** Audit identity for lazily-created ingest keys (org_ingest_keys.created_by). */
 const SCRAPER_SYSTEM_USER = Schema.decodeSync(UserId)("system-prometheus-scraper")
 const decodeScrapeResultsEffect = Schema.decodeUnknownEffect(ScrapeResultReportList)
 const decodeLabelsEffect = Schema.decodeUnknownEffect(Schema.Record(Schema.String, Schema.String))
 const EMPTY_LABELS = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.String))({})
+/** PlanetScale's data plane authenticates with the signed URL, never a header. */
+const NO_AUTH_HEADERS: Record<string, string> = {}
 
 const errorText = (message: string, status: number) =>
 	HttpServerResponse.text(message, {
@@ -39,6 +43,7 @@ export interface ScrapeTargetRowLike {
 	readonly name: string
 	readonly serviceName: string | null
 	readonly url: string
+	readonly targetType: string
 	readonly scrapeIntervalSeconds: number
 	readonly labelsJson: unknown
 }
@@ -46,6 +51,8 @@ export interface ScrapeTargetRowLike {
 export interface SubTargetOverride {
 	/** Discovered per-branch scrape URL replacing the row's SD endpoint url. */
 	readonly url: string
+	/** `url` plus the signed `?sig=&exp=` params the data plane authenticates with. */
+	readonly signedUrl: string
 	readonly subTargetKey: string
 	/** Discovery labels; the target's own labelsJson wins on key conflicts. */
 	readonly labels: Record<string, string>
@@ -62,14 +69,16 @@ class InvalidScrapeTargetRow extends Schema.TaggedError<InvalidScrapeTargetRow>(
 
 /**
  * Marshal a DB row into the internal wire shape. Unparseable labels degrade
- * to `{}`; a row that fails the schema brands (interval out of range, bad id)
- * yields `none` so one corrupt row cannot break the whole list. Discovered
- * sub-targets (PlanetScale branches) pass an override carrying the concrete
- * scrape URL and discriminator key.
+ * to `{}`; a row that fails the schema brands (interval out of range, bad id,
+ * unknown target type) yields `none` so one corrupt row cannot break the whole
+ * list. `authHeaders` is the row's already-decrypted Authorization header (or
+ * `{}`); discovered sub-targets (PlanetScale branches) pass an override
+ * carrying the concrete scrape URL, its signed form, and the discriminator key.
  */
 export const toInternalScrapeTarget = (
 	row: ScrapeTargetRowLike,
 	ingestKey: string,
+	authHeaders: Record<string, string>,
 	subTarget?: SubTargetOverride,
 ): Effect.Effect<Option.Option<InternalScrapeTarget>> =>
 	Effect.gen(function* () {
@@ -84,7 +93,10 @@ export const toInternalScrapeTarget = (
 					orgId: row.orgId,
 					name: row.name,
 					serviceName: row.serviceName ?? null,
+					targetType: decodeTargetTypeSync(row.targetType),
 					url: subTarget?.url ?? row.url,
+					scrapeUrl: subTarget?.signedUrl ?? row.url,
+					authHeaders,
 					subTargetKey: subTarget?.subTargetKey ?? null,
 					scrapeIntervalSeconds: decodeScrapeIntervalSecondsSync(row.scrapeIntervalSeconds),
 					labels,
@@ -102,9 +114,10 @@ export const toInternalScrapeTarget = (
 /**
  * Internal endpoints backing the standalone Prometheus scraper
  * (apps/scraper). The scraper polls `/api/internal/scrape-targets` for the
- * enabled target list, fetches each target's exposition text through
- * `/api/internal/prometheus-scrape` (credentials stay server-side), and
- * reports outcomes to `/api/internal/scrape-results`.
+ * enabled target list — each entry carries the concrete URL to fetch and the
+ * decrypted Authorization header for it, so the master encryption key and the
+ * PlanetScale OAuth grant never leave the API — scrapes every target itself,
+ * and reports outcomes to `/api/internal/scrape-results`.
  */
 export const ScraperInternalRouter = HttpRouter.use((router) =>
 	Effect.gen(function* () {
@@ -177,7 +190,12 @@ export const ScraperInternalRouter = HttpRouter.use((router) =>
 							)
 							yield* Effect.forEach(subTargets, (subTarget) =>
 								Effect.gen(function* () {
-									const target = yield* toInternalScrapeTarget(row, ingestKey, subTarget)
+									const target = yield* toInternalScrapeTarget(
+										row,
+										ingestKey,
+										NO_AUTH_HEADERS,
+										subTarget,
+									)
 									if (Option.isSome(target)) {
 										targets.push(target.value)
 									} else {
@@ -196,7 +214,26 @@ export const ScraperInternalRouter = HttpRouter.use((router) =>
 							return
 						}
 
-						const target = yield* toInternalScrapeTarget(row, ingestKey)
+						// A credential that no longer decrypts (rotated master key, corrupt
+						// row) skips this target for the round rather than failing the
+						// whole list; the target's own `lastScrapeError` already tells the
+						// org, since every scrape through the old proxy hit the same wall.
+						const authHeaders = yield* service.authHeaders(row).pipe(
+							Effect.map(Option.some),
+							Effect.catch((error) =>
+								Effect.logWarning("Skipping scrape target (credentials unavailable)").pipe(
+									Effect.annotateLogs({
+										scrapeTargetId: row.id,
+										orgId: row.orgId,
+										error: error.message,
+									}),
+									Effect.as(Option.none<Record<string, string>>()),
+								),
+							),
+						)
+						if (Option.isNone(authHeaders)) return
+
+						const target = yield* toInternalScrapeTarget(row, ingestKey, authHeaders.value)
 						if (Option.isSome(target)) {
 							targets.push(target.value)
 						} else {

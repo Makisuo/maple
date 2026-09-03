@@ -260,7 +260,11 @@ function SessionDetailBody({
 					<DashboardLayout.Header
 						titleContent={
 							<div className="flex min-w-0 items-center gap-2">
-								<VendorIcon size={16} className="shrink-0 text-muted-foreground" aria-hidden />
+								<VendorIcon
+									size={16}
+									className="shrink-0 text-muted-foreground"
+									aria-hidden
+								/>
 								<DashboardLayout.Title title={title}>
 									{summary.title === undefined ? (
 										// The id fallback title copies the full session id.

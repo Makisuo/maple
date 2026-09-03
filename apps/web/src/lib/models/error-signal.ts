@@ -51,7 +51,11 @@ export interface ErrorSignal {
 	readonly detail: string
 	readonly serviceName: string
 	readonly severity: IssueSeverity | null
-	readonly state: SignalState
+	/** A live investigation, if one is running or has landed. The row draws this
+	 *  on its own rather than through {@link resolveSignalState} — that precedence
+	 *  exists for the issue header, which has one slot to fill, and it would hide
+	 *  every investigation behind an open incident in a list. */
+	readonly investigation: InvestigationSummary | null
 	/** Occurrences in the selected window, from the warehouse. `null` when the
 	 *  fingerprint had none — an issue that has gone quiet, which is a fact worth
 	 *  drawing rather than a zero to hide. */
@@ -180,7 +184,7 @@ export function buildErrorSignals(input: {
 			detail: issue.exceptionMessage ?? "",
 			serviceName: issue.serviceName,
 			severity: issue.severity,
-			state: resolveSignalState(issue, input.investigations.get(issue.id)),
+			investigation: liveInvestigationSummary(input.investigations.get(issue.id) ?? null) ?? null,
 			windowCount: volume ? volume.count : null,
 			totalCount: issue.occurrenceCount,
 			affectedServicesCount: volume ? volume.affectedServicesCount : null,

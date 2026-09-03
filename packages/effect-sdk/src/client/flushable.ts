@@ -173,7 +173,11 @@ const buildBrowserAttributes = (config: MapleClientFlushableConfig): Record<stri
 		attributes["deployment.environment"] = config.environment
 		attributes["deployment.environment.name"] = config.environment
 	}
-	if (config.serviceVersion) attributes["deployment.commit_sha"] = config.serviceVersion
+	// `serviceVersion` may be a semver release string, which belongs in
+	// `service.version` but not in `vcs.*` — only a SHA-shaped value is stamped.
+	if (config.serviceVersion && /^[0-9a-f]{7,40}$/i.test(config.serviceVersion)) {
+		attributes["vcs.ref.head.revision"] = config.serviceVersion
+	}
 	if (config.serviceNamespace) attributes["service.namespace"] = config.serviceNamespace
 	if (config.attributes) Object.assign(attributes, config.attributes)
 	return attributes
@@ -317,8 +321,12 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 			name: "browser.uncaught_error",
 			attributes: {
 				"maple.exception.source": "window.onerror",
-				...(event.filename ? { "code.filepath": event.filename } : undefined),
-				...(event.lineno ? { "code.lineno": event.lineno } : undefined),
+				// `code.file.path` / `code.line.number` since semconv v1.34.0. Nothing
+				// reads the names they replaced, so they are dropped rather than
+				// dual-emitted — carrying both would put four near-identical rows on
+				// every uncaught error in the attribute list.
+				...(event.filename ? { "code.file.path": event.filename } : undefined),
+				...(event.lineno ? { "code.line.number": event.lineno } : undefined),
 			},
 		})
 	}

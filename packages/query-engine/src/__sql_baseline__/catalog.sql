@@ -45,7 +45,7 @@ SELECT
         GROUP BY hostName) AS hosts
         FORMAT JSON
 
--- builder:containers:containerDetailSummaryQuery:default  [6063da9a]
+-- builder:containers:containerDetailSummaryQuery:default  [58383940]
 SELECT
           ResourceAttributes['container.name'] AS containerName,
           any(ResourceAttributes['host.name']) AS hostName,
@@ -53,7 +53,7 @@ SELECT
           any(ResourceAttributes['container.image.name']) AS imageName,
           any(ResourceAttributes['compose.project']) AS composeProject,
           any(ResourceAttributes['compose.service']) AS composeService,
-          any(ResourceAttributes['container.runtime']) AS runtime,
+          any(coalesce(nullIf(ResourceAttributes['container.runtime.name'], ''), ResourceAttributes['container.runtime'])) AS runtime,
           min(TimeUnix) AS firstSeen,
           max(TimeUnix) AS lastSeen,
           ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,
@@ -250,7 +250,7 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- builder:containers:listContainersQuery:default  [fe84ad79]
+-- builder:containers:listContainersQuery:default  [df58f91f]
 SELECT
           containerName AS containerName,
           hostName AS hostName,
@@ -275,7 +275,7 @@ SELECT
           any(ResourceAttributes['container.image.name']) AS imageName,
           any(ResourceAttributes['compose.project']) AS composeProject,
           any(ResourceAttributes['compose.service']) AS composeService,
-          any(ResourceAttributes['container.runtime']) AS runtime,
+          any(coalesce(nullIf(ResourceAttributes['container.runtime.name'], ''), ResourceAttributes['container.runtime'])) AS runtime,
           any(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment'])) AS environment,
           max(TimeUnix) AS lastSeen,
           ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,
@@ -298,7 +298,7 @@ SELECT
         OFFSET 0
         FORMAT JSON
 
--- builder:containers:listContainersQuery:filtered  [75408df7]
+-- builder:containers:listContainersQuery:filtered  [16c1f98d]
 SELECT
           containerName AS containerName,
           hostName AS hostName,
@@ -323,7 +323,7 @@ SELECT
           any(ResourceAttributes['container.image.name']) AS imageName,
           any(ResourceAttributes['compose.project']) AS composeProject,
           any(ResourceAttributes['compose.service']) AS composeService,
-          any(ResourceAttributes['container.runtime']) AS runtime,
+          any(coalesce(nullIf(ResourceAttributes['container.runtime.name'], ''), ResourceAttributes['container.runtime'])) AS runtime,
           any(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment'])) AS environment,
           max(TimeUnix) AS lastSeen,
           ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,
@@ -351,7 +351,7 @@ SELECT
         OFFSET 0
         FORMAT JSON
 
--- builder:containers:listContainersQuery:scoped  [41805227]
+-- builder:containers:listContainersQuery:scoped  [34d4c009]
 SELECT
           containerName AS containerName,
           hostName AS hostName,
@@ -376,7 +376,7 @@ SELECT
           any(ResourceAttributes['container.image.name']) AS imageName,
           any(ResourceAttributes['compose.project']) AS composeProject,
           any(ResourceAttributes['compose.service']) AS composeService,
-          any(ResourceAttributes['container.runtime']) AS runtime,
+          any(coalesce(nullIf(ResourceAttributes['container.runtime.name'], ''), ResourceAttributes['container.runtime'])) AS runtime,
           any(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment'])) AS environment,
           max(TimeUnix) AS lastSeen,
           ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,
@@ -8103,7 +8103,7 @@ SELECT
           StatusCode AS statusCode,
           StatusMessage AS statusMessage,
           toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'url.full', SpanAttributes['url.full'], 'http.url', SpanAttributes['http.url'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'url.path', SpanAttributes['url.path'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'cache.system', SpanAttributes['cache.system'], 'cache.result', SpanAttributes['cache.result'], 'cache.name', SpanAttributes['cache.name'], 'cache.operation', SpanAttributes['cache.operation'], 'cache.lookup_performed', SpanAttributes['cache.lookup_performed'], 'db.system.name', SpanAttributes['db.system.name'], 'db.system', SpanAttributes['db.system'], 'cloud.platform', SpanAttributes['cloud.platform'], 'cloudflare.colo', SpanAttributes['cloudflare.colo'], 'faas.invoked_region', SpanAttributes['faas.invoked_region'], 'cloudflare.outcome', SpanAttributes['cloudflare.outcome'])) AS spanAttributes,
-          toJSONString(map('deployment.environment', ResourceAttributes['deployment.environment'], 'deployment.commit_sha', ResourceAttributes['deployment.commit_sha'])) AS resourceAttributes,
+          toJSONString(map('deployment.environment', ResourceAttributes['deployment.environment'], 'vcs.ref.head.revision', ResourceAttributes['vcs.ref.head.revision'])) AS resourceAttributes,
           'related' AS relationship
         FROM trace_detail_spans
         WHERE TraceId = '0af7651916cd43dd8448eb211c80319c'
@@ -8125,7 +8125,7 @@ SELECT
           StatusCode AS statusCode,
           StatusMessage AS statusMessage,
           toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'url.full', SpanAttributes['url.full'], 'http.url', SpanAttributes['http.url'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'url.path', SpanAttributes['url.path'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'cache.system', SpanAttributes['cache.system'], 'cache.result', SpanAttributes['cache.result'], 'cache.name', SpanAttributes['cache.name'], 'cache.operation', SpanAttributes['cache.operation'], 'cache.lookup_performed', SpanAttributes['cache.lookup_performed'], 'db.system.name', SpanAttributes['db.system.name'], 'db.system', SpanAttributes['db.system'], 'cloud.platform', SpanAttributes['cloud.platform'], 'cloudflare.colo', SpanAttributes['cloudflare.colo'], 'faas.invoked_region', SpanAttributes['faas.invoked_region'], 'cloudflare.outcome', SpanAttributes['cloudflare.outcome'])) AS spanAttributes,
-          toJSONString(map('deployment.environment', ResourceAttributes['deployment.environment'], 'deployment.commit_sha', ResourceAttributes['deployment.commit_sha'])) AS resourceAttributes,
+          toJSONString(map('deployment.environment', ResourceAttributes['deployment.environment'], 'vcs.ref.head.revision', ResourceAttributes['vcs.ref.head.revision'])) AS resourceAttributes,
           if(SpanId = '00f067aa0ba902b7', 'target', 'related') AS relationship
         FROM trace_detail_spans
         WHERE TraceId = '0af7651916cd43dd8448eb211c80319c'

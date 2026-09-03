@@ -267,7 +267,7 @@ export const ConfigResourceServiceStubsLayer = Layer.mergeAll(
 		delete: die,
 		deleteManaged: die,
 		listAllEnabled: die,
-		scrapeForCollector: die,
+		authHeaders: die,
 		recordScrapeResults: die,
 		listChecks: die,
 		probe: die,

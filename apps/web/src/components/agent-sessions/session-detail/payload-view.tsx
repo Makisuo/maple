@@ -2,10 +2,8 @@ import { useMemo } from "react"
 
 import { cn } from "@maple/ui/lib/utils"
 
-import { MessageResponse } from "@/components/ai-elements/message-response"
 import { tryParseJson } from "@/components/attributes"
-import { highlightCode } from "@/lib/sugar-high"
-import { ClampedText } from "./clamped-text"
+import { ClampedText, type ClampLines } from "./clamped-text"
 
 /**
  * The rendered ↔ raw affordances every captured body shares, wherever it is
@@ -16,17 +14,17 @@ import { ClampedText } from "./clamped-text"
  */
 
 /**
- * A payload body, pretty-printed and highlighted where it parses as JSON
- * (object or array — same test as the log body), verbatim otherwise. An
- * emitter-truncated prefix fails the parse and stays verbatim, which is right:
- * pretty-printing a fragment would dress it up as a whole document.
+ * A payload body, pretty-printed where it parses as JSON (object or array —
+ * same test as the log body), verbatim otherwise. An emitter-truncated prefix
+ * fails the parse and stays verbatim, which is right: pretty-printing a
+ * fragment would dress it up as a whole document. Highlighting is the body's
+ * own business (`ClampedText`), which dresses up only what it mounts.
  */
-export function useJsonPayload(text: string): { formatted: string; highlighted: string | undefined } {
+export function useJsonPayload(text: string): { formatted: string; isJson: boolean } {
 	return useMemo(() => {
 		const parsed = tryParseJson(text)
-		if (parsed === null) return { formatted: text, highlighted: undefined }
-		const formatted = JSON.stringify(parsed, null, 2)
-		return { formatted, highlighted: highlightCode(formatted) }
+		if (parsed === null) return { formatted: text, isJson: false }
+		return { formatted: JSON.stringify(parsed, null, 2), isJson: true }
 	}, [text])
 }
 
@@ -36,13 +34,9 @@ export function useJsonPayload(text: string): { formatted: string; highlighted: 
  * a JSON message laid out as markdown collapses its structure into one
  * paragraph. `rendered` names the choice and is what the ViewSwitch shows.
  */
-export function useMessageBody(text: string): {
-	rendered: "md" | "json"
-	formatted: string
-	highlighted: string | undefined
-} {
+export function useMessageBody(text: string): { rendered: "md" | "json"; formatted: string } {
 	const payload = useJsonPayload(text)
-	return { rendered: payload.highlighted === undefined ? "md" : "json", ...payload }
+	return { rendered: payload.isJson ? "json" : "md", formatted: payload.formatted }
 }
 
 /**
@@ -138,7 +132,7 @@ export function MessageBody({
 	text,
 	body,
 	raw,
-	clampClass,
+	clampLines,
 	proseClassName = "text-foreground text-sm leading-relaxed",
 	expanded,
 	onToggleExpanded,
@@ -146,9 +140,9 @@ export function MessageBody({
 	text: string
 	/** The reading chosen by `useMessageBody`, hoisted so the caller's ViewSwitch
 	 *  can label the segment it selects. */
-	body: { rendered: "md" | "json"; formatted: string; highlighted: string | undefined }
+	body: { rendered: "md" | "json"; formatted: string }
 	raw: boolean
-	clampClass?: string
+	clampLines?: ClampLines
 	proseClassName?: string
 	expanded: boolean
 	onToggleExpanded: () => void
@@ -156,14 +150,10 @@ export function MessageBody({
 	return (
 		<ClampedText
 			text={raw ? text : body.formatted}
-			html={raw ? undefined : body.highlighted}
+			rendering={raw ? "text" : body.rendered}
 			mono={!raw && body.rendered === "json"}
-			clampClass={clampClass}
-			body={
-				raw || body.rendered === "json" ? undefined : (
-					<MessageResponse className={proseClassName}>{text}</MessageResponse>
-				)
-			}
+			clampLines={clampLines}
+			proseClassName={proseClassName}
 			expanded={expanded}
 			onToggleExpanded={onToggleExpanded}
 		/>

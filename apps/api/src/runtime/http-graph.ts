@@ -24,7 +24,6 @@ import { OAuthDiscoveryRouter } from "@/routes/v1/oauth-discovery.http"
 import { HttpOrgClickHouseSettingsLive } from "@/routes/v1/org-clickhouse-settings.http"
 import { HttpOrganizationsLive } from "@/routes/v1/organizations.http"
 import { PlanetScaleWebhookRouter } from "@/routes/v1/planetscale-webhook.http"
-import { PrometheusScrapeProxyRouter } from "@/routes/v1/prometheus-scrape-proxy.http"
 import { HttpQueryEngineLive } from "@/routes/internal/query-engine.http"
 import { HttpSessionReplaysInternalLive } from "@/routes/internal/session-replays.http"
 import { ScraperInternalRouter } from "@/routes/v1/scraper-internal.http"
@@ -163,7 +162,6 @@ export const AllRoutes = Layer.mergeAll(
 	SlackInternalRouter,
 	OAuthDiscoveryRouter,
 	PlanetScaleWebhookRouter,
-	PrometheusScrapeProxyRouter,
 	ScraperInternalRouter,
 	VcsWebhookRouter,
 	ClerkWebhookRouter,

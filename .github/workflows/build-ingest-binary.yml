@@ -17,7 +17,7 @@ name: Build ingest binary
 #     wrong natively.
 #
 # The rest of a deploy stays on x86 — only this step cares about the task
-# architecture, and moving a whole deploy job (bun, alchemy, wrangler, drizzle)
+# architecture, and moving a whole deploy job (bun, alchemy, drizzle)
 # to arm64 would risk far more than it buys.
 
 on:

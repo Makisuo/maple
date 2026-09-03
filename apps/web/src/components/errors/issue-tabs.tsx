@@ -31,8 +31,10 @@ export function IssueTabs({
 }: {
 	issueId: ErrorIssueId
 	active: IssueTab
-	occurrenceCount: number
-	activityCount: number
+	/** Omitted while the detail query is still in flight — the tab renders
+	 *  without its count rather than with a placeholder zero. */
+	occurrenceCount?: number
+	activityCount?: number
 	/** Alert- and integration-backed issues have no fingerprint samples to show,
 	 *  so the tab is absent rather than empty. */
 	showOccurrences: boolean

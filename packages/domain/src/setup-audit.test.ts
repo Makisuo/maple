@@ -1043,29 +1043,33 @@ describe("resource-attribute coverage", () => {
 		expect(check(withoutResourceKey("vcs.repository.url.full"), "RES-04").status).toBe("fail")
 	})
 
-	it("RES-05 accepts either the semconv revision key or the legacy commit SHA", () => {
+	it("RES-05 requires the semconv revision key — the retired deployment.commit_sha no longer counts", () => {
 		const legacy = telemetry({
 			attributeKeys: [
 				...healthyWarehouse.attributeKeys.filter((row) => row.key !== "vcs.ref.head.revision"),
 				resourceKey("deployment.commit_sha"),
 			],
 		})
-		expect(check(legacy, "RES-05").status).toBe("pass")
+		expect(check(legacy, "RES-05").status).toBe("fail")
 		expect(check(withoutResourceKey("vcs.ref.head.revision"), "RES-05").status).toBe("fail")
 	})
 
-	it("RES-06 flags invented parallel keys but not the commit SHA Maple actually reads", () => {
+	it("RES-06 flags invented parallel keys, including the retired deployment.commit_sha", () => {
 		const invented = telemetry({
-			attributeKeys: [...healthyWarehouse.attributeKeys, resourceKey("env"), resourceKey("git.repo")],
+			attributeKeys: [
+				...healthyWarehouse.attributeKeys,
+				resourceKey("env"),
+				resourceKey("git.repo"),
+				resourceKey("deployment.commit_sha"),
+			],
 		})
 		const result = check(invented, "RES-06")
 		expect(result.status).toBe("fail")
-		expect(result.affected.map((entity) => entity.name).sort()).toEqual(["env", "git.repo"])
-
-		const supported = telemetry({
-			attributeKeys: [...healthyWarehouse.attributeKeys, resourceKey("deployment.commit_sha")],
-		})
-		expect(check(supported, "RES-06").status).toBe("pass")
+		expect(result.affected.map((entity) => entity.name).sort()).toEqual([
+			"deployment.commit_sha",
+			"env",
+			"git.repo",
+		])
 	})
 })
 

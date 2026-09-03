@@ -1,7 +1,7 @@
 import * as React from "react"
 import { Result } from "@/lib/effect-atom"
 
-import { listAiSessions } from "@/api/warehouse/ai-sessions"
+import { listAiSessions, type ListAiSessionsInput } from "@/api/warehouse/ai-sessions"
 import { listAiSessionsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import type { AgentSessionRow } from "@/components/agent-sessions/agent-sessions-list"
@@ -14,19 +14,27 @@ export const MAX_RETAINED_AI_SESSIONS = 500
 
 /**
  * The filter inputs the agent-sessions route assembles (resolved time window +
- * sidebar filters). Pagination params are added by this hook — callers must not
- * set `limit`/`offset` themselves.
+ * sidebar filters + sort). Pagination params are added by this hook — callers
+ * must not set `limit`/`offset` themselves.
  */
-export interface AiSessionsFilterInputs {
+export type AiSessionsFilterInputs = Omit<
+	ListAiSessionsInput,
+	"limit" | "offset" | "startTime" | "endTime"
+> & {
 	startTime: string
 	endTime: string
-	vendorIds?: ReadonlyArray<string>
-	serviceNames?: ReadonlyArray<string>
 }
 
 interface AiSessionsPage {
 	data: ReadonlyArray<AgentSessionRow>
+	/** Sessions the server ranked for this page — what paging counts, since
+	 *  `data` can run short of it (see `ListAiSessionsResponse.ranked`). */
+	ranked: number
 }
+
+/** A page's ranked count, falling back to its row count for a server that
+ *  predates the field. */
+const rankedOf = (page: { data: ReadonlyArray<unknown>; ranked?: number }) => page.ranked ?? page.data.length
 
 /**
  * Offset-based infinite scroll for the agent-sessions list, mirroring
@@ -66,15 +74,24 @@ export function useInfiniteAiSessions(filterInputs: AiSessionsFilterInputs) {
 	}, [firstPageResult, additionalPages])
 	const isCapped = allData.length >= MAX_RETAINED_AI_SESSIONS
 
+	// Paged on what the server RANKED, not on the rows it returned: a page can
+	// come back a row short of a full one and still not be the last (see
+	// `ListAiSessionsResponse.ranked`), so the row count would end the scroll
+	// early and the next offset would re-show a session.
+	const rankedCount = React.useMemo(() => {
+		const first = Result.isSuccess(firstPageResult) ? rankedOf(firstPageResult.value) : 0
+		return additionalPages.reduce((sum, page) => sum + page.ranked, first)
+	}, [firstPageResult, additionalPages])
+
 	const hasNextPage = React.useMemo(() => {
 		if (isCapped) return false
 		if (paginationStopped) return false
 		if (!Result.isSuccess(firstPageResult)) return false
 		if (additionalPages.length === 0) {
-			return firstPageResult.value.data.length === PAGE_SIZE
+			return rankedOf(firstPageResult.value) === PAGE_SIZE
 		}
 		const lastPage = additionalPages[additionalPages.length - 1]
-		return lastPage.data.length === PAGE_SIZE
+		return lastPage.ranked === PAGE_SIZE
 	}, [firstPageResult, additionalPages, paginationStopped, isCapped])
 
 	const fetchNextPage = React.useCallback(() => {
@@ -83,13 +100,13 @@ export function useInfiniteAiSessions(filterInputs: AiSessionsFilterInputs) {
 		setIsFetchingNextPage(true)
 
 		const currentKey = filterKeyRef.current
-		const offset = allData.length
+		const offset = rankedCount
 
 		mapleRuntime
 			.runPromise(listAiSessions({ data: { ...filterInputs, limit: PAGE_SIZE, offset } }))
 			.then((result) => {
 				if (filterKeyRef.current !== currentKey) return
-				setAdditionalPages((prev) => [...prev, { data: result.data }])
+				setAdditionalPages((prev) => [...prev, { data: result.data, ranked: rankedOf(result) }])
 			})
 			.catch((error) => {
 				if (filterKeyRef.current !== currentKey) return
@@ -104,7 +121,7 @@ export function useInfiniteAiSessions(filterInputs: AiSessionsFilterInputs) {
 				}
 				isFetchingRef.current = false
 			})
-	}, [filterInputs, allData.length, hasNextPage])
+	}, [filterInputs, rankedCount, hasNextPage])
 
 	return {
 		firstPageResult,

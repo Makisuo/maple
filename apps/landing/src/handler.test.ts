@@ -1,6 +1,6 @@
 import { v2RouteNotFoundBody } from "@maple/domain/http/v2"
 import { describe, expect, it } from "vitest"
-import worker, { apiNotFoundBody, isApiPath, markdownTwin, notFoundMarkdown } from "./worker"
+import { apiNotFoundBody, handleRequest, isApiPath, markdownTwin, notFoundMarkdown } from "./handler"
 
 /**
  * A stand-in for the Workers Assets binding: a path → body map with the same
@@ -36,7 +36,7 @@ const env = {
 const BROWSER_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 
 const get = (path: string, headers: Record<string, string> = {}, init: RequestInit = {}) =>
-	worker.fetch(new Request(`https://maple.dev${path}`, { headers, ...init }), env)
+	handleRequest(new Request(`https://maple.dev${path}`, { headers, ...init }), env.ASSETS)
 
 describe("markdownTwin", () => {
 	it("maps page paths to their .md twin, including the home page", () => {

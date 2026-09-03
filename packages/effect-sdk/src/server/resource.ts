@@ -141,7 +141,6 @@ export const resolveResource = Effect.fn("resolveResource")(function* (config: R
 		attributes["deployment.environment"] = environment
 		attributes["deployment.environment.name"] = environment
 	}
-	if (serviceVersion) attributes["deployment.commit_sha"] = serviceVersion
 	if (repositoryUrl) attributes["vcs.repository.url.full"] = repositoryUrl
 	if (headRevision) attributes["vcs.ref.head.revision"] = headRevision
 	if (config.serviceNamespace) attributes["service.namespace"] = config.serviceNamespace
@@ -221,7 +220,6 @@ export const resolveResourceFromEnv = (
 		attributes["deployment.environment"] = environment
 		attributes["deployment.environment.name"] = environment
 	}
-	if (serviceVersion) attributes["deployment.commit_sha"] = serviceVersion
 	if (repositoryUrl) attributes["vcs.repository.url.full"] = repositoryUrl
 	if (headRevision) attributes["vcs.ref.head.revision"] = headRevision
 	if (config.serviceNamespace) attributes["service.namespace"] = config.serviceNamespace

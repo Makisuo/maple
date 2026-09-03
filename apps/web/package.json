@@ -3,8 +3,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "portless",
-		"dev:app": "vite dev --port ${PORT:-3471} --host ${HOST:-127.0.0.1}",
+		"dev": "vite dev --port ${PORT:-3471} --host ${HOST:-127.0.0.1}",
 		"build": "vite build",
 		"preview": "vite preview",
 		"test": "vitest run --passWithNoTests",
@@ -98,9 +97,5 @@
 		"vite": "catalog:",
 		"vitest": "catalog:",
 		"woff2-encoder": "^2.0.0"
-	},
-	"portless": {
-		"name": "web",
-		"script": "dev:app"
 	}
 }

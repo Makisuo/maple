@@ -22,8 +22,9 @@ describe("normalizeKey", () => {
 	})
 
 	it("normalizes commit_sha alias", () => {
-		expect(normalizeKey("commit_sha")).toBe("deployment.commit_sha")
-		expect(normalizeKey("deployment.commit_sha")).toBe("deployment.commit_sha")
+		expect(normalizeKey("commit_sha")).toBe("vcs.ref.head.revision")
+		expect(normalizeKey("deployment.commit_sha")).toBe("vcs.ref.head.revision")
+		expect(normalizeKey("vcs.ref.head.revision")).toBe("vcs.ref.head.revision")
 	})
 
 	it("normalizes root.only alias", () => {

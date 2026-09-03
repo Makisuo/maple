@@ -613,19 +613,6 @@ function sessionCost(
 	return bySpan.size === 0 ? undefined : sumCosts(bySpan.values())
 }
 
-/**
- * One turn's reported spend, by the same rules `countTurnTokens` follows: the
- * deepest reporter counts, and a span reporting for more than this turn counts
- * for none of them.
- */
-export function countTurnCost(turn: SessionTurn, turns: readonly SessionTurn[]): number | undefined {
-	const byId = new Map(turn.spans.map((span) => [span.spanId, span]))
-	const bySpan = [...costBySpan(turn.spans, byId)].filter(
-		([spanId]) => !isSessionLevelReporter(byId.get(spanId)!, turns),
-	)
-	return bySpan.length === 0 ? undefined : sumCosts(bySpan.map(([, cost]) => cost))
-}
-
 /** Per bucket, what `reported` claims over `counted`. Never negative: a wrapper
  *  that under-reports its own children adds nothing rather than subtracting. */
 function excessTokens(reported: SessionTokenTotals, counted: SessionTokenTotals): SessionTokenTotals {

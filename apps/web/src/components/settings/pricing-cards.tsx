@@ -49,7 +49,7 @@ import {
 	CodeIcon,
 	ShieldIcon,
 	PlayRotateClockwiseIcon,
-	CursorPointerIcon,
+	GlobePointerIcon,
 } from "@/components/icons"
 import type { IconComponent } from "@/components/icons"
 
@@ -58,7 +58,7 @@ const FEATURE_ICONS: Record<string, IconComponent> = {
 	traces: PulseIcon,
 	metrics: ChartLineIcon,
 	browser_sessions: PlayRotateClockwiseIcon,
-	product_events: CursorPointerIcon,
+	product_events: GlobePointerIcon,
 } satisfies Record<string, IconComponent>
 
 // Display labels for the metered data rows, keyed by Autumn featureId (Autumn

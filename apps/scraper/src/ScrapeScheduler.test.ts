@@ -2,7 +2,8 @@ import { assert, describe, it } from "@effect/vitest"
 import { Duration, Effect, Exit, Fiber, Layer, Metric, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { InternalScrapeTarget, ScrapeResultReport, ScrapeTargetId } from "@maple/domain/http"
-import { ApiClient, ApiRequestError, type ApiClientApi, type ScrapeProxyResponse } from "./ApiClient"
+import { ApiClient, ApiRequestError, type ApiClientApi } from "./ApiClient"
+import { TargetFetcher, TargetFetchError, type TargetFetcherApi, type TargetResponse } from "./TargetFetcher"
 import { OtlpIngest, OtlpIngestError, type OtlpIngestApi } from "./OtlpIngest"
 import {
 	backoffLogMessage,
@@ -37,6 +38,8 @@ const mkTarget = (
 		name: string
 		serviceName: string | null
 		url: string
+		scrapeUrl: string
+		authHeaders: Record<string, string>
 		labels: Record<string, string>
 		ingestKey: string
 		subTargetKey: string | null
@@ -47,7 +50,10 @@ const mkTarget = (
 		orgId: "org_test",
 		name: overrides.name ?? `target-${id.slice(0, 4)}`,
 		serviceName: overrides.serviceName ?? null,
+		targetType: "prometheus",
 		url: overrides.url ?? "https://example.com/metrics",
+		scrapeUrl: overrides.scrapeUrl ?? overrides.url ?? "https://example.com/metrics",
+		authHeaders: overrides.authHeaders ?? {},
 		subTargetKey: overrides.subTargetKey ?? null,
 		scrapeIntervalSeconds: intervalSeconds,
 		labels: overrides.labels ?? {},
@@ -59,12 +65,12 @@ const TARGET_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
 const GAUGE_BODY = "# TYPE up gauge\nup 1\n"
 
-/** Build a proxy response, defaulting the rate-limit hint absent. */
-const proxyResponse = (fields: {
+/** Build a target response, defaulting the rate-limit hint absent. */
+const fetchResponse = (fields: {
 	status: number
 	body: string
 	retryAfterSeconds?: number | null
-}): ScrapeProxyResponse => ({
+}): TargetResponse => ({
 	status: fields.status,
 	body: fields.body,
 	retryAfterSeconds: fields.retryAfterSeconds ?? null,
@@ -84,12 +90,14 @@ interface Harness {
 	/** Mutable target list returned by the stubbed listTargets. */
 	targets: Array<InternalScrapeTarget>
 	scrapeCalls: Array<string>
-	/** `(targetId, subTargetKey)` pairs as seen by the scrape proxy stub. */
+	/** `(targetId, subTargetKey)` pairs as seen by the target fetcher stub. */
 	subCalls: Array<{ targetId: string; subTargetKey: string | null }>
+	/** The `scrapeUrl` of every target handed to the fetcher stub, in order. */
+	fetchedUrls: Array<string>
 	ingestCalls: Array<{ ingestKey: string; request: OtlpExportRequest }>
 	reportedResults: Array<ScrapeResultReport>
 	/** Per-target scrape behaviour override. */
-	scrapeImpl: (targetId: string) => Effect.Effect<ScrapeProxyResponse, ApiRequestError>
+	scrapeImpl: (targetId: string) => Effect.Effect<TargetResponse, TargetFetchError>
 	ingestImpl: (ingestKey: string, request: OtlpExportRequest) => Effect.Effect<void, OtlpIngestError>
 }
 
@@ -97,21 +105,27 @@ const makeHarness = (targets: Array<InternalScrapeTarget>): Harness => ({
 	targets,
 	scrapeCalls: [],
 	subCalls: [],
+	fetchedUrls: [],
 	ingestCalls: [],
 	reportedResults: [],
-	scrapeImpl: () => Effect.succeed(proxyResponse({ status: 200, body: GAUGE_BODY })),
+	scrapeImpl: () => Effect.succeed(fetchResponse({ status: 200, body: GAUGE_BODY })),
 	ingestImpl: () => Effect.void,
+})
+
+/** The fetcher stub: records every call on the harness, answers via `scrapeImpl`. */
+const harnessFetcher = (harness: Harness): TargetFetcherApi => ({
+	fetch: (target) =>
+		Effect.suspend(() => {
+			harness.scrapeCalls.push(target.id)
+			harness.subCalls.push({ targetId: target.id, subTargetKey: target.subTargetKey })
+			harness.fetchedUrls.push(target.scrapeUrl)
+			return harness.scrapeImpl(target.id)
+		}),
 })
 
 const harnessLayer = (harness: Harness, env: ScraperEnvConfig = testEnv) => {
 	const api: ApiClientApi = {
 		listTargets: () => Effect.sync(() => [...harness.targets]),
-		scrapeTarget: (targetId, subTargetKey) =>
-			Effect.suspend(() => {
-				harness.scrapeCalls.push(targetId)
-				harness.subCalls.push({ targetId, subTargetKey: subTargetKey ?? null })
-				return harness.scrapeImpl(targetId)
-			}),
 		reportResults: (results) =>
 			Effect.sync(() => {
 				harness.reportedResults.push(...results)
@@ -128,6 +142,7 @@ const harnessLayer = (harness: Harness, env: ScraperEnvConfig = testEnv) => {
 		Layer.provide(
 			Layer.mergeAll(
 				Layer.succeed(ApiClient, api),
+				Layer.succeed(TargetFetcher, harnessFetcher(harness)),
 				Layer.succeed(OtlpIngest, otlp),
 				Layer.succeed(ScraperEnv, env),
 			),
@@ -190,7 +205,7 @@ describe("ScrapeScheduler", () => {
 		Effect.gen(function* () {
 			const harness = makeHarness([mkTarget(TARGET_A, 60)])
 			harness.scrapeImpl = () =>
-				Effect.succeed(proxyResponse({ status: 200, body: "# only comments\n" }))
+				Effect.succeed(fetchResponse({ status: 200, body: "# only comments\n" }))
 			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
 
 			yield* TestClock.adjust(Duration.seconds(10))
@@ -204,7 +219,7 @@ describe("ScrapeScheduler", () => {
 	it.effect("records a failure and ingests nothing when the target returns a non-2xx", () =>
 		Effect.gen(function* () {
 			const harness = makeHarness([mkTarget(TARGET_A, 60)])
-			harness.scrapeImpl = () => Effect.succeed(proxyResponse({ status: 503, body: "unavailable" }))
+			harness.scrapeImpl = () => Effect.succeed(fetchResponse({ status: 503, body: "unavailable" }))
 			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
 
 			yield* TestClock.adjust(Duration.seconds(10))
@@ -225,7 +240,7 @@ describe("ScrapeScheduler", () => {
 				Effect.gen(function* () {
 					const span = yield* Effect.currentSpan
 					traceIds.push(span.traceId)
-					return proxyResponse({ status: 200, body: GAUGE_BODY })
+					return fetchResponse({ status: 200, body: GAUGE_BODY })
 				}).pipe(Effect.orDie)
 
 			// Target loops are forked from inside `scraper.reconcile`, so they
@@ -248,7 +263,7 @@ describe("ScrapeScheduler", () => {
 			// Scrape takes 2s of (test) wall-clock before responding.
 			harness.scrapeImpl = () =>
 				Effect.sleep(Duration.seconds(2)).pipe(
-					Effect.as(proxyResponse({ status: 200, body: GAUGE_BODY })),
+					Effect.as(fetchResponse({ status: 200, body: GAUGE_BODY })),
 				)
 			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
 
@@ -267,7 +282,7 @@ describe("ScrapeScheduler", () => {
 	it.effect("reports duration but no sample counts for failed scrapes", () =>
 		Effect.gen(function* () {
 			const harness = makeHarness([mkTarget(TARGET_A, 60)])
-			harness.scrapeImpl = () => Effect.succeed(proxyResponse({ status: 503, body: "unavailable" }))
+			harness.scrapeImpl = () => Effect.succeed(fetchResponse({ status: 503, body: "unavailable" }))
 			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
 
 			yield* TestClock.adjust(Duration.seconds(10))
@@ -305,8 +320,10 @@ describe("ScrapeScheduler", () => {
 			const harness = makeHarness([mkTarget(TARGET_A, 10), mkTarget(TARGET_B, 10)])
 			harness.scrapeImpl = (targetId) =>
 				targetId === TARGET_A
-					? Effect.fail(new ApiRequestError({ message: "boom", status: null }))
-					: Effect.succeed(proxyResponse({ status: 200, body: GAUGE_BODY }))
+					? Effect.fail(
+							new TargetFetchError({ message: "request failed: boom", reason: "transport" }),
+						)
+					: Effect.succeed(fetchResponse({ status: 200, body: GAUGE_BODY }))
 			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
 
 			yield* TestClock.adjust(Duration.seconds(30))
@@ -430,17 +447,13 @@ describe("ScrapeScheduler", () => {
 							? Effect.succeed([...harness.targets])
 							: Effect.fail(new ApiRequestError({ message: "api down", status: null }))
 					}),
-				scrapeTarget: (targetId) =>
-					Effect.suspend(() => {
-						harness.scrapeCalls.push(targetId)
-						return harness.scrapeImpl(targetId)
-					}),
 				reportResults: () => Effect.void,
 			}
 			const layer = ScrapeScheduler.layer.pipe(
 				Layer.provide(
 					Layer.mergeAll(
 						Layer.succeed(ApiClient, api),
+						Layer.succeed(TargetFetcher, harnessFetcher(harness)),
 						Layer.succeed(OtlpIngest, { send: () => Effect.void }),
 						Layer.succeed(ScraperEnv, testEnv),
 					),
@@ -465,7 +478,7 @@ describe("ScrapeScheduler", () => {
 			// Each scrape takes 2s; the period must stay 10s start-to-start, not 12s.
 			harness.scrapeImpl = () =>
 				Effect.sleep(Duration.seconds(2)).pipe(
-					Effect.as(proxyResponse({ status: 200, body: GAUGE_BODY })),
+					Effect.as(fetchResponse({ status: 200, body: GAUGE_BODY })),
 				)
 			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
 
@@ -480,7 +493,7 @@ describe("ScrapeScheduler", () => {
 	it.effect("backs off a rate-limited target instead of scraping every interval", () =>
 		Effect.gen(function* () {
 			const harness = makeHarness([mkTarget(TARGET_A, 10)])
-			harness.scrapeImpl = () => Effect.succeed(proxyResponse({ status: 429, body: "slow down" }))
+			harness.scrapeImpl = () => Effect.succeed(fetchResponse({ status: 429, body: "slow down" }))
 			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
 
 			yield* TestClock.adjust(Duration.seconds(60))
@@ -498,7 +511,7 @@ describe("ScrapeScheduler", () => {
 			// bearer with 403 on every scrape — the loop must escalate its delay
 			// exactly like a rate limit, not retry every interval forever.
 			const harness = makeHarness([mkTarget(TARGET_A, 10)])
-			harness.scrapeImpl = () => Effect.succeed(proxyResponse({ status: 403, body: "forbidden" }))
+			harness.scrapeImpl = () => Effect.succeed(fetchResponse({ status: 403, body: "forbidden" }))
 			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
 
 			yield* TestClock.adjust(Duration.seconds(60))
@@ -513,7 +526,7 @@ describe("ScrapeScheduler", () => {
 	it.effect("backs off a target the upstream answers with 503 (rate limited)", () =>
 		Effect.gen(function* () {
 			const harness = makeHarness([mkTarget(TARGET_A, 10)])
-			harness.scrapeImpl = () => Effect.succeed(proxyResponse({ status: 503, body: "unavailable" }))
+			harness.scrapeImpl = () => Effect.succeed(fetchResponse({ status: 503, body: "unavailable" }))
 			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
 
 			yield* TestClock.adjust(Duration.seconds(60))
@@ -596,7 +609,7 @@ describe("ScrapeScheduler", () => {
 		Effect.gen(function* () {
 			const tracer = makeCapturingTracer()
 			const harness = makeHarness([mkTarget(TARGET_A, 10)])
-			harness.scrapeImpl = () => Effect.succeed(proxyResponse({ status: 503, body: "unavailable" }))
+			harness.scrapeImpl = () => Effect.succeed(fetchResponse({ status: 503, body: "unavailable" }))
 			yield* startScheduler.pipe(Effect.provide([harnessLayer(harness), tracer.layer]))
 
 			yield* TestClock.adjust(Duration.seconds(1))
@@ -614,7 +627,7 @@ describe("ScrapeScheduler", () => {
 			// minting an anonymous "target returned HTTP 500" error every interval.
 			const tracer = makeCapturingTracer()
 			const harness = makeHarness([mkTarget(TARGET_A, 10, { name: "payments-db" })])
-			harness.scrapeImpl = () => Effect.succeed(proxyResponse({ status: 500, body: "boom" }))
+			harness.scrapeImpl = () => Effect.succeed(fetchResponse({ status: 500, body: "boom" }))
 			yield* startScheduler.pipe(Effect.provide([harnessLayer(harness), tracer.layer]))
 
 			// Exponential backoff from scrape end: t=0 fails → +10s → t=10 fails →
@@ -635,21 +648,84 @@ describe("ScrapeScheduler", () => {
 		}),
 	)
 
-	it.effect("holds the configured cadence on a generic failure instead of backing off", () =>
+	it.effect("holds the configured cadence on a rejected url instead of backing off", () =>
 		Effect.gen(function* () {
-			// A transport error is not a signal that the upstream wants us to slow
-			// down, so the loop must keep its interval (contrast with 429/403/402).
+			// A URL that fails SSRF validation is a configuration fault, not a signal
+			// that the upstream wants us to slow down, so the loop keeps its interval
+			// (contrast with 429/403/402 and with an unreachable target).
 			const harness = makeHarness([mkTarget(TARGET_A, 10)])
 			harness.scrapeImpl = () =>
-				Effect.fail(new ApiRequestError({ message: "Maple API unreachable: boom", status: null }))
+				Effect.fail(
+					new TargetFetchError({ message: "url rejected: private host", reason: "invalid_url" }),
+				)
 			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
 
 			yield* TestClock.adjust(Duration.seconds(60))
 
 			// Fixed 10s cadence → t=0,10,...,60 → 7 scrapes.
 			assert.strictEqual(harness.scrapeCalls.length, 7)
-			assert.include(harness.reportedResults[0]?.error ?? "", "boom")
+			assert.include(harness.reportedResults[0]?.error ?? "", "url rejected")
 		}),
+	)
+
+	it.effect("backs off on a transport failure like an upstream server error", () =>
+		Effect.gen(function* () {
+			// Unreachable and stalled targets used to surface as the proxy's 502 and
+			// back off; fetching directly must classify them the same way.
+			const harness = makeHarness([mkTarget(TARGET_A, 10)])
+			harness.scrapeImpl = () =>
+				Effect.fail(new TargetFetchError({ message: "request timed out", reason: "timeout" }))
+			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
+
+			yield* TestClock.adjust(Duration.seconds(60))
+
+			// Exponential from the 10s base: t=0, 10, 30 → 3 scrapes in the first minute.
+			assert.strictEqual(harness.scrapeCalls.length, 3)
+			assert.include(
+				harness.reportedResults[0]?.error ?? "",
+				'target "target-aaaa" (example.com) request timed out',
+			)
+		}),
+	)
+
+	it.effect(
+		"fetches with the latest scrapeUrl after a reconcile rotates it, without restarting the loop",
+		() =>
+			Effect.gen(function* () {
+				// PlanetScale re-signs branch URLs every discovery refresh. The loop key
+				// deliberately excludes scrapeUrl, so the running loop must pick the new
+				// signature up from the reconciled list while keeping its cadence.
+				const harness = makeHarness([
+					mkTarget(TARGET_A, 10, {
+						subTargetKey: "branch-1",
+						url: "https://b1.example.com/metrics",
+						scrapeUrl: "https://b1.example.com/metrics?sig=first",
+					}),
+				])
+				yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
+				yield* TestClock.adjust(Duration.seconds(30))
+				assert.isTrue(harness.fetchedUrls.every((url) => url.endsWith("sig=first")))
+				const callsBeforeRotation = harness.scrapeCalls.length
+
+				harness.targets = [
+					mkTarget(TARGET_A, 10, {
+						subTargetKey: "branch-1",
+						url: "https://b1.example.com/metrics",
+						scrapeUrl: "https://b1.example.com/metrics?sig=second",
+					}),
+				]
+				// Reconcile runs at t=60; every fetch after it carries the new signature.
+				yield* TestClock.adjust(Duration.seconds(30))
+				const fetchedAfterReconcile = harness.fetchedUrls.length
+				yield* TestClock.adjust(Duration.seconds(30))
+				assert.isTrue(
+					harness.fetchedUrls
+						.slice(fetchedAfterReconcile)
+						.every((url) => url.endsWith("sig=second")),
+				)
+				// Same fiber throughout: the 10s cadence never re-jittered or reset.
+				assert.strictEqual(harness.scrapeCalls.length, callsBeforeRotation + 6)
+			}),
 	)
 
 	it.effect("keeps results and the gauge consistent when a flush is interrupted", () =>
@@ -659,11 +735,6 @@ describe("ScrapeScheduler", () => {
 			const harness = makeHarness([mkTarget(TARGET_A, 60)])
 			const api: ApiClientApi = {
 				listTargets: () => Effect.sync(() => [...harness.targets]),
-				scrapeTarget: (targetId) =>
-					Effect.suspend(() => {
-						harness.scrapeCalls.push(targetId)
-						return harness.scrapeImpl(targetId)
-					}),
 				// Never settles: the flush is in flight when we interrupt.
 				reportResults: () => Effect.never,
 			}
@@ -671,6 +742,7 @@ describe("ScrapeScheduler", () => {
 				Layer.provide(
 					Layer.mergeAll(
 						Layer.succeed(ApiClient, api),
+						Layer.succeed(TargetFetcher, harnessFetcher(harness)),
 						Layer.succeed(OtlpIngest, { send: () => Effect.void }),
 						Layer.succeed(ScraperEnv, testEnv),
 					),
@@ -696,7 +768,7 @@ describe("ScrapeScheduler", () => {
 		Effect.gen(function* () {
 			const harness = makeHarness([mkTarget(TARGET_A, 10)])
 			harness.scrapeImpl = () =>
-				Effect.succeed(proxyResponse({ status: 429, body: "slow down", retryAfterSeconds: 120 }))
+				Effect.succeed(fetchResponse({ status: 429, body: "slow down", retryAfterSeconds: 120 }))
 			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
 
 			yield* TestClock.adjust(Duration.seconds(60))
@@ -715,8 +787,8 @@ describe("ScrapeScheduler", () => {
 					calls++
 					// First two scrapes are rate-limited, then it recovers.
 					return calls <= 2
-						? proxyResponse({ status: 429, body: "slow down" })
-						: proxyResponse({ status: 200, body: GAUGE_BODY })
+						? fetchResponse({ status: 429, body: "slow down" })
+						: fetchResponse({ status: 200, body: GAUGE_BODY })
 				})
 			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
 
@@ -736,11 +808,6 @@ describe("ScrapeScheduler", () => {
 			let failReports = true
 			const api: ApiClientApi = {
 				listTargets: () => Effect.sync(() => [...harness.targets]),
-				scrapeTarget: (targetId) =>
-					Effect.suspend(() => {
-						harness.scrapeCalls.push(targetId)
-						return harness.scrapeImpl(targetId)
-					}),
 				reportResults: (results) =>
 					Effect.suspend(() => {
 						if (failReports) {
@@ -754,6 +821,7 @@ describe("ScrapeScheduler", () => {
 				Layer.provide(
 					Layer.mergeAll(
 						Layer.succeed(ApiClient, api),
+						Layer.succeed(TargetFetcher, harnessFetcher(harness)),
 						Layer.succeed(OtlpIngest, { send: () => Effect.void }),
 						Layer.succeed(ScraperEnv, testEnv),
 					),

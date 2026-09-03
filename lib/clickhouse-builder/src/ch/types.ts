@@ -136,6 +136,31 @@ const CHDateTimeFromDate: Schema.Codec<Date, string> = Schema.String.pipe(
 const CHDateTimeFromString: Schema.Codec<string, string> = Schema.String.pipe(Schema.check(isChDateTime))
 
 /**
+ * The same, floored to whole seconds.
+ *
+ * A `DateTime` column rejects a fractional literal outright — `TimestampTime >=
+ * '2026-09-01 02:40:00.000'` is `TYPE_MISMATCH`, not a rounding — while the
+ * `DateTime64` column beside it in the same table needs that fraction kept. The
+ * two cannot share one rendering of one bound, which is what
+ * {@link param.dateTimeSeconds} exists to resolve: same param value, floored
+ * encoding, so a second-precision column gets a literal it can parse.
+ *
+ * The `DateTime.Utc` and `Date` arms already floor via `chDateTimeLiteral`;
+ * only the string passthrough needed teaching.
+ */
+export const CHDateTimeSecondsLiteral: Schema.Codec<string, string> = Schema.String.pipe(
+	Schema.check(isChDateTime),
+	Schema.decodeTo(Schema.String, {
+		decode: SchemaGetter.transform((value: string) => value),
+		encode: SchemaGetter.transform((value: string) => {
+			const trimmed = value.trim()
+			const dot = trimmed.indexOf(".")
+			return dot === -1 ? trimmed : trimmed.slice(0, dot)
+		}),
+	}),
+)
+
+/**
  * Everything a DateTime column can be compared against.
  *
  * Union order is the encode order: the first member whose type matches wins, so

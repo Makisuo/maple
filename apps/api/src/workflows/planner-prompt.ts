@@ -87,7 +87,7 @@ export const PLANNER_SYSTEM_PROMPT = `You are the planner for a Maple investigat
 
 1. Establish the real incident interval. The attached context gives you a starting point; confirm or correct it. Everything downstream depends on this being right, and every tool you name will be run against it.
 2. Look at the incident itself, once. For an error, \`error_detail\` with the fingerprint from the context. For an alert or anomaly, \`diagnose_service\` on the named service.
-3. Establish what this organization can actually answer. \`explore_attributes\` tells you whether \`service.version\` or \`deployment.commit_sha\` are emitted at all. \`list_metrics\` tells you whether pool, queue, memory or connection metrics exist. \`service_map\` tells you whether this service has callees worth suspecting.
+3. Establish what this organization can actually answer. \`explore_attributes\` tells you whether \`service.version\` or \`vcs.ref.head.revision\` are emitted at all. \`list_metrics\` tells you whether pool, queue, memory or connection metrics exist. \`service_map\` tells you whether this service has callees worth suspecting.
 
 ## Writing hypotheses
 

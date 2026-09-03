@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import {
 	ChartBarHorizontalIcon,
@@ -122,10 +122,22 @@ export function SessionViews({
 		setRevealedSpanId(undefined)
 		setRevealedTurnId(undefined)
 	}
-	const selectSpan = (spanId: string | undefined) => {
-		clearRevealed()
-		onSelectSpan(spanId)
-	}
+	// Stable, like the two toggles below: the transcript's rows are memoized
+	// on their props, and a callback minted per render would re-render every
+	// mounted block on every scroll.
+	const selectSpan = useCallback(
+		(spanId: string | undefined) => {
+			setRevealedSpanId(undefined)
+			setRevealedTurnId(undefined)
+			onSelectSpan(spanId)
+		},
+		[onSelectSpan],
+	)
+	const toggleTurn = useCallback(
+		(turnId: string) => setCollapsedTurns((previous) => toggled(previous, turnId)),
+		[],
+	)
+	const toggleRow = useCallback((key: string) => setOpenRows((previous) => toggled(previous, key)), [])
 	const changeView = (next: SessionView) => {
 		clearRevealed()
 		onViewChange(next)
@@ -319,7 +331,7 @@ export function SessionViews({
 						agentSpansOnly={agentSpansOnly}
 						collapseIdle={collapseIdle}
 						collapsedTurns={collapsedTurns}
-						onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
+						onToggleTurn={toggleTurn}
 						appSpans={paging?.appSpans}
 						selectedSpanId={selectedSpanId}
 						revealedSpanId={revealedSpanId}
@@ -361,9 +373,9 @@ export function SessionViews({
 						loadingMore={paging?.loadingMore === true}
 						onLoadMore={paging?.onLoadMore}
 						collapsedTurns={collapsedTurns}
-						onToggleTurn={(turnId) => setCollapsedTurns((previous) => toggled(previous, turnId))}
+						onToggleTurn={toggleTurn}
 						openRows={openRows}
-						onToggleRow={(key) => setOpenRows((previous) => toggled(previous, key))}
+						onToggleRow={toggleRow}
 						selectedSpanId={selectedSpanId}
 						onSelectSpan={selectSpan}
 					/>

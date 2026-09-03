@@ -9,9 +9,9 @@
  * locale, and Layout.astro derives hreflang from the URL, so there is nothing
  * locale-specific to thread through.
  *
- * Section order runs on a numbered spine, 01 Signals → 10 Start, and on a
+ * Section order runs on a numbered spine, 01 Signals → 11 Start, and on a
  * deliberate tonal cadence rather than a bg-bg / bg-bg-deep checkerboard:
- * ten sections sit quiet on `bg-bg`, with two amber peaks (Sovereignty just
+ * eleven sections sit quiet on `bg-bg`, with two amber peaks (Sovereignty just
  * before the midpoint, the bookend CTA at the very end) and four `bg-bg-deep`
  * drops. Hairline `border-t` separators appear only where the surface tone
  * does NOT change from the section above — where the tone steps, the tone is
@@ -27,6 +27,7 @@ import PlatformSheet from "./PlatformSheet.astro";
 import Sovereignty from "../Sovereignty.astro";
 import LocalSection from "./LocalSection.astro";
 import KubernetesSection from "./KubernetesSection.astro";
+import WebAnalyticsSection from "./WebAnalyticsSection.astro";
 import AgentSection from "./AgentSection.astro";
 import BillComparison from "../BillComparison.astro";
 import PricingTable from "../PricingTable.astro";
@@ -78,10 +79,15 @@ const homeFaqs = [
     <!-- 06 — the infrastructure proof point. -->
     <KubernetesSection />
 
-    <!-- 07 — the same investigation as 02, run by an agent instead of a human. -->
+    <!-- 07 — the audience above the trace: web analytics read from the
+         sessions the browser SDK already records. A real capture, media-left
+         so 06 → 07 → 08 alternate instead of stacking three copy-left sections. -->
+    <WebAnalyticsSection />
+
+    <!-- 08 — the same investigation as 02, run by an agent instead of a human. -->
     <AgentSection />
 
-    <!-- 08 + 09 — the money chapter: one deep floor, two beats, one internal
+    <!-- 09 + 10 — the money chapter: one deep floor, two beats, one internal
          hairline. The bill runs first because Maple's pricing only reads as
          remarkable next to Datadog's. -->
     <BillComparison />

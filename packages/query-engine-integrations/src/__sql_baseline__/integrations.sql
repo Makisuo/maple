@@ -34,85 +34,434 @@ SELECT
         GROUP BY name
         ORDER BY count DESC
         LIMIT 50
-FORMAT JSON
-
--- builder:ai-sessions:aiSessionListQuery:default
+UNION ALL
 SELECT
-          if(rawSessionId = '', concat('trace:', traceId), rawSessionId) AS sessionId,
-          argMin(vendorId, sessionStart) AS vendorId,
-          argMin(vendorVersion, sessionStart) AS vendorVersion,
-          count() AS traceCount,
-          sum(spanCount) AS spanCount,
-          sum(errorSpanCount) AS errorSpanCount,
-          groupUniqArrayArray(serviceNames) AS serviceNames,
-          toString(min(traceStart)) AS startTime,
-          toString(fromUnixTimestamp64Nano(max(traceEndNanos))) AS endTime,
-          intDiv(max(traceEndNanos) - toUnixTimestamp64Nano(min(traceStart)), 1000000) AS durationMs
+          arrayJoin(names) AS name,
+          uniqExact(if(rawSessionId = '', concat('trace:', traceId), rawSessionId)) AS count,
+          'environment' AS facetType
         FROM (SELECT
           TraceId AS traceId,
-          max(SpanAttributes['maple_ai.session.id']) AS rawSessionId,
-          argMin(SpanAttributes['maple_ai.vendor.id'], tuple(multiIf((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), 0, SpanAttributes['maple_ai.vendor.id'] != '', 1, 2), Timestamp)) AS vendorId,
-          argMin(SpanAttributes['maple_ai.vendor.version'], tuple(multiIf((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), 0, SpanAttributes['maple_ai.vendor.id'] != '', 1, 2), Timestamp)) AS vendorVersion,
-          min(if((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), Timestamp, toDateTime('2106-01-01 00:00:00'))) AS sessionStart,
-          count() AS spanCount,
-          countIf((StatusCode = 'Error' OR (SpanAttributes['maple_ai.vendor.id'] != '' AND (SpanAttributes['error.type'] != '' OR SpanAttributes['gen_ai.response.status'] IN ('failed', 'error'))))) AS errorSpanCount,
-          groupUniqArray(ServiceName) AS serviceNames,
-          min(Timestamp) AS traceStart,
-          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceEndNanos
-        FROM trace_detail_spans
-        WHERE OrgId = 'org_sql_catalog'
-          AND Timestamp >= '2026-01-01 10:30:00' - INTERVAL 86400 SECOND
-          AND Timestamp <= '2026-01-03 14:15:00' + INTERVAL 86400 SECOND
-          AND TraceId IN (SELECT
-          TraceId AS TraceId
-        FROM ai_trace_index
-        WHERE OrgId = 'org_sql_catalog'
-          AND Timestamp >= '2026-01-01 10:30:00'
-          AND Timestamp <= '2026-01-03 14:15:00')
-        GROUP BY traceId) AS session_traces
-        GROUP BY sessionId
-        ORDER BY startTime DESC
-        LIMIT 50
-        FORMAT JSON
-
--- builder:ai-sessions:aiSessionListQuery:filtered
-SELECT
-          if(rawSessionId = '', concat('trace:', traceId), rawSessionId) AS sessionId,
-          argMin(vendorId, sessionStart) AS vendorId,
-          argMin(vendorVersion, sessionStart) AS vendorVersion,
-          count() AS traceCount,
-          sum(spanCount) AS spanCount,
-          sum(errorSpanCount) AS errorSpanCount,
-          groupUniqArrayArray(serviceNames) AS serviceNames,
-          toString(min(traceStart)) AS startTime,
-          toString(fromUnixTimestamp64Nano(max(traceEndNanos))) AS endTime,
-          intDiv(max(traceEndNanos) - toUnixTimestamp64Nano(min(traceStart)), 1000000) AS durationMs
-        FROM (SELECT
-          TraceId AS traceId,
-          max(SpanAttributes['maple_ai.session.id']) AS rawSessionId,
-          argMin(SpanAttributes['maple_ai.vendor.id'], tuple(multiIf((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), 0, SpanAttributes['maple_ai.vendor.id'] != '', 1, 2), Timestamp)) AS vendorId,
-          argMin(SpanAttributes['maple_ai.vendor.version'], tuple(multiIf((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), 0, SpanAttributes['maple_ai.vendor.id'] != '', 1, 2), Timestamp)) AS vendorVersion,
-          min(if((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), Timestamp, toDateTime('2106-01-01 00:00:00'))) AS sessionStart,
-          count() AS spanCount,
-          countIf((StatusCode = 'Error' OR (SpanAttributes['maple_ai.vendor.id'] != '' AND (SpanAttributes['error.type'] != '' OR SpanAttributes['gen_ai.response.status'] IN ('failed', 'error'))))) AS errorSpanCount,
-          groupUniqArray(ServiceName) AS serviceNames,
-          min(Timestamp) AS traceStart,
-          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceEndNanos
-        FROM trace_detail_spans
-        WHERE OrgId = 'org_sql_catalog'
-          AND Timestamp >= '2026-01-01 10:30:00' - INTERVAL 86400 SECOND
-          AND Timestamp <= '2026-01-03 14:15:00' + INTERVAL 86400 SECOND
-          AND TraceId IN (SELECT
-          TraceId AS TraceId
+          max(SessionId) AS rawSessionId,
+          groupUniqArray(DeploymentEnv) AS names
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND VendorId IN ('eve')
-          AND ServiceName IN ('maple-slack-agent'))
+          AND DeploymentEnv != ''
+        GROUP BY traceId) AS facet_traces
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          arrayJoin(names) AS name,
+          uniqExact(if(rawSessionId = '', concat('trace:', traceId), rawSessionId)) AS count,
+          'model' AS facetType
+        FROM (SELECT
+          TraceId AS traceId,
+          max(SessionId) AS rawSessionId,
+          groupUniqArray(Model) AS names
+        FROM ai_trace_index
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND Model != ''
+        GROUP BY traceId) AS facet_traces
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          arrayJoin(names) AS name,
+          uniqExact(if(rawSessionId = '', concat('trace:', traceId), rawSessionId)) AS count,
+          'agent' AS facetType
+        FROM (SELECT
+          TraceId AS traceId,
+          max(SessionId) AS rawSessionId,
+          groupUniqArray(AgentName) AS names
+        FROM ai_trace_index
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND AgentName != ''
+        GROUP BY traceId) AS facet_traces
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+UNION ALL
+SELECT
+          arrayJoin(names) AS name,
+          uniqExact(if(rawSessionId = '', concat('trace:', traceId), rawSessionId)) AS count,
+          'tool' AS facetType
+        FROM (SELECT
+          TraceId AS traceId,
+          max(SessionId) AS rawSessionId,
+          groupUniqArray(ToolName) AS names
+        FROM ai_trace_index
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ToolName != ''
+        GROUP BY traceId) AS facet_traces
+        GROUP BY name
+        ORDER BY count DESC
+        LIMIT 50
+FORMAT JSON
+
+-- builder:ai-sessions:aiSessionListQuery:default
+SELECT
+          if(index_traces.rawSessionId = '', concat('trace:', session_traces.traceId), index_traces.rawSessionId) AS sessionId,
+          argMin(session_traces.vendorId, session_traces.sessionStart) AS vendorId,
+          argMin(session_traces.vendorVersion, session_traces.sessionStart) AS vendorVersion,
+          count() AS traceCount,
+          sum(session_traces.spanCount) AS spanCount,
+          sum(session_traces.errorSpanCount) AS errorSpanCount,
+          groupUniqArrayArray(session_traces.serviceNames) AS serviceNames,
+          toString(min(session_traces.traceStart)) AS startTime,
+          toString(fromUnixTimestamp64Nano(max(session_traces.traceEndNanos))) AS endTime,
+          intDiv(max(session_traces.traceEndNanos) - toUnixTimestamp64Nano(min(session_traces.traceStart)), 1000000) AS durationMs
+        FROM (SELECT
+          TraceId AS traceId,
+          argMin(SpanAttributes['maple_ai.vendor.id'], tuple(multiIf((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), 0, SpanAttributes['maple_ai.vendor.id'] != '', 1, 2), Timestamp)) AS vendorId,
+          argMin(SpanAttributes['maple_ai.vendor.version'], tuple(multiIf((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), 0, SpanAttributes['maple_ai.vendor.id'] != '', 1, 2), Timestamp)) AS vendorVersion,
+          min(if((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), Timestamp, toDateTime('2106-01-01 00:00:00'))) AS sessionStart,
+          count() AS spanCount,
+          countIf((StatusCode = 'Error' OR (SpanAttributes['maple_ai.vendor.id'] != '' AND (SpanAttributes['error.type'] != '' OR SpanAttributes['gen_ai.response.status'] IN ('failed', 'error'))))) AS errorSpanCount,
+          groupUniqArray(ServiceName) AS serviceNames,
+          min(Timestamp) AS traceStart,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceEndNanos
+        FROM trace_detail_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-02 10:30:00' - INTERVAL 3600 SECOND
+          AND Timestamp <= '2026-01-02 12:30:00' + INTERVAL 3600 SECOND
+          AND TraceId IN (SELECT
+          traceId AS traceId
+        FROM (SELECT
+          TraceId AS traceId,
+          max(SessionId) AS rawSessionId,
+          min(Timestamp) AS traceAgentStart,
+          max(Timestamp) AS traceAgentEnd,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
+          groupUniqArrayIf(20)(Model, Model != '') AS models,
+          groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
+          sum(IsLlmCall) AS llmCalls,
+          sum(IsToolCall) AS toolCalls,
+          sum(IsError) AS errorAgentSpans,
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+        FROM ai_trace_index
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-02 10:30:00'
+          AND Timestamp <= '2026-01-02 12:30:00'
+        GROUP BY traceId) AS agent_traces
+        WHERE if(rawSessionId = '', concat('trace:', traceId), rawSessionId) IN ('wrun_sql_catalog', 'trace:7f3a4b5c6d7e8f901234567890abcdef'))
         GROUP BY traceId) AS session_traces
+        INNER JOIN (SELECT
+          traceId AS traceId,
+          rawSessionId AS rawSessionId
+        FROM (SELECT
+          TraceId AS traceId,
+          max(SessionId) AS rawSessionId,
+          min(Timestamp) AS traceAgentStart,
+          max(Timestamp) AS traceAgentEnd,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
+          groupUniqArrayIf(20)(Model, Model != '') AS models,
+          groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
+          sum(IsLlmCall) AS llmCalls,
+          sum(IsToolCall) AS toolCalls,
+          sum(IsError) AS errorAgentSpans,
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+        FROM ai_trace_index
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-02 10:30:00'
+          AND Timestamp <= '2026-01-02 12:30:00'
+        GROUP BY traceId) AS agent_traces
+        WHERE if(rawSessionId = '', concat('trace:', traceId), rawSessionId) IN ('wrun_sql_catalog', 'trace:7f3a4b5c6d7e8f901234567890abcdef')) AS index_traces ON session_traces.traceId = index_traces.traceId
         GROUP BY sessionId
         ORDER BY startTime DESC
+        FORMAT JSON
+
+-- builder:ai-sessions:aiSessionListQuery:every-counted-filter
+SELECT
+          if(index_traces.rawSessionId = '', concat('trace:', session_traces.traceId), index_traces.rawSessionId) AS sessionId,
+          argMin(session_traces.vendorId, session_traces.sessionStart) AS vendorId,
+          argMin(session_traces.vendorVersion, session_traces.sessionStart) AS vendorVersion,
+          count() AS traceCount,
+          sum(session_traces.spanCount) AS spanCount,
+          sum(session_traces.errorSpanCount) AS errorSpanCount,
+          groupUniqArrayArray(session_traces.serviceNames) AS serviceNames,
+          toString(min(session_traces.traceStart)) AS startTime,
+          toString(fromUnixTimestamp64Nano(max(session_traces.traceEndNanos))) AS endTime,
+          intDiv(max(session_traces.traceEndNanos) - toUnixTimestamp64Nano(min(session_traces.traceStart)), 1000000) AS durationMs
+        FROM (SELECT
+          TraceId AS traceId,
+          argMin(SpanAttributes['maple_ai.vendor.id'], tuple(multiIf((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), 0, SpanAttributes['maple_ai.vendor.id'] != '', 1, 2), Timestamp)) AS vendorId,
+          argMin(SpanAttributes['maple_ai.vendor.version'], tuple(multiIf((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), 0, SpanAttributes['maple_ai.vendor.id'] != '', 1, 2), Timestamp)) AS vendorVersion,
+          min(if((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), Timestamp, toDateTime('2106-01-01 00:00:00'))) AS sessionStart,
+          count() AS spanCount,
+          countIf((StatusCode = 'Error' OR (SpanAttributes['maple_ai.vendor.id'] != '' AND (SpanAttributes['error.type'] != '' OR SpanAttributes['gen_ai.response.status'] IN ('failed', 'error'))))) AS errorSpanCount,
+          groupUniqArray(ServiceName) AS serviceNames,
+          min(Timestamp) AS traceStart,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceEndNanos
+        FROM trace_detail_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-02 10:30:00' - INTERVAL 3600 SECOND
+          AND Timestamp <= '2026-01-02 12:30:00' + INTERVAL 3600 SECOND
+          AND TraceId IN (SELECT
+          traceId AS traceId
+        FROM (SELECT
+          TraceId AS traceId,
+          max(SessionId) AS rawSessionId,
+          min(Timestamp) AS traceAgentStart,
+          max(Timestamp) AS traceAgentEnd,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
+          groupUniqArrayIf(20)(Model, Model != '') AS models,
+          groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
+          sum(IsLlmCall) AS llmCalls,
+          sum(IsToolCall) AS toolCalls,
+          sum(IsError) AS errorAgentSpans,
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+        FROM ai_trace_index
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-02 10:30:00'
+          AND Timestamp <= '2026-01-02 12:30:00'
+        GROUP BY traceId
+        HAVING countIf(DeploymentEnv IN ('production')) > 0
+          AND countIf(Model IN ('gpt-5.5')) > 0
+          AND countIf(AgentName IN ('billing-agent')) > 0
+          AND countIf(ToolName IN ('send_email')) > 0
+          AND countIf((SessionId LIKE 'wrun\\_01%' OR TraceId LIKE 'wrun\\_01%')) > 0) AS agent_traces
+        WHERE if(rawSessionId = '', concat('trace:', traceId), rawSessionId) IN ('wrun_sql_catalog', 'trace:7f3a4b5c6d7e8f901234567890abcdef'))
+        GROUP BY traceId) AS session_traces
+        INNER JOIN (SELECT
+          traceId AS traceId,
+          rawSessionId AS rawSessionId
+        FROM (SELECT
+          TraceId AS traceId,
+          max(SessionId) AS rawSessionId,
+          min(Timestamp) AS traceAgentStart,
+          max(Timestamp) AS traceAgentEnd,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
+          groupUniqArrayIf(20)(Model, Model != '') AS models,
+          groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
+          sum(IsLlmCall) AS llmCalls,
+          sum(IsToolCall) AS toolCalls,
+          sum(IsError) AS errorAgentSpans,
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+        FROM ai_trace_index
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-02 10:30:00'
+          AND Timestamp <= '2026-01-02 12:30:00'
+        GROUP BY traceId
+        HAVING countIf(DeploymentEnv IN ('production')) > 0
+          AND countIf(Model IN ('gpt-5.5')) > 0
+          AND countIf(AgentName IN ('billing-agent')) > 0
+          AND countIf(ToolName IN ('send_email')) > 0
+          AND countIf((SessionId LIKE 'wrun\\_01%' OR TraceId LIKE 'wrun\\_01%')) > 0) AS agent_traces
+        WHERE if(rawSessionId = '', concat('trace:', traceId), rawSessionId) IN ('wrun_sql_catalog', 'trace:7f3a4b5c6d7e8f901234567890abcdef')) AS index_traces ON session_traces.traceId = index_traces.traceId
+        GROUP BY sessionId
+        ORDER BY startTime DESC
+        FORMAT JSON
+
+-- builder:ai-sessions:aiSessionListQuery:filtered
+SELECT
+          if(index_traces.rawSessionId = '', concat('trace:', session_traces.traceId), index_traces.rawSessionId) AS sessionId,
+          argMin(session_traces.vendorId, session_traces.sessionStart) AS vendorId,
+          argMin(session_traces.vendorVersion, session_traces.sessionStart) AS vendorVersion,
+          count() AS traceCount,
+          sum(session_traces.spanCount) AS spanCount,
+          sum(session_traces.errorSpanCount) AS errorSpanCount,
+          groupUniqArrayArray(session_traces.serviceNames) AS serviceNames,
+          toString(min(session_traces.traceStart)) AS startTime,
+          toString(fromUnixTimestamp64Nano(max(session_traces.traceEndNanos))) AS endTime,
+          intDiv(max(session_traces.traceEndNanos) - toUnixTimestamp64Nano(min(session_traces.traceStart)), 1000000) AS durationMs
+        FROM (SELECT
+          TraceId AS traceId,
+          argMin(SpanAttributes['maple_ai.vendor.id'], tuple(multiIf((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), 0, SpanAttributes['maple_ai.vendor.id'] != '', 1, 2), Timestamp)) AS vendorId,
+          argMin(SpanAttributes['maple_ai.vendor.version'], tuple(multiIf((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), 0, SpanAttributes['maple_ai.vendor.id'] != '', 1, 2), Timestamp)) AS vendorVersion,
+          min(if((mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != ''), Timestamp, toDateTime('2106-01-01 00:00:00'))) AS sessionStart,
+          count() AS spanCount,
+          countIf((StatusCode = 'Error' OR (SpanAttributes['maple_ai.vendor.id'] != '' AND (SpanAttributes['error.type'] != '' OR SpanAttributes['gen_ai.response.status'] IN ('failed', 'error'))))) AS errorSpanCount,
+          groupUniqArray(ServiceName) AS serviceNames,
+          min(Timestamp) AS traceStart,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceEndNanos
+        FROM trace_detail_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-02 10:30:00' - INTERVAL 3600 SECOND
+          AND Timestamp <= '2026-01-02 12:30:00' + INTERVAL 3600 SECOND
+          AND TraceId IN (SELECT
+          traceId AS traceId
+        FROM (SELECT
+          TraceId AS traceId,
+          max(SessionId) AS rawSessionId,
+          min(Timestamp) AS traceAgentStart,
+          max(Timestamp) AS traceAgentEnd,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
+          groupUniqArrayIf(20)(Model, Model != '') AS models,
+          groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
+          sum(IsLlmCall) AS llmCalls,
+          sum(IsToolCall) AS toolCalls,
+          sum(IsError) AS errorAgentSpans,
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+        FROM ai_trace_index
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-02 10:30:00'
+          AND Timestamp <= '2026-01-02 12:30:00'
+        GROUP BY traceId
+        HAVING countIf(VendorId IN ('eve')) > 0
+          AND countIf(ServiceName IN ('maple-slack-agent')) > 0) AS agent_traces
+        WHERE if(rawSessionId = '', concat('trace:', traceId), rawSessionId) IN ('wrun_sql_catalog', 'trace:7f3a4b5c6d7e8f901234567890abcdef'))
+        GROUP BY traceId) AS session_traces
+        INNER JOIN (SELECT
+          traceId AS traceId,
+          rawSessionId AS rawSessionId
+        FROM (SELECT
+          TraceId AS traceId,
+          max(SessionId) AS rawSessionId,
+          min(Timestamp) AS traceAgentStart,
+          max(Timestamp) AS traceAgentEnd,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
+          groupUniqArrayIf(20)(Model, Model != '') AS models,
+          groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
+          sum(IsLlmCall) AS llmCalls,
+          sum(IsToolCall) AS toolCalls,
+          sum(IsError) AS errorAgentSpans,
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+        FROM ai_trace_index
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-02 10:30:00'
+          AND Timestamp <= '2026-01-02 12:30:00'
+        GROUP BY traceId
+        HAVING countIf(VendorId IN ('eve')) > 0
+          AND countIf(ServiceName IN ('maple-slack-agent')) > 0) AS agent_traces
+        WHERE if(rawSessionId = '', concat('trace:', traceId), rawSessionId) IN ('wrun_sql_catalog', 'trace:7f3a4b5c6d7e8f901234567890abcdef')) AS index_traces ON session_traces.traceId = index_traces.traceId
+        GROUP BY sessionId
+        ORDER BY startTime DESC
+        FORMAT JSON
+
+-- builder:ai-sessions:aiSessionPageQuery:default
+SELECT
+          if(rawSessionId = '', concat('trace:', traceId), rawSessionId) AS sessionId,
+          toString(min(traceAgentStart)) AS agentStart,
+          toString(max(traceAgentEnd)) AS agentEnd,
+          groupUniqArrayArray(models) AS models,
+          groupUniqArrayArray(agentNames) AS agentNames,
+          sum(llmCalls) AS llmCalls,
+          sum(toolCalls) AS toolCalls,
+          sum(errorAgentSpans) AS errorAgentSpans,
+          sum(arraySum(r -> greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), usageReporters)), usageReporters)) AS totalTokens,
+          sum(arraySum(r -> greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), usageReporters)), usageReporters)) AS cost,
+          intDiv(max(traceAgentEndNanos) - toUnixTimestamp64Nano(min(traceAgentStart)), 1000000) AS agentDurationMs
+        FROM (SELECT
+          TraceId AS traceId,
+          max(SessionId) AS rawSessionId,
+          min(Timestamp) AS traceAgentStart,
+          max(Timestamp) AS traceAgentEnd,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
+          groupUniqArrayIf(20)(Model, Model != '') AS models,
+          groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
+          sum(IsLlmCall) AS llmCalls,
+          sum(IsToolCall) AS toolCalls,
+          sum(IsError) AS errorAgentSpans,
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+        FROM ai_trace_index
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY traceId) AS index_traces
+        GROUP BY sessionId
+        ORDER BY agentStart DESC, sessionId ASC
+        LIMIT 50
+        FORMAT JSON
+
+-- builder:ai-sessions:aiSessionPageQuery:every-filter
+SELECT
+          if(rawSessionId = '', concat('trace:', traceId), rawSessionId) AS sessionId,
+          toString(min(traceAgentStart)) AS agentStart,
+          toString(max(traceAgentEnd)) AS agentEnd,
+          groupUniqArrayArray(models) AS models,
+          groupUniqArrayArray(agentNames) AS agentNames,
+          sum(llmCalls) AS llmCalls,
+          sum(toolCalls) AS toolCalls,
+          sum(errorAgentSpans) AS errorAgentSpans,
+          sum(arraySum(r -> greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), usageReporters)), usageReporters)) AS totalTokens,
+          sum(arraySum(r -> greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), usageReporters)), usageReporters)) AS cost,
+          intDiv(max(traceAgentEndNanos) - toUnixTimestamp64Nano(min(traceAgentStart)), 1000000) AS agentDurationMs
+        FROM (SELECT
+          TraceId AS traceId,
+          max(SessionId) AS rawSessionId,
+          min(Timestamp) AS traceAgentStart,
+          max(Timestamp) AS traceAgentEnd,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
+          groupUniqArrayIf(20)(Model, Model != '') AS models,
+          groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
+          sum(IsLlmCall) AS llmCalls,
+          sum(IsToolCall) AS toolCalls,
+          sum(IsError) AS errorAgentSpans,
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+        FROM ai_trace_index
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY traceId
+        HAVING countIf(VendorId IN ('eve')) > 0
+          AND countIf(ServiceName IN ('maple-slack-agent')) > 0
+          AND countIf(DeploymentEnv IN ('production')) > 0
+          AND countIf(Model IN ('gpt-5.5')) > 0
+          AND countIf(AgentName IN ('billing-agent')) > 0
+          AND countIf(ToolName IN ('send_email')) > 0
+          AND countIf((SessionId LIKE 'wrun\\_01%' OR TraceId LIKE 'wrun\\_01%')) > 0) AS index_traces
+        GROUP BY sessionId
+        HAVING errorAgentSpans > 0
+          AND NOT (sessionId LIKE 'trace:%')
+          AND agentDurationMs >= 1000
+          AND agentDurationMs <= 600000
+          AND cost >= 0.01
+          AND cost <= 5
+          AND totalTokens >= 100
+          AND totalTokens <= 1000000
+          AND llmCalls >= 1
+          AND llmCalls <= 50
+          AND toolCalls >= 1
+          AND toolCalls <= 50
+        ORDER BY cost ASC, agentStart DESC, sessionId ASC
+        LIMIT 25
+        OFFSET 25
+        FORMAT JSON
+
+-- builder:ai-sessions:aiSessionPageQuery:filtered
+SELECT
+          if(rawSessionId = '', concat('trace:', traceId), rawSessionId) AS sessionId,
+          toString(min(traceAgentStart)) AS agentStart,
+          toString(max(traceAgentEnd)) AS agentEnd,
+          groupUniqArrayArray(models) AS models,
+          groupUniqArrayArray(agentNames) AS agentNames,
+          sum(llmCalls) AS llmCalls,
+          sum(toolCalls) AS toolCalls,
+          sum(errorAgentSpans) AS errorAgentSpans,
+          sum(arraySum(r -> greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), usageReporters)), usageReporters)) AS totalTokens,
+          sum(arraySum(r -> greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), usageReporters)), usageReporters)) AS cost,
+          intDiv(max(traceAgentEndNanos) - toUnixTimestamp64Nano(min(traceAgentStart)), 1000000) AS agentDurationMs
+        FROM (SELECT
+          TraceId AS traceId,
+          max(SessionId) AS rawSessionId,
+          min(Timestamp) AS traceAgentStart,
+          max(Timestamp) AS traceAgentEnd,
+          max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
+          groupUniqArrayIf(20)(Model, Model != '') AS models,
+          groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
+          sum(IsLlmCall) AS llmCalls,
+          sum(IsToolCall) AS toolCalls,
+          sum(IsError) AS errorAgentSpans,
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+        FROM ai_trace_index
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY traceId
+        HAVING countIf(VendorId IN ('eve')) > 0
+          AND countIf(ServiceName IN ('maple-slack-agent')) > 0) AS index_traces
+        GROUP BY sessionId
+        ORDER BY agentStart DESC, sessionId ASC
         LIMIT 25
         OFFSET 25
         FORMAT JSON

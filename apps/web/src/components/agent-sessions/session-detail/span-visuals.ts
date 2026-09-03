@@ -5,13 +5,7 @@
 // token rather than a fifth hue — chart-5 and chart-2 are two near-identical
 // cyans in the light palette (ΔL 0.04, Δh 25°).
 
-import {
-	DotsIcon,
-	FaceRobotIcon,
-	GearIcon,
-	PixelSparkleIcon,
-	type IconComponent,
-} from "@/components/icons"
+import { DotsIcon, FaceRobotIcon, GearIcon, PixelSparkleIcon, type IconComponent } from "@/components/icons"
 
 import type { AiSpanCategory } from "@/lib/agent-sessions/session-turns"
 import type { OccupancyKind } from "@/lib/agent-sessions/session-summary"
