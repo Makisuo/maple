@@ -16,6 +16,8 @@ export {
 	aiSessionWindowQuery,
 	aiTraceSpansQuery,
 	aiTraceWindowQuery,
+	idSearchPattern,
+	type AiSessionFacetType,
 	type AiSessionFacetsOutput,
 	type AiSessionFilterOpts,
 	type AiSessionListOpts,

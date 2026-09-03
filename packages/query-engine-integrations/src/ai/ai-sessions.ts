@@ -106,6 +106,7 @@
 
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
+import * as T from "@maple-dev/clickhouse-builder/types"
 import {
 	compileFnCall,
 	from,
@@ -120,13 +121,14 @@ import {
 } from "@maple-dev/clickhouse-builder"
 import { AiTraceIndex, TraceDetailSpans, Traces } from "@maple/query-engine/ch/tables"
 import { CHNumber } from "@maple/query-engine/ch/schema"
-import { AI_SESSION_SPANS_MAX_SPANS } from "@maple/domain/http"
+import { AI_SESSION_SPANS_MAX_SPANS, type AiSessionSortDir, type AiSessionSortKey } from "@maple/domain/http"
 import {
 	MAPLE_AI_SESSION_ID_ATTR,
 	MAPLE_AI_TRACE_SESSION_PREFIX,
 	MAPLE_AI_VENDOR_ID_ATTR,
 	MAPLE_AI_VENDOR_VERSION_ATTR,
 } from "@maple/domain/gen-ai"
+import { deepestReporterSum, usageReportersExpr } from "./ai-span-columns"
 
 const SESSION_ID_ATTR = MAPLE_AI_SESSION_ID_ATTR
 const VENDOR_ID_ATTR = MAPLE_AI_VENDOR_ID_ATTR
@@ -200,17 +202,54 @@ const orderTuple = (...parts: ReadonlyArray<unknown>): CH.Expr<unknown> =>
 const sessionKey = (rawSessionId: CH.Expr<string>, traceId: CH.Expr<string>): CH.Expr<string> =>
 	CH.if_(rawSessionId.eq(""), CH.concat(MAPLE_AI_TRACE_SESSION_PREFIX, traceId), rawSessionId)
 
-/** The filters the page and the list share; both apply them on `ai_trace_index`. */
+/**
+ * The filters the page and the list share; both apply them on `ai_trace_index`,
+ * each as a per-trace existence test — see `indexTraces`. One per index
+ * column, so each selects exactly the population `aiSessionFacetsQuery`
+ * counted for it.
+ */
 export interface AiSessionFilterOpts {
 	readonly vendorIds?: readonly string[]
 	readonly serviceNames?: readonly string[]
+	readonly deploymentEnvs?: readonly string[]
+	readonly models?: readonly string[]
+	readonly agentNames?: readonly string[]
+	readonly toolNames?: readonly string[]
+	/**
+	 * A session id or trace id, or the leading characters of one — what a
+	 * reader pastes from a ticket, a log line, or the list row itself. Matched
+	 * as a prefix against both id columns of the index.
+	 */
+	readonly search?: string
 }
 
 export interface AiSessionPageOpts extends AiSessionFilterOpts {
-	/** Sessions returned, most recently started first. */
+	/** Sessions returned, most recently started first unless `sortBy` says otherwise. */
 	readonly limit?: number
 	/** Sessions skipped before `limit` applies — the list's next page. */
 	readonly offset?: number
+	// Session-level filters — `HAVING` on the ranked session row, over the
+	// measures the index carries per span (migration 0026). A failure here is
+	// a failed AGENT span; the row's `errorSpanCount` counts every span of the
+	// trace, so a session whose only error is on an HTTP span is listed with a
+	// badge and not matched by the filter. A duration here is the extent of
+	// the agent spans, which the true extent trails by minutes at most (see
+	// `FAN_OUT_PAD_SECONDS`).
+	readonly hasErrors?: boolean
+	/** Drop the `trace:` sessions — traces whose vendor exposes no session key. */
+	readonly excludeTraceSessions?: boolean
+	readonly durationMinMs?: number
+	readonly durationMaxMs?: number
+	readonly costMin?: number
+	readonly costMax?: number
+	readonly tokensMin?: number
+	readonly tokensMax?: number
+	readonly llmCallsMin?: number
+	readonly llmCallsMax?: number
+	readonly toolCallsMin?: number
+	readonly toolCallsMax?: number
+	readonly sortBy?: AiSessionSortKey
+	readonly sortDir?: AiSessionSortDir
 }
 
 export interface AiSessionPageOutput {
@@ -222,6 +261,20 @@ export interface AiSessionPageOutput {
 	 *  `fanOutEnd` params take back. */
 	readonly agentStart: string
 	readonly agentEnd: string
+	/** Every model any agent span of the session ran on, dialects coalesced. */
+	readonly models: readonly string[]
+	/** Every agent named on any agent span of the session. */
+	readonly agentNames: readonly string[]
+	readonly llmCalls: number
+	readonly toolCalls: number
+	/** Failed agent spans — what `hasErrors` tests; not the row's all-span count. */
+	readonly errorAgentSpans: number
+	/** Tokens across every bucket, deepest reporter counted — see `deepestReporterSum`. */
+	readonly totalTokens: number
+	/** USD as the instrumentation priced it; 0 where nothing reported a cost. */
+	readonly cost: number
+	/** Extent of the agent spans, what the duration filter and sort read. */
+	readonly agentDurationMs: number
 }
 
 export interface AiSessionListOpts extends AiSessionFilterOpts {
@@ -237,7 +290,6 @@ export interface AiSessionListOpts extends AiSessionFilterOpts {
 /** Which pair of params bounds an `ai_trace_index` read: the caller's window
  *  (`startTime`/`endTime`) or the page's (`fanOutStart`/`fanOutEnd`). */
 type IndexBounds = "window" | "page"
-
 
 export interface AiSessionListOutput {
 	/** The vendor's own session id, or `trace:<TraceId>` for a trace that has
@@ -257,10 +309,29 @@ export interface AiSessionListOutput {
 }
 
 /**
+ * A pasted id, as a `LIKE` prefix pattern.
+ *
+ * Strips what the list row itself shows around a `trace:` id — the prefix and
+ * the trailing ellipsis — so copying the visible text finds the row. Escapes the
+ * three characters `LIKE` reads as syntax; the builder quotes the literal.
+ */
+export function idSearchPattern(search: string): string {
+	let needle = search.trim()
+	if (needle.startsWith(MAPLE_AI_TRACE_SESSION_PREFIX)) {
+		needle = needle.slice(MAPLE_AI_TRACE_SESSION_PREFIX.length)
+	}
+	needle = needle.replace(/…+$/, "")
+	return `${needle.replace(/[\\%_]/g, (char) => `\\${char}`)}%`
+}
+
+/** Distinct models/agents collected per trace for the list row. */
+const MAX_NAMES_PER_TRACE = 20
+
+/**
  * One row per agent trace in the window, off `ai_trace_index` alone: the
- * trace's session key and the bounds of its agent spans. The level both stages
- * share, so a trace resolves to the same session in the page and in the
- * aggregation.
+ * trace's session key, the bounds of its agent spans, and the per-trace
+ * measures the page ranks on. The level both stages share, so a trace resolves
+ * to the same session in the page and in the aggregation.
  *
  * The page reads it over the caller's window; the aggregation over the page's
  * own bounds, which is the same thing for every trace ON the page: a page
@@ -281,11 +352,24 @@ export interface AiSessionListOutput {
  * it. A row predicate would also narrow the rows `rawSessionId` is read from,
  * and a vendor filter would then file a trace under `trace:` whenever its
  * session-bearing span belongs to another vendor — an eve agent calling through
- * the Vercel AI SDK carries both. The population is the one the facets count:
- * `aiSessionFacetsQuery` also collects per trace and counts any-span.
+ * the Vercel AI SDK carries both. And the three GenAI identity columns are
+ * mutually exclusive by construction — a chat span has a model and no tool, a
+ * tool span the reverse, the session id sits on the turn-owning span alone —
+ * so a row predicate ANDing `Model IN (…)` with `ToolName IN (…)` could only
+ * match a row carrying both, and that pair of facets, each with a non-zero
+ * count, would return an empty list. The population is the one the facets
+ * count: `aiSessionFacetsQuery` also collects per trace and counts any-span.
+ *
+ * The measures are collected here per trace and summed per session one level
+ * up. Usage travels as the trace's reporters rather than a sum, because a
+ * wrapper's roll-up of its children cannot be undone one row at a time — see
+ * `usageReportersExpr`.
  */
-const indexTraces = (opts: AiSessionFilterOpts, bounds: IndexBounds) =>
-	from(AiTraceIndex)
+const indexTraces = (opts: AiSessionFilterOpts, bounds: IndexBounds) => {
+	const values = (list: readonly string[] | undefined) => (list?.length ? list : undefined)
+	const search = opts.search?.trim() || undefined
+	const carries = (cond: CH.Condition) => CH.countIf(cond).gt(0)
+	return from(AiTraceIndex)
 		.select(($) => ({
 			traceId: $.TraceId,
 			rawSessionId: CH.max_($.SessionId),
@@ -295,6 +379,17 @@ const indexTraces = (opts: AiSessionFilterOpts, bounds: IndexBounds) =>
 			// `traceStart` in `aiSessionListQuery`.
 			traceAgentStart: CH.min_($.Timestamp),
 			traceAgentEnd: CH.max_($.Timestamp),
+			// `Timestamp` is the span's START; the extent ends where the
+			// last-starting agent span ended. Same idiom as `traceEndNanos`.
+			traceAgentEndNanos: CH.max_(CH.toUnixTimestamp64Nano($.Timestamp).add(CH.toInt64($.Duration))),
+			// Bounded per trace: a row is a list cell, and a trace that somehow
+			// names more models than that is not one the cell can show anyway.
+			models: CH.groupUniqArrayIf(MAX_NAMES_PER_TRACE)($.Model, $.Model.neq("")),
+			agentNames: CH.groupUniqArrayIf(MAX_NAMES_PER_TRACE)($.AgentName, $.AgentName.neq("")),
+			llmCalls: CH.sum($.IsLlmCall),
+			toolCalls: CH.sum($.IsToolCall),
+			errorAgentSpans: CH.sum($.IsError),
+			usageReporters: usageReportersExpr($),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
@@ -303,11 +398,18 @@ const indexTraces = (opts: AiSessionFilterOpts, bounds: IndexBounds) =>
 		])
 		.groupBy("traceId")
 		.having(($) => [
-			opts.vendorIds?.length ? CH.countIf(CH.inList($.VendorId, opts.vendorIds)).gt(0) : undefined,
-			opts.serviceNames?.length
-				? CH.countIf(CH.inList($.ServiceName, opts.serviceNames)).gt(0)
-				: undefined,
+			CH.when(values(opts.vendorIds), (v) => carries(CH.inList($.VendorId, v))),
+			CH.when(values(opts.serviceNames), (v) => carries(CH.inList($.ServiceName, v))),
+			CH.when(values(opts.deploymentEnvs), (v) => carries(CH.inList($.DeploymentEnv, v))),
+			CH.when(values(opts.models), (v) => carries(CH.inList($.Model, v))),
+			CH.when(values(opts.agentNames), (v) => carries(CH.inList($.AgentName, v))),
+			CH.when(values(opts.toolNames), (v) => carries(CH.inList($.ToolName, v))),
+			CH.when(search, (needle) => {
+				const pattern = idSearchPattern(needle)
+				return carries($.SessionId.like(pattern).or($.TraceId.like(pattern)))
+			}),
 		])
+}
 
 /**
  * The page: which sessions the list shows, in what order, and where their
@@ -325,8 +427,16 @@ const indexTraces = (opts: AiSessionFilterOpts, bounds: IndexBounds) =>
  * carries only agent spans, and the two differ by under a second in practice
  * (see `FAN_OUT_PAD_SECONDS`). The row's `startTime` still reports the true
  * first span; the caller keeps the page in this order rather than re-sorting
- * by it, so what is shown is the order that was paged. `sessionId` breaks
- * ties, so a page boundary never splits two sessions that share a start.
+ * by it, so what is shown is the order that was paged. A measure sort
+ * (`sortBy`) orders by that measure first, with the first agent span and then
+ * `sessionId` breaking ties, so a page boundary never splits two sessions that
+ * share a start.
+ *
+ * The session-level filters are `HAVING` on the ranked row, over the measures
+ * the index carries per span, and cost nothing beyond the index scan the page
+ * already is. What they cannot do is count — a facet for "sessions over $1"
+ * would be another pass over the same index per bucket, which the sidebar
+ * does not ask for.
  *
  * The remaining gap is between traces, not inside one: a session whose OTHER
  * traces lie entirely outside the range is still found only by the traces that
@@ -335,6 +445,39 @@ const indexTraces = (opts: AiSessionFilterOpts, bounds: IndexBounds) =>
 export function aiSessionPageQuery(opts: AiSessionPageOpts = {}) {
 	const limit = opts.limit ?? 50
 	const offset = opts.offset ?? 0
+
+	// The `HAVING` level sees the outer aliases by name only.
+	const having = {
+		sessionId: CH.dynamicColumn<string>("sessionId", T.string),
+		errorAgentSpans: CH.dynamicColumn<number>("errorAgentSpans", T.float64),
+		agentDurationMs: CH.dynamicColumn<number>("agentDurationMs", T.float64),
+		cost: CH.dynamicColumn<number>("cost", T.float64),
+		totalTokens: CH.dynamicColumn<number>("totalTokens", T.float64),
+		llmCalls: CH.dynamicColumn<number>("llmCalls", T.float64),
+		toolCalls: CH.dynamicColumn<number>("toolCalls", T.float64),
+	}
+	const sortBy = opts.sortBy ?? "startTime"
+	const sortDir = opts.sortDir ?? "desc"
+	// The measure a sort key names on this level. `startTime` is the first
+	// agent span, and `errorSpanCount` the failed agent spans — the row's own
+	// numbers are the fan-out's, which the page cannot see.
+	const sortColumn = {
+		startTime: "agentStart",
+		durationMs: "agentDurationMs",
+		cost: "cost",
+		totalTokens: "totalTokens",
+		errorSpanCount: "errorAgentSpans",
+		llmCalls: "llmCalls",
+		toolCalls: "toolCalls",
+	} as const satisfies Record<AiSessionSortKey, string>
+	const order: Array<[(typeof sortColumn)[AiSessionSortKey] | "sessionId", AiSessionSortDir]> =
+		sortBy === "startTime"
+			? [["agentStart", sortDir]]
+			: [
+					[sortColumn[sortBy], sortDir],
+					["agentStart", "desc"],
+				]
+	order.push(["sessionId", "asc"])
 
 	const page = fromQuery(indexTraces(opts, "window"), "index_traces")
 		.select(($) => ({
@@ -345,11 +488,40 @@ export function aiSessionPageQuery(opts: AiSessionPageOpts = {}) {
 			sessionId: sessionKey($.rawSessionId, $.traceId),
 			agentStart: CH.toString_(CH.min_($.traceAgentStart)),
 			agentEnd: CH.toString_(CH.max_($.traceAgentEnd)),
+			models: CH.groupUniqArrayArray($.models),
+			agentNames: CH.groupUniqArrayArray($.agentNames),
+			llmCalls: CH.sum($.llmCalls),
+			toolCalls: CH.sum($.toolCalls),
+			errorAgentSpans: CH.sum($.errorAgentSpans),
+			totalTokens: deepestReporterSum("usageReporters", 3),
+			cost: deepestReporterSum("usageReporters", 4),
+			// Nanoseconds first, wrapped in `intDiv` — see `durationMs` in
+			// `aiSessionListQuery` for both.
+			agentDurationMs: CH.intDiv(
+				CH.max_($.traceAgentEndNanos).sub(CH.toUnixTimestamp64Nano(CH.min_($.traceAgentStart))),
+				1_000_000,
+			),
 		}))
 		.groupBy("sessionId")
+		.having(() => [
+			CH.whenTrue(opts.hasErrors, () => having.errorAgentSpans.gt(0)),
+			CH.whenTrue(opts.excludeTraceSessions, () =>
+				CH.not(having.sessionId.like(`${MAPLE_AI_TRACE_SESSION_PREFIX}%`)),
+			),
+			CH.when(opts.durationMinMs, (v) => having.agentDurationMs.gte(v)),
+			CH.when(opts.durationMaxMs, (v) => having.agentDurationMs.lte(v)),
+			CH.when(opts.costMin, (v) => having.cost.gte(v)),
+			CH.when(opts.costMax, (v) => having.cost.lte(v)),
+			CH.when(opts.tokensMin, (v) => having.totalTokens.gte(v)),
+			CH.when(opts.tokensMax, (v) => having.totalTokens.lte(v)),
+			CH.when(opts.llmCallsMin, (v) => having.llmCalls.gte(v)),
+			CH.when(opts.llmCallsMax, (v) => having.llmCalls.lte(v)),
+			CH.when(opts.toolCallsMin, (v) => having.toolCalls.gte(v)),
+			CH.when(opts.toolCallsMax, (v) => having.toolCalls.lte(v)),
+		])
 		// A String order, and a correct one: the literal is fixed-width
 		// `YYYY-MM-DD hh:mm:ss.nnnnnnnnn`, so it sorts as the instant does.
-		.orderBy(["agentStart", "desc"], ["sessionId", "asc"])
+		.orderBy(...order)
 		.limit(limit)
 	// Only a positive offset is emitted: `OFFSET 0` is a no-op that would still
 	// change the compiled SQL of every first-page read.
@@ -487,39 +659,37 @@ export function aiSessionListQuery(opts: AiSessionListOpts) {
 		])
 		.groupBy("traceId")
 
-	return (
-		fromQuery(perTrace, "session_traces")
-			.innerJoinQuery(pageTraces, "index_traces", (t, i) => t.traceId.eq(i.traceId))
-			.select(($) => ({
-				// The key the page resolved, not one re-derived from the spans — see
-				// the file header for why the two must not be allowed to differ.
-				sessionId: sessionKey($.index_traces.rawSessionId, $.traceId),
-				vendorId: CH.argMin($.vendorId, $.sessionStart),
-				vendorVersion: CH.argMin($.vendorVersion, $.sessionStart),
-				// `count()`, not `uniq()`: the derived table already emits exactly one
-				// row per trace, so this is exact and cheaper — `uniq` is an
-				// approximate HLL that would start drifting on a very large session.
-				traceCount: CH.count(),
-				spanCount: CH.sum($.spanCount),
-				errorSpanCount: CH.sum($.errorSpanCount),
-				serviceNames: CH.groupUniqArrayArray($.serviceNames),
-				startTime: CH.toString_(CH.min_($.traceStart)),
-				endTime: CH.toString_(fromUnixTimestamp64Nano(CH.max_($.traceEndNanos))),
-				// Nanoseconds first: `Timestamp` is DateTime64(9), and subtracting two
-				// of them yields a Decimal whose scale the wire format then quotes.
-				// Wrapped in `intDiv` because `Expr.sub`/`div` do not parenthesize.
-				durationMs: CH.intDiv(
-					CH.max_($.traceEndNanos).sub(CH.toUnixTimestamp64Nano(CH.min_($.traceStart))),
-					1_000_000,
-				),
-			}))
-			.groupBy("sessionId")
-			.orderBy(["startTime", "desc"])
-			.format("JSON")
-	)
+	return fromQuery(perTrace, "session_traces")
+		.innerJoinQuery(pageTraces, "index_traces", (t, i) => t.traceId.eq(i.traceId))
+		.select(($) => ({
+			// The key the page resolved, not one re-derived from the spans — see
+			// the file header for why the two must not be allowed to differ.
+			sessionId: sessionKey($.index_traces.rawSessionId, $.traceId),
+			vendorId: CH.argMin($.vendorId, $.sessionStart),
+			vendorVersion: CH.argMin($.vendorVersion, $.sessionStart),
+			// `count()`, not `uniq()`: the derived table already emits exactly one
+			// row per trace, so this is exact and cheaper — `uniq` is an
+			// approximate HLL that would start drifting on a very large session.
+			traceCount: CH.count(),
+			spanCount: CH.sum($.spanCount),
+			errorSpanCount: CH.sum($.errorSpanCount),
+			serviceNames: CH.groupUniqArrayArray($.serviceNames),
+			startTime: CH.toString_(CH.min_($.traceStart)),
+			endTime: CH.toString_(fromUnixTimestamp64Nano(CH.max_($.traceEndNanos))),
+			// Nanoseconds first: `Timestamp` is DateTime64(9), and subtracting two
+			// of them yields a Decimal whose scale the wire format then quotes.
+			// Wrapped in `intDiv` because `Expr.sub`/`div` do not parenthesize.
+			durationMs: CH.intDiv(
+				CH.max_($.traceEndNanos).sub(CH.toUnixTimestamp64Nano(CH.min_($.traceStart))),
+				1_000_000,
+			),
+		}))
+		.groupBy("sessionId")
+		.orderBy(["startTime", "desc"])
+		.format("JSON")
 }
 
-// List facets (UNION ALL — vendor / service)
+// List facets (UNION ALL — one branch per index dimension)
 
 export interface AiSessionFacetsOutput {
 	readonly name: string
@@ -527,13 +697,18 @@ export interface AiSessionFacetsOutput {
 	readonly facetType: string
 }
 
+export type AiSessionFacetType = "vendor" | "service" | "environment" | "model" | "agent" | "tool"
+
 /**
- * Distinct sessions per vendor and per service, for the list's filter sidebar.
+ * Distinct sessions per value of each index dimension, for the list's filter
+ * sidebar: vendor, service, environment, model, agent and tool.
  *
- * This is the detection scan of `aiSessionListQuery` (an `ai_trace_index` read)
- * and nothing else — no `trace_detail_spans` fan-out, which is the expensive
- * half. It can be: both of the list's filters are applied at that level, so the
- * population a facet describes is exactly the population its filter selects.
+ * This is the page's index scan (`indexTraces`) and nothing else — no
+ * `trace_detail_spans` fan-out, which is the expensive half. It can be: every
+ * one of the list's counted filters is applied at that level, so the population
+ * a facet describes is exactly the population its filter selects. The
+ * session-level filters (errors, the ranges) have no facet for the same reason
+ * in reverse — their numbers exist only per ranked row.
  *
  * What it cannot do is count per span. A session id is a fact about the TRACE,
  * so a facet keyed on the span's own value would count every agent span of a
@@ -553,7 +728,7 @@ export interface AiSessionFacetsOutput {
  */
 export function aiSessionFacetsQuery(): CHUnionQuery<AiSessionFacetsOutput> {
 	const facet = (
-		facetType: string,
+		facetType: AiSessionFacetType,
 		name: ($: ColumnAccessor<typeof AiTraceIndex.columns>) => CH.Expr<string>,
 	) => {
 		const perTrace = from(AiTraceIndex)
@@ -587,6 +762,10 @@ export function aiSessionFacetsQuery(): CHUnionQuery<AiSessionFacetsOutput> {
 	return unionAll(
 		facet("vendor", ($) => $.VendorId),
 		facet("service", ($) => $.ServiceName),
+		facet("environment", ($) => $.DeploymentEnv),
+		facet("model", ($) => $.Model),
+		facet("agent", ($) => $.AgentName),
+		facet("tool", ($) => $.ToolName),
 	).format("JSON")
 }
 

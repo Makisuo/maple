@@ -34,8 +34,23 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
-						const filters = { vendorIds: payload.vendorIds, serviceNames: payload.serviceNames }
-						const window = { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime }
+						// The counted filters go to BOTH stages, so they resolve a trace
+						// identically; the session-level ones and the sort rank the page
+						// and are the page's alone.
+						const filters = {
+							vendorIds: payload.vendorIds,
+							serviceNames: payload.serviceNames,
+							deploymentEnvs: payload.deploymentEnvs,
+							models: payload.models,
+							agentNames: payload.agentNames,
+							toolNames: payload.toolNames,
+							search: payload.search,
+						}
+						const window = {
+							orgId: tenant.orgId,
+							startTime: payload.startTime,
+							endTime: payload.endTime,
+						}
 						// Two reads, not one: the page is ranked on `ai_trace_index` over the
 						// caller's whole window, and only then is that page aggregated over
 						// `trace_detail_spans` — inside the hours its own agent spans cover,
@@ -48,6 +63,20 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 									...filters,
 									limit: payload.limit,
 									offset: payload.offset,
+									hasErrors: payload.hasErrors,
+									excludeTraceSessions: payload.excludeTraceSessions,
+									durationMinMs: payload.durationMinMs,
+									durationMaxMs: payload.durationMaxMs,
+									costMin: payload.costMin,
+									costMax: payload.costMax,
+									tokensMin: payload.tokensMin,
+									tokensMax: payload.tokensMax,
+									llmCallsMin: payload.llmCallsMin,
+									llmCallsMax: payload.llmCallsMax,
+									toolCallsMin: payload.toolCallsMin,
+									toolCallsMax: payload.toolCallsMax,
+									sortBy: payload.sortBy,
+									sortDir: payload.sortDir,
 								}),
 								window,
 							),
@@ -57,7 +86,9 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 							return new ListAiSessionsResponse({ data: [] })
 						}
 						// Fixed-width warehouse literals, so they sort as the instants do.
-						const fanOutStart = page.map((row) => row.agentStart).reduce((a, b) => (a < b ? a : b))
+						const fanOutStart = page
+							.map((row) => row.agentStart)
+							.reduce((a, b) => (a < b ? a : b))
 						const fanOutEnd = page.map((row) => row.agentEnd).reduce((a, b) => (a < b ? b : a))
 						// The row schema already coerces the UInt64 aggregates and decodes
 						// exactly the response's fields, so rows pass through unmapped.
@@ -88,9 +119,25 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 							"maple.ai.page_size": page.length,
 							"maple.ai.aggregated": rows.length,
 						})
+						// One row per session: the fan-out's facts (spans, services, the
+						// true extent, the all-span error count) joined with the page's
+						// measures (models, agents, calls, usage), which only the index
+						// can answer and the page already computed to rank on.
 						const byId = new Map(rows.map((row) => [row.sessionId, row]))
 						return new ListAiSessionsResponse({
-							data: page.flatMap((row) => byId.get(row.sessionId) ?? []),
+							data: page.flatMap((ranked) => {
+								const row = byId.get(ranked.sessionId)
+								if (row === undefined) return []
+								return {
+									...row,
+									models: ranked.models,
+									agentNames: ranked.agentNames,
+									llmCalls: ranked.llmCalls,
+									toolCalls: ranked.toolCalls,
+									totalTokens: ranked.totalTokens,
+									cost: ranked.cost,
+								}
+							}),
 							ranked: page.length,
 						})
 					}),
@@ -108,14 +155,18 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 							profile: "list",
 							context: "aiSessionsFacets",
 						})
-						// One UNION ALL result carrying both dimensions, split by facetType.
-						const pick = (facetType: string) =>
+						// One UNION ALL result carrying every dimension, split by facetType.
+						const pick = (facetType: Integrations.AiSessionFacetType) =>
 							rows
 								.filter((row) => row.facetType === facetType)
 								.map((row) => ({ name: row.name, count: row.count }))
 						return new ListAiSessionsFacetsResponse({
 							vendors: pick("vendor"),
 							services: pick("service"),
+							environments: pick("environment"),
+							models: pick("model"),
+							agents: pick("agent"),
+							tools: pick("tool"),
 						})
 					}),
 				)
