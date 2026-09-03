@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test"
 import { Effect, Exit, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
+import { encodePublicId } from "@maple/domain/http/v2"
 import * as Remote from "./remote-ops"
 import { makeV2Client, toV2Timestamp } from "./v2-client"
 
@@ -80,6 +81,45 @@ const listEnvelope = (data: ReadonlyArray<unknown>) => ({
 	has_more: false,
 	next_cursor: null,
 })
+
+const ISSUE_ID = encodePublicId("iss", "018f2b3c-4d5e-6f70-8192-a3b4c5d6e7f8")
+
+/** A full `V2ErrorIssue` — the client decodes the response, so a partial stub fails. */
+const errorIssue = {
+	id: ISSUE_ID,
+	object: "error_issue",
+	kind: "error",
+	fingerprint_hash: "12345",
+	service_name: "api",
+	exception_type: "TypeError",
+	exception_message: "boom",
+	error_label: "TypeError: boom",
+	top_frame: "src/index.ts:12",
+	workflow_state: "triage",
+	priority: 1,
+	severity: null,
+	severity_source: null,
+	source_ref: null,
+	assigned_actor: null,
+	lease_holder: null,
+	lease_expires_at: null,
+	claimed_at: null,
+	notes: null,
+	first_seen_at: "2026-08-15T12:00:00.000Z",
+	last_seen_at: "2026-08-15T12:30:00.000Z",
+	occurrence_count: 3,
+	resolved_at: null,
+	last_resolved_at: null,
+	last_regressed_at: null,
+	regression_count: 0,
+	resolved_versions: [],
+	snooze_until: null,
+	archived_at: null,
+	has_open_incident: false,
+	comment_count: 0,
+	open_pull_request_count: 0,
+	merged_pull_request_count: 0,
+}
 
 beforeEach(() => {
 	requests = []
@@ -179,6 +219,136 @@ describe("remote-ops request shapes", () => {
 			end_time: "2026-08-15T12:30:02.000Z",
 			filters: { trace_id: traceId },
 		})
+	})
+
+	it("listMetrics returns local mode's column names, not the v2 wire names", async () => {
+		stubV2(() =>
+			listEnvelope([
+				{
+					object: "metric",
+					name: "http.server.duration",
+					type: "histogram",
+					service_name: "api",
+					description: "Request duration",
+					unit: "ms",
+					is_monotonic: false,
+					data_point_count: 42,
+					first_seen: "2026-08-15T12:00:00.000Z",
+					last_seen: "2026-08-15T13:00:00.000Z",
+				},
+			]),
+		)
+		const rows = await Effect.runPromise(
+			Effect.flatMap(v2Client, (v2) => Remote.listMetrics(v2, { range: RANGE })),
+		)
+
+		// `maple metrics` prints the row's own keys, so a pass-through of the v2
+		// resource renamed every column when the same command ran remotely.
+		expect(rows[0]).toEqual({
+			metricName: "http.server.duration",
+			metricType: "histogram",
+			serviceName: "api",
+			metricDescription: "Request duration",
+			metricUnit: "ms",
+			dataPointCount: 42,
+			firstSeen: "2026-08-15T12:00:00.000Z",
+			lastSeen: "2026-08-15T13:00:00.000Z",
+			isMonotonic: false,
+		})
+	})
+
+	it("tracesTimeseries merges the per-aggregation series onto local mode's columns", async () => {
+		const point = (value: number) => ({
+			object: "trace_timeseries",
+			aggregation: "count",
+			start_time: "2026-08-15T12:00:00.000Z",
+			end_time: "2026-08-15T13:00:00.000Z",
+			bucket_seconds: 60,
+			group_by: null,
+			series: [{ group: null, points: [{ timestamp: "2026-08-15T12:00:00.000Z", value }] }],
+		})
+		let call = 0
+		stubV2(() => point(++call))
+		const rows = await Effect.runPromise(
+			Effect.flatMap(v2Client, (v2) => Remote.tracesTimeseries(v2, { range: RANGE })),
+		)
+
+		expect(rows).toHaveLength(1)
+		expect(Object.keys(rows[0]!).sort()).toEqual(
+			[
+				"avgDuration",
+				"bucket",
+				"count",
+				"errorRate",
+				"groupName",
+				"p50Duration",
+				"p95Duration",
+				"p99Duration",
+			].sort(),
+		)
+	})
+
+	it("errorDetail resolves a fingerprint through /v2/error_issues", async () => {
+		const traceId = "7f3a4b5c6d7e8f901234567890abcdef"
+		const requests = stubV2((url) => {
+			if (url.includes(`/v2/error_issues/${ISSUE_ID}`)) {
+				return {
+					...errorIssue,
+					timeseries: [{ bucket: "2026-08-15T12:00:00.000Z", count: 3 }],
+					sample_traces: [
+						{
+							trace_id: traceId,
+							span_id: "0123456789abcdef",
+							service_name: "api",
+							timestamp: "2026-08-15T12:30:00.000Z",
+							exception_message: "boom",
+							duration_micros: 1500,
+						},
+					],
+					incidents: [],
+					environments: [],
+				}
+			}
+			if (url.includes("/v2/error_issues")) return listEnvelope([errorIssue])
+			if (url.includes("/logs/search")) return listEnvelope([])
+			return {
+				id: traceId,
+				object: "trace",
+				start_time: "2026-08-15T12:30:00.000Z",
+				end_time: "2026-08-15T12:30:02.000Z",
+				duration_ms: 2000,
+				span_count: 3,
+				service_count: 2,
+				truncated: false,
+				spans: [],
+			}
+		})
+		const result = await Effect.runPromise(
+			Effect.flatMap(v2Client, (v2) =>
+				Remote.errorDetail(v2, { fingerprintHash: "12345", range: RANGE, limit: 5 }),
+			),
+		)
+
+		const lookup = new URL(requests[0]!.url)
+		expect(lookup.pathname).toBe("/v2/error_issues")
+		expect(lookup.searchParams.get("fingerprint_hash")).toBe("12345")
+		// The lookup is unwindowed on purpose — a fingerprint is an identity, and
+		// the list's window filters triage activity, not the events asked about.
+		expect(lookup.searchParams.get("start_time")).toBeNull()
+		expect(new URL(requests[1]!.url).searchParams.get("sample_limit")).toBe("5")
+		expect(result.traces[0]).toMatchObject({ traceId, spanCount: 3, errorMessage: "boom" })
+		expect(result.timeseries).toEqual([{ bucket: "2026-08-15T12:00:00.000Z", count: 3 }])
+	})
+
+	it("errorDetail says what remote mode cannot see when no issue matches", async () => {
+		stubV2(() => listEnvelope([]))
+		const exit = await Effect.runPromise(
+			Effect.flatMap(v2Client, (v2) =>
+				Effect.exit(Remote.errorDetail(v2, { fingerprintHash: "12345", range: RANGE })),
+			),
+		)
+
+		expect(Exit.isFailure(exit)).toBe(true)
 	})
 })
 

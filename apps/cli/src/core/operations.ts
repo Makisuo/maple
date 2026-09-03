@@ -121,7 +121,7 @@ export const findErrors = (p: { range: Range; service?: string; environment?: st
 		() =>
 			unsupportedInRemote(
 				"errors_by_type",
-				"/v2/error_issues returns triage issues keyed by an opaque `erris_…` id, not exception-type counts over a window.",
+				"/v2/error_issues lists one triage issue per fingerprint, so it cannot report how many services an error spans, and it only covers fingerprints a sweep has already turned into issues.",
 			),
 		"errors_by_type",
 	)
@@ -135,11 +135,7 @@ export const errorDetail = (p: { fingerprintHash: string; range: Range; service?
 			includeTimeseries: true,
 			limit: p.limit,
 		}),
-		() =>
-			unsupportedInRemote(
-				"error_detail_traces",
-				"v2 identifies errors by an opaque `erris_…` issue id and offers no lookup from a fingerprint hash.",
-			),
+		(client) => Remote.errorDetail(client, p),
 		"error_detail_traces",
 	)
 
