@@ -134,6 +134,7 @@ const paramTypes = new Map<ParamKind, Schema.Codec<any, any>>([
 	["float", T.float64.literalSchema],
 	["bool", T.bool.literalSchema],
 	["dateTime", T.dateTime.literalSchema],
+	["dateTimeSeconds", T.CHDateTimeSecondsLiteral],
 ])
 
 /** The codec a placeholder's kind names, or `undefined` for an unknown kind. */
@@ -181,6 +182,22 @@ export const param = {
 	 * and a param has to agree with the column it bounds.
 	 */
 	dateTimeString: makeParam<string>("dateTime"),
+
+	/**
+	 * The same bound, floored to whole seconds.
+	 *
+	 * For a column declared `DateTime` (not `DateTime64`) that shares a param with
+	 * a `DateTime64` column beside it — `logs.TimestampTime` next to
+	 * `logs.Timestamp`, `trace_list_mv.Timestamp` next to `traces.Timestamp`. The
+	 * fraction is load-bearing on the 64-bit column (a log search can legitimately
+	 * span 200ms) and a hard `TYPE_MISMATCH` on the other, so one rendering cannot
+	 * serve both. Placeholders carry kind and name independently, so this reads the
+	 * very same `startTime` value and only encodes it differently.
+	 *
+	 * Widening is safe where these appear: they bound a partition/index key for
+	 * pruning, and the exact `DateTime64` predicate still decides the result.
+	 */
+	dateTimeSeconds: makeParam<string>("dateTimeSeconds"),
 
 	/**
 	 * A param of any column type, resolved through that type's own codec.
