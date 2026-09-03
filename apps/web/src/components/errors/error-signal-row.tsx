@@ -8,7 +8,7 @@ import { formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 
 import { normalizeTimestampInput } from "@/lib/timezone-format"
-import type { ErrorSignal, SignalState } from "@/lib/models/error-signal"
+import type { ErrorSignal, InvestigationSummary } from "@/lib/models/error-signal"
 import { densifySpark, surgeRatio } from "@/lib/models/error-signal"
 
 import { BranchForkIcon, ChatBubbleIcon } from "@/components/icons"
@@ -17,7 +17,7 @@ import { ActorAvatar } from "./actor-chip"
 import { IssueContextMenu } from "./issue-context-menu"
 import { SeverityPicker, StatePicker } from "./issue-pickers"
 import { SignalSpark } from "./signal-spark"
-import { SignalStateChip } from "./signal-state-chip"
+import { InvestigationChip } from "./signal-state-chip"
 import type { IssueMutations } from "./use-issue-mutations"
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
@@ -42,36 +42,37 @@ function formatLastSeen(iso: string): string {
 const SURGE_THRESHOLD = 2.5
 
 /**
- * What is happening around a row: an open incident or a live investigation,
- * then comment and PR marks. All of it answers "is anyone on this?", and a row
- * nobody has touched draws nothing rather than a line of zeros.
+ * What is happening around a row: a live investigation, then comment and PR
+ * marks. All of it answers "is anyone on this?", and a row nobody has touched
+ * draws nothing rather than a line of zeros.
  *
  * They ride at the end of the identity lane rather than in a column of their
  * own. As a column they held 64px on every row to say something about roughly
  * a third of them, and that 64px was taken from the error message — the lane
- * the list is actually read by. The incident mark moved here from the status
- * lane when that lane became the workflow picker: an incident is a fact about
- * the error, the status is a decision about it, and one slot could not hold
- * both — in an org where every open issue has an incident, the decision was
- * the one that vanished.
+ * the list is actually read by.
+ *
+ * No incident mark. An incident is a flare-up rather than a decision, it opens
+ * on the first occurrence and only auto-resolves after 30 quiet minutes, so in
+ * a busy org it is true of nearly every open row at once — a mark that never
+ * varies separates nothing and only costs the message width.
  */
 function SignalActivity({
-	state,
+	investigation,
 	commentCount,
 	openPullRequestCount,
 	mergedPullRequestCount,
 }: {
-	state: SignalState
+	investigation: InvestigationSummary | null
 	commentCount: number
 	openPullRequestCount: number
 	mergedPullRequestCount: number
 }) {
 	const prCount = openPullRequestCount + mergedPullRequestCount
-	if (state.kind === "workflow" && commentCount === 0 && prCount === 0) return null
+	if (investigation === null && commentCount === 0 && prCount === 0) return null
 	return (
 		<span className="ml-auto flex shrink-0 items-center gap-2 pl-3">
-			{state.kind !== "workflow" ? (
-				<SignalStateChip state={state} withConfidence={false} compact />
+			{investigation !== null ? (
+				<InvestigationChip investigation={investigation} withConfidence={false} compact />
 			) : null}
 			{commentCount > 0 ? (
 				<span
@@ -310,7 +311,7 @@ export function ErrorSignalRow({
 						</span>
 					) : null}
 					<SignalActivity
-						state={signal.state}
+						investigation={signal.investigation}
 						commentCount={signal.commentCount}
 						openPullRequestCount={signal.openPullRequestCount}
 						mergedPullRequestCount={signal.mergedPullRequestCount}
