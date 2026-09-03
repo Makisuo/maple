@@ -5,7 +5,13 @@ import { Result } from "@/lib/effect-atom"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { ExcludedEmptyHint } from "@maple/ui/components/filters/excluded-empty-hint"
 import { traceFilterChips } from "@/lib/traces/trace-filter-chips"
-import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table"
+import {
+	columnSizingFeature,
+	type ColumnDef,
+	flexRender,
+	tableFeatures,
+	useTable,
+} from "@tanstack/react-table"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -128,6 +134,12 @@ function SortableHeader({
 	)
 }
 
+/**
+ * v9 registers features explicitly. Sorting is server-side and nothing else here is table-driven,
+ * so column sizing — the declared widths the header cells read back — is the only one needed.
+ */
+const TABLE_FEATURES = tableFeatures({ columnSizingFeature })
+
 const ROW_HEIGHT = 44
 
 const HEADER_CELL_CLASS = "h-10 px-2 text-left align-middle font-medium text-muted-foreground"
@@ -234,7 +246,7 @@ function TracesTableView({
 	const { effectiveTimezone } = useTimezonePreference()
 	const scrollContainerRef = React.useRef<HTMLDivElement>(null)
 
-	const columns = React.useMemo<ColumnDef<Trace>[]>(
+	const columns = React.useMemo<ColumnDef<typeof TABLE_FEATURES, Trace>[]>(
 		() => [
 			{
 				accessorKey: "traceId",
@@ -369,10 +381,10 @@ function TracesTableView({
 		[effectiveTimezone, sortBy, sortDir, onSortChange],
 	)
 
-	const table = useReactTable({
+	const table = useTable({
+		features: TABLE_FEATURES,
 		data: allData,
 		columns,
-		getCoreRowModel: getCoreRowModel(),
 	})
 
 	const { rows } = table.getRowModel()
@@ -500,7 +512,7 @@ function TracesTableView({
 										}
 									}}
 								>
-									{row.getVisibleCells().map((cell) => {
+									{row.getAllCells().map((cell) => {
 										const { responsive, cellClass } = columnClasses(cell.column.id)
 										return (
 											<td
