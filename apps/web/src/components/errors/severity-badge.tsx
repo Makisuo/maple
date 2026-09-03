@@ -2,6 +2,8 @@ import type { IssueSeverity } from "@maple/domain/http"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { cn } from "@maple/ui/lib/utils"
 
+import { PixelTriangleWarningIcon } from "@/components/icons"
+
 export const SEVERITY_TONE: Record<IssueSeverity, string> = {
 	critical: "bg-destructive/10 text-destructive",
 	high: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
@@ -86,5 +88,73 @@ export function SeverityBadge({
 		<Badge variant="outline" className={cn(SEVERITY_TONE[severity], className)}>
 			{SEVERITY_LABEL[severity]}
 		</Badge>
+	)
+}
+
+/**
+ * The compact glyph for a row, drawn on Nucleo's pixel grid so it sits with the
+ * rest of the icon set: 24-unit viewBox, 2-unit cells, square caps, nothing
+ * anti-aliased into a curve. Three blocks for "nobody has said" — the mark
+ * Linear uses for "no priority", which is where the eye already looks for a
+ * thing to set. One, two or three bars for low, medium and high. Critical is
+ * the pixel triangle-warning the rest of the app already uses, in red: the top
+ * level is a different kind of statement from "a bit more than high".
+ */
+export function SeverityIcon({
+	severity,
+	size = 16,
+	className,
+}: {
+	severity: IssueSeverity | null
+	size?: number
+	className?: string
+}) {
+	const label = severity === null ? "Severity not set" : SEVERITY_LABEL[severity]
+
+	if (severity === "critical") {
+		return (
+			<PixelTriangleWarningIcon
+				size={size}
+				role="img"
+				aria-hidden={undefined}
+				aria-label={label}
+				className={cn(SEVERITY_TEXT[severity], className)}
+			/>
+		)
+	}
+
+	const common = {
+		xmlns: "http://www.w3.org/2000/svg",
+		viewBox: "0 0 24 24",
+		width: size,
+		height: size,
+		fill: "none",
+		stroke: "currentColor",
+		strokeWidth: 4,
+		strokeLinecap: "square" as const,
+		role: "img" as const,
+		"aria-label": label,
+	}
+
+	if (severity === null) {
+		return (
+			<svg {...common} className={cn("text-muted-foreground", className)}>
+				{/* Three 2×2-cell blocks on the midline. */}
+				<path d="M3 12H3.01" />
+				<path d="M11 12H11.01" />
+				<path d="M19 12H19.01" />
+			</svg>
+		)
+	}
+
+	// Bars two cells wide on a shared baseline, three, five and eight cells tall.
+	const filled = severity === "high" ? 3 : severity === "medium" ? 2 : 1
+	const bars = ["M3 16V18", "M11 12V18", "M19 6V18"]
+	return (
+		<svg {...common} className={cn(SEVERITY_TEXT[severity], className)}>
+			{bars.map((d, index) => (
+				<path key={d} d={d} opacity={index < filled ? 1 : 0.25} />
+			))}
+		</svg>
 	)
 }
