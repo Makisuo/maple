@@ -23,6 +23,7 @@ import { ErrorState } from "@/components/common/error-state"
 import { AlertSourceCard } from "@/components/errors/alert-source-card"
 import { IssueCommentComposer } from "@/components/errors/issue-comment-composer"
 import { IssueCulpritPanel } from "@/components/errors/issue-culprit-panel"
+import { IssueDetailSkeleton } from "@/components/errors/issue-detail-skeleton"
 import { IssueFactStrip } from "@/components/errors/issue-fact-strip"
 import { IssueHeader } from "@/components/errors/issue-header"
 import { IssueIncidentsTable } from "@/components/errors/issue-incidents-table"
@@ -502,14 +503,17 @@ function IssueDetailContent() {
 	}
 
 	return Result.builder(detailResult)
+		// Not a page-shaped skeleton: the layout, tabs, window picker and rail
+		// labels are all knowable without the query, so the load draws the real
+		// page with ghosted values instead of blanking it.
 		.onInitial(() => (
-			<IssueShell breadcrumbs={[...ISSUE_LOADING_BREADCRUMBS]}>
-				<div className="space-y-4">
-					<Skeleton className="h-24 w-full" />
-					<Skeleton className="h-20 w-full" />
-					<Skeleton className="h-40 w-full" />
-				</div>
-			</IssueShell>
+			<IssueDetailSkeleton
+				issueId={issueId}
+				tab={tab}
+				search={search}
+				onTimeChange={handleTimeChange}
+				windowLabel={windowLabel(search)}
+			/>
 		))
 		.onError((error) => (
 			<IssueShell breadcrumbs={[...ISSUE_LOADING_BREADCRUMBS]}>
