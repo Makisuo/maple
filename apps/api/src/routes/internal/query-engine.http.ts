@@ -1389,7 +1389,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								saturation: Number(row.saturation) || 0,
 							})),
 							// The denominator has to match the predicate the list ran, or a scoped
-							// view reads "Top 17 of 541". The scope counts are already computed.
+							// view reads "Top 17 of 541". The scope counts are already computed
+							// within the requested lifecycle, so only the unscoped case has to
+							// pick which lifecycle total it wants.
 							totalCount:
 								Number(
 									payload.scope === "saturated"
@@ -1398,9 +1400,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 											? countRow?.elevatedPods
 											: payload.scope === "unbounded"
 												? countRow?.unboundedPods
-												: payload.scope === "stale"
-													? countRow?.stalePods
-													: countRow?.totalPods,
+												: payload.lifecycle === "ended"
+													? countRow?.endedPods
+													: payload.lifecycle === "all"
+														? Number(countRow?.livePods ?? 0) +
+															Number(countRow?.endedPods ?? 0)
+														: countRow?.livePods,
 								) ||
 								// A failed count must not render as "0 of 0" under a list with rows.
 								rows.length,
@@ -1412,11 +1417,11 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 						const tenant = yield* CurrentTenant.Context
 						const row = yield* runQueryFirst(Queries.podsSummary, tenant, payload)
 						return new PodsSummaryResponse({
-							totalPods: Number(row?.totalPods) || 0,
+							livePods: Number(row?.livePods) || 0,
+							endedPods: Number(row?.endedPods) || 0,
 							saturatedPods: Number(row?.saturatedPods) || 0,
 							elevatedPods: Number(row?.elevatedPods) || 0,
 							unboundedPods: Number(row?.unboundedPods) || 0,
-							stalePods: Number(row?.stalePods) || 0,
 						})
 					}),
 				)

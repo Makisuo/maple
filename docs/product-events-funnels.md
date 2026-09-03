@@ -333,9 +333,9 @@ Verified against ClickHouse 26.2, all three tiers:
 
 The contract lives in one place — `packages/domain/src/tinybird/product-event-attributes.ts` —
 and is read by exactly two consumers that must agree byte for byte: `productEventsTracesMv`
-(managed orgs, via `tinybird deploy`) and the frozen copy inside ClickHouse migration 0026 (BYO
+(managed orgs, via `tinybird deploy`) and the frozen copy inside ClickHouse migration 0027 (BYO
 clusters). The migration's copy is deliberately NOT imported from the constant: a delta migration
-describes one step in history, and a shared constant would silently rewrite what 0026 did the next
+describes one step in history, and a shared constant would silently rewrite what 0027 did the next
 time the live projection changes.
 
 ### Why an attribute and not a UI action
@@ -349,7 +349,7 @@ dashboard — the span is the record, the product event is its projection.
 
 ### The link
 
-`product_events` gained `TraceId`/`SpanId` (migration 0026, `DEFAULT ''`, appended, plus a
+`product_events` gained `TraceId`/`SpanId` (migration 0027, `DEFAULT ''`, appended, plus a
 `bloom_filter` on `TraceId`). Non-empty only on `Source = 'trace'` rows. Real columns rather than
 `Attributes` keys because both directions filter on them, and a `Map` lookup on this table reads
 the whole map per row — the exact cost `product_events` was split out of `session_events` to avoid.
@@ -399,10 +399,10 @@ lookup.
    accepted — but on a table feeding customer-visible funnels, a double-counted conversion is worse
    than a missing one. Populate once, immediately after deploy, and if it fails partway prefer
    deleting the trace rows by hand over re-running it blind.
-2. **BYO ClickHouse**: migration 0026, `requiredForIngest: false`. That is safe for one reason
+2. **BYO ClickHouse**: migration 0027, `requiredForIngest: false`. That is safe for one reason
    worth knowing before anyone touches `datasources.ts`: `TraceId`/`SpanId` are declared with **no
    `jsonPath`**, so the insert-mapping generator omits them and the Rust gateway's
-   `INSERT INTO product_events (…)` never names them — a cluster stamped below 26 still accepts
+   `INSERT INTO product_events (…)` never names them — a cluster stamped below 27 still accepts
    every row it sends. Give those columns a `jsonPath` and the flag becomes a data-loss bug: the
    readiness gate still says 21, so unmigrated BYO orgs keep routing to their own cluster, where
    the INSERT fails on the unknown column, retries, trips the breaker and drops the batch.

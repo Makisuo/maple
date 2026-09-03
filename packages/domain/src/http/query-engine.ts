@@ -1232,7 +1232,14 @@ const PodSortKeyLiteral = Schema.Literals([
 const SortDirectionLiteral = Schema.Literals(["asc", "desc"])
 
 /** One-click fleet scopes from the browse summary band. */
-const PodScopeLiteral = Schema.Literals(["saturated", "elevated", "unbounded", "stale"])
+const PodScopeLiteral = Schema.Literals(["saturated", "elevated", "unbounded"])
+
+/**
+ * Which slice of the window's pods to return. A windowed list is the union of
+ * everything that reported at any point in it, so on an autoscaled fleet most
+ * of those pods no longer exist. Defaults to `live` server-side.
+ */
+const PodLifecycleLiteral = Schema.Literals(["live", "ended", "all"])
 
 export class ListPodsRequest extends Schema.Class<ListPodsRequest>("ListPodsRequest")({
 	startTime: TinybirdDateTime,
@@ -1261,6 +1268,7 @@ export class ListPodsRequest extends Schema.Class<ListPodsRequest>("ListPodsRequ
 	workloadKind: Schema.optional(WorkloadKindLiteral),
 	workloadName: Schema.optional(Schema.String),
 	scope: Schema.optional(PodScopeLiteral),
+	lifecycle: Schema.optional(PodLifecycleLiteral),
 	sortBy: Schema.optional(PodSortKeyLiteral),
 	sortDir: Schema.optional(SortDirectionLiteral),
 	limit: Schema.optional(Schema.Number),
@@ -1311,11 +1319,13 @@ export class PodsSummaryRequest extends Schema.Class<PodsSummaryRequest>("PodsSu
 }) {}
 
 export class PodsSummaryResponse extends Schema.Class<PodsSummaryResponse>("PodsSummaryResponse")({
-	totalPods: Schema.Number,
+	/** Still reporting at the window's end — the fleet as it stands. */
+	livePods: Schema.Number,
+	/** Reported earlier in the window and stopped: scale-in, a rollout, a cycled task. */
+	endedPods: Schema.Number,
 	saturatedPods: Schema.Number,
 	elevatedPods: Schema.Number,
 	unboundedPods: Schema.Number,
-	stalePods: Schema.Number,
 }) {}
 
 // Containers (Docker) — docker_stats receiver rows, identity (container.name,

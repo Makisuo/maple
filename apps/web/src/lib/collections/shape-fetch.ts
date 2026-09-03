@@ -11,9 +11,10 @@ import { tracedFetch } from "@/lib/services/common/telemetry"
 
 /**
  * URL of the standalone `apps/electric-sync` ElectricSQL shape proxy. Every
- * collection points its ShapeStream here with `?shape=<name>`; the proxy
- * authenticates, injects the org scope, and forwards to Electric. Never point a
- * ShapeStream at Electric directly — it has no auth.
+ * collection points its ShapeStream here with `?shape=<name>&org=<id>`; the proxy
+ * authenticates, injects the org scope from the BEARER (never from `org=`, which
+ * is there for cache keying only — see `createSyncedCollection`), and forwards to
+ * Electric. Never point a ShapeStream at Electric directly — it has no auth.
  */
 export const syncProxyUrl = `${electricSyncBaseUrl}/api/sync/shape`
 
@@ -87,7 +88,23 @@ export const createSyncedCollection = <A extends Row<unknown>>(config: {
 		getKey: config.getKey,
 		shapeOptions: {
 			url: syncProxyUrl,
-			params: { shape: config.shape, ...(config.scope ? { scope: config.scope } : undefined) },
+			params: {
+				shape: config.shape,
+				// Present so the URL differs per tenant, and read by NOBODY: the proxy
+				// forwards only Electric's own cursor params and derives the org from
+				// the bearer, so this cannot widen what a client can reach.
+				//
+				// It exists because the URL is a cache key in three places that are all
+				// org-blind without it. The ShapeStream derives its internal shape key
+				// from this URL minus the cursor params, and that key indexes a
+				// `localStorage` map of expired shape handles (`electric_expired_shapes`,
+				// no TTL) shared by every org a user visits — one org's dead handle rode
+				// along on another's requests and tripped the client's stale-cache
+				// detector. The browser's HTTP cache and any intermediary key on it too,
+				// where `Vary: Authorization` was the only thing keeping tenants apart.
+				org: config.orgId,
+				...(config.scope ? { scope: config.scope } : undefined),
+			},
 			fetchClient: mapleSyncFetch,
 			...(config.parser ? { parser: config.parser } : undefined),
 		},

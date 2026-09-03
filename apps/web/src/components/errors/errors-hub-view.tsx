@@ -5,7 +5,6 @@ import type { ErrorIssueId, WorkflowState } from "@maple/domain/http"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
-import { ExcludedEmptyHint } from "@maple/ui/components/filters/excluded-empty-hint"
 import { cn } from "@maple/ui/lib/utils"
 
 import { CircleCheckIcon, HistoryIcon, MagnifierIcon } from "@/components/icons"
@@ -84,14 +83,31 @@ export function viewCovers(view: HubView, state: WorkflowState): boolean {
 	return states === "all" || states.includes(state)
 }
 
-export const HUB_SORTS = ["volume", "severity", "last_seen"] as const
+/** `last_seen` leads because it is the default: newest activity first, paged
+ *  back through older issues. `volume` is the one sort only the warehouse can
+ *  answer, so it is the one scoped to the time range. */
+export const HUB_SORTS = ["last_seen", "volume", "severity"] as const
 export type HubSort = (typeof HUB_SORTS)[number]
 
 const SORT_LABEL: Record<HubSort, string> = {
+	last_seen: "Most recent",
 	volume: "Most errors",
 	severity: "Severity",
-	last_seen: "Last seen",
 } satisfies Record<HubSort, string>
+
+/**
+ * Where the list stands relative to the pages it has not shown yet. `more`
+ * offers the button, `loading` swaps it for placeholder rows, `failed` turns
+ * it into a retry, `end` draws nothing — the last page is the last page.
+ */
+export interface HubPaging {
+	readonly state: "more" | "loading" | "failed" | "end"
+	readonly onLoadMore: () => void
+}
+
+/** Placeholder rows under the list while the next page loads. Fewer than the
+ *  first paint's, because the reader already has rows to look at. */
+const LOAD_MORE_SKELETON_ROWS = 3
 
 export const SEVERITY_FILTERS = ["all", "critical", "high", "medium", "low", "unset"] as const
 export type SeverityFilter = (typeof SEVERITY_FILTERS)[number]
@@ -179,23 +195,22 @@ const EMPTY_COPY = {
 	open: {
 		icon: CircleCheckIcon,
 		title: "Nothing open",
-		description:
-			"Every error in this window is closed out. Widen the range, or check Resolved to see recent fixes.",
+		description: "Every error here is closed out. Check Resolved to see recent fixes.",
 	},
 	triage: {
 		icon: CircleCheckIcon,
 		title: "Nothing waiting on triage",
-		description: "Every error in this window has been picked up. Widen the range to see more.",
+		description: "Every error here has been picked up.",
 	},
 	active: {
 		icon: CircleCheckIcon,
 		title: "Nothing in progress",
-		description: "No one has claimed an error in this window yet. Start from the triage queue.",
+		description: "No one has claimed an error yet. Start from the triage queue.",
 	},
 	all: {
 		icon: CircleCheckIcon,
-		title: "No errors in this window",
-		description: "Nothing was recorded here. Widen the time range or clear the service filters.",
+		title: "No errors here",
+		description: "Nothing has been recorded. If a filter is on, clearing it shows everything.",
 	},
 	resolved: {
 		icon: HistoryIcon,
@@ -221,9 +236,10 @@ export interface ErrorsHubViewProps {
 	/** The window totals above the toolbar. A slot rather than a component
 	 *  because it is the one part of the list that fetches for itself. */
 	stats?: React.ReactNode
-	/** Flattened active exclusions, for the empty state's hint. */
-	excludedValues?: ReadonlyArray<string>
-	onClearExclusions: () => void
+	/** Omitted when the list is complete as given — the lab, or a fixture. */
+	paging?: HubPaging
+	/** Present while a sidebar filter is on: the empty state offers to clear it. */
+	onClearFilters?: () => void
 	onRetry: () => void
 }
 
@@ -238,11 +254,15 @@ export function ErrorsHubView({
 	onSortChange,
 	onSeverityChange,
 	stats,
-	excludedValues = [],
-	onClearExclusions,
+	paging,
+	onClearFilters,
 	onRetry,
 }: ErrorsHubViewProps) {
 	const sorted = useMemo(() => sortSignals(signals, sort), [signals, sort])
+
+	// A paged list cannot state a total. "50+" says what is known — at least this
+	// many — without pretending the next page is empty.
+	const hasUnshownPages = paging !== undefined && paging.state !== "end"
 
 	const toolbar = (
 		<>
@@ -255,6 +275,7 @@ export function ErrorsHubView({
 				/* No count until there is one to state. "0 errors" under a spinner is
 				   a claim about the data, and it is wrong every time. */
 				totalCount={status === "ready" ? sorted.length : undefined}
+				countLabel={status === "ready" && hasUnshownPages ? `${sorted.length}+ errors` : undefined}
 				onChange={onViewChange}
 				trailing={
 					<>
@@ -357,8 +378,8 @@ export function ErrorsHubView({
 			severity={severity}
 			onViewChange={onViewChange}
 			onSeverityChange={onSeverityChange}
-			excludedValues={excludedValues}
-			onClearExclusions={onClearExclusions}
+			paging={paging}
+			onClearFilters={onClearFilters}
 		/>
 	)
 }
@@ -374,8 +395,8 @@ function HubList({
 	severity,
 	onViewChange,
 	onSeverityChange,
-	excludedValues,
-	onClearExclusions,
+	paging,
+	onClearFilters,
 }: {
 	signals: ReadonlyArray<ErrorSignal>
 	sparkWindow: { startMs: number; endMs: number; bucketMs: number }
@@ -384,9 +405,8 @@ function HubList({
 	severity: SeverityFilter
 	onViewChange: (view: HubView) => void
 	onSeverityChange: (severity: SeverityFilter) => void
-	/** Flattened active exclusions, for the empty state's hint. */
-	excludedValues: ReadonlyArray<string>
-	onClearExclusions: () => void
+	paging: HubPaging | undefined
+	onClearFilters: (() => void) | undefined
 }) {
 	const [selection, dispatchSelection] = useReducer(selectionReducer, initialIssueSelection)
 	const selectedIds = selection.selectedIds
@@ -436,8 +456,7 @@ function HubList({
 					severity={severity}
 					onViewChange={onViewChange}
 					onSeverityChange={onSeverityChange}
-					excludedValues={excludedValues}
-					onClearExclusions={onClearExclusions}
+					onClearFilters={onClearFilters}
 				/>
 			) : (
 				/* The header labels the columns; it is not one of the items, so it
@@ -458,6 +477,7 @@ function HubList({
 							</div>
 						))}
 					</div>
+					{paging !== undefined ? <HubPagingFooter paging={paging} /> : null}
 				</div>
 			)}
 			<IssuesBulkBar selected={selectedIssues} mutations={mutations} onClear={clearSelection} />
@@ -470,22 +490,23 @@ function HubEmpty({
 	severity,
 	onViewChange,
 	onSeverityChange,
-	excludedValues,
-	onClearExclusions,
+	onClearFilters,
 }: {
 	view: HubView
 	severity: SeverityFilter
 	onViewChange: (view: HubView) => void
 	onSeverityChange: (severity: SeverityFilter) => void
-	excludedValues: ReadonlyArray<string>
-	onClearExclusions: () => void
+	onClearFilters: (() => void) | undefined
 }) {
 	const empty = EMPTY_COPY[view]
 	// A severity filter is the one narrowing the reader can see in the toolbar
 	// and undo from here, so an empty list under one is its own state rather
 	// than the view's all-clear.
 	const filtered = severity !== "all"
-	const Icon = filtered ? MagnifierIcon : empty.icon
+	// Likewise a sidebar filter: an all-clear under one would be a claim about
+	// errors the filter is hiding.
+	const narrowed = filtered || onClearFilters !== undefined
+	const Icon = narrowed ? MagnifierIcon : empty.icon
 
 	return (
 		<Empty className="py-12">
@@ -496,25 +517,36 @@ function HubEmpty({
 				<EmptyTitle>
 					{filtered
 						? `No ${SEVERITY_FILTER_LABEL[severity].toLowerCase()} errors here`
-						: empty.title}
+						: narrowed
+							? "Nothing matches these filters"
+							: empty.title}
 				</EmptyTitle>
 				<EmptyDescription>
 					{filtered
-						? `Nothing in ${VIEW_LABEL[view]} matches that severity in this window. Other severities may have plenty.`
-						: empty.description}
+						? `Nothing in ${VIEW_LABEL[view]} matches that severity. Other severities may have plenty.`
+						: narrowed
+							? `No ${VIEW_LABEL[view].toLowerCase()} errors match the sidebar filters. Clear them to see everything.`
+							: empty.description}
 				</EmptyDescription>
 			</EmptyHeader>
-			{filtered || view !== "all" ? (
+			{filtered || onClearFilters !== undefined || view !== "all" ? (
 				<div className="flex flex-wrap items-center justify-center gap-2">
 					{filtered ? (
 						<Button size="sm" variant="outline" onClick={() => onSeverityChange("all")}>
 							Show all severities
 						</Button>
 					) : null}
+					{/* A sidebar filter is the other narrowing the reader chose, and the
+					    sidebar may be collapsed — so the way out is offered here too. */}
+					{onClearFilters !== undefined ? (
+						<Button size="sm" variant={filtered ? "ghost" : "outline"} onClick={onClearFilters}>
+							Clear filters
+						</Button>
+					) : null}
 					{view !== "all" ? (
 						<Button
 							size="sm"
-							variant={filtered ? "ghost" : "outline"}
+							variant={filtered || onClearFilters !== undefined ? "ghost" : "outline"}
 							onClick={() => onViewChange("all")}
 						>
 							See every error
@@ -522,10 +554,40 @@ function HubEmpty({
 					) : null}
 				</div>
 			) : null}
-			{/* The copy above says "clear the service filters", which an exclusion is
-			    not — it is the filter you cannot see in the results. */}
-			<ExcludedEmptyHint excluded={excludedValues} onClear={onClearExclusions} className="max-w-lg" />
 		</Empty>
+	)
+}
+
+/**
+ * The bottom of a page that is not the bottom of the list.
+ *
+ * Loading draws placeholder rows in the list's own grid rather than a spinner
+ * under a button, so the next page lands where the eye already is. A failed
+ * page says so in place: the rows above it are fine, and a toast would leave
+ * nothing here to retry from.
+ */
+function HubPagingFooter({ paging }: { paging: HubPaging }) {
+	if (paging.state === "end") return null
+
+	if (paging.state === "loading") {
+		return (
+			<div className="divide-y divide-border/40 border-t border-border/40" aria-busy="true">
+				{Array.from({ length: LOAD_MORE_SKELETON_ROWS }).map((_, index) => (
+					<ErrorSignalRowSkeleton key={index} index={index} />
+				))}
+			</div>
+		)
+	}
+
+	return (
+		<div className="flex items-center justify-center gap-3 border-t border-border/40 p-4">
+			{paging.state === "failed" ? (
+				<span className="text-xs text-muted-foreground">More errors could not be loaded.</span>
+			) : null}
+			<Button variant="outline" size="sm" onClick={paging.onLoadMore}>
+				{paging.state === "failed" ? "Retry" : "Load more"}
+			</Button>
+		</div>
 	)
 }
 

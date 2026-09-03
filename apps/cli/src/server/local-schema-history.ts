@@ -164,16 +164,34 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 	Object.freeze({
-		// TODO(v16): what changed, whether any part is rewritten or any row
+		// `ai_trace_index` widened with the sidebar's filter dimensions
+		// (`DeploymentEnv`, `Model`, `AgentName`, `ToolName`) and the per-span
+		// measures the page ranks on (`IsError`, `IsLlmCall`, `IsToolCall`,
+		// `Tokens`, `Cost`, plus `SpanId`/`ParentSpanId`/`Duration`), and
+		// `ai_trace_index_mv` recreated to fill them (ClickHouse migration
+		// 0026). Metadata-only ALTERs plus a view swap — no part is rewritten and
+		// no row moves. Rows materialized under v15 keep ''/0 in the new columns;
+		// nothing is backfilled.
+		//
+		// projectRevision stays the hardcoded constant, as for v12 to v15 — the
+		// identity this gate compares is the fingerprint/digest pair.
+		version: 16,
+		fingerprint: "d975e674ce66af41",
+		digest: "d975e674ce66af417e4398d8ca336d41340c9c1aa7b26082a6c55ecd02effe38",
+		manifestDigest: "f7d559f0db216379db02bc78c4e50f180f40588e124adf65665bf7eaaf556735",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
+	Object.freeze({
+		// TODO(v17): what changed, whether any part is rewritten or any row
 		// moves, and what this edge does NOT backfill.
 		//
 		// projectRevision is carried forward deliberately — it is a hardcoded
 		// constant that no longer tracks the generator's header, and the identity
 		// this gate compares is the fingerprint/digest pair.
-		version: 16,
-		fingerprint: "3cfe5f649a11853a",
-		digest: "3cfe5f649a11853ae87021dfb611b0ef76cbd6be4a597d247fb2dff4e717c59c",
-		manifestDigest: "91ef0f362cc378f3e83dec0cd40065506b36d0447487dab1d0e6887e5c660bad",
+		version: 17,
+		fingerprint: "cf6f38c252f1086e",
+		digest: "cf6f38c252f1086ecadd073ecb4253d21dbd8c86a2873a4013d0ceb282ccee2f",
+		manifestDigest: "82378706ddd9601e1449d5ff74a41a95c50f598cb13f19d53fcffc8168e10d41",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 ] as const)

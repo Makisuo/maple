@@ -965,6 +965,9 @@ const listPodsFilters = (payload: ListPodsRequest) => ({
 	excludedComputeTypes: payload.excludedComputeTypes,
 	workloadKind: payload.workloadKind,
 	workloadName: payload.workloadName,
+	// Lifecycle rides with the filters, not the scope: the denominator has to
+	// count the same slice of the fleet the page is showing.
+	lifecycle: payload.lifecycle,
 })
 
 export const listPods = defineQuery({

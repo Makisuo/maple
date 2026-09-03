@@ -52,6 +52,16 @@ import {
 	PRODUCT_EVENTS_TRACE_PROJECTION_SQL,
 } from "./product-event-attributes"
 import { DEPLOYMENT_ENV_SQL, MESSAGING_DESTINATION_SQL } from "./semconv-renames"
+import {
+	GENAI_AGENT_NAME_SQL,
+	GENAI_COST_SQL,
+	GENAI_IS_ERROR_SQL,
+	GENAI_IS_LLM_CALL_SQL,
+	GENAI_IS_TOOL_CALL_SQL,
+	GENAI_MODEL_SQL,
+	GENAI_TOKENS_SQL,
+	GENAI_TOOL_NAME_SQL,
+} from "./gen-ai-columns"
 import { NORMALIZED_SPAN_NAME_SQL } from "./span-display-name"
 
 /**
@@ -979,10 +989,16 @@ export const traceDetailSpansMv = defineMaterializedView("trace_detail_spans_mv"
  *
  * A missing Map key reads back as `''`, so the single `!= ''` comparison is
  * both the presence check and the non-empty check.
+ *
+ * The GenAI columns coalesce the dialects and classify the span at insert —
+ * the SQL comes from `gen-ai-columns.ts`, so a raw-table read of the same fact
+ * is the same expression. Migration 0026 added them; rows materialized before
+ * it carry `''`/0 throughout, which the facets drop, the filters never match
+ * and the sums count as nothing.
  */
 export const aiTraceIndexMv = defineMaterializedView("ai_trace_index_mv", {
 	description:
-		"Populates ai_trace_index with GenAI agent spans (maple_ai.vendor.id stamped), pre-extracting the maple_ai.* identity to plain columns.",
+		"Populates ai_trace_index with GenAI agent spans (maple_ai.vendor.id stamped), pre-extracting the maple_ai.* identity, the environment, the GenAI model/agent/tool and the span's kind, failure and usage to plain columns.",
 	datasource: aiTraceIndex,
 	nodes: [
 		node({
@@ -994,7 +1010,19 @@ export const aiTraceIndexMv = defineMaterializedView("ai_trace_index_mv", {
           TraceId,
           SpanAttributes['${MAPLE_AI_SESSION_ID_ATTR}'] AS SessionId,
           SpanAttributes['${MAPLE_AI_VENDOR_ID_ATTR}'] AS VendorId,
-          ServiceName
+          ServiceName,
+          ${DEPLOYMENT_ENV_SQL} AS DeploymentEnv,
+          ${GENAI_MODEL_SQL} AS Model,
+          ${GENAI_AGENT_NAME_SQL} AS AgentName,
+          ${GENAI_TOOL_NAME_SQL} AS ToolName,
+          SpanId,
+          ParentSpanId,
+          Duration,
+          ${GENAI_IS_ERROR_SQL} AS IsError,
+          ${GENAI_IS_LLM_CALL_SQL} AS IsLlmCall,
+          ${GENAI_IS_TOOL_CALL_SQL} AS IsToolCall,
+          ${GENAI_TOKENS_SQL} AS Tokens,
+          ${GENAI_COST_SQL} AS Cost
         FROM traces
         WHERE SpanAttributes['${MAPLE_AI_VENDOR_ID_ATTR}'] != ''
       `,

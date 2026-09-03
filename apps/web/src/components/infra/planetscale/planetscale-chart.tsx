@@ -1,7 +1,6 @@
 import { useMemo, type ReactNode } from "react"
 import { d3Curve, defineChart, lineY } from "@tanstack/charts"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
-import { scalePoint } from "@tanstack/charts-scales/point"
 import { curveMonotoneX } from "d3-shape"
 
 import {
@@ -24,10 +23,10 @@ import { cn } from "@maple/ui/lib/utils"
 
 import type { PlanetScaleInfraTimeseriesRow } from "@/api/warehouse/planetscale-infra"
 import { formatNumber } from "@maple/ui/lib/format"
-import { CHART_EMPTY_MESSAGE, makeBucketLabeler } from "../chart-utils"
+import { CHART_EMPTY_MESSAGE, bucketDate, makeBucketAxis } from "../chart-utils"
 import {
 	chartEventMarkerMarks,
-	snapMarkersToBuckets,
+	placeMarkersInWindow,
 	type ChartEventMarker,
 } from "../primitives/chart-event-markers"
 import { formatPercent } from "@maple/ui/lib/format"
@@ -84,9 +83,10 @@ export function PlanetScaleChartLoading({ metric }: { metric: PlanetScaleMetric 
 	)
 }
 
-/** One point: its bucket label, and the metric's value there (null = no sample). */
+/** One point: its bucket, the same as an instant, and the metric's value there (null = no sample). */
 interface MetricPoint {
-	time: string
+	bucket: string
+	date: Date
 	value: number | null
 }
 
@@ -121,18 +121,24 @@ export function PlanetScaleChart({
 		return resolvePlotColor(token, fallback)
 	}, [metric, theme])
 
-	const data = useMemo<MetricPoint[]>(() => {
-		const labeler = makeBucketLabeler(buckets.map((row) => row.bucket))
-		return buckets.map((row) => ({ time: labeler(row.bucket), value: row[metric] }))
-	}, [buckets, metric])
+	const data = useMemo<MetricPoint[]>(
+		() =>
+			buckets.map((row) => ({ bucket: row.bucket, date: bucketDate(row.bucket), value: row[metric] })),
+		[buckets, metric],
+	)
 
-	// The x-axis is categorical (bucket labels), so markers snap by index and
-	// read their label back — see chart-event-markers.
-	const snapped = useMemo(() => {
+	// A time axis over the buckets' instants — see `makeBucketAxis` for why the
+	// label point scale this replaced folded a 24h window onto itself.
+	const axis = useMemo(() => makeBucketAxis(buckets.map((row) => row.bucket)), [buckets])
+
+	// Markers sit at their own instant on that axis; only the window is decided
+	// here — see chart-event-markers.
+	const placed = useMemo(() => {
 		if (markers === undefined || markers.length === 0) return []
-		const isos = buckets.map((row) => row.bucket)
-		const labeler = makeBucketLabeler(isos)
-		return snapMarkersToBuckets(markers, isos, labeler)
+		return placeMarkersInWindow(
+			markers,
+			buckets.map((row) => row.bucket),
+		)
 	}, [markers, buckets])
 
 	// Storage can be null for buckets the volume gauges never reported. Those are
@@ -170,7 +176,7 @@ export function PlanetScaleChart({
 	)
 
 	const definition = useMemo(() => {
-		const at = (point: MetricPoint) => point.time
+		const at = (point: MetricPoint) => point.date
 		// A bucket with no sample is a hole in the data; bridging it would draw a
 		// disk trend that never happened. `null` is what breaks the path — the
 		// equivalent of Recharts' `connectNulls={false}`.
@@ -179,7 +185,7 @@ export function PlanetScaleChart({
 		return defineChart({
 			marks: [
 				dashedGridY(),
-				...chartEventMarkerMarks(snapped, { yDomain }),
+				...chartEventMarkerMarks(placed, { yDomain }),
 				lineY(data, {
 					x: at,
 					y: value,
@@ -191,16 +197,7 @@ export function PlanetScaleChart({
 				focusCrosshair(chromeColors),
 			],
 			scales: {
-				x: {
-					// A POINT scale over the bucket labels: this axis is categorical, which
-					// is also what lets the markers snap by index.
-					scale: scalePoint,
-					axis: {
-						line: false,
-						ticks: { size: 0, padding: 8 },
-						tickLabels: { thin: { minGap: 12 } },
-					},
-				},
+				x: axis.x,
 				y: {
 					scale: scaleLinear().domain(yDomain),
 					axis: {
@@ -221,7 +218,7 @@ export function PlanetScaleChart({
 			focusRing: false,
 			tooltip: cursorTooltip(focusStore.anchor),
 		})
-	}, [data, snapped, yDomain, color, chromeColors, metric, focusStore])
+	}, [data, axis, placed, yDomain, color, chromeColors, metric, focusStore])
 
 	return (
 		<ChartCard
@@ -243,7 +240,7 @@ export function PlanetScaleChart({
 								points={points}
 								series={tooltipSeries}
 								focusStore={focusStore}
-								heading={(point: MetricPoint) => point.time}
+								heading={(point: MetricPoint) => axis.heading(point.bucket)}
 							/>
 						)}
 					/>

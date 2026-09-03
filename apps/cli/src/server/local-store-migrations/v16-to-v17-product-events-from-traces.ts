@@ -10,24 +10,24 @@ import type {
 } from "../local-store-migration-module"
 import { withRawTelemetryRetentionFloor } from "../schema-manifest"
 import {
-	LOCAL_SCHEMA_V15,
-	LOCAL_SCHEMA_V15_MANIFEST,
-	LOCAL_SCHEMA_V15_SQL,
 	LOCAL_SCHEMA_V16,
 	LOCAL_SCHEMA_V16_MANIFEST,
 	LOCAL_SCHEMA_V16_SQL,
+	LOCAL_SCHEMA_V17,
+	LOCAL_SCHEMA_V17_MANIFEST,
+	LOCAL_SCHEMA_V17_SQL,
 } from "../schema-identity"
 import { assertPhysicalSchema } from "../schema-physical"
 
 const RAW_TABLES = RAW_TELEMETRY_TTL_COLUMNS.map(([table]) => table)
 
-const MODULE_ID = "local-0015-to-0016-product-events-from-traces" as const
+const MODULE_ID = "local-0016-to-0017-product-events-from-traces" as const
 
 /**
- * Frozen copy of ClickHouse migration 0026's trace projection. Frozen for the
+ * Frozen copy of ClickHouse migration 0027's trace projection. Frozen for the
  * reason every edge in this directory freezes its SQL: this module describes one
  * step in history, and importing the live projection would silently rewrite what
- * v15 -> v16 did the next time it changes.
+ * v16 -> v17 did the next time it changes.
  */
 const PRODUCT_EVENTS_TRACE_COLUMNS = [
 	"OrgId",
@@ -70,7 +70,7 @@ const PRODUCT_EVENTS_TRACE_PROJECTION_SQL = `OrgId,
 const PRODUCT_EVENTS_TRACE_FILTER = "SpanAttributes['maple.product_event.name'] != ''"
 
 /**
- * The local mirror of ClickHouse migration 0026.
+ * The local mirror of ClickHouse migration 0027.
  *
  * `product_events` gains `TraceId`/`SpanId` (`DEFAULT ''`) and a bloom filter on
  * `TraceId`, and a second view — `product_events_traces_mv` — starts projecting
@@ -96,7 +96,7 @@ const PRODUCT_EVENTS_TRACE_FILTER = "SpanAttributes['maple.product_event.name'] 
  * resume after a crash between them lands in the same place.
  */
 
-interface V15ToV16State {
+interface V16ToV17State {
 	readonly module: typeof MODULE_ID
 	readonly version: 1
 	readonly rawRows: Readonly<Record<string, string>>
@@ -108,7 +108,7 @@ interface V15ToV16State {
  * What `product_events` held before the edge, and what the backfill is expected
  * to add.
  *
- * `existing` is every row already in the table — at v15 none of them can be a
+ * `existing` is every row already in the table — at v16 none of them can be a
  * trace row, because the source did not exist — and is re-checked as an
  * EQUALITY: the backfill must add rows, never disturb one. `expectedTrace` is
  * counted from `traces` under the very filter the backfill uses, so verify
@@ -121,7 +121,7 @@ interface ProductEventRowCounts {
 	readonly expectedTrace: string
 }
 
-interface V15ToV16Progress {
+interface V16ToV17Progress {
 	readonly installed: true
 }
 
@@ -131,41 +131,41 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isCount = (value: unknown): value is string => typeof value === "string" && /^\d+$/.test(value)
 
 const decodeCounts = (value: unknown): Readonly<Record<string, string>> => {
-	if (!isRecord(value)) throw new Error("v15 -> v16 rawRows must be an object")
+	if (!isRecord(value)) throw new Error("v16 -> v17 rawRows must be an object")
 	const counts: Record<string, string> = {}
 	for (const table of RAW_TABLES) {
 		const count = value[table]
-		if (!isCount(count)) throw new Error(`v15 -> v16 rawRows.${table} must be an unsigned decimal string`)
+		if (!isCount(count)) throw new Error(`v16 -> v17 rawRows.${table} must be an unsigned decimal string`)
 		counts[table] = count
 	}
 	if (Object.keys(value).some((table) => !RAW_TABLES.includes(table as (typeof RAW_TABLES)[number])))
-		throw new Error("v15 -> v16 rawRows contains an unknown table")
+		throw new Error("v16 -> v17 rawRows contains an unknown table")
 	return counts
 }
 
 const decodeProductEventRows = (value: unknown): ProductEventRowCounts => {
-	if (!isRecord(value)) throw new Error("v15 -> v16 productEventRows must be an object")
+	if (!isRecord(value)) throw new Error("v16 -> v17 productEventRows must be an object")
 	if (Object.keys(value).some((key) => key !== "existing" && key !== "expectedTrace"))
-		throw new Error("v15 -> v16 productEventRows contains an unknown field")
+		throw new Error("v16 -> v17 productEventRows contains an unknown field")
 	if (!isCount(value.existing))
-		throw new Error("v15 -> v16 productEventRows.existing must be an unsigned decimal string")
+		throw new Error("v16 -> v17 productEventRows.existing must be an unsigned decimal string")
 	if (!isCount(value.expectedTrace))
-		throw new Error("v15 -> v16 productEventRows.expectedTrace must be an unsigned decimal string")
+		throw new Error("v16 -> v17 productEventRows.expectedTrace must be an unsigned decimal string")
 	return { existing: value.existing, expectedTrace: value.expectedTrace }
 }
 
-const decodeState = (value: unknown): V15ToV16State => {
-	if (!isRecord(value)) throw new Error("v15 -> v16 state must be an object")
+const decodeState = (value: unknown): V16ToV17State => {
+	if (!isRecord(value)) throw new Error("v16 -> v17 state must be an object")
 	const allowed = new Set(["module", "version", "rawRows", "productEventRows", "retentionDays"])
 	if (Object.keys(value).some((key) => !allowed.has(key)))
-		throw new Error("v15 -> v16 state contains an unknown field")
+		throw new Error("v16 -> v17 state contains an unknown field")
 	if (value.module !== MODULE_ID || value.version !== 1)
-		throw new Error("v15 -> v16 state has an unsupported module or version")
+		throw new Error("v16 -> v17 state has an unsupported module or version")
 	if (
 		value.retentionDays !== undefined &&
 		(typeof value.retentionDays !== "number" || !Number.isSafeInteger(value.retentionDays))
 	)
-		throw new Error("v15 -> v16 retentionDays must be an integer")
+		throw new Error("v16 -> v17 retentionDays must be an integer")
 	return {
 		module: MODULE_ID,
 		version: 1,
@@ -175,10 +175,10 @@ const decodeState = (value: unknown): V15ToV16State => {
 	}
 }
 
-const decodeProgress = (value: unknown): V15ToV16Progress | undefined => {
+const decodeProgress = (value: unknown): V16ToV17Progress | undefined => {
 	if (value === undefined) return undefined
 	if (!isRecord(value) || Object.keys(value).some((key) => key !== "installed") || value.installed !== true)
-		throw new Error("v15 -> v16 progress is invalid")
+		throw new Error("v16 -> v17 progress is invalid")
 	return { installed: true }
 }
 
@@ -203,7 +203,7 @@ const rawRowCounts = (db: Chdb): Readonly<Record<string, string>> => {
 const scalarCount = (db: Chdb, sql: string): string => {
 	const rows = parseJsonEachRow<{ count: string }>(db.query(sql))
 	const count = rows[0]?.count
-	if (!isCount(count)) throw new Error(`v15 -> v16 count query returned no row: ${sql}`)
+	if (!isCount(count)) throw new Error(`v16 -> v17 count query returned no row: ${sql}`)
 	return count
 }
 
@@ -215,20 +215,20 @@ const productEventRowCounts = (db: Chdb): ProductEventRowCounts => ({
 	),
 })
 
-const expectedManifest = (manifest: typeof LOCAL_SCHEMA_V15_MANIFEST, retentionDays: number | undefined) =>
+const expectedManifest = (manifest: typeof LOCAL_SCHEMA_V16_MANIFEST, retentionDays: number | undefined) =>
 	retentionDays === undefined
 		? manifest
 		: withRawTelemetryRetentionFloor(manifest, RAW_TABLES, retentionDays)
 
-const preflight = async (context: MigrationModuleContext): Promise<V15ToV16State> => {
+const preflight = async (context: MigrationModuleContext): Promise<V16ToV17State> => {
 	await context.ensureCapacity()
 	const retentionDays = readRawTelemetryRetentionDays(context.dataDir)
 	const { rawRows, productEventRows } = await context.openSource(
 		(db) => {
-			assertPhysicalSchema(db, expectedManifest(LOCAL_SCHEMA_V15_MANIFEST, retentionDays))
+			assertPhysicalSchema(db, expectedManifest(LOCAL_SCHEMA_V16_MANIFEST, retentionDays))
 			return { rawRows: rawRowCounts(db), productEventRows: productEventRowCounts(db) }
 		},
-		{ schemaSql: LOCAL_SCHEMA_V15_SQL, bootstrapSchema: false },
+		{ schemaSql: LOCAL_SCHEMA_V16_SQL, bootstrapSchema: false },
 	)
 	return {
 		module: MODULE_ID,
@@ -241,8 +241,8 @@ const preflight = async (context: MigrationModuleContext): Promise<V15ToV16State
 
 const prepareTarget = async (
 	context: MigrationModuleContext,
-	state: V15ToV16State,
-): Promise<V15ToV16State> => {
+	state: V16ToV17State,
+): Promise<V16ToV17State> => {
 	await context.closeStores()
 	const source = resolve(context.sourceDataDir)
 	const target = resolve(context.targetDataDir)
@@ -253,21 +253,21 @@ const prepareTarget = async (
 }
 
 /**
- * The columns, the index AND both view drops happen before the v16 bootstrap, in
- * the v15-schema block. The ordering is load-bearing in both directions:
+ * The columns, the index AND both view drops happen before the v17 bootstrap, in
+ * the v16-schema block. The ordering is load-bearing in both directions:
  *
  *   - `CREATE TABLE IF NOT EXISTS` is a no-op against the cloned store, so the
- *     v15 snapshot alone leaves `product_events` without its two new columns.
+ *     v16 snapshot alone leaves `product_events` without its two new columns.
  *   - `CREATE MATERIALIZED VIEW IF NOT EXISTS` is equally a no-op while the old
  *     view still exists, and a view's SELECT is frozen at creation. Dropping the
  *     views AFTER the bootstrap would delete them outright — the bootstrap has
  *     already skipped them and nothing recreates them.
  *
- * The backfill then runs in the v16 block, after the bootstrap has created both
+ * The backfill then runs in the v17 block, after the bootstrap has created both
  * views. It writes `product_events` directly and the views read `session_events`
  * and `traces`, so nothing double-fires.
  */
-const apply = async (context: MigrationModuleContext): Promise<V15ToV16Progress> => {
+const apply = async (context: MigrationModuleContext): Promise<V16ToV17Progress> => {
 	await context.openTarget(
 		(db) => {
 			db.exec("ALTER TABLE product_events ADD COLUMN IF NOT EXISTS TraceId String DEFAULT ''")
@@ -278,14 +278,14 @@ const apply = async (context: MigrationModuleContext): Promise<V15ToV16Progress>
 			db.exec("DROP VIEW IF EXISTS product_events_traces_mv")
 			db.exec("DROP VIEW IF EXISTS product_events_mv")
 		},
-		{ schemaSql: LOCAL_SCHEMA_V15_SQL, bootstrapSchema: false },
+		{ schemaSql: LOCAL_SCHEMA_V16_SQL, bootstrapSchema: false },
 	)
 	return context.openTarget(
 		(db) => {
-			// Scoped to the backfill's own source window, matching migration 0026:
+			// Scoped to the backfill's own source window, matching migration 0027:
 			// `traces` keeps 30 days and `product_events` 365, so an unbounded
 			// delete would destroy trace rows a late re-run can no longer rebuild.
-			// A v15 store has no trace rows at all — the source did not exist — so
+			// A v16 store has no trace rows at all — the source did not exist — so
 			// this is a no-op on the edge it actually runs on, and correct on any
 			// resume or re-apply that finds some.
 			db.exec(
@@ -296,22 +296,22 @@ const apply = async (context: MigrationModuleContext): Promise<V15ToV16Progress>
 			)
 			return { installed: true } as const
 		},
-		{ schemaSql: LOCAL_SCHEMA_V16_SQL, bootstrapSchema: true },
+		{ schemaSql: LOCAL_SCHEMA_V17_SQL, bootstrapSchema: true },
 	)
 }
 
 const verify = async (
 	context: MigrationModuleContext,
-	state: V15ToV16State,
-	_progress: V15ToV16Progress,
+	state: V16ToV17State,
+	_progress: V16ToV17Progress,
 ): Promise<void> => {
 	await context.openTarget(
 		(db) => {
-			assertPhysicalSchema(db, expectedManifest(LOCAL_SCHEMA_V16_MANIFEST, state.retentionDays))
+			assertPhysicalSchema(db, expectedManifest(LOCAL_SCHEMA_V17_MANIFEST, state.retentionDays))
 			const targetRows = rawRowCounts(db)
 			for (const table of RAW_TABLES) {
 				if (targetRows[table] !== state.rawRows[table])
-					throw new Error(`v15 -> v16 raw telemetry verification failed for ${table}`)
+					throw new Error(`v16 -> v17 raw telemetry verification failed for ${table}`)
 			}
 			// Split rather than a single total: an equality on the pre-existing rows
 			// is what proves the backfill only ADDED, and an equality on the trace
@@ -323,7 +323,7 @@ const verify = async (
 			)
 			if (existing !== state.productEventRows.existing)
 				throw new Error(
-					`v15 -> v16 pre-existing product_events row count changed: expected ${state.productEventRows.existing}, found ${existing}`,
+					`v16 -> v17 pre-existing product_events row count changed: expected ${state.productEventRows.existing}, found ${existing}`,
 				)
 			const backfilled = scalarCount(
 				db,
@@ -331,17 +331,17 @@ const verify = async (
 			)
 			if (backfilled !== state.productEventRows.expectedTrace)
 				throw new Error(
-					`v15 -> v16 backfilled trace product_events row count mismatch: expected ${state.productEventRows.expectedTrace}, found ${backfilled}`,
+					`v16 -> v17 backfilled trace product_events row count mismatch: expected ${state.productEventRows.expectedTrace}, found ${backfilled}`,
 				)
 		},
-		{ schemaSql: LOCAL_SCHEMA_V16_SQL, bootstrapSchema: false },
+		{ schemaSql: LOCAL_SCHEMA_V17_SQL, bootstrapSchema: false },
 	)
 }
 
 const operations: ReadonlyArray<MigrationOperation> = [
 	{
-		id: "clone-v15-store",
-		description: "Clone the stopped v15 store into the staged migration target",
+		id: "clone-v16-store",
+		description: "Clone the stopped v16 store into the staged migration target",
 		requiresQuiescence: true,
 		phase: "target-created",
 	},
@@ -367,9 +367,9 @@ const operations: ReadonlyArray<MigrationOperation> = [
 		phase: "copying",
 	},
 	{
-		id: "verify-v16-schema",
+		id: "verify-v17-schema",
 		description:
-			"Verify the v16 physical schema, retained raw telemetry counts, and that the backfill added exactly the annotated spans and disturbed no existing row",
+			"Verify the v17 physical schema, retained raw telemetry counts, and that the backfill added exactly the annotated spans and disturbed no existing row",
 		requiresQuiescence: true,
 		phase: "copy-verified",
 	},
@@ -380,7 +380,7 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 		name: "local store",
 		classification: "authoritative",
 		disposition: "preserve-exact",
-		guarantee: "The clean stopped v15 store is cloned byte-for-byte before any DDL runs.",
+		guarantee: "The clean stopped v16 store is cloned byte-for-byte before any DDL runs.",
 	},
 	{
 		name: "traces",
@@ -414,16 +414,16 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 	},
 ]
 
-export const v15ToV16ProductEventsFromTracesModule: LocalStoreMigrationModule<
-	V15ToV16State,
-	V15ToV16Progress
+export const v16ToV17ProductEventsFromTracesModule: LocalStoreMigrationModule<
+	V16ToV17State,
+	V16ToV17Progress
 > = {
 	id: MODULE_ID,
 	moduleVersion: 1,
 	description:
 		"Add TraceId/SpanId to product_events and project spans annotated with maple.product_event.name into it, backfilled from retained traces",
-	from: LOCAL_SCHEMA_V15,
-	to: LOCAL_SCHEMA_V16,
+	from: LOCAL_SCHEMA_V16,
+	to: LOCAL_SCHEMA_V17,
 	operations,
 	dispositions,
 	decodeState,

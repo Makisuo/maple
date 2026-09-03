@@ -14,7 +14,7 @@ import { FolderIcon, MagnifierIcon } from "@/components/icons"
 import { KubernetesShell } from "@/components/infra/kubernetes/kubernetes-shell"
 import { PodPeekSheet } from "@/components/infra/kubernetes/pod-peek-sheet"
 import { PodsFilterSidebarView, type PodFilters } from "@/components/infra/k8s-filter-sidebar"
-import { PodTable, PodTableLoading, podKey } from "@/components/infra/pod-table"
+import { PodTable, PodTableLoading, podKey, type PodRow } from "@/components/infra/pod-table"
 import { FleetBand, FleetBandLoading, type FleetBandCell } from "@/components/infra/primitives/fleet-band"
 import { ListToolbar, countLabel } from "@/components/infra/primitives/list-toolbar"
 import { podFilterChips } from "@/lib/infra/pod-filter-chips"
@@ -33,14 +33,19 @@ import {
 const PAGE_SIZE = 50
 const DEFAULT_PRESET = "12h"
 
-/** A one-click scope from the band. `undefined` means the whole fleet. */
-type PodScope = "saturated" | "elevated" | "unbounded" | "stale"
+/**
+ * A one-click scope from the band. `undefined` means the live fleet, which is
+ * what the list shows by default — see `PodLifecycle` in the domain contract.
+ * `ended` is a lifecycle rather than a saturation bucket, but it rides in the
+ * same URL param so the band stays one uniform row of cells.
+ */
+type PodScope = "saturated" | "elevated" | "unbounded" | "ended"
 
 const PodSortKeyParam = Schema.optional(
 	Schema.Literals(["saturation", "cpuUsage", "cpuLimitPct", "memoryLimitPct", "podName", "lastSeen"]),
 )
 const SortDirParam = Schema.optional(Schema.Literals(["asc", "desc"]))
-const ScopeParam = Schema.optional(Schema.Literals(["saturated", "elevated", "unbounded", "stale"]))
+const ScopeParam = Schema.optional(Schema.Literals(["saturated", "elevated", "unbounded", "ended"]))
 
 const podsSearchSchema = Schema.Struct({
 	q: Schema.optional(Schema.String),
@@ -83,7 +88,7 @@ const SCOPE_LABEL: Record<PodScope, string> = {
 	saturated: "at or above 90% of a limit",
 	elevated: "at or above 60% of a limit",
 	unbounded: "running with no limits set",
-	stale: "whose collector has gone quiet",
+	ended: "no longer running",
 } satisfies Record<PodScope, string>
 
 function PodsPage() {
@@ -127,6 +132,8 @@ function PodsPage() {
 	const searchText = search.q ?? ""
 	const debouncedSearch = useDebouncedValue(searchText, 300)
 
+	// "Ended" is the lifecycle dial, not a saturation bucket: the other three
+	// scopes narrow the live fleet, this one swaps which fleet is on screen.
 	const podsResult = useAtomValue(
 		listPodsResultAtom({
 			data: {
@@ -134,7 +141,8 @@ function PodsPage() {
 				endTime,
 				...filters,
 				search: debouncedSearch.trim() || undefined,
-				scope,
+				scope: scope === "ended" ? undefined : scope,
+				lifecycle: scope === "ended" ? "ended" : "live",
 				sortBy,
 				sortDir,
 				limit: PAGE_SIZE,
@@ -182,6 +190,13 @@ function PodsPage() {
 		patchSearch({ sortBy: key, sortDir: key === "podName" ? "asc" : "desc" })
 	}
 
+	// An unfiltered page can come back empty because the fleet is entirely gone
+	// rather than never instrumented — a job that finished, an environment scaled
+	// to zero. The band already knows, so the empty state can stop guessing.
+	const endedPods = Result.builder(summaryResult)
+		.onSuccess((counts) => counts.endedPods)
+		.orElse(() => 0)
+
 	const hasStructuredFilter = Object.values(filters).some((v) => (v?.length ?? 0) > 0)
 	const hasAnyNarrowing = hasStructuredFilter || Boolean(searchText.trim()) || Boolean(scope)
 
@@ -192,6 +207,10 @@ function PodsPage() {
 		.orElse(() => [])
 	const peekIndex = search.peek ? pods.findIndex((pod) => podKey(pod) === search.peek) : -1
 	const peekPod = peekIndex >= 0 ? (pods[peekIndex] ?? null) : null
+	// The rows ↑/↓ would land on, fetched ahead so the step is instant.
+	const peekNeighbors = peekPod
+		? [pods[peekIndex - 1], pods[peekIndex + 1]].filter((row): row is PodRow => row !== undefined)
+		: []
 	// Stepping and closing replace history: walking fifty rows must not leave
 	// fifty entries behind the back button.
 	const stepPeek = (delta: 1 | -1) => {
@@ -249,22 +268,22 @@ function PodsPage() {
 								tone: "warn",
 							},
 							{
-								scope: "stale",
-								label: "Stale collector",
-								hint: ">5m",
-								value: counts.stalePods,
+								scope: "ended",
+								label: "Ended",
+								hint: "not running",
+								value: counts.endedPods,
 								tone: "neutral",
 							},
 						]
 						const healthy = Math.max(
-							counts.totalPods - counts.saturatedPods - counts.elevatedPods,
+							counts.livePods - counts.saturatedPods - counts.elevatedPods,
 							0,
 						)
 						return (
 							<FleetBand
-								total={counts.totalPods}
-								noun="pod"
-								caption="share of the fleet by peak utilization"
+								total={counts.livePods}
+								noun="live pod"
+								caption="share of the live fleet by peak utilization"
 								segments={[
 									{ key: "healthy", count: healthy, className: "bg-muted-foreground/35" },
 									{
@@ -301,12 +320,26 @@ function PodsPage() {
 										<EmptyMedia variant="icon">
 											<FolderIcon size={16} />
 										</EmptyMedia>
-										<EmptyTitle>No pods reporting yet</EmptyTitle>
+										<EmptyTitle>
+											{endedPods > 0
+												? "Nothing running right now"
+												: "No pods reporting yet"}
+										</EmptyTitle>
 										<EmptyDescription>
-											Install the Maple Kubernetes Helm chart so the kubelet stats
-											receiver can start collecting per-pod CPU and memory metrics.
+											{endedPods > 0
+												? `Every pod that reported in this window has since ended. Open the Ended scope to see the ${endedPods.toLocaleString()} that ran.`
+												: "Install the Maple Kubernetes Helm chart so the kubelet stats receiver can start collecting per-pod CPU and memory metrics."}
 										</EmptyDescription>
 									</EmptyHeader>
+									{endedPods > 0 ? (
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => patchSearch({ scope: "ended" })}
+										>
+											Show ended pods
+										</Button>
+									) : null}
 								</Empty>
 							)
 						}
@@ -372,6 +405,7 @@ function PodsPage() {
 			<PodPeekSheet
 				pod={peekPod}
 				position={peekPod ? { index: peekIndex, count: pods.length } : null}
+				neighbors={peekNeighbors}
 				onStep={stepPeek}
 				onClose={() => patchSearch({ peek: undefined }, { replace: true })}
 				startTime={startTime}

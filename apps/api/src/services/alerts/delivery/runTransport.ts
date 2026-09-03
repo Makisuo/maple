@@ -11,7 +11,7 @@ import {
 	type AlertDestinationType,
 } from "@maple/domain/http"
 import { Duration, Effect, Option, Result } from "effect"
-import { safeFetch } from "@/http/url-validator"
+import { safeFetch } from "@maple/safe-fetch"
 import type {
 	EffectTransport,
 	EffectTransportDeps,
