@@ -122,6 +122,14 @@ export const LAB_ENTRIES: ReadonlyArray<LabEntry> = [
 		session: "none",
 	},
 	{
+		path: "/lab/bench/agent-transcript",
+		title: "Agent transcript",
+		description:
+			"The session Transcript view over a synthetic session of `?turns=` turns (default 40) whose tool results run to hundreds of kilobytes — row mount cost and scroll perf, via window.__transcriptBench.",
+		kind: "bench",
+		session: "none",
+	},
+	{
 		path: "/lab/bench/logs",
 		title: "Logs table",
 		description: "The real LogsTableView over 2,000 synthetic rows × 12 chips — hover and scroll perf.",

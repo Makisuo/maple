@@ -3,7 +3,7 @@ import { formatBytes } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 
 import { ArrowDownIcon, ArrowUpIcon, CircleQuestionIcon } from "@/components/icons"
-import { ClampedText } from "./clamped-text"
+import { ClampedText, type ClampLines } from "./clamped-text"
 import { disclosed, useJsonPayload, ViewSwitch } from "./payload-view"
 import { Pill } from "./pill"
 
@@ -34,8 +34,8 @@ export interface ToolIoPayload {
 
 /** Arguments are context and clamp shorter; the result is what the reader
  *  opened the card for, and keeps the twelve-line body of every other payload. */
-const IN_CLAMP = "line-clamp-[8]"
-const OUT_CLAMP = "line-clamp-[14]"
+const IN_CLAMP: ClampLines = 8
+const OUT_CLAMP: ClampLines = 14
 
 const LABEL = "font-medium font-mono text-[10px] uppercase tracking-[0.1em]"
 const META = "font-mono text-[10px] text-muted-foreground"
@@ -92,7 +92,7 @@ export function ToolIo({
 					label="Sent"
 					name="arguments"
 					payload={args}
-					clampClass={IN_CLAMP}
+					clampLines={IN_CLAMP}
 					textKey={`${keyPrefix}:args-text`}
 					openRows={openRows}
 					onToggleRow={onToggleRow}
@@ -108,7 +108,7 @@ export function ToolIo({
 					payload={result}
 					meta={resultMeta}
 					failed={failed}
-					clampClass={OUT_CLAMP}
+					clampLines={OUT_CLAMP}
 					textKey={`${keyPrefix}:result-text`}
 					openRows={openRows}
 					onToggleRow={onToggleRow}
@@ -146,7 +146,7 @@ function IoHalf({
 	payload,
 	meta,
 	failed = false,
-	clampClass,
+	clampLines,
 	textKey,
 	openRows,
 	onToggleRow,
@@ -159,12 +159,12 @@ function IoHalf({
 	payload: ToolIoPayload
 	meta?: string
 	failed?: boolean
-	clampClass: string
+	clampLines: ClampLines
 	textKey: string
 	openRows: ReadonlySet<string>
 	onToggleRow: (key: string) => void
 }) {
-	const { formatted, highlighted } = useJsonPayload(payload.text)
+	const { formatted, isJson } = useJsonPayload(payload.text)
 	const rawKey = `${textKey}:raw`
 	const raw = disclosed(openRows, rawKey, false)
 
@@ -205,7 +205,7 @@ function IoHalf({
 					    The switch only appears where the two differ. */}
 					{payload.text !== "" && (
 						<span className="-my-1 ml-auto flex items-center">
-							{highlighted !== undefined && (
+							{isJson && (
 								<ViewSwitch
 									rendered="json"
 									raw={raw}
@@ -222,9 +222,9 @@ function IoHalf({
 				{payload.text !== "" && (
 					<ClampedText
 						text={raw ? payload.text : formatted}
-						html={raw ? undefined : highlighted}
+						rendering={!raw && isJson ? "json" : "text"}
 						mono
-						clampClass={clampClass}
+						clampLines={clampLines}
 						toneClass={failed ? "text-destructive/90" : undefined}
 						expanded={disclosed(openRows, textKey, false)}
 						onToggleExpanded={() => onToggleRow(textKey)}
