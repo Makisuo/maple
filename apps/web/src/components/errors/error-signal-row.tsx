@@ -1,3 +1,4 @@
+import { useRef } from "react"
 import { Link } from "@tanstack/react-router"
 
 import type { ErrorIssueId } from "@maple/domain/http"
@@ -7,14 +8,14 @@ import { formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 
 import { normalizeTimestampInput } from "@/lib/timezone-format"
-import type { ErrorSignal } from "@/lib/models/error-signal"
+import type { ErrorSignal, SignalState } from "@/lib/models/error-signal"
 import { densifySpark, surgeRatio } from "@/lib/models/error-signal"
 
 import { BranchForkIcon, ChatBubbleIcon } from "@/components/icons"
 
 import { ActorAvatar } from "./actor-chip"
 import { IssueContextMenu } from "./issue-context-menu"
-import { SeverityBadge } from "./severity-badge"
+import { SeverityPicker, StatePicker } from "./issue-pickers"
 import { SignalSpark } from "./signal-spark"
 import { SignalStateChip } from "./signal-state-chip"
 import type { IssueMutations } from "./use-issue-mutations"
@@ -41,28 +42,37 @@ function formatLastSeen(iso: string): string {
 const SURGE_THRESHOLD = 2.5
 
 /**
- * Comment and PR marks for a row. Deliberately muted — they answer "is anyone
- * on this?" without competing with severity and the incident chip, and a row
+ * What is happening around a row: an open incident or a live investigation,
+ * then comment and PR marks. All of it answers "is anyone on this?", and a row
  * nobody has touched draws nothing rather than a line of zeros.
  *
  * They ride at the end of the identity lane rather than in a column of their
  * own. As a column they held 64px on every row to say something about roughly
  * a third of them, and that 64px was taken from the error message — the lane
- * the list is actually read by.
+ * the list is actually read by. The incident mark moved here from the status
+ * lane when that lane became the workflow picker: an incident is a fact about
+ * the error, the status is a decision about it, and one slot could not hold
+ * both — in an org where every open issue has an incident, the decision was
+ * the one that vanished.
  */
 function SignalActivity({
+	state,
 	commentCount,
 	openPullRequestCount,
 	mergedPullRequestCount,
 }: {
+	state: SignalState
 	commentCount: number
 	openPullRequestCount: number
 	mergedPullRequestCount: number
 }) {
 	const prCount = openPullRequestCount + mergedPullRequestCount
-	if (commentCount === 0 && prCount === 0) return null
+	if (state.kind === "workflow" && commentCount === 0 && prCount === 0) return null
 	return (
 		<span className="ml-auto flex shrink-0 items-center gap-2 pl-3">
+			{state.kind !== "workflow" ? (
+				<SignalStateChip state={state} withConfidence={false} compact />
+			) : null}
 			{commentCount > 0 ? (
 				<span
 					className="flex items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
@@ -99,7 +109,7 @@ function SignalActivity({
  * does not.
  */
 const LANE = {
-	severity: "w-[60px] shrink-0",
+	severity: "w-6 shrink-0",
 	/** The lane that grows, and the last one to give ground. Every other lane
 	 *  now switches on at the width where the identity can still afford it —
 	 *  at 600px this row used to truncate `TypeError` to `Type…` while a 56px
@@ -171,8 +181,8 @@ export function ErrorSignalRowSkeleton({ index }: { index: number }) {
 
 	return (
 		<div className={cn(ROW_SHELL, "h-11")} aria-hidden="true">
-			<span className={cn(LANE.severity, "flex items-center")}>
-				<Skeleton className="h-5 w-12 rounded-sm" />
+			<span className={cn(LANE.severity, "flex items-center justify-center")}>
+				<Skeleton className="size-3.5 rounded-sm" />
 			</span>
 			<span className={LANE.identity}>
 				<Skeleton className="h-3.5" style={{ width: identityWidth }} />
@@ -201,6 +211,9 @@ export function ErrorSignalRowSkeleton({ index }: { index: number }) {
 	)
 }
 
+/** The inline pickers a row can have open. One at a time, and only on one row. */
+export type RowPicker = "severity" | "state"
+
 export interface ErrorSignalRowProps {
 	signal: ErrorSignal
 	sparkWindow: { readonly startMs: number; readonly endMs: number; readonly bucketMs: number }
@@ -208,6 +221,10 @@ export interface ErrorSignalRowProps {
 	selected: boolean
 	focused: boolean
 	onFocus: (id: ErrorIssueId) => void
+	/** Which picker is open on this row, if any. Owned by the list so a hotkey
+	 *  on the focused row can open one without the row's button being clicked. */
+	picker: RowPicker | null
+	onPickerChange: (picker: RowPicker | null) => void
 }
 
 /**
@@ -229,8 +246,11 @@ export function ErrorSignalRow({
 	selected,
 	focused,
 	onFocus,
+	picker,
+	onPickerChange,
 }: ErrorSignalRowProps) {
 	const href = `/errors/issues/${signal.id}`
+	const rowRef = useRef<HTMLAnchorElement | null>(null)
 	const dense = densifySpark(signal.spark, sparkWindow)
 	const surge = surgeRatio(dense)
 	const isSurging = surge !== null && surge >= SURGE_THRESHOLD
@@ -243,6 +263,7 @@ export function ErrorSignalRow({
 			onOpenInNewTab={() => window.open(href, "_blank", "noopener,noreferrer")}
 		>
 			<Link
+				ref={rowRef}
 				to="/errors/issues/$issueId"
 				params={{ issueId: signal.id }}
 				data-issue-id={signal.id}
@@ -258,10 +279,13 @@ export function ErrorSignalRow({
 					"transition-colors",
 				)}
 			>
-				<span className={cn(LANE.severity, "flex items-center")}>
-					<SeverityBadge
-						severity={signal.severity}
-						className="h-5 max-w-full truncate px-1.5 text-[10px]"
+				<span className={cn(LANE.severity, "flex items-center justify-center")}>
+					<SeverityPicker
+						value={signal.severity}
+						onChange={(severity) => void mutations.setSeverity(signal.id, severity)}
+						open={picker === "severity"}
+						onOpenChange={(open) => onPickerChange(open ? "severity" : null)}
+						fallbackAnchor={rowRef}
 					/>
 				</span>
 
@@ -286,6 +310,7 @@ export function ErrorSignalRow({
 						</span>
 					) : null}
 					<SignalActivity
+						state={signal.state}
 						commentCount={signal.commentCount}
 						openPullRequestCount={signal.openPullRequestCount}
 						mergedPullRequestCount={signal.mergedPullRequestCount}
@@ -340,7 +365,13 @@ export function ErrorSignalRow({
 				</span>
 
 				<span className={LANE.state}>
-					<SignalStateChip state={signal.state} withConfidence={false} />
+					<StatePicker
+						current={signal.issue.workflowState}
+						onChange={(next) => void mutations.transitionTo(signal.id, next)}
+						open={picker === "state"}
+						onOpenChange={(open) => onPickerChange(open ? "state" : null)}
+						fallbackAnchor={rowRef}
+					/>
 				</span>
 
 				<span className={LANE.actor}>

@@ -6,7 +6,10 @@ import type { V2Investigation } from "@maple/domain/http/v2"
 import type { SignalState } from "@/lib/models/error-signal"
 
 /**
- * The one status slot on an error row.
+ * The one status slot on an error row — the issue header's, now. The list
+ * row's status lane became the workflow picker, so the list only draws this
+ * for the two kinds that are not a workflow state (an open incident, a live
+ * investigation), as a mark beside the error's name.
  *
  * A row used to be able to carry four of these at once — a workflow badge, an
  * "Open incident" pill, a kind badge, and an investigation that was only
@@ -32,12 +35,17 @@ const INVESTIGATION_LABEL = {
 export function SignalStateChip({
 	state,
 	withConfidence = true,
+	compact = false,
 	className,
 }: {
 	state: SignalState
 	/** Inline `· medium` after "Diagnosed". The list row turns it off — its fixed
 	 *  lane cannot fit the suffix on one line, and the tooltip still carries it. */
 	withConfidence?: boolean
+	/** For the list row, whose identity lane this shares with the error message:
+	 *  "Incident" rather than "Open incident", and below `@xl` only the dot —
+	 *  every character here is one the message loses. */
+	compact?: boolean
 	className?: string
 }) {
 	const navigate = useNavigate()
@@ -52,7 +60,9 @@ export function SignalStateChip({
 				title="An incident is open for this error"
 			>
 				<span className="size-1.5 shrink-0 rounded-full bg-destructive" />
-				<span className="truncate">Open incident</span>
+				<span className={cn("truncate", compact && "hidden @xl/page:inline")}>
+					{compact ? "Incident" : "Open incident"}
+				</span>
 			</span>
 		)
 	}
@@ -90,7 +100,7 @@ export function SignalStateChip({
 						isLive && "motion-safe:animate-pulse",
 					)}
 				/>
-				<span className="truncate">{label}</span>
+				<span className={cn("truncate", compact && "hidden @xl/page:inline")}>{label}</span>
 				{withConfidence && state.confidence && state.status === "diagnosed" ? (
 					<span className="text-muted-foreground/60">· {state.confidence}</span>
 				) : null}

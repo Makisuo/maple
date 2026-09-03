@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useReducer } from "react"
+import { useCallback, useMemo, useReducer, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 
 import type { ErrorIssueId, WorkflowState } from "@maple/domain/http"
@@ -10,6 +10,7 @@ import { cn } from "@maple/ui/lib/utils"
 import { CircleCheckIcon, HistoryIcon, MagnifierIcon } from "@/components/icons"
 import { ErrorState } from "@/components/common/error-state"
 import { ListToolbar } from "@/components/common/list-toolbar"
+import { useAppHotkey } from "@/hooks/use-app-hotkey"
 import { useListNavigation } from "@/hooks/use-list-navigation"
 import type { ErrorSignal } from "@/lib/models/error-signal"
 import {
@@ -21,7 +22,7 @@ import {
 	updateIssueSelection,
 } from "@/lib/models/issue-selection"
 
-import { ErrorSignalHeader, ErrorSignalRow, ErrorSignalRowSkeleton } from "./error-signal-row"
+import { ErrorSignalHeader, ErrorSignalRow, ErrorSignalRowSkeleton, type RowPicker } from "./error-signal-row"
 import { IssuesBulkBar } from "./issues-bulk-bar"
 import { SEVERITY_FILL, SEVERITY_ORDER, SeverityDot, severityRank } from "./severity-badge"
 import { useIssueMutations } from "./use-issue-mutations"
@@ -439,6 +440,17 @@ function HubList({
 		scrollTo: (id) => scrollIntoView(id),
 	})
 
+	// One picker open across the whole list. Linear's "s" and "p": the focused
+	// row opens its status or severity picker without a pointer reaching the
+	// button — which may not even be on screen at narrow widths, hence the
+	// row's fallback anchor.
+	const [openPicker, setOpenPicker] = useState<{ id: ErrorIssueId; kind: RowPicker } | null>(null)
+	const openPickerOnFocused = (kind: RowPicker) => {
+		if (focusedId !== null) setOpenPicker({ id: focusedId, kind })
+	}
+	useAppHotkey("issue.status", () => openPickerOnFocused("state"))
+	useAppHotkey("issue.severity", () => openPickerOnFocused("severity"))
+
 	const selectedIssues = useMemo(
 		() =>
 			signals
@@ -473,6 +485,10 @@ function HubList({
 									selected={selectedIds.has(signal.id)}
 									focused={focusedId === signal.id}
 									onFocus={setFocusedId}
+									picker={openPicker?.id === signal.id ? openPicker.kind : null}
+									onPickerChange={(kind) =>
+										setOpenPicker(kind === null ? null : { id: signal.id, kind })
+									}
 								/>
 							</div>
 						))}
