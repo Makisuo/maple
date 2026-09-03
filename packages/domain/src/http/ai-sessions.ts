@@ -10,10 +10,32 @@ import { warehouseReadHttpErrors } from "./warehouse"
 //
 // Backed by the `maple_ai.*` span attributes the ingest gateway stamps at
 // decode time; a session is resolved at trace granularity by
-// `aiSessionListQuery` in the query-engine integrations layer. The Agent
+// `aiSessionPageQuery` (which ranks a page) and `aiSessionListQuery` (which
+// aggregates it) in the query-engine integrations layer. The Agent
 // Sessions page is behind the `agent_tracing` org rollout flag and these
 // shapes exist for it alone, so they live in the internal tier where they can
 // follow the UI.
+
+/** The measures the list can be ordered by; `startTime` is the default. */
+export const AI_SESSION_SORT_KEYS = [
+	"startTime",
+	"durationMs",
+	"cost",
+	"totalTokens",
+	"errorSpanCount",
+	"llmCalls",
+	"toolCalls",
+] as const
+export const AiSessionSortKey = Schema.Literals(AI_SESSION_SORT_KEYS)
+export type AiSessionSortKey = Schema.Schema.Type<typeof AiSessionSortKey>
+
+export const AiSessionSortDir = Schema.Literals(["asc", "desc"])
+export type AiSessionSortDir = Schema.Schema.Type<typeof AiSessionSortDir>
+
+/** A range bound. Every measure the list filters on is non-negative, so a
+ *  negative bound is a malformed request rather than an empty page. */
+const RangeBound = Schema.optional(Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)))
+const CountBound = Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)))
 
 export class ListAiSessionsRequest extends Schema.Class<ListAiSessionsRequest>("ListAiSessionsRequest")({
 	startTime: TinybirdDateTime,
@@ -22,18 +44,51 @@ export class ListAiSessionsRequest extends Schema.Class<ListAiSessionsRequest>("
 		Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 100 })),
 	),
 	/**
-	 * Rows to skip, for the list's infinite scroll. Offset-based like the
-	 * replays list: the page re-runs the aggregation and drops the first `offset`
-	 * sessions, which is fine at the volumes an org's agent traffic reaches
-	 * (~10k index rows a day) and lets the client keep a single ordered list
-	 * without a session-keyed cursor the aggregation cannot cheaply seek to.
+	 * Rows to skip, for the list's infinite scroll. Offset-based like the replays
+	 * list, and applied on the index-only page ranking (`aiSessionPageQuery`),
+	 * which is cheap to re-run at the volumes an org's agent traffic reaches
+	 * (~10k index rows a day). The span aggregation only ever covers the page
+	 * that ranking returned, so the offset costs nothing there.
 	 */
 	offset: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
-	// Both filters land on the session-detection subquery, so `serviceNames`
-	// means "the session-bearing spans came from this service", not "the trace
-	// touched it" — see `aiSessionListQuery`.
+	// The counted filters land on the `ai_trace_index` level of both stages,
+	// one per index column, each as its own per-trace existence test:
+	// `serviceNames` means "some agent span of the trace came from this
+	// service", not "the trace touched it", and a model and a tool given
+	// together are matched by different spans of the trace — see
+	// `aiSessionPageQuery`. Each selects exactly the population its facet
+	// counted.
 	vendorIds: Schema.optional(Schema.Array(Schema.String)),
 	serviceNames: Schema.optional(Schema.Array(Schema.String)),
+	deploymentEnvs: Schema.optional(Schema.Array(Schema.String)),
+	models: Schema.optional(Schema.Array(Schema.String)),
+	agentNames: Schema.optional(Schema.Array(Schema.String)),
+	toolNames: Schema.optional(Schema.Array(Schema.String)),
+	/**
+	 * A session id or trace id, or the leading characters of one, matched as a
+	 * prefix. Bounded because it becomes a `LIKE` pattern against the index —
+	 * no id in either column is anywhere near this long.
+	 */
+	search: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
+	// The session-level filters: applied to the ranked row over the measures
+	// the index carries per agent span, so they have no facet count behind
+	// them. `hasErrors` means a failed agent span; a session whose only error
+	// is on a non-agent span shows the badge but is not matched.
+	hasErrors: Schema.optional(Schema.Boolean),
+	/** Drop the `trace:` sessions — traces whose vendor exposes no session key. */
+	excludeTraceSessions: Schema.optional(Schema.Boolean),
+	durationMinMs: RangeBound,
+	durationMaxMs: RangeBound,
+	costMin: RangeBound,
+	costMax: RangeBound,
+	tokensMin: CountBound,
+	tokensMax: CountBound,
+	llmCallsMin: CountBound,
+	llmCallsMax: CountBound,
+	toolCallsMin: CountBound,
+	toolCallsMax: CountBound,
+	sortBy: Schema.optional(AiSessionSortKey),
+	sortDir: Schema.optional(AiSessionSortDir),
 }) {}
 
 export const AiSessionListItem = Schema.Struct({
@@ -49,6 +104,17 @@ export const AiSessionListItem = Schema.Struct({
 	errorSpanCount: Schema.Number,
 	/** Every service touched by the session's traces. */
 	serviceNames: Schema.Array(Schema.String),
+	/** Every model any agent span of the session ran on, dialects coalesced. */
+	models: Schema.Array(Schema.String),
+	/** Every agent named on any agent span of the session. */
+	agentNames: Schema.Array(Schema.String),
+	llmCalls: Schema.Number,
+	toolCalls: Schema.Number,
+	/** Tokens across every bucket, deepest reporter counted, so the number
+	 *  agrees with the detail page's header. */
+	totalTokens: Schema.Number,
+	/** USD as the instrumentation priced it; 0 where nothing reported a cost. */
+	cost: Schema.Number,
 	/** Warehouse datetime literals, e.g. `2026-08-19 10:33:25.825000000`. */
 	startTime: Schema.String,
 	endTime: Schema.String,
@@ -57,6 +123,18 @@ export const AiSessionListItem = Schema.Struct({
 
 export class ListAiSessionsResponse extends Schema.Class<ListAiSessionsResponse>("ListAiSessionsResponse")({
 	data: Schema.Array(AiSessionListItem),
+	/**
+	 * How many sessions the page RANKED, which `data` can fall short of: the
+	 * ranking reads `ai_trace_index` and the rows read `trace_detail_spans`,
+	 * two materialized views written one after the other from the same insert,
+	 * so the newest session can be ranked a moment before its spans are
+	 * readable. A client paging on `data.length` would take that short page for
+	 * the end of the list and skip nothing but stop scrolling; it should page on
+	 * this instead — the next offset is the sum of `ranked`, and a page is the
+	 * last one when `ranked` is under the limit. Optional only for a client
+	 * built before the field existed.
+	 */
+	ranked: Schema.optionalKey(Schema.Number),
 }) {}
 
 export class ListAiSessionsFacetsRequest extends Schema.Class<ListAiSessionsFacetsRequest>(
@@ -80,6 +158,14 @@ export class ListAiSessionsFacetsResponse extends Schema.Class<ListAiSessionsFac
 	vendors: Schema.Array(AiSessionFacetItem),
 	/** Distinct sessions per service name, matching what `serviceNames` selects. */
 	services: Schema.Array(AiSessionFacetItem),
+	/** …per `deployment.environment(.name)`, matching `deploymentEnvs`. */
+	environments: Schema.Array(AiSessionFacetItem),
+	/** …per model, matching `models`. */
+	models: Schema.Array(AiSessionFacetItem),
+	/** …per agent name, matching `agentNames`. */
+	agents: Schema.Array(AiSessionFacetItem),
+	/** …per tool name, matching `toolNames`. */
+	tools: Schema.Array(AiSessionFacetItem),
 }) {}
 
 export class GetAiSessionSpansRequest extends Schema.Class<GetAiSessionSpansRequest>(

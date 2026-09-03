@@ -1,6 +1,6 @@
 services:
-    # Dev database for `wrangler dev` (the Hyperdrive localConnectionString in
-    # each worker's wrangler.jsonc points here). Port 5499 dodges any host
+    # Dev database for `alchemy dev` (the dev Hyperdrive origin in
+    # apps/api/alchemy.run.ts points here). Port 5499 dodges any host
     # Postgres. vitest does NOT need this — tests run embedded PGlite.
     postgres:
         image: postgres:17-alpine
@@ -21,7 +21,7 @@ services:
             timeout: 3s
             retries: 5
 
-    # ElectricSQL sync service for `wrangler dev`. The apps/api shape proxy
+    # ElectricSQL sync service for local dev. The apps/api shape proxy
     # (/api/sync/shape) points at http://localhost:3473 and is the only thing that
     # talks to it. ELECTRIC_MANUAL_TABLE_PUBLISHING mirrors prod: the publication
     # is owned by a Drizzle migration, not by Electric.

@@ -1100,8 +1100,8 @@ export function slowTracesQuery(opts: SlowTracesOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTimeString("startTime")),
-			$.Timestamp.lte(param.dateTimeString("endTime")),
+			$.Timestamp.gte(param.dateTimeSeconds("startTime")),
+			$.Timestamp.lte(param.dateTimeSeconds("endTime")),
 			CH.when(opts.service, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.environment, (v: string) => $.DeploymentEnv.eq(v)),
 		])
@@ -1347,8 +1347,8 @@ export function traceSummariesQuery(opts: TraceSummariesOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTimeString("startTime")),
-			$.Timestamp.lte(param.dateTimeString("endTime")),
+			$.Timestamp.gte(param.dateTimeSeconds("startTime")),
+			$.Timestamp.lte(param.dateTimeSeconds("endTime")),
 			matchingTraceIds ? subqueryCond(matchingTraceIds, (sql) => `TraceId IN (${sql})`) : undefined,
 			opts.cursor
 				? $.Timestamp.lt(opts.cursor.timestamp).or(
@@ -1558,8 +1558,8 @@ function traceListMvWhereConditions(
 	const spanNames = inclusionValues(opts.spanName, opts.spanNames)
 	const conditions: Array<CH.Condition | undefined> = [
 		$.OrgId.eq(param.string("orgId")),
-		$.Timestamp.gte(param.dateTimeString("startTime")),
-		$.Timestamp.lte(param.dateTimeString("endTime")),
+		$.Timestamp.gte(param.dateTimeSeconds("startTime")),
+		$.Timestamp.lte(param.dateTimeSeconds("endTime")),
 		CH.when(services, (v: readonly string[]) =>
 			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),
@@ -1806,8 +1806,8 @@ export function traceServicesByTraceIdsQuery(opts: TraceServicesByTraceIdsOpts) 
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.TraceId.in_(...opts.traceIds),
-			$.Timestamp.gte(param.dateTimeString("startTime")),
-			$.Timestamp.lte(param.dateTimeString("endTime")),
+			$.Timestamp.gte(param.dateTimeSeconds("startTime")),
+			$.Timestamp.lte(param.dateTimeSeconds("endTime")),
 		])
 		.groupBy("traceId")
 		.limit(opts.traceIds.length)

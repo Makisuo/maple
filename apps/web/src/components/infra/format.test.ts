@@ -13,12 +13,12 @@ describe("deriveHostStatus", () => {
 		expect(deriveHostStatus("2026-04-24T11:58:30Z", now)).toBe("idle")
 	})
 
-	it("returns down when last-seen is older than 10x scrape interval", () => {
-		expect(deriveHostStatus("2026-04-24T11:55:00Z", now)).toBe("down")
+	it("returns ended when last-seen is older than 10x scrape interval", () => {
+		expect(deriveHostStatus("2026-04-24T11:55:00Z", now)).toBe("ended")
 	})
 
-	it("returns down for a malformed ISO string", () => {
-		expect(deriveHostStatus("not-a-date", now)).toBe("down")
+	it("returns ended for a malformed ISO string", () => {
+		expect(deriveHostStatus("not-a-date", now)).toBe("ended")
 	})
 })
 

@@ -29,6 +29,8 @@ import {
 	LOCAL_SCHEMA_V13,
 	LOCAL_SCHEMA_V13_MANIFEST,
 	LOCAL_SCHEMA_V14,
+	LOCAL_SCHEMA_V15,
+	LOCAL_SCHEMA_V16,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -76,16 +78,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v14 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("c46a599e1bfe417c")
-		expect(SCHEMA_DIGEST).toBe("c46a599e1bfe417c1e6f50d123779c6ca9c5f5f375ef9c6fe329c8a9676e3b5b")
+	it("matches the generated v16 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("d975e674ce66af41")
+		expect(SCHEMA_DIGEST).toBe("d975e674ce66af417e4398d8ca336d41340c9c1aa7b26082a6c55ecd02effe38")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(14)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V14)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(16)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V16)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -310,6 +312,8 @@ describe("local migration registry", () => {
 			"local-0011-to-0012-service-map-edge-quantiles",
 			"local-0012-to-0013-service-operations-discriminators",
 			"local-0013-to-0014-ai-trace-index",
+			"local-0014-to-0015-commit-sha-vcs-revision",
+			"local-0015-to-0016-ai-trace-index-filter-columns",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
@@ -356,7 +360,7 @@ describe("local migration registry", () => {
 				// One past the current tip — bump alongside LOCAL_SCHEMA_VERSION, or this
 				// stops testing the future-store guard and starts testing the
 				// unknown-fingerprint one.
-				{ ...CURRENT_LOCAL_SCHEMA, version: 15, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 17, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)
@@ -1359,6 +1363,8 @@ describe("v10 -> v11 product events module", () => {
 			"local-0011-to-0012-service-map-edge-quantiles",
 			"local-0012-to-0013-service-operations-discriminators",
 			"local-0013-to-0014-ai-trace-index",
+			"local-0014-to-0015-commit-sha-vcs-revision",
+			"local-0015-to-0016-ai-trace-index-filter-columns",
 		])
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V11)
 		// The dropped table is declared, and the backfilled ones say what they

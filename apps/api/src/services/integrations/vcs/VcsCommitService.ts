@@ -22,7 +22,7 @@ import { VcsRepository } from "./VcsRepository"
 // `VcsProviderClient` obtained from the registry; it never imports a provider
 // module. Adding a provider needs no change here.
 //
-// The SHA comes from telemetry (`deployment.commit_sha`) and carries no repo
+// The SHA comes from telemetry (`vcs.ref.head.revision`) and carries no repo
 // association, so resolution is by SHA across the whole org:
 //   1. stored?  → return the DB row (the common, fast path)
 //   2. else     → probe each connected repo via `provider.fetchCommit` until one

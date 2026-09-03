@@ -50,7 +50,7 @@ export function ErrorsLab() {
 	const fixture = useMemo(() => buildErrorsLabFixture(nowMs), [nowMs])
 
 	const [view, setView] = useState<HubView>("open")
-	const [sort, setSort] = useState<HubSort>("volume")
+	const [sort, setSort] = useState<HubSort>("last_seen")
 	const [severity, setSeverity] = useState<SeverityFilter>("all")
 	const [state, setState] = useState<LabState>("ready")
 	const [width, setWidth] = useState<number | null>(null)
@@ -100,7 +100,6 @@ export function ErrorsLab() {
 								onSortChange={setSort}
 								onSeverityChange={setSeverity}
 								stats={<LabStatStrip summary={fixture.summary} />}
-								onClearExclusions={() => undefined}
 								onRetry={() => setState("ready")}
 							/>
 						</div>

@@ -47,13 +47,6 @@ import {
 /** Why a lane exists, which is also how its header reads. */
 export type LaneKind = "lane" | "subagent"
 
-/** A note the transcript makes about itself — never about the agent's work. */
-export type TranscriptNoteKind =
-	/** No message content anywhere in this session (or in this turn). */
-	| "capture-off"
-	/** The emitting service changed and so did what it records. */
-	| "capture-boundary"
-
 export type TranscriptDividerKind = "compaction" | "truncated"
 
 /** Which halves of a call an emitter records. Mixed sessions have several. */
@@ -252,6 +245,34 @@ export interface TranscriptInput {
 const CAPTURE_BANNER_THRESHOLD = 0.5
 
 export function buildTranscript(input: TranscriptInput): readonly TranscriptRow[] {
+	return assembleTranscript(prepareTranscript(input), input)
+}
+
+/** What the read of the session takes: everything but the two inputs a
+ *  reader flips row by row, which only `assembleTranscript` sees. */
+export type PrepareInput = Omit<TranscriptInput, "collapsedTurns" | "truncated">
+
+/** The session read once: every turn's rows, and the session-wide facts the
+ *  assembly needs to order them. */
+export interface PreparedTranscript {
+	readonly turnRows: readonly TurnRows[]
+	/** Parallel-turn markers by the turn that opens each cluster. */
+	readonly concurrent: ReadonlyMap<string, TranscriptRow | undefined>
+	readonly filtering: boolean
+	/** Capture is the exception this session, so one banner says so up top. */
+	readonly bannerUp: boolean
+	readonly capturedCalls: number
+	readonly anyAiActivity: boolean
+}
+
+/**
+ * The expensive half of the build — a JSON parse per captured span, then the
+ * forest walk, for every turn — done once per session and filter. Collapsing
+ * a turn changes which rows are EMITTED, not what they are, so it re-runs only
+ * `assembleTranscript`: on a session of megabytes that is the difference
+ * between a click and a stall.
+ */
+export function prepareTranscript(input: PrepareInput): PreparedTranscript {
 	// `classifyAiSpan` re-reads the same attributes every time the build asks
 	// what a span is, and a build asks five to eight times per span. One cache
 	// for the whole build, alongside the per-turn message cache.
@@ -279,6 +300,14 @@ export function buildTranscript(input: TranscriptInput): readonly TranscriptRow[
 	// have agent work keeps placeholders for the turns without it.
 	const anyAiActivity = turnRows.some((entry) => entry.aiSpanCount > 0)
 
+	return { turnRows, concurrent, filtering, bannerUp, capturedCalls, anyAiActivity }
+}
+
+/** The cheap half: the row list, in order, for what the reader has open. */
+export function assembleTranscript(
+	{ turnRows, concurrent, filtering, bannerUp, capturedCalls, anyAiActivity }: PreparedTranscript,
+	{ collapsedTurns, truncated }: Pick<TranscriptInput, "collapsedTurns" | "truncated">,
+): readonly TranscriptRow[] {
 	const body: TranscriptRow[] = []
 	for (const entry of turnRows) {
 		// The fallback turn partition is one turn per trace, so a session of pure
@@ -318,7 +347,7 @@ export function buildTranscript(input: TranscriptInput): readonly TranscriptRow[
 				anyCaptured: false,
 			})
 		}
-		if (!input.collapsedTurns.has(entry.turn.id)) {
+		if (!collapsedTurns.has(entry.turn.id)) {
 			body.push(
 				...(indent === 0
 					? entry.rows
@@ -346,7 +375,7 @@ export function buildTranscript(input: TranscriptInput): readonly TranscriptRow[
 
 	// Truncation drops the END of the session, so the divider is terminal and
 	// unconditional: it says where the reading stops, not where the agent did.
-	if (input.truncated) {
+	if (truncated) {
 		rows.push({
 			kind: "divider",
 			key: "divider:truncated",
@@ -373,7 +402,7 @@ interface TurnRows {
 
 function buildTurn(
 	turn: SessionTurn,
-	input: TranscriptInput,
+	input: PrepareInput,
 	categoryOf: (span: AiSessionSpan) => AiSpanCategory,
 ): TurnRows {
 	// Non-AI spans are the app's own HTTP/DB work sharing the agent's traces and
@@ -395,15 +424,6 @@ function buildTurn(
 		toolNames: distinct(
 			toolSpans.map((span) => span.genAi.toolName).filter((name): name is string => name !== undefined),
 		),
-	}
-
-	// A collapsed turn renders its header and nothing else, so none of the work
-	// below — a JSON parse per captured span, then the forest walk — would ever
-	// reach the page. With a filter on it does reach it: the filter decides
-	// whether the header itself survives, and that is read off the rows.
-	const filtering = input.query.trim() !== ""
-	if (input.collapsedTurns.has(turn.id) && !filtering) {
-		return { turn, header, rows: [], llmSpans, aiSpanCount: spans.length }
 	}
 
 	// `spanMessages` re-walks the captured JSON on every call and a turn asks for
@@ -451,7 +471,7 @@ function buildTurn(
 
 interface TurnContext {
 	readonly turn: SessionTurn
-	readonly input: TranscriptInput
+	readonly input: PrepareInput
 	/** Per-turn cache over `spanMessages` — the captured JSON is parsed once. */
 	readonly messagesOf: (span: AiSessionSpan) => readonly SpanMessage[]
 	/** Per-build cache over `classifyAiSpan`. */

@@ -25,7 +25,7 @@ Tag every span with these and you get per-environment and per-version slices for
 | ----------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------- |
 | `deployment.environment.name` | `production` | The current OTel key. Filterable everywhere; per-env throughput / latency / error rate; environment chips in span detail. |
 | `deployment.environment`      | `production` | The deprecated spelling of the same attribute. Read everywhere the `.name` key is, so older instrumentation keeps working. |
-| `deployment.commit_sha`       | `c0b92f68`   | Per-version metrics in service overview; exposed as the `commit_sha` discovery facet so you can pivot by deploy. |
+| `vcs.ref.head.revision`       | `c0b92f68…`  | The commit a service was built from. Release markers, the deploy list and per-version metrics in service overview; exposed as the `commit_sha` discovery facet so you can pivot by deploy. (`deployment.commit_sha`, Maple's former vendor key, is retired and no longer read.) |
 
 OpenTelemetry renamed this attribute (`deployment.environment` → `deployment.environment.name`); Maple reads whichever one your spans carry, preferring `.name` when both are present, so emitting either is fine. Maple's own SDKs dual-emit both. The same holds for `messaging.destination` → `messaging.destination.name` on messaging spans. In the search bar, `env`, `environment`, and `commit_sha` are short aliases — see [Filter aliases](#filter-aliases) below.
 
@@ -301,7 +301,7 @@ In Maple's WHERE-clause search bar (trace list, log search, dashboard widgets), 
 | `service`            | `service.name`                                     |
 | `span`               | `span.name`                                        |
 | `environment`, `env` | `deployment.environment`                           |
-| `commit_sha`         | `deployment.commit_sha`                            |
+| `commit_sha`, `deployment.commit_sha` | `vcs.ref.head.revision`                         |
 | `root.only`          | `root_only` (synthetic boolean — root spans only)  |
 | `errors_only`        | `has_error` (synthetic boolean — error spans only) |
 

@@ -109,7 +109,11 @@ export function setupTracing(config: ResolvedConfig): () => Promise<void> {
 	}
 	if (config.serviceVersion) {
 		attributes[ATTR_SERVICE_VERSION] = config.serviceVersion
-		attributes["deployment.commit_sha"] = config.serviceVersion
+		// A semver release string belongs in `service.version` but not in
+		// `vcs.*` — only a SHA-shaped value is stamped as the head revision.
+		if (/^[0-9a-f]{7,40}$/i.test(config.serviceVersion)) {
+			attributes["vcs.ref.head.revision"] = config.serviceVersion
+		}
 	}
 	if (config.environment) {
 		// Dual-emit: legacy key (pre-extracted by Tinybird MVs) + the canonical

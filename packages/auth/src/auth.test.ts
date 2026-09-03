@@ -1168,9 +1168,12 @@ describe(`${ORG_SELECTION_HEADER} (organization selection)`, () => {
 		}),
 	)
 
-	it.effect("rejects the header when MAPLE_ORG_ID_OVERRIDE pins the deployment", () =>
+	it.effect("ignores the selection header when MAPLE_ORG_ID_OVERRIDE pins the deployment", () =>
 		Effect.gen(function* () {
-			const membership = verifier([{ orgId: "org_other", role: "org:admin" }])
+			const membership = verifier([
+				{ orgId: "org_pinned", role: "org:member" },
+				{ orgId: "org_other", role: "org:admin" },
+			])
 			const resolveTenant = makeResolveTenant(
 				{ ...clerkEnv, MAPLE_ORG_ID_OVERRIDE: Option.some("org_pinned") },
 				clerkAuth(),
@@ -1178,14 +1181,12 @@ describe(`${ORG_SELECTION_HEADER} (organization selection)`, () => {
 				membership.verify,
 			)
 
-			const exit = yield* Effect.exit(
-				resolveTenant({
-					authorization: "Bearer test-token",
-					[ORG_SELECTION_HEADER]: "org_other",
-				}),
-			)
+			const tenant = yield* resolveTenant({
+				authorization: "Bearer test-token",
+				[ORG_SELECTION_HEADER]: "org_other",
+			})
 
-			assertDenied(exit)
+			assert.strictEqual(tenant.orgId, asOrgId("org_pinned"))
 		}),
 	)
 
@@ -1212,7 +1213,7 @@ describe(`${ORG_SELECTION_HEADER} (organization selection)`, () => {
 		}),
 	)
 
-	it.effect("MAPLE_ORG_ID_OVERRIDE refuses an org the user is not a member of", () =>
+	it.effect("MAPLE_ORG_ID_OVERRIDE refuses a non-member outside development", () =>
 		Effect.gen(function* () {
 			const membership = verifier([])
 			const resolveTenant = makeResolveTenant(
@@ -1226,8 +1227,32 @@ describe(`${ORG_SELECTION_HEADER} (organization selection)`, () => {
 		}),
 	)
 
-	// No membership directory wired (MCP, electric-sync): the pin still selects
-	// the organization, but it can prove nothing, so it confers no role.
+	it.effect("MAPLE_ORG_ID_OVERRIDE keeps a non-member's session role in development", () =>
+		Effect.gen(function* () {
+			const membership = verifier([])
+			const resolveTenant = makeResolveTenant(
+				{
+					...clerkEnv,
+					MAPLE_ORG_ID_OVERRIDE: Option.some("org_pinned"),
+					MAPLE_ENVIRONMENT: "development",
+				},
+				clerkAuth(),
+				undefined,
+				membership.verify,
+			)
+
+			const tenant = yield* resolveTenant({ authorization: "Bearer test-token" })
+
+			assert.deepStrictEqual(tenant, {
+				orgId: asOrgId("org_pinned"),
+				roles: [asRoleName("org:admin")],
+				userId: asUserId("user_123"),
+				authMode: "clerk",
+			})
+		}),
+	)
+
+	// No membership directory wired (MCP, electric-sync): the pin can prove nothing, so no role.
 	it.effect("MAPLE_ORG_ID_OVERRIDE confers no role without a verifier", () =>
 		Effect.gen(function* () {
 			const resolveTenant = makeResolveTenant(

@@ -174,8 +174,8 @@ export const auditSamplingRowSchema = Schema.Struct({
  * sampling-extrapolated `EstimatedSpanCount`, so it is the only cheap source for a service's
  * effective sample weight — the input to "these services disagree about how much they sample".
  *
- * `CommitSha` is pre-extracted from `deployment.commit_sha`, NOT `vcs.ref.head.revision`. It is a
- * per-service proxy for release tagging; the authoritative resource-key coverage comes from A2.
+ * `CommitSha` is pre-extracted from `vcs.ref.head.revision`. It is a per-service proxy for release
+ * tagging; the authoritative resource-key coverage comes from A2.
  */
 export function auditSamplingByServiceQuery(opts: { limit?: number } = {}) {
 	return from(ServiceOverviewHourly)

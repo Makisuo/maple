@@ -66,7 +66,7 @@ export function estimateLabelWidth(label: string, commitCount: number): number {
 
 // A 40-hex git sha → its 7-char short form (git's own convention, narrow enough to
 // stay readable and let neighbouring deploys keep their own labels). Anything else
-// (tag, version, arbitrary `deployment.commit_sha`) is already a meaningful short id
+// (tag, version, arbitrary `vcs.ref.head.revision`) is already a meaningful short id
 // and is shown verbatim — the renderer CSS-truncates only if it's genuinely too long.
 function shortLabel(sha: string): string {
 	return /^[0-9a-f]{40}$/i.test(sha) ? sha.slice(0, 7) : sha

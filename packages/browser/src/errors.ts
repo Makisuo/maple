@@ -87,8 +87,12 @@ export function setupErrorCapture(): () => void {
 			name: "browser.uncaught_error",
 			attributes: {
 				"maple.exception.source": "window.onerror",
-				...(event.filename ? { "code.filepath": event.filename } : undefined),
-				...(event.lineno ? { "code.lineno": event.lineno } : undefined),
+				// `code.file.path` / `code.line.number` since semconv v1.34.0. Nothing
+				// reads the names they replaced, so they are dropped rather than
+				// dual-emitted — carrying both would put four near-identical rows on
+				// every uncaught error in the attribute list.
+				...(event.filename ? { "code.file.path": event.filename } : undefined),
+				...(event.lineno ? { "code.line.number": event.lineno } : undefined),
 			},
 		})
 	}

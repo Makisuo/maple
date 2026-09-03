@@ -9,6 +9,7 @@
         "@effect/platform-node": "4.0.0-rc.111",
         "@effect/tsgo": "0.36.4",
         "@effect/vitest": "catalog:effect",
+        "@maple/alchemy-portless": "workspace:*",
         "@maple/infra": "workspace:*",
         "@oxlint/plugins": "1.77.0",
         "@tinybirdco/sdk": "catalog:tinybird",
@@ -40,7 +41,6 @@
         "@types/node": "catalog:tooling",
         "typescript": "catalog:tooling",
         "vitest": "catalog:",
-        "wrangler": "^4.118.0",
       },
     },
     "apps/api": {
@@ -63,6 +63,7 @@
         "@maple/query-engine": "workspace:*",
         "@maple/query-engine-integrations": "workspace:*",
         "@maple/query-model": "workspace:*",
+        "@maple/safe-fetch": "workspace:*",
         "@maple/widgets": "workspace:*",
         "@opencode-ai/ai": "0.0.0-beta-18050",
         "@tinybirdco/sdk": "catalog:tinybird",
@@ -114,17 +115,16 @@
         "@maple/auth": "workspace:*",
         "@maple/domain": "workspace:*",
         "@maple/effect-cloudflare": "workspace:*",
+        "@maple/infra": "workspace:*",
         "effect": "catalog:effect",
       },
       "devDependencies": {
         "@cloudflare/workers-types": "4.20260603.1",
         "@effect/language-service": "catalog:effect",
         "@effect/vitest": "catalog:effect",
-        "@maple/infra": "workspace:*",
         "@types/node": "catalog:tooling",
         "typescript": "catalog:tooling",
         "vitest": "catalog:",
-        "wrangler": "^4.118.0",
       },
     },
     "apps/ingest": {
@@ -203,6 +203,7 @@
         "@effect/platform-bun": "catalog:effect",
         "@maple-dev/effect-sdk": "workspace:*",
         "@maple/domain": "workspace:*",
+        "@maple/safe-fetch": "workspace:*",
         "effect": "catalog:effect",
       },
       "devDependencies": {
@@ -328,6 +329,19 @@
         "vite": "catalog:",
       },
     },
+    "lib/alchemy-portless": {
+      "name": "@maple/alchemy-portless",
+      "dependencies": {
+        "alchemy": "2.0.0-beta.74",
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@effect/language-service": "catalog:effect",
+        "@types/node": "catalog:tooling",
+        "typescript": "catalog:tooling",
+        "vitest": "catalog:",
+      },
+    },
     "lib/cache": {
       "name": "@maple/cache",
       "dependencies": {
@@ -417,6 +431,19 @@
       },
       "peerDependencies": {
         "@opentelemetry/api": ">=1.9.0",
+      },
+    },
+    "lib/safe-fetch": {
+      "name": "@maple/safe-fetch",
+      "dependencies": {
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@effect/language-service": "catalog:effect",
+        "@effect/vitest": "catalog:effect",
+        "@types/node": "catalog:tooling",
+        "typescript": "catalog:tooling",
+        "vitest": "catalog:",
       },
     },
     "lib/thinking-orbs": {
@@ -599,7 +626,9 @@
     "packages/infra": {
       "name": "@maple/infra",
       "dependencies": {
+        "@maple/alchemy-portless": "workspace:*",
         "@maple/effect-cloudflare": "workspace:*",
+        "alchemy": "2.0.0-beta.74",
         "effect": "catalog:effect",
       },
       "devDependencies": {
@@ -1318,6 +1347,8 @@
 
     "@maple-examples/effect-todo": ["@maple-examples/effect-todo@workspace:examples/effect-todo"],
 
+    "@maple/alchemy-portless": ["@maple/alchemy-portless@workspace:lib/alchemy-portless"],
+
     "@maple/alerting": ["@maple/alerting@workspace:apps/alerting"],
 
     "@maple/api": ["@maple/api@workspace:apps/api"],
@@ -1361,6 +1392,8 @@
     "@maple/query-engine-integrations": ["@maple/query-engine-integrations@workspace:packages/query-engine-integrations"],
 
     "@maple/query-model": ["@maple/query-model@workspace:packages/query-model"],
+
+    "@maple/safe-fetch": ["@maple/safe-fetch@workspace:lib/safe-fetch"],
 
     "@maple/scraper": ["@maple/scraper@workspace:apps/scraper"],
 

@@ -1,6 +1,6 @@
 import { assert, describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { safeFetch, UrlValidationError, validateExternalUrl, validateExternalUrlSync } from "./url-validator"
+import { safeFetch, UrlValidationError, validateExternalUrl, validateExternalUrlSync } from "./index"
 
 describe("validateExternalUrlSync", () => {
 	it("accepts public https URLs", () => {
