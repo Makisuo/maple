@@ -392,6 +392,26 @@ lookup.
    Blocked on the same manual step the rest of this document's checklist is — see
    `project_product_events_tinybird_rollout_pending`.
 
+   **The `FORWARD_QUERY` on `product_events` is what makes this deploy safe, and it is not
+   optional.** Adding two defaulted columns is *not* a free change here: without the forward query
+   Tinybird satisfies the new schema by rebuilding the table from the datasources that feed it, and
+   both (`session_events`, `traces`) keep 30 days against `product_events`' 365. It says so and
+   proceeds anyway —
+
+   > it is going to be backfilled using the following datasources which would lead to a deleting
+   > historical data
+
+   — which on this dual-fed table is worse than it sounds: the server and mobile rows arrive by
+   `POST /v1/events` and have **no source datasource at all**, so a rebuild drops them at every age,
+   not just past 30 days. Verified against a real deploy, not inferred.
+
+   Two traps around it. `DEPLOYMENT_METHOD alter` on `product_events_mv` does **not** substitute —
+   tested, and the same data-loss warning returns, because it is the datasource schema change that
+   triggers the source backfill, not the view's. And once the forward query is in place Tinybird
+   suggests the inverse ("could be applied with ALTER TABLE and no data movement at promotion time
+   if you remove the FORWARD_QUERY"); following that suggestion reintroduces the loss. Per the
+   Tinybird rules the forward query can be deleted in a *later* deploy, once this one has compacted.
+
    **The populate is one-shot and overlap-prone.** Unlike BYO and local, the managed surface has no
    `DELETE WHERE Source = 'trace'` step, so running it twice double-inserts, and running it after
    the MV is already live double-counts every annotated span ingested between MV creation and the

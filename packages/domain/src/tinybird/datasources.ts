@@ -2298,6 +2298,36 @@ export const productEvents = defineDatasource("product_events", {
 		/** The annotated span within {@link TraceId}. `''` on non-trace rows. */
 		SpanId: t.string().default(""),
 	},
+	// REQUIRED, and proven so against a real deploy rather than assumed.
+	//
+	// Without it Tinybird satisfies the two added columns by REBUILDING this
+	// table from the datasources that feed it, and both of them keep 30 days
+	// against this table's 365: "it is going to be backfilled using the
+	// following datasources which would lead to a deleting historical data —
+	// 'session_events' … 'traces'". It says that as a WARNING and proceeds.
+	//
+	// Worse than the warning states, because `product_events` is DUAL-FED: the
+	// server and mobile rows arrive by `POST /v1/events` and have no source
+	// datasource at all, so a rebuild drops them at every age, not just past 30
+	// days. A forward query reads EXISTING rows through this SELECT instead —
+	// no source replay, nothing lost — until the next deploy compacts them.
+	//
+	// `DEPLOYMENT_METHOD alter` on `product_events_mv` does NOT substitute for
+	// this. Tested: with alter and no forward query the same data-loss warning
+	// comes back, because it is the DATASOURCE schema change that triggers the
+	// source backfill, not the view's. Tinybird also suggests the inverse once
+	// the forward query is present ("could be applied with ALTER TABLE … if you
+	// remove the FORWARD_QUERY") — following that suggestion reintroduces the
+	// loss, so do not.
+	//
+	// Every column must be listed; that is the format. The two new ones take
+	// their type default, matching what the BYO `ALTER TABLE … ADD COLUMN` and
+	// the local v16->v17 edge give existing rows.
+	forwardQuery: `SELECT
+		OrgId, Timestamp, Source, SessionId, Seq, VisitorId, UserId, GroupId, Kind, EventName,
+		Host, PagePath, Url, ServiceName, Attributes,
+		defaultValueOfTypeName('String') AS TraceId,
+		defaultValueOfTypeName('String') AS SpanId`,
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",
 		sortingKey: ["OrgId", "Timestamp", "VisitorId", "SessionId", "Seq"],
