@@ -36,13 +36,14 @@ import {
 	type QuerySpec,
 	type WarehouseQueryName,
 } from "@maple/domain"
-import { baselineWarehouseCapabilities, type WarehouseCapabilities } from "./capabilities"
-import * as CH from "./ch"
-import { builderFixtures } from "./ch/builder-fixtures"
-import { compilePipeQuery } from "./ch/pipe-dispatch"
-import { compiledQueryOf } from "./execution/compiled-input"
-import { fingerprintSql } from "./execution/fingerprint"
-import { makeQueryEngineExecute, type QueryEngineWarehouse, type QueryTenant } from "./runtime"
+import { baselineWarehouseCapabilities, type WarehouseCapabilities } from "../capabilities"
+import * as CH from "../ch"
+import { builderFixtures } from "./builders"
+import { compilePipeQuery } from "../ch/pipe-dispatch"
+import { compiledQueryOf } from "../execution/compiled-input"
+import { fingerprintSql } from "../execution/fingerprint"
+import { makeQueryEngineExecute, type QueryEngineWarehouse, type QueryTenant } from "../runtime"
+import { BenchmarkError, validateSuite, type Suite } from "./model"
 
 // Fixture inputs
 
@@ -977,7 +978,7 @@ export function collectQuerySpecCatalog(): ReadonlyArray<CatalogEntry> {
 //
 // The pipe registry + QuerySpec lowering cover only ~36 of 161 exported query
 // builders; the rest are compiled directly at call sites in apps/api and never
-// met the analyzer. `builderFixtures` (ch/builder-fixtures.ts) enumerates them
+// met the analyzer. `builderFixtures` (benchmark/builders.ts) enumerates them
 // with production-shaped params; the e2e sweep picks these entries up with
 // zero test changes because it iterates the catalog.
 
@@ -1009,10 +1010,45 @@ export function collectBuilderCatalog(): ReadonlyArray<CatalogEntry> {
 	return entries
 }
 
-/** The full catalog: every SQL shape reachable from any entry surface. */
-export function collectSqlCatalog(): ReadonlyArray<CatalogEntry> {
-	return [...collectPipeCatalog(), ...collectQuerySpecCatalog(), ...collectBuilderCatalog()]
+/** The benchmark and analyzer consume these same compiled cases. Compilation
+ * failures stay typed at CLI boundaries instead of dropping fixtures. */
+export const collectQueryCatalog = () =>
+	Effect.try({
+		try: () => [...collectPipeCatalog(), ...collectQuerySpecCatalog(), ...collectBuilderCatalog()],
+		catch: (cause) =>
+			new BenchmarkError({ message: `Core catalog compilation failed: ${String(cause)}` }),
+	})
+
+/** Composition happens in the app, keeping integration knowledge out of core. */
+export const mergeQueryCatalogs = (...catalogs: ReadonlyArray<ReadonlyArray<CatalogEntry>>) => {
+	const entries = catalogs.flat()
+	const seen = new Set<string>()
+	const duplicate = entries.find((entry) => {
+		if (seen.has(entry.id)) return true
+		seen.add(entry.id)
+		return false
+	})
+	return duplicate
+		? Effect.fail(new BenchmarkError({ message: `Duplicate query case ID: ${duplicate.id}` }))
+		: Effect.succeed(entries)
 }
+
+/** The only conversion from compiled catalog cases to a serializable workload.
+ * Analyzer-only decoder metadata stays on the in-memory catalog. */
+export const suiteFromCatalog = (
+	entries: ReadonlyArray<CatalogEntry>,
+): Effect.Effect<Suite, BenchmarkError> =>
+	validateSuite({
+		source: "maple-query-catalog",
+		samples: entries.map((entry) => ({
+			id: entry.id,
+			context: entry.name,
+			profile: "",
+			sampleSql: entry.sql,
+			fingerprint: entry.fingerprint,
+			inputs: "sql-catalog-fixtures-v1",
+		})),
+	})
 
 /** One entry per distinct SQL shape, keeping the first fixture that produced it. */
 export function dedupeByFingerprint(entries: ReadonlyArray<CatalogEntry>): ReadonlyArray<CatalogEntry> {

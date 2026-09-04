@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
-// SAFETY-FILE: JSON rows here come from fixed internal formats and are validated before domain use.
 // bench-queries.ts — ClickHouse query benchmarking CLI (Effect)
 //
 // Replays production SQL (captured on `WarehouseQueryService.executeSql` spans
 // as `db.query.text`) against a target ClickHouse and reports wall-time +
 // ClickHouse server-side stats + EXPLAIN plans.
 //
+//   bun run scripts/bench-queries.ts catalog  [flags]   # compile real builders → JSON
 //   bun run scripts/bench-queries.ts fetch    [flags]   # mine traces → JSON
 //   bun run scripts/bench-queries.ts run      <file>    # replay queries
 //   bun run scripts/bench-queries.ts inspect  <file>    # EXPLAIN + PIPELINE
@@ -21,7 +21,8 @@
 //   MAPLE_INTERNAL_ORG_ID  (default: internal)
 
 import { dirname, resolve } from "node:path"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import {
 	Clock,
 	Config,
@@ -40,6 +41,9 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { CH } from "@maple/query-engine"
 import * as Integrations from "@maple/query-engine-integrations"
+import * as Bench from "@maple/query-engine/benchmark"
+import { collectWarehouseQueryCatalog } from "./query-bench/catalog"
+import { escapeClickHouseString } from "@maple-dev/clickhouse-builder/sql"
 
 // Errors
 
@@ -113,53 +117,12 @@ interface FetchOutput {
 	readonly samples: ReadonlyArray<Sample>
 }
 
-interface RunMetrics {
-	readonly wallMs: number
-	readonly serverElapsedMs: number | null
-	readonly readRows: number | null
-	readonly readBytes: number | null
-	readonly memoryUsage: number | null
-}
-
-interface SampleResult {
-	readonly fingerprint: string
-	readonly context: string
-	readonly profile: string
-	readonly runs: ReadonlyArray<RunMetrics>
-	readonly aggregates: {
-		readonly p50WallMs: number
-		readonly p95WallMs: number
-		readonly p99WallMs: number
-		readonly meanServerMs: number | null
-		readonly meanReadRows: number | null
-		readonly meanReadBytes: number | null
-		readonly meanMemoryUsage: number | null
-	}
-	readonly error?: string
-}
-
-interface RunOutput {
-	readonly ranAt: string
-	readonly target: string
-	readonly sourceFile: string
-	readonly runsPerQuery: number
-	readonly warmupRuns: number
-	readonly results: ReadonlyArray<SampleResult>
-}
-
 interface ChResult {
 	readonly status: number
 	readonly body: string
 	readonly queryId: string
 	readonly wallMs: number
-	readonly summary: Option.Option<Record<string, string>>
-}
-
-interface QueryLogEntry {
-	readonly memoryUsage: number
-	readonly queryDurationMs: number
-	readonly readRows: number
-	readonly readBytes: number
+	readonly summary: Option.Option<Readonly<Record<string, unknown>>>
 }
 
 // BenchConfig — resolve warehouse credentials from the environment via `Config`
@@ -217,21 +180,27 @@ export class BenchConfig extends Context.Service<BenchConfig, BenchConfigValues>
 
 // ClickHouse client — raw HTTP so we can read X-ClickHouse-Summary + query_id
 
-const parseSummaryHeader = (value: string | null): Option.Option<Record<string, string>> => {
-	if (!value) return Option.none()
-	try {
-		return Option.some(JSON.parse(value) as Record<string, string>)
-	} catch {
-		return Option.none()
-	}
-}
+const parseSummaryHeader = (value: string | null): Option.Option<Readonly<Record<string, unknown>>> =>
+	value === null
+		? Option.none()
+		: Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(
+				value,
+			)
 
 interface ClickHouseApi {
 	readonly run: (
 		sql: string,
-		opts?: { readonly queryId?: string },
+		opts?: { readonly queryId?: string; readonly timeoutMs?: number },
 	) => Effect.Effect<ChResult, HttpRequestError | MissingConfigError>
-	readonly queryLog: (queryId: string) => Effect.Effect<Option.Option<QueryLogEntry>, MissingConfigError>
+	readonly queryLogs: (
+		queryIds: ReadonlyArray<string>,
+		waitSeconds: number,
+		cluster?: string,
+	) => Effect.Effect<
+		{ readonly entries: ReadonlyArray<Bench.LogMetrics>; readonly warnings: ReadonlyArray<string> },
+		MissingConfigError
+	>
+	readonly target: Effect.Effect<{ readonly url: string; readonly database: string }, MissingConfigError>
 }
 
 export class ClickHouse extends Context.Service<ClickHouse, ClickHouseApi>()("bench/ClickHouse", {
@@ -239,7 +208,7 @@ export class ClickHouse extends Context.Service<ClickHouse, ClickHouseApi>()("be
 		const { clickhouse } = yield* BenchConfig
 		const httpClient = yield* HttpClient.HttpClient
 
-		const requireConfig = Option.match(clickhouse, {
+		const requireConfig: Effect.Effect<ClickHouseConfig, MissingConfigError> = Option.match(clickhouse, {
 			onNone: () =>
 				Effect.fail(
 					new MissingConfigError({
@@ -256,78 +225,127 @@ export class ClickHouse extends Context.Service<ClickHouse, ClickHouseApi>()("be
 		const authHeader = (cfg: ClickHouseConfig) =>
 			`Basic ${Buffer.from(`${cfg.user}:${cfg.password}`).toString("base64")}`
 
-		const run = Effect.fn("ClickHouse.run")(function* (
-			sql: string,
-			opts?: { readonly queryId?: string },
-		) {
-			const cfg = yield* requireConfig
-			const queryId = opts?.queryId ?? randomUUID()
-			const url = new URL(cfg.url)
-			url.searchParams.set("database", cfg.database)
-			url.searchParams.set("query_id", queryId)
-			url.searchParams.set("wait_end_of_query", "1")
+		const run: ClickHouseApi["run"] = Effect.fn("ClickHouse.run")(
+			function* (sql: string, opts?: { readonly queryId?: string; readonly timeoutMs?: number }) {
+				const cfg = yield* requireConfig
+				const queryId = opts?.queryId ?? randomUUID()
+				const url = new URL(cfg.url)
+				url.searchParams.set("database", cfg.database)
+				url.searchParams.set("query_id", queryId)
+				url.searchParams.set("wait_end_of_query", "1")
+				url.searchParams.set("readonly", "2")
+				url.searchParams.set("log_queries", "0")
 
-			const start = performance.now()
-			const request = HttpClientRequest.post(url, {
-				headers: {
-					Authorization: authHeader(cfg),
-					"Content-Type": "text/plain; charset=utf-8",
-				},
-			}).pipe(HttpClientRequest.bodyText(sql))
-			const response = yield* httpClient
-				.execute(request)
-				.pipe(
+				const start = performance.now()
+				const request = HttpClientRequest.post(url, {
+					headers: {
+						Authorization: authHeader(cfg),
+						"Content-Type": "text/plain; charset=utf-8",
+					},
+				}).pipe(HttpClientRequest.bodyText(sql))
+				const response = yield* httpClient
+					.execute(request)
+					.pipe(
+						Effect.mapError(
+							(cause) => new HttpRequestError({ url: cfg.url, message: String(cause) }),
+						),
+					)
+				const body = yield* response.text.pipe(
 					Effect.mapError(
 						(cause) => new HttpRequestError({ url: cfg.url, message: String(cause) }),
 					),
 				)
-			const body = yield* response.text.pipe(
-				Effect.mapError((cause) => new HttpRequestError({ url: cfg.url, message: String(cause) })),
-			)
-			const wallMs = performance.now() - start
+				const wallMs = performance.now() - start
 
-			return {
-				status: response.status,
-				body,
-				queryId,
-				wallMs,
-				summary: parseSummaryHeader(response.headers.get("x-clickhouse-summary")),
-			} satisfies ChResult
-		})
+				return {
+					status: response.status,
+					body,
+					queryId,
+					wallMs,
+					summary: parseSummaryHeader(response.headers["x-clickhouse-summary"] ?? null),
+				} satisfies ChResult
+			},
+			(effect, _sql, opts) =>
+				effect.pipe(
+					Effect.timeout(opts?.timeoutMs ?? 35_000),
+					Effect.catchTag("TimeoutError", () =>
+						Effect.fail(
+							new HttpRequestError({
+								url: "ClickHouse",
+								message: "Request timed out (including response body).",
+							}),
+						),
+					),
+				),
+		)
 
-		// system.query_log is buffered (~7s flush). Poll a few times with backoff,
-		// then give up and let the caller fall back to the summary header.
-		const queryLog = Effect.fn("ClickHouse.queryLog")(function* (queryId: string) {
-			const sql =
-				`SELECT memory_usage, query_duration_ms, read_rows, read_bytes ` +
-				`FROM system.query_log ` +
-				`WHERE query_id = '${queryId}' AND type = 'QueryFinish' ` +
-				`ORDER BY event_time DESC LIMIT 1 FORMAT JSONEachRow`
-
-			for (const delayMs of [500, 1500, 3000, 5000]) {
-				yield* Effect.sleep(Duration.millis(delayMs))
-				const result = yield* run(sql).pipe(
-					Effect.match({ onFailure: () => null, onSuccess: (r) => r }),
-				)
-				if (!result || result.status !== 200) continue
-				const line = result.body.trim().split("\n")[0]
-				if (!line) continue
-				const parsed = yield* Effect.try({
-					try: () => JSON.parse(line) as Record<string, unknown>,
-					catch: () => null,
-				}).pipe(Effect.match({ onFailure: () => null, onSuccess: (p) => p }))
-				if (!parsed) continue
-				return Option.some({
-					memoryUsage: Number(parsed.memory_usage ?? 0),
-					queryDurationMs: Number(parsed.query_duration_ms ?? 0),
-					readRows: Number(parsed.read_rows ?? 0),
-					readBytes: Number(parsed.read_bytes ?? 0),
-				} satisfies QueryLogEntry)
+		// Buffered logs are collected in batches AFTER the timing loop. Never flush
+		// global logs or drop caches on a shared server.
+		const queryLogs = Effect.fn("ClickHouse.queryLogs")(function* (
+			queryIds: ReadonlyArray<string>,
+			waitSeconds: number,
+			cluster?: string,
+		) {
+			const entries = new Map<string, Bench.LogMetrics>()
+			const warnings: string[] = []
+			const deadline = (yield* Clock.currentTimeMillis) + waitSeconds * 1000
+			if (queryIds.length === 0) return { entries: [], warnings }
+			while (true) {
+				const pending = queryIds.filter((id) => !entries.has(id))
+				for (let offset = 0; offset < pending.length; offset += 100) {
+					const ids = pending
+						.slice(offset, offset + 100)
+						.map((id) => `'${escapeClickHouseString(id)}'`)
+						.join(",")
+					const table = cluster
+						? `clusterAllReplicas('${escapeClickHouseString(cluster)}', system.query_log)`
+						: "system.query_log"
+					const sql = `SELECT query_id, memory_usage, query_duration_ms, read_rows, read_bytes, result_rows, ProfileEvents
+                        FROM ${table} WHERE event_date >= today() - 1 AND is_initial_query = 1
+                        AND type = 'QueryFinish' AND query_id IN (${ids})
+                        ORDER BY event_time_microseconds DESC LIMIT 1 BY query_id FORMAT JSONEachRow`
+					const result = yield* run(sql).pipe(Effect.result)
+					if (result._tag === "Failure" || result.success.status !== 200) {
+						warnings.push(
+							"system.query_log unavailable (permissions, logging, or cluster configuration); using HTTP summary metrics.",
+						)
+						return { entries: [...entries.values()], warnings }
+					}
+					const decoded = yield* decodeJsonLines(result.success.body).pipe(Effect.result)
+					if (decoded._tag === "Failure") {
+						warnings.push("Invalid system.query_log response; using HTTP summary metrics.")
+						return { entries: [...entries.values()], warnings }
+					}
+					for (const row of decoded.success) {
+						if (typeof row.query_id !== "string" || !queryIds.includes(row.query_id)) continue
+						const events: Record<string, number> = {}
+						if (typeof row.ProfileEvents === "object" && row.ProfileEvents !== null) {
+							for (const [key, value] of Object.entries(row.ProfileEvents)) {
+								const metric = Bench.metricNumber(value)
+								if (metric !== null) events[key] = metric
+							}
+						}
+						entries.set(row.query_id, {
+							queryId: row.query_id,
+							memoryUsage: Bench.metricNumber(row.memory_usage),
+							serverElapsedMs: Bench.metricNumber(row.query_duration_ms),
+							readRows: Bench.metricNumber(row.read_rows),
+							readBytes: Bench.metricNumber(row.read_bytes),
+							resultRows: Bench.metricNumber(row.result_rows),
+							profileEvents: events,
+						})
+					}
+				}
+				const remainingMs = deadline - (yield* Clock.currentTimeMillis)
+				if (entries.size === queryIds.length || remainingMs <= 0) break
+				yield* Effect.sleep(Duration.millis(Math.min(1000, remainingMs)))
 			}
-			return Option.none<QueryLogEntry>()
+			return { entries: [...entries.values()], warnings }
 		})
-
-		return { run, queryLog } satisfies ClickHouseApi
+		const target = requireConfig.pipe(
+			Effect.map((cfg) => ({ url: new URL(cfg.url).origin, database: cfg.database })),
+		)
+		return { run, queryLogs, target } satisfies ClickHouseApi
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(BenchConfig.layer))
@@ -351,7 +369,7 @@ export class Tinybird extends Context.Service<Tinybird, TinybirdApi>()("bench/Ti
 		const { tinybird } = yield* BenchConfig
 		const httpClient = yield* HttpClient.HttpClient
 
-		const requireConfig = Option.match(tinybird, {
+		const requireConfig: Effect.Effect<TinybirdConfig, MissingConfigError> = Option.match(tinybird, {
 			onNone: () =>
 				Effect.fail(
 					new MissingConfigError({
@@ -380,7 +398,7 @@ export class Tinybird extends Context.Service<Tinybird, TinybirdApi>()("bench/Ti
 			const text = yield* response.text.pipe(
 				Effect.mapError((cause) => new HttpRequestError({ url: cfg.host, message: String(cause) })),
 			)
-			if (!response.ok) {
+			if (response.status < 200 || response.status >= 300) {
 				return yield* Effect.fail(
 					new UpstreamStatusError({
 						source: "Tinybird",
@@ -389,10 +407,9 @@ export class Tinybird extends Context.Service<Tinybird, TinybirdApi>()("bench/Ti
 					}),
 				)
 			}
-			const parsed = yield* Effect.try({
-				try: () => JSON.parse(text) as { data: ReadonlyArray<Record<string, unknown>> },
-				catch: (cause) => new HttpRequestError({ url: cfg.host, message: String(cause) }),
-			})
+			const parsed = yield* decodeJson(text, Schema.Struct({ data: Schema.Array(JsonRow) })).pipe(
+				Effect.mapError((cause) => new HttpRequestError({ url: cfg.host, message: cause.message })),
+			)
 			return parsed.data
 		})
 
@@ -408,7 +425,17 @@ export class Tinybird extends Context.Service<Tinybird, TinybirdApi>()("bench/Ti
 
 // File IO via the core FileSystem service
 
-const readJsonFile = <T>(path: string) =>
+const decodeJson = <A>(text: string, schema: Schema.Decoder<A>) =>
+	Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
+		Effect.flatMap(Schema.decodeUnknownEffect(schema)),
+		Effect.mapError((cause) => new Bench.BenchmarkError({ message: String(cause) })),
+	)
+
+const JsonRow = Schema.Record(Schema.String, Schema.Unknown)
+const decodeJsonLines = (text: string) =>
+	Effect.forEach(text.trim() ? text.trim().split("\n") : [], (line) => decodeJson(line, JsonRow))
+
+const readJsonFile = <A>(path: string, schema: Schema.Decoder<A>) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem
 		const text = yield* fs
@@ -416,10 +443,9 @@ const readJsonFile = <T>(path: string) =>
 			.pipe(
 				Effect.mapError((cause) => new BenchFileError({ path, op: "read", message: String(cause) })),
 			)
-		return yield* Effect.try({
-			try: () => JSON.parse(text) as T,
-			catch: (cause) => new BenchFileError({ path, op: "parse", message: String(cause) }),
-		})
+		return yield* decodeJson(text, schema).pipe(
+			Effect.mapError((cause) => new BenchFileError({ path, op: "decode", message: cause.message })),
+		)
 	})
 
 const writeJsonFile = (path: string, value: unknown) =>
@@ -488,27 +514,7 @@ const formatBytes = (n: number | null | undefined): string => {
 const formatMemoryMB = (bytes: number | null | undefined): string =>
 	bytes == null || Number.isNaN(bytes) ? "—" : `${(bytes / 1024 / 1024).toFixed(1)}MB`
 
-const formatDelta = (a: number | null, b: number | null, kind: "ms" | "rows" | "bytes"): string => {
-	if (a == null || b == null || Number.isNaN(a) || Number.isNaN(b)) return "—"
-	const delta = b - a
-	const pct = a === 0 ? 0 : (delta / a) * 100
-	const sign = delta > 0 ? "+" : ""
-	const fmt = kind === "ms" ? formatMs : kind === "rows" ? formatRows : formatBytes
-	return `${sign}${fmt(delta)} (${sign}${pct.toFixed(1)}%)`
-}
-
 const truncate = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}…`)
-
-const percentile = (values: ReadonlyArray<number>, p: number): number => {
-	if (values.length === 0) return Number.NaN
-	const sorted = [...values].sort((a, b) => a - b)
-	return sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))]!
-}
-
-const mean = (values: ReadonlyArray<number | null>): number | null => {
-	const finite = values.filter((v): v is number => v != null && Number.isFinite(v))
-	return finite.length === 0 ? null : finite.reduce((a, b) => a + b, 0) / finite.length
-}
 
 interface Column {
 	readonly header: string
@@ -538,7 +544,10 @@ const renderTable = (
 	return lines.join("\n")
 }
 
-const timestampSlug = () => new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)
+const artifactDirectory = fileURLToPath(new URL(".bench/", import.meta.url))
+const defaultOutput = (name: string) => resolve(artifactDirectory, `${name}-${timestampSlug()}.json`)
+
+const timestampSlug = () => new Date().toISOString().replace(/[:.]/g, "-")
 
 // Handlers
 
@@ -584,12 +593,9 @@ const fetchHandler = Effect.fn("bench.fetch")(function* (config: FetchConfig) {
 		return
 	}
 
-	const outputPath = Option.getOrElse(
-		config.out,
-		() => `apps/api/scripts/.bench/queries-${timestampSlug()}.json`,
-	)
+	const outputPath = Option.getOrElse(config.out, () => defaultOutput("queries"))
 	const output: FetchOutput = {
-		fetchedAt: now.toISOString(),
+		fetchedAt: new Date(nowMs).toISOString(),
 		source: host,
 		criteria: {
 			orgId,
@@ -629,132 +635,43 @@ const fetchHandler = Effect.fn("bench.fetch")(function* (config: FetchConfig) {
 	yield* Console.log(`\nWrote ${outputPath}`)
 })
 
-const stripTrailingSemi = (sql: string) => sql.replace(/;\s*$/, "")
+const filterSuite = (suite: Bench.Suite, match: Option.Option<string>) =>
+	Bench.validateSuite({
+		...suite,
+		samples: Option.isSome(match)
+			? suite.samples.filter((sample) =>
+					`${Bench.sampleId(sample)} ${sample.context}`
+						.toLowerCase()
+						.includes(match.value.toLowerCase()),
+				)
+			: suite.samples,
+	})
 
-const failedResult = (sample: Sample, message: string): SampleResult => ({
-	fingerprint: sample.fingerprint,
-	context: sample.context,
-	profile: sample.profile,
-	runs: [],
-	aggregates: {
-		p50WallMs: Number.NaN,
-		p95WallMs: Number.NaN,
-		p99WallMs: Number.NaN,
-		meanServerMs: null,
-		meanReadRows: null,
-		meanReadBytes: null,
-		meanMemoryUsage: null,
-	},
-	error: message,
-})
-
-const benchmarkSample = Effect.fn("bench.sample")(function* (
-	ch: ClickHouseApi,
-	sample: Sample,
-	runsPerQuery: number,
-	warmupRuns: number,
-) {
-	const replaySql = stripTrailingSemi(sample.sampleSql)
-
-	const result = yield* Effect.gen(function* () {
-		// Sequential by default — timing is measured inside each `ch.run`, so the
-		// per-iteration wall/server stats are unaffected. A non-200 short-circuits
-		// the run (forEach stops on the first failure), as the old `for` loop did.
-		yield* Effect.forEach(
-			Array.from({ length: warmupRuns }),
-			() =>
-				Effect.gen(function* () {
-					const warm = yield* ch.run(replaySql)
-					if (warm.status !== 200) {
-						return yield* Effect.fail(
-							new UpstreamStatusError({
-								source: "ClickHouse",
-								status: warm.status,
-								message: warm.body.slice(0, 200),
-							}),
-						)
-					}
-				}),
-			{ discard: true },
+const catalogHandler = Effect.fn("bench.catalog")(function* (config: {
+	readonly match: Option.Option<string>
+	readonly suite: Option.Option<string>
+	readonly out: Option.Option<string>
+}) {
+	const suite = yield* Option.match(config.suite, {
+		onSome: (path) =>
+			Effect.tryPromise({
+				try: () =>
+					import(pathToFileURL(resolve(path)).href).then(
+						(module: { default: unknown }) => module.default,
+					),
+				catch: (cause) => new BenchFileError({ path, op: "import suite", message: String(cause) }),
+			}).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Bench.Suite))),
+		onNone: () => collectWarehouseQueryCatalog().pipe(Effect.flatMap(Bench.suiteFromCatalog)),
+	})
+	const selected = yield* filterSuite(suite, config.match)
+	const path = Option.getOrElse(config.out, () => defaultOutput("catalog"))
+	yield* writeJsonFile(path, selected)
+	yield* Console.log(selected.samples.map((sample) => Bench.sampleId(sample)).join("\n"))
+	yield* Console.log(`\nWrote ${selected.samples.length} cases to ${path}`)
+	if (Option.isNone(config.suite))
+		yield* Console.log(
+			"Catalog fixtures use org_sql_catalog and synthetic dates/filters. Use --suite for a representative tenant and fixed window.",
 		)
-
-		const runs: RunMetrics[] = yield* Effect.forEach(Array.from({ length: runsPerQuery }), () =>
-			Effect.gen(function* () {
-				const res = yield* ch.run(replaySql)
-				if (res.status !== 200) {
-					return yield* Effect.fail(
-						new UpstreamStatusError({
-							source: "ClickHouse",
-							status: res.status,
-							message: res.body.slice(0, 200),
-						}),
-					)
-				}
-				const log = yield* ch.queryLog(res.queryId)
-				const fromSummary = (key: string) =>
-					Option.match(res.summary, {
-						onNone: () => null,
-						onSome: (s) => (s[key] !== undefined ? Number(s[key]) : null),
-					})
-				return {
-					wallMs: res.wallMs,
-					serverElapsedMs: Option.match(log, {
-						onNone: () => {
-							const ns = fromSummary("elapsed_ns")
-							return ns == null ? null : ns / 1e6
-						},
-						onSome: (l) => l.queryDurationMs,
-					}),
-					readRows: Option.match(log, {
-						onNone: () => fromSummary("read_rows"),
-						onSome: (l) => l.readRows,
-					}),
-					readBytes: Option.match(log, {
-						onNone: () => fromSummary("read_bytes"),
-						onSome: (l) => l.readBytes,
-					}),
-					memoryUsage: Option.match(log, {
-						onNone: () => null,
-						onSome: (l) => l.memoryUsage,
-					}),
-				} satisfies RunMetrics
-			}),
-		)
-
-		const wallValues = runs.map((r) => r.wallMs)
-		return {
-			fingerprint: sample.fingerprint,
-			context: sample.context,
-			profile: sample.profile,
-			runs,
-			aggregates: {
-				p50WallMs: percentile(wallValues, 50),
-				p95WallMs: percentile(wallValues, 95),
-				p99WallMs: percentile(wallValues, 99),
-				meanServerMs: mean(runs.map((r) => r.serverElapsedMs)),
-				meanReadRows: mean(runs.map((r) => r.readRows)),
-				meanReadBytes: mean(runs.map((r) => r.readBytes)),
-				meanMemoryUsage: mean(runs.map((r) => r.memoryUsage)),
-			},
-		} satisfies SampleResult
-	}).pipe(
-		// A single bad query shouldn't abort the whole sweep — record and move on.
-		Effect.catchTags({
-			"@maple/api/scripts/bench-queries/HttpRequestError": (err) =>
-				Effect.succeed(failedResult(sample, err.message)),
-			"@maple/api/scripts/bench-queries/UpstreamStatusError": (err) =>
-				Effect.succeed(failedResult(sample, `status ${err.status}: ${err.message}`)),
-			"@maple/api/scripts/bench-queries/MissingConfigError": (err) => Effect.fail(err),
-		}),
-	)
-
-	yield* Console.log(
-		`  ${truncate(`${sample.context}@${sample.fingerprint}`, 50).padEnd(50)} ` +
-			(result.error
-				? `FAILED — ${truncate(result.error, 60)}`
-				: `p95 ${formatMs(result.aggregates.p95WallMs)}`),
-	)
-	return result
 })
 
 interface RunConfig {
@@ -762,148 +679,296 @@ interface RunConfig {
 	readonly runs: number
 	readonly warmup: number
 	readonly out: Option.Option<string>
+	readonly match: Option.Option<string>
+	readonly dataset: string
+	readonly timeout: number
+	readonly threads: Option.Option<number>
+	readonly cache: "warm" | "bypass"
+	readonly verifyResults: boolean
+	readonly resultOrder: "ordered" | "unordered"
+	readonly logWait: number
+	readonly cluster: Option.Option<string>
 }
+
+const requireOk = (result: ChResult) =>
+	result.status === 200
+		? Effect.succeed(result)
+		: Effect.fail(
+				new Bench.BenchmarkError({
+					message: `ClickHouse ${result.status}: ${result.body.slice(0, 1000)}`,
+				}),
+			)
 
 const runHandler = Effect.fn("bench.run")(function* (config: RunConfig) {
 	const ch = yield* ClickHouse
-	const runsPerQuery = config.runs
-	const warmupRuns = config.warmup
-	const fetchOutput = yield* readJsonFile<FetchOutput>(config.file)
-
-	yield* Console.log(
-		`Replaying ${fetchOutput.samples.length} queries (${runsPerQuery} runs each, warmup ${warmupRuns})`,
+	const suite = yield* readJsonFile(config.file, Bench.Suite).pipe(
+		Effect.flatMap((s) => filterSuite(s, config.match)),
 	)
-	yield* Console.log(`  source: ${config.file}\n`)
-
-	// Sequential on purpose: concurrent replays would distort per-query timings.
-	const results = yield* Effect.forEach(fetchOutput.samples, (sample) =>
-		benchmarkSample(ch, sample, runsPerQuery, warmupRuns),
-	)
-
-	yield* Console.log(
-		"\n" +
-			renderTable(
-				`Replay results (${runsPerQuery} runs each, warmup ${warmupRuns})`,
-				[
-					{ header: "context", width: 26 },
-					{ header: "fingerprint", width: 14 },
-					{ header: "p95 wall", width: 10, align: "right" },
-					{ header: "ch elapsed", width: 10, align: "right" },
-					{ header: "read rows", width: 10, align: "right" },
-					{ header: "read bytes", width: 11, align: "right" },
-					{ header: "mem", width: 9, align: "right" },
-				],
-				results.map((r) => [
-					r.error ? `${r.context} (err)` : r.context || "—",
-					r.fingerprint,
-					formatMs(r.aggregates.p95WallMs),
-					formatMs(r.aggregates.meanServerMs),
-					formatRows(r.aggregates.meanReadRows),
-					formatBytes(r.aggregates.meanReadBytes),
-					formatMemoryMB(r.aggregates.meanMemoryUsage),
-				]),
-			),
-	)
-
-	const outputPath = Option.getOrElse(
-		config.out,
-		() => `apps/api/scripts/.bench/results-${timestampSlug()}.json`,
-	)
-	const runOutput: RunOutput = {
-		ranAt: new Date().toISOString(),
-		target: fetchOutput.source,
-		sourceFile: config.file,
-		runsPerQuery,
-		warmupRuns,
-		results,
+	if (
+		!Number.isInteger(config.runs) ||
+		config.runs < 1 ||
+		config.runs > 1000 ||
+		!Number.isInteger(config.warmup) ||
+		config.warmup < 0 ||
+		config.warmup > 100 ||
+		!Number.isInteger(config.timeout) ||
+		config.timeout < 1 ||
+		config.timeout > 3600 ||
+		!Number.isInteger(config.logWait) ||
+		config.logWait < 0 ||
+		config.logWait > 60 ||
+		(Option.isSome(config.threads) && (config.threads.value < 1 || config.threads.value > 256))
+	) {
+		return yield* Effect.fail(
+			new Bench.BenchmarkError({
+				message:
+					"Expected runs 1–1000, warmup 0–100, timeout 1–3600s, log-wait 0–60s, threads 1–256.",
+			}),
+		)
 	}
-	yield* writeJsonFile(outputPath, runOutput)
-	yield* Console.log(`\nWrote ${outputPath}`)
+	yield* Effect.forEach(suite.samples, (sample) => Bench.validateReplaySql(sample.sampleSql), {
+		discard: true,
+	})
+	const target = yield* ch.target
+	const metadata = yield* ch
+		.run("SELECT version() AS version, currentDatabase() AS database FORMAT JSONEachRow")
+		.pipe(Effect.flatMap(requireOk))
+	const server = yield* decodeJson(
+		metadata.body,
+		Schema.Struct({ version: Schema.String, database: Schema.String }),
+	)
+	const settings = {
+		max_execution_time: String(config.timeout),
+		use_query_cache: "0",
+		use_query_condition_cache: "0",
+		log_queries: "1",
+		log_query_settings: "1",
+		log_queries_probability: "1",
+		...(Option.isSome(config.threads) ? { max_threads: String(config.threads.value) } : undefined),
+		...(config.cache === "bypass"
+			? { enable_filesystem_cache: "0", use_uncompressed_cache: "0" }
+			: undefined),
+	} satisfies Bench.RunOutput["settings"]
+	const execute: Bench.BenchmarkTransport["execute"] = (sql) =>
+		Effect.gen(function* () {
+			const result = yield* ch.run(sql, { timeoutMs: config.timeout * 1000 + 5000 }).pipe(
+				Effect.mapError((cause) => new Bench.BenchmarkError({ message: cause.message })),
+				Effect.flatMap(requireOk),
+			)
+			let resultHash: string | undefined
+			if (config.verifyResults) {
+				const rows = yield* decodeJsonLines(result.body)
+				const canonical = rows.map(Bench.canonicalJson)
+				if (config.resultOrder === "unordered") canonical.sort()
+				resultHash = createHash("sha256").update(canonical.join("\n")).digest("hex")
+			}
+			return {
+				queryId: result.queryId,
+				wallMs: result.wallMs,
+				summary: Option.getOrElse(result.summary, () => ({})),
+				...(resultHash ? { resultHash } : undefined),
+			}
+		})
+	yield* Console.log(
+		`Benchmarking ${suite.samples.length} cases on ${target.url}/${server.database} (ClickHouse ${server.version})`,
+	)
+	const result = yield* Bench.runSuite(
+		{
+			execute,
+			collectLogs: (ids) =>
+				ch
+					.queryLogs(ids, config.logWait, Option.getOrUndefined(config.cluster))
+					.pipe(Effect.mapError((cause) => new Bench.BenchmarkError({ message: cause.message }))),
+		},
+		suite,
+		{ runs: config.runs, warmup: config.warmup, settings, verifyResults: config.verifyResults },
+		Console.log,
+	)
+	const output: Bench.RunOutput = {
+		version: 1,
+		ranAt: new Date().toISOString(),
+		target: target.url,
+		database: server.database,
+		serverVersion: server.version,
+		dataset: config.dataset,
+		sourceFile: resolve(config.file),
+		source: suite.source,
+		runsPerQuery: config.runs,
+		warmupRuns: config.warmup,
+		settings,
+		verifyResults: config.verifyResults,
+		resultOrder: config.resultOrder,
+		...result,
+	}
+	const path = Option.getOrElse(config.out, () => defaultOutput("results"))
+	yield* writeJsonFile(path, output)
+	yield* Console.log(
+		renderTable(
+			"Benchmark results",
+			[
+				{ header: "case", width: 55 },
+				{ header: "p50 wall", width: 10 },
+				{ header: "p95 wall", width: 10 },
+				{ header: "server", width: 10 },
+				{ header: "rows", width: 10 },
+				{ header: "bytes", width: 10 },
+				{ header: "memory", width: 10 },
+			],
+			result.results.map((r) => [
+				r.error ? `${r.id} FAILED` : r.id,
+				formatMs(r.aggregates.p50WallMs),
+				formatMs(r.aggregates.p95WallMs),
+				formatMs(r.aggregates.meanServerMs),
+				formatRows(r.aggregates.meanReadRows),
+				formatBytes(r.aggregates.meanReadBytes),
+				formatMemoryMB(r.aggregates.meanMemoryUsage),
+			]),
+		),
+	)
+	for (const warning of result.warnings) yield* Console.log(`Warning: ${warning}`)
+	yield* Console.log(`Wrote ${path}`)
+	if (result.results.some((r) => r.error))
+		return yield* Effect.fail(
+			new Bench.BenchmarkError({
+				message: "Some queries failed; completed measurements and errors were saved.",
+			}),
+		)
 })
 
-const stripFormatClause = (sql: string) => sql.replace(/\s+FORMAT\s+\w+\s*;?\s*$/i, "").replace(/;\s*$/, "")
-
-const inspectHandler = Effect.fn("bench.inspect")(function* (config: { readonly file: string }) {
+const inspectHandler = Effect.fn("bench.inspect")(function* (config: {
+	readonly file: string
+	readonly match: Option.Option<string>
+	readonly out: Option.Option<string>
+}) {
 	const ch = yield* ClickHouse
-	const fetchOutput = yield* readJsonFile<FetchOutput>(config.file)
-
-	yield* Effect.forEach(fetchOutput.samples, (sample) =>
+	const input = yield* readJsonFile(config.file, Schema.Union([Bench.Suite, Bench.RunOutput]))
+	const suite = yield* filterSuite(
+		"samples" in input
+			? input
+			: {
+					source: input.source,
+					samples: input.results.map((r) => ({
+						id: r.id,
+						context: r.context,
+						profile: r.profile,
+						fingerprint: r.fingerprint,
+						sampleSql: r.sql,
+						...(r.inputs === undefined ? undefined : { inputs: r.inputs }),
+					})),
+				},
+		config.match,
+	)
+	yield* Effect.forEach(suite.samples, (sample) => Bench.validateReplaySql(sample.sampleSql), {
+		discard: true,
+	})
+	const target = yield* ch.target
+	const plans = yield* Effect.forEach(suite.samples, (sample) =>
 		Effect.gen(function* () {
-			const baseSql = stripFormatClause(sample.sampleSql)
-			yield* Console.log(`\n${"━".repeat(80)}`)
-			yield* Console.log(`${sample.context}  ${sample.fingerprint}  (profile=${sample.profile || "—"})`)
-			yield* Console.log("━".repeat(80))
-
-			yield* Effect.forEach(
-				["EXPLAIN", "EXPLAIN PIPELINE"] as const,
-				(variant) =>
-					Effect.gen(function* () {
-						const res = yield* ch.run(`${variant} ${baseSql} FORMAT TabSeparatedRaw`)
-						yield* Console.log(`\n── ${variant} ───────────────────────────────`)
-						if (res.status !== 200) {
-							yield* Console.log(`  ERROR (${res.status}): ${res.body.slice(0, 500)}`)
-						} else {
-							const indented = res.body
-								.trimEnd()
-								.split("\n")
-								.map((l) => `  ${l}`)
-								.join("\n")
-							yield* Console.log(indented || "  (empty)")
-						}
-					}),
-				{ discard: true },
+			const variants = yield* Effect.forEach(["indexes", "pipeline"] as const, (kind) =>
+				Effect.gen(function* () {
+					const sql = Bench.explainSql(sample.sampleSql, kind)
+					const result = yield* ch.run(sql)
+					yield* Console.log(`\n${Bench.sampleId(sample)} — ${kind}\n${result.body}`)
+					return { kind, sql, status: result.status, plan: result.body }
+				}),
 			)
+			return { id: Bench.sampleId(sample), sql: sample.sampleSql, variants }
 		}),
 	)
+	const tables = yield* ch.run(
+		"SELECT name, engine, sorting_key, primary_key, partition_key, total_rows, total_bytes, create_table_query FROM system.tables WHERE database = currentDatabase() ORDER BY name FORMAT JSONEachRow",
+	)
+	const path = Option.getOrElse(config.out, () => defaultOutput("plans"))
+	yield* writeJsonFile(path, {
+		version: 1,
+		inspectedAt: new Date().toISOString(),
+		target,
+		source: suite.source,
+		plans,
+		tables: tables.status === 200 ? yield* decodeJsonLines(tables.body) : [],
+		warnings: tables.status === 200 ? [] : ["Table metadata unavailable"],
+	})
+	yield* Console.log(`Wrote ${path}`)
+	if (plans.some((p) => p.variants.some((v) => v.status !== 200)))
+		return yield* Effect.fail(
+			new Bench.BenchmarkError({ message: "Some EXPLAIN plans failed; details were saved." }),
+		)
 })
 
 const compareHandler = Effect.fn("bench.compare")(function* (config: {
 	readonly baseline: string
 	readonly candidate: string
+	readonly metric: Bench.ComparisonMetric
+	readonly threshold: number
+	readonly minDelta: number
+	readonly failOnRegression: boolean
+	readonly out: Option.Option<string>
 }) {
-	const a = yield* readJsonFile<RunOutput>(config.baseline)
-	const b = yield* readJsonFile<RunOutput>(config.candidate)
-	const bByFp = new Map(b.results.map((r) => [r.fingerprint, r]))
-
-	const rows = a.results.map((aResult) => {
-		const bResult = bByFp.get(aResult.fingerprint)
-		if (!bResult) {
-			return [
-				aResult.context || "—",
-				aResult.fingerprint,
-				formatMs(aResult.aggregates.p95WallMs),
-				"—",
-				"(missing in b)",
-				"—",
-				"—",
-			]
-		}
-		return [
-			aResult.context || "—",
-			aResult.fingerprint,
-			formatMs(aResult.aggregates.p95WallMs),
-			formatMs(bResult.aggregates.p95WallMs),
-			formatDelta(aResult.aggregates.p95WallMs, bResult.aggregates.p95WallMs, "ms"),
-			formatDelta(aResult.aggregates.meanReadBytes, bResult.aggregates.meanReadBytes, "bytes"),
-			formatDelta(aResult.aggregates.meanMemoryUsage, bResult.aggregates.meanMemoryUsage, "bytes"),
-		]
+	if (
+		!Number.isFinite(config.threshold) ||
+		config.threshold < 0 ||
+		!Number.isFinite(config.minDelta) ||
+		config.minDelta < 0
+	) {
+		return yield* Effect.fail(
+			new Bench.BenchmarkError({
+				message: "Comparison thresholds must be finite non-negative numbers.",
+			}),
+		)
+	}
+	const a = yield* readJsonFile(config.baseline, Bench.RunOutput)
+	const b = yield* readJsonFile(config.candidate, Bench.RunOutput)
+	for (const run of [a, b]) {
+		if (!run.results.length || new Set(run.results.map((r) => r.id)).size !== run.results.length)
+			return yield* Effect.fail(
+				new Bench.BenchmarkError({
+					message: "Reports must contain measurements with unique case IDs.",
+				}),
+			)
+	}
+	const comparison = Bench.compareRuns(a, b, {
+		metric: config.metric,
+		thresholdPercent: config.threshold,
+		minDelta: config.minDelta,
 	})
-
 	yield* Console.log(
 		renderTable(
-			`Compare: ${config.baseline} → ${config.candidate}`,
+			`Compare ${config.metric} (threshold ${config.threshold}%, minimum delta ${config.minDelta})`,
 			[
-				{ header: "context", width: 22 },
-				{ header: "fingerprint", width: 14 },
-				{ header: "a p95", width: 10, align: "right" },
-				{ header: "b p95", width: 10, align: "right" },
-				{ header: "Δ p95 wall", width: 20, align: "right" },
-				{ header: "Δ read bytes", width: 20, align: "right" },
-				{ header: "Δ memory", width: 20, align: "right" },
+				{ header: "case", width: 55 },
+				{ header: "status", width: 16 },
+				{ header: "baseline", width: 12 },
+				{ header: "candidate", width: 12 },
+				{ header: "change", width: 12 },
+				{ header: "SQL changed", width: 11 },
 			],
-			rows,
+			comparison.rows.map((r) => [
+				r.id,
+				r.status,
+				r.baseline?.toFixed(2) ?? "—",
+				r.candidate?.toFixed(2) ?? "—",
+				r.percent === null
+					? r.baseline === 0 && (r.delta ?? 0) > 0
+						? "from zero"
+						: "—"
+					: `${r.percent.toFixed(1)}%`,
+				r.sqlChanged ? "yes" : "no",
+			]),
 		),
 	)
+	for (const row of comparison.rows) if (row.reason) yield* Console.log(`${row.id}: ${row.reason}`)
+	for (const warning of comparison.warnings) yield* Console.log(`Warning: ${warning}`)
+	if (Option.isSome(config.out)) {
+		yield* writeJsonFile(config.out.value, comparison)
+		yield* Console.log(`Wrote ${config.out.value}`)
+	}
+	if (config.failOnRegression && comparison.failed)
+		return yield* Effect.fail(
+			new Bench.BenchmarkError({
+				message:
+					"Comparison failed: regression, changed results, or incomplete/incompatible evidence.",
+			}),
+		)
 })
 
 // CLI command tree (effect/unstable/cli)
@@ -930,38 +995,118 @@ const fetchCommand = Command.make(
 	fetchHandler,
 ).pipe(Command.withDescription("Mine recent db.query.text spans from production traces into a JSON file"))
 
+const matchFlag = Flag.string("match").pipe(
+	Flag.withDescription("Case ID/context substring filter"),
+	Flag.optional,
+)
+const outFlag = Flag.string("out").pipe(Flag.withDescription("Output JSON path"), Flag.optional)
+const catalogCommand = Command.make(
+	"catalog",
+	{
+		match: matchFlag,
+		out: outFlag,
+		suite: Flag.string("suite").pipe(
+			Flag.withDescription("TS module exporting a benchmark suite (default export)"),
+			Flag.optional,
+		),
+	},
+	catalogHandler,
+).pipe(
+	Command.withDescription("Compile real catalog fixtures or a custom TypeScript suite without a warehouse"),
+)
+
 const runCommand = Command.make(
 	"run",
 	{
-		file: Argument.string("file").pipe(Argument.withDescription("Queries JSON produced by `fetch`")),
+		file: Argument.string("file").pipe(
+			Argument.withDescription("Queries JSON produced by catalog/fetch"),
+		),
 		runs: Flag.integer("runs").pipe(Flag.withDescription("Timed runs per query"), Flag.withDefault(5)),
 		warmup: Flag.integer("warmup").pipe(
 			Flag.withDescription("Warmup runs before timing"),
 			Flag.withDefault(1),
 		),
-		out: Flag.string("out").pipe(Flag.withDescription("Results JSON path"), Flag.optional),
+		out: outFlag,
+		match: matchFlag,
+		dataset: Flag.string("dataset").pipe(
+			Flag.withDescription("Stable dataset revision for comparable runs"),
+			Flag.withDefault("unspecified"),
+		),
+		timeout: Flag.integer("timeout").pipe(
+			Flag.withDescription("Query timeout in seconds"),
+			Flag.withDefault(30),
+		),
+		threads: Flag.integer("threads").pipe(
+			Flag.withDescription("Pin max_threads for reproducible measurements"),
+			Flag.optional,
+		),
+		cache: Flag.choice("cache", ["warm", "bypass"]).pipe(
+			Flag.withDescription(
+				"Result/condition caches always disabled; bypass also disables filesystem/uncompressed caches (OS cache remains)",
+			),
+			Flag.withDefault("warm"),
+		),
+		verifyResults: Flag.boolean("verify-results").pipe(
+			Flag.withDescription("Hash JSON results for exact equivalence checks"),
+		),
+		resultOrder: Flag.choice("result-order", ["ordered", "unordered"]).pipe(
+			Flag.withDefault("unordered"),
+		),
+		logWait: Flag.integer("log-wait").pipe(
+			Flag.withDescription("Maximum log flush polling wait in seconds after timing"),
+			Flag.withDefault(12),
+		),
+		cluster: Flag.string("cluster").pipe(
+			Flag.withDescription("Read query logs across this ClickHouse cluster"),
+			Flag.optional,
+		),
 	},
 	runHandler,
 ).pipe(Command.withDescription("Replay each query and report wall-time + server-side stats"))
 
 const inspectCommand = Command.make(
 	"inspect",
-	{ file: Argument.string("file").pipe(Argument.withDescription("Queries JSON produced by `fetch`")) },
+	{ file: Argument.string("file"), match: matchFlag, out: outFlag },
 	inspectHandler,
-).pipe(Command.withDescription("Print EXPLAIN and EXPLAIN PIPELINE for each query"))
+).pipe(
+	Command.withDescription(
+		"Save index/projection plans, pipelines, and table metadata from a suite or run report",
+	),
+)
 
 const compareCommand = Command.make(
 	"compare",
 	{
 		baseline: Argument.string("baseline").pipe(Argument.withDescription("Baseline results JSON")),
 		candidate: Argument.string("candidate").pipe(Argument.withDescription("Candidate results JSON")),
+		metric: Flag.choice("metric", [
+			"p95WallMs",
+			"meanServerMs",
+			"meanReadRows",
+			"meanReadBytes",
+			"meanMemoryUsage",
+		]).pipe(Flag.withDefault("p95WallMs")),
+		threshold: Flag.float("threshold").pipe(
+			Flag.withDescription("Maximum increase in percent"),
+			Flag.withDefault(10),
+		),
+		minDelta: Flag.float("min-delta").pipe(
+			Flag.withDescription("Minimum absolute increase in the metric's units"),
+			Flag.withDefault(0),
+		),
+		failOnRegression: Flag.boolean("fail-on-regression").pipe(
+			Flag.withDescription(
+				"Exit nonzero on regressions, mismatches, missing cases, or incompatible evidence",
+			),
+		),
+		out: outFlag,
 	},
 	compareHandler,
 ).pipe(Command.withDescription("Diff two run outputs (p95 wall, read bytes, memory)"))
 
 const rootCommand = Command.make("bench-queries").pipe(
 	Command.withDescription("Measure ClickHouse query performance"),
-	Command.withSubcommands([fetchCommand, runCommand, inspectCommand, compareCommand]),
+	Command.withSubcommands([catalogCommand, fetchCommand, runCommand, inspectCommand, compareCommand]),
 )
 
 const BenchServicesLive = Layer.mergeAll(ClickHouse.layer, Tinybird.layer).pipe(
@@ -969,7 +1114,7 @@ const BenchServicesLive = Layer.mergeAll(ClickHouse.layer, Tinybird.layer).pipe(
 )
 const BenchLive = Layer.mergeAll(BenchServicesLive, BunServices.layer)
 
-Command.run(rootCommand, { version: "0.1.0" }).pipe(
+Command.run(rootCommand, { version: "0.2.0" }).pipe(
 	// Application root: this is the one runtime boundary that owns the complete layer graph.
 	// oxlint-disable-next-line effecttsgo/strict-effect-provide
 	Effect.provide(BenchLive),

@@ -5,7 +5,7 @@
 //
 // Each fixture calls the REAL exported builder with parameters shaped like its
 // production call site (file:line noted per fixture), so the catalog sweeps the
-// SQL the app actually emits. `sql-catalog.test.ts`'s `uncoveredBuilders`
+// SQL the app actually emits. `benchmark/catalog.test.ts`'s `uncoveredBuilders`
 // anti-rot test enforces that every module export is either fixtured here or
 // explicitly exempted there — adding a builder without either breaks the build.
 //
@@ -14,7 +14,7 @@
 // exemption list and shrink batch by batch.
 
 import type { CompiledQuery } from "@maple-dev/clickhouse-builder"
-import * as CH from "./index"
+import * as CH from "../ch"
 import { Effect } from "effect"
 import type { QueryBuilderError } from "@maple-dev/clickhouse-builder"
 
@@ -72,7 +72,7 @@ const window = { orgId: ORG_ID, startTime: START_TIME, endTime: END_TIME }
 // second SQL shape that no unfiltered fixture reaches.
 //
 // Every one is emitted TWICE, once per page-view source. `useProductEvents` is a
-// routing predicate, and `routeCoverage()` in sql-catalog.ts requires a
+// routing predicate, and `routeCoverage()` in benchmark/catalog.ts requires a
 // predicate to be exercised both ways — but the stronger reason is that the two
 // paths are required to return identical numbers, so both SQL shapes belong in
 // the reviewable baseline side by side. Generated rather than written out so a
@@ -957,6 +957,7 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 			runCompile(
 				CH.serviceMapEdgesRollupSQL({ orgId: ORG_ID, hourStart: START_TIME, hourEnd: END_TIME }),
 			),
+		sampleValues: { OrgId: ORG_ID },
 	},
 	{
 		module: "service-map-rollup",
