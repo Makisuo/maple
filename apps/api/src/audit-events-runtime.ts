@@ -4,8 +4,9 @@ import { EdgeCacheService } from "@maple/cache"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import type { OrgId } from "@maple/domain/primitives"
 import { WorkerConfigProviderLayer, workerEnvironmentLayer } from "@maple/infra/worker-runtime"
-import { Clock, Effect, Layer } from "effect"
+import { Cause, Clock, Effect, Layer } from "effect"
 import { CacheBackendLive } from "@/platform/CacheBackendLive"
+import { summarizeCause } from "@/platform/describe-cause"
 import { layerPg } from "@/platform/DatabasePgLive"
 import { Env } from "@/platform/Env"
 import { systemTenant } from "@/services/alerts/system-tenant"
@@ -157,21 +158,17 @@ export const processAuditEventsBatch = (batch: MessageBatch<unknown>) =>
 							}),
 						),
 						Effect.withSpan("auditEvents.writeOrgBatch", { attributes: { orgId, rows: group.length } }),
-						// `catch` + `catchDefect`, never `catchCause`: v4's catchCause also
-						// catches interruption, and an interrupted batch (a deploy, an
-						// isolate torn down) would then be counted as a failed attempt —
-						// pushing messages toward the DLQ for something that never failed.
-						// Left uncaught, the interrupt simply leaves the batch unacked and
-						// the platform redelivers it.
-						Effect.catch((error) =>
-							Effect.forEach(group, ({ message }) => retryOrExhaust(message, error), {
-								discard: true,
-							}),
-						),
-						Effect.catchDefect((defect) =>
-							Effect.forEach(group, ({ message }) => retryOrExhaust(message, defect), {
-								discard: true,
-							}),
+						// A failure or a defect is a failed attempt and retries. Interruption
+						// is not: an interrupted batch (a deploy, an isolate torn down)
+						// counted as an attempt would push messages toward the DLQ for
+						// something that never failed. Re-raised, it leaves the batch
+						// unacked and the platform redelivers it.
+						Effect.catchCause((cause) =>
+							Cause.hasInterruptsOnly(cause)
+								? Effect.interrupt
+								: Effect.forEach(group, ({ message }) => retryOrExhaust(message, summarizeCause(cause)), {
+										discard: true,
+									}),
 						),
 					),
 			{ concurrency: 3, discard: true },

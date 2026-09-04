@@ -13,7 +13,8 @@ import {
 } from "@maple/domain/http/v2"
 import type { V2AuditLogEntry } from "@maple/domain/http/v2"
 import type { AuditLogEntry } from "@/services/audit/audit-event"
-import { Effect, Option, Schema } from "effect"
+import { Cause, Effect, Option, Schema } from "effect"
+import { summarizeCause } from "@/platform/describe-cause"
 import { AuditLogService } from "@/services/audit/AuditLogService"
 import { OrgMembersService } from "@/services/org/OrgMembersService"
 import { requireAdmin } from "@/services/auth/auth"
@@ -22,10 +23,11 @@ import type { AuditLogListFilters } from "@/services/audit/AuditLogService"
 const adminOnly = () => V2InsufficientPermissions.make("Only org admins can read the audit log")
 
 /** No directory, no names — the entries still carry every id they were written with. */
-const unnamed = (cause: unknown) =>
-	Effect.logWarning("Audit log: member directory unavailable; entries keep their ids", {
-		cause,
-	}).pipe(Effect.as(new Map<string, ActorProfile>()))
+const unnamed = (cause: Cause.Cause<unknown>) =>
+	Effect.logWarning("Audit log: member directory unavailable; entries keep their ids").pipe(
+		Effect.annotateLogs({ error: summarizeCause(cause) }),
+		Effect.as(new Map<string, ActorProfile>()),
+	)
 
 const decodeApiKeyIdOption = Schema.decodeUnknownOption(ApiKeyId)
 const decodeActorIdOption = Schema.decodeUnknownOption(ActorId)
@@ -164,8 +166,8 @@ export const HttpV2AuditLogLive = HttpApiBuilder.group(MapleApiV2, "auditLog", (
 		 * actually recognises — an opaque `user_…` is the last resort, not the
 		 * second one.
 		 *
-		 * `catch` + `catchDefect` rather than `catchCause`, which would also
-		 * swallow the interrupt that tears this request down.
+		 * Failures and defects both fall back; interruption is re-raised, because
+		 * a request being torn down has no page left to label.
 		 */
 		const directory = (orgId: OrgId) =>
 			members.listMembers(orgId).pipe(
@@ -181,8 +183,9 @@ export const HttpV2AuditLogLive = HttpApiBuilder.group(MapleApiV2, "auditLog", (
 							),
 						),
 				),
-				Effect.catch((error) => unnamed(error)),
-				Effect.catchDefect((defect) => unnamed(defect)),
+				Effect.catchCause((cause) =>
+					Cause.hasInterruptsOnly(cause) ? Effect.interrupt : unnamed(cause),
+				),
 			)
 
 		return handlers.handle("list", ({ query }) =>

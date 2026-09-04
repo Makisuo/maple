@@ -42,6 +42,12 @@ const message = (body: unknown, attempts: number) => {
 const batchOf = (...messages: ReadonlyArray<{ readonly message: unknown }>) =>
 	({ messages: messages.map((entry) => entry.message) }) as never
 
+/** A warehouse whose `ingest` is interrupted — a deploy tearing the isolate down. */
+const interruptedWarehouse = Layer.succeed(
+	WarehouseQueryService,
+	makeWarehouseServiceStub({ ingest: () => Effect.interrupt }),
+)
+
 /** A warehouse whose `ingest` dies rather than failing — an unexpected defect. */
 const dyingWarehouse = Layer.succeed(
 	WarehouseQueryService,
@@ -122,6 +128,21 @@ describe("processAuditEventsBatch", () => {
 			const defect = message(event("77777777-7777-4777-8777-777777777777"), 2)
 			yield* processAuditEventsBatch(batchOf(defect)).pipe(Effect.provide(dyingWarehouse))
 			expect(defect.calls).toEqual(["retry"])
+		}),
+	)
+
+	// Interruption is not a failed attempt. Counting it as one would spend the
+	// message's retry budget — and eventually route it to the DLQ — for a deploy.
+	// Unacked is enough: the platform redelivers.
+	it.effect("does not count an interrupted batch as an attempt", () =>
+		Effect.gen(function* () {
+			const torn = message(event("88888888-8888-4888-8888-888888888888"), 2)
+			const exit = yield* processAuditEventsBatch(batchOf(torn)).pipe(
+				Effect.provide(interruptedWarehouse),
+				Effect.exit,
+			)
+			expect(exit._tag).toBe("Failure")
+			expect(torn.calls).toEqual([])
 		}),
 	)
 
