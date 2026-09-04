@@ -5,6 +5,7 @@
 	"sideEffects": false,
 	"exports": {
 		".": "./src/index.ts",
+		"./acm": "./src/aws/acm-dns-validation.ts",
 		"./aws": "./src/aws/index.ts",
 		"./cloudflare": "./src/cloudflare/index.ts",
 		"./config-helpers": "./src/config-helpers.ts",
@@ -19,6 +20,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@distilled.cloud/aws": "1.0.0-rc.6",
 		"@maple/alchemy-portless": "workspace:*",
 		"alchemy": "2.0.0-beta.74",
 		"effect": "catalog:effect"

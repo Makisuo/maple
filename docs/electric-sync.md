@@ -190,12 +190,11 @@ like local docker does.
    plaintext `env`.
 4. **Migrate,** then `alchemy deploy`. No new migration is needed — the service
    reads the publication `0009`/`0011`/`0014`/`0037` already maintain.
-5. **DNS.** The certificate lands `PENDING_VALIDATION` on the first deploy and the
-   443 listener fails; the deploy workflows recover on their own by creating the
-   validation CNAME and redeploying (`scripts/acm-cert-validate.sh`, which now
-   names the electric domains alongside ingest). The one manual record is a
-   **proxied CNAME for `electric.maple.dev` at the ALB** — the deploy output
-   carries the hostname.
+5. **DNS.** The stack publishes the ACM validation CNAME into the `maple.dev`
+   zone and waits for the certificate to reach `ISSUED` before attaching the 443
+   listener (`@maple/infra/acm`), so the first deploy needs no second pass. The
+   one manual record is a **proxied CNAME for `electric.maple.dev` at the ALB** —
+   the deploy output carries the hostname.
 6. **Verify** before pointing anything at it:
    `curl https://electric.maple.dev/v1/health`, then a shape through the proxy —
    `curl -g 'https://sync.maple.dev/api/sync/shape?shape=dashboards&offset=-1' -H "authorization: Bearer <token>"`.
