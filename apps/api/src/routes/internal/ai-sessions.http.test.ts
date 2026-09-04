@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import {
 	AiSessionsInternalApiGroup,
 	AI_SESSION_SPANS_MAX_SPANS,
+	AI_SESSION_SUMMARY_MAX_TURNS,
 	CurrentTenant,
 	V1SchemaErrors,
 	V1UnexpectedErrors,
@@ -114,7 +115,7 @@ describe("POST /internal/ai-sessions/spans", () => {
 		}
 	})
 
-	it("cuts the session at the row cap and says so", async () => {
+	it("cuts the page at the row cap and hands back where the next one starts", async () => {
 		// The query asks for one row past the cap precisely so this case is
 		// distinguishable from a session that exactly fills it.
 		const rows = Array.from({ length: AI_SESSION_SPANS_MAX_SPANS + 1 }, (_, index) => spanRow(index))
@@ -126,8 +127,10 @@ describe("POST /internal/ai-sessions/spans", () => {
 		try {
 			const response = await harness.post("/internal/ai-sessions/spans", SPANS_BODY)
 			expect(response.status).toBe(200)
-			expect(response.body.truncated).toBe(true)
 			expect(response.body.data).toHaveLength(AI_SESSION_SPANS_MAX_SPANS)
+			// The last row RETURNED, not the extra one: the next page starts after it.
+			const last = spanRow(AI_SESSION_SPANS_MAX_SPANS - 1)
+			expect(response.body.nextCursor).toEqual({ timestamp: last.timestamp, spanId: last.spanId })
 		} finally {
 			await harness.dispose()
 		}
@@ -144,7 +147,7 @@ describe("POST /internal/ai-sessions/spans", () => {
 		try {
 			const response = await harness.post("/internal/ai-sessions/spans", SPANS_BODY)
 			expect(response.status).toBe(200)
-			expect(response.body.truncated).toBe(false)
+			expect(response.body.nextCursor).toBeUndefined()
 			expect(response.body.data).toHaveLength(2)
 		} finally {
 			await harness.dispose()
@@ -271,7 +274,7 @@ describe("POST /internal/ai-sessions/spans", () => {
 				sessionId: "trace:not-a-trace-id' OR 1=1",
 			})
 			expect(response.status).toBe(200)
-			expect(response.body).toMatchObject({ data: [], truncated: false })
+			expect(response.body).toEqual({ data: [] })
 			expect(windowSql).toContain("SpanAttributes['maple_ai.session.id'] =")
 			expect(windowSql).not.toContain("TraceId =")
 			expect(spansRead).toBe(false)
@@ -306,7 +309,7 @@ describe("POST /internal/ai-sessions/spans", () => {
 		try {
 			const response = await harness.post("/internal/ai-sessions/spans", { sessionId: SESSION_ID })
 			expect(response.status).toBe(200)
-			expect(response.body).toMatchObject({ data: [], truncated: false })
+			expect(response.body).toEqual({ data: [] })
 			expect(spansRead).toBe(false)
 		} finally {
 			await harness.dispose()
@@ -673,6 +676,272 @@ describe("POST /internal/ai-sessions/list", () => {
 			expect(
 				(await harness.post("/internal/ai-sessions/list", { ...WINDOW, tokensMin: 1.5 })).status,
 			).toBe(400)
+		} finally {
+			await harness.dispose()
+		}
+	})
+})
+
+describe("POST /internal/ai-sessions/spans — pages and scopes", () => {
+	const captureSpansSql = () => {
+		let sql: string | undefined
+		const harness = makeHarness({
+			compiledQueryBounded: (_tenant, compiled) => {
+				sql = compiledQueryOf(compiled).sql
+				return compiledQueryOf(compiled)
+					.decodeRows([spanRow(0)])
+					.pipe(Effect.orDie)
+			},
+		})
+		return { harness, sql: () => sql }
+	}
+
+	it("resumes after the cursor, on the agent spans alone", async () => {
+		const { harness, sql } = captureSpansSql()
+		try {
+			const after = { timestamp: "2026-08-19 10:00:00.000000000", spanId: "00000000000007cf" }
+			const response = await harness.post("/internal/ai-sessions/spans", {
+				...SPANS_BODY,
+				scope: "ai",
+				after,
+				limit: 500,
+			})
+			expect(response.status).toBe(200)
+			expect(sql()).toContain("SpanAttributes['maple_ai.vendor.id'] != ''")
+			expect(sql()).toContain(
+				`(Timestamp > '${after.timestamp}' OR (Timestamp = '${after.timestamp}' AND SpanId > '${after.spanId}'))`,
+			)
+			expect(sql()).toContain("LIMIT 501")
+		} finally {
+			await harness.dispose()
+		}
+	})
+
+	it("reads a turn's app spans by its traces, skipping session detection", async () => {
+		const { harness, sql } = captureSpansSql()
+		try {
+			const other = "0123456789abcdef0123456789abcdef"
+			const response = await harness.post("/internal/ai-sessions/spans", {
+				...SPANS_BODY,
+				scope: "app",
+				traceIds: [TRACE_ID, other],
+			})
+			expect(response.status).toBe(200)
+			expect(sql()).toContain(`TraceId IN ('${TRACE_ID}', '${other}')`)
+			expect(sql()).toContain("SpanAttributes['maple_ai.vendor.id'] = ''")
+			expect(sql()).not.toContain("FROM traces")
+		} finally {
+			await harness.dispose()
+		}
+	})
+
+	it("refuses a trace-pinned read with no window to bound it", async () => {
+		const { harness } = captureSpansSql()
+		try {
+			const response = await harness.post("/internal/ai-sessions/spans", {
+				sessionId: SESSION_ID,
+				traceIds: [TRACE_ID],
+			})
+			expect(response.status).toBe(400)
+		} finally {
+			await harness.dispose()
+		}
+	})
+
+	it("refuses a trace id that is not one", async () => {
+		const { harness } = captureSpansSql()
+		try {
+			const response = await harness.post("/internal/ai-sessions/spans", {
+				...SPANS_BODY,
+				traceIds: ["not-a-trace-id' OR 1=1"],
+			})
+			expect(response.status).toBe(400)
+		} finally {
+			await harness.dispose()
+		}
+	})
+})
+
+describe("POST /internal/ai-sessions/summary", () => {
+	/** One turn row, in the wire shape `aiSessionSummaryRowSchema` decodes. */
+	const turnRow = (overrides: Record<string, unknown>) => ({
+		turnKey: "turn_0",
+		conversationId: "turn_0",
+		traceIds: [TRACE_ID],
+		startTime: "2026-08-19 10:00:00.000000000",
+		endTime: "2026-08-19 10:00:10.000000000",
+		durationMs: "10000",
+		spanCount: "40",
+		aiSpanCount: "6",
+		llmCalls: "3",
+		toolCalls: "2",
+		errorSpanCount: "0",
+		inputTokens: "0",
+		outputTokens: "0",
+		cacheReadTokens: "0",
+		llmInputTokens: "0",
+		llmOutputTokens: "0",
+		llmCacheReadTokens: "0",
+		costReporters: "0",
+		cost: "0",
+		llmCost: "0",
+		models: ["gpt-5"],
+		agentNames: ["slack-agent"],
+		...overrides,
+	})
+
+	/** The session's own row, in the wire shape `aiSessionTotalsRowSchema` decodes. */
+	const totalsRow = (overrides: Record<string, unknown>) => {
+		const { turnKey: _turnKey, conversationId: _conversationId, traceIds: _traceIds, ...measures } = turnRow({})
+		return { traceCount: "1", ...measures, ...overrides }
+	}
+
+	/** Two reads: the turn rows under `GROUP BY`, the session's row without. */
+	const summaryHarness = (
+		rows: ReadonlyArray<Record<string, unknown>>,
+		totals: ReadonlyArray<Record<string, unknown>>,
+	) => {
+		const sqls: string[] = []
+		const harness = makeHarness({
+			compiledQuery: (_tenant, compiled) => {
+				const sql = compiledQueryOf(compiled).sql
+				sqls.push(sql)
+				return compiledQueryOf(compiled)
+					.decodeRows(sql.includes("GROUP BY turnKey") ? rows : totals)
+					.pipe(Effect.orDie)
+			},
+		})
+		return { harness, sqls }
+	}
+
+	it("reports the session's own row as the totals, and the turn rows beside it", async () => {
+		const { harness, sqls } = summaryHarness(
+			[
+				turnRow({ inputTokens: "300", llmInputTokens: "150", outputTokens: "60", llmOutputTokens: "30" }),
+				turnRow({
+					turnKey: "turn_1",
+					conversationId: "turn_1",
+					traceIds: [TRACE_ID, "0123456789abcdef0123456789abcdef"],
+					startTime: "2026-08-19 10:00:20.000000000",
+					endTime: "2026-08-19 10:00:35.500000000",
+					errorSpanCount: "1",
+					inputTokens: "100",
+					llmInputTokens: "100",
+					models: ["gpt-5", "claude-opus-5"],
+					agentNames: [],
+				}),
+			],
+			[
+				// Usage reported per model call AND rolled up onto the agent span:
+				// the per-call figures are the total, the roll-up is not added on top.
+				totalsRow({
+					traceCount: "2",
+					spanCount: "80",
+					aiSpanCount: "12",
+					llmCalls: "6",
+					toolCalls: "4",
+					errorSpanCount: "1",
+					endTime: "2026-08-19 10:00:35.500000000",
+					durationMs: "35500",
+					inputTokens: "400",
+					llmInputTokens: "250",
+					outputTokens: "60",
+					llmOutputTokens: "30",
+					costReporters: "4",
+					cost: "0.02",
+					llmCost: "0.01",
+					models: ["gpt-5", "claude-opus-5"],
+				}),
+			],
+		)
+		try {
+			const response = await harness.post("/internal/ai-sessions/summary", SPANS_BODY)
+			expect(response.status).toBe(200)
+			expect(response.body).toMatchObject({
+				spanCount: 80,
+				aiSpanCount: 12,
+				traceCount: 2,
+				startTime: "2026-08-19 10:00:00.000000000",
+				endTime: "2026-08-19 10:00:35.500000000",
+				durationMs: 35_500,
+				llmCalls: 6,
+				toolCalls: 4,
+				errorSpanCount: 1,
+				tokens: { input: 250, output: 30, cacheRead: 0 },
+				tokenReporting: "per-call",
+				cost: 0.01,
+				models: ["gpt-5", "claude-opus-5"],
+				agentNames: ["slack-agent"],
+				turnsTruncated: false,
+			})
+			const turns = response.body.turns as Array<Record<string, unknown>>
+			expect(turns).toHaveLength(2)
+			expect(turns[1]).toMatchObject({ turnKey: "turn_1", tokens: { input: 100, output: 0, cacheRead: 0 } })
+			expect(turns[1]).not.toHaveProperty("cost")
+			expect(sqls).toHaveLength(2)
+			for (const sql of sqls) expect(sql).toContain(`SpanAttributes['maple_ai.session.id'] = '${SESSION_ID}'`)
+		} finally {
+			await harness.dispose()
+		}
+	})
+
+	// The rule is applied to the session's row, never to the turn rows summed:
+	// a turn span's roll-up and its model calls can land in different rows.
+	it("does not double usage split across a turn row and its trace's row", async () => {
+		const { harness } = summaryHarness(
+			[
+				turnRow({ inputTokens: "300", llmCalls: "0" }),
+				turnRow({ turnKey: TRACE_ID, conversationId: "", inputTokens: "300", llmInputTokens: "300" }),
+			],
+			[totalsRow({ inputTokens: "600", llmInputTokens: "300" })],
+		)
+		try {
+			const response = await harness.post("/internal/ai-sessions/summary", SPANS_BODY)
+			expect(response.body).toMatchObject({ tokens: { input: 300, output: 0, cacheRead: 0 }, tokenReporting: "per-call" })
+		} finally {
+			await harness.dispose()
+		}
+	})
+
+	it("counts a roll-up when no model call reported usage", async () => {
+		const { harness } = summaryHarness(
+			[turnRow({ inputTokens: "300", outputTokens: "60" })],
+			[totalsRow({ inputTokens: "300", outputTokens: "60" })],
+		)
+		try {
+			const response = await harness.post("/internal/ai-sessions/summary", SPANS_BODY)
+			expect(response.body).toMatchObject({
+				tokens: { input: 300, output: 60, cacheRead: 0 },
+				tokenReporting: "roll-up",
+			})
+			expect(response.body).not.toHaveProperty("cost")
+		} finally {
+			await harness.dispose()
+		}
+	})
+
+	it("keeps exact totals when the turn list is cut", async () => {
+		const rows = Array.from({ length: AI_SESSION_SUMMARY_MAX_TURNS + 1 }, (_, index) =>
+			turnRow({ turnKey: `turn_${index}`, conversationId: `turn_${index}`, spanCount: "1" }),
+		)
+		const { harness } = summaryHarness(rows, [totalsRow({ spanCount: String(AI_SESSION_SUMMARY_MAX_TURNS + 1) })])
+		try {
+			const response = await harness.post("/internal/ai-sessions/summary", SPANS_BODY)
+			expect(response.body).toMatchObject({ spanCount: AI_SESSION_SUMMARY_MAX_TURNS + 1, turnsTruncated: true })
+			expect(response.body.turns).toHaveLength(AI_SESSION_SUMMARY_MAX_TURNS)
+		} finally {
+			await harness.dispose()
+		}
+	})
+
+	it("answers an unknown session with empty totals and no bounds", async () => {
+		// An aggregate over no rows is still one row, with a zero count.
+		const { harness } = summaryHarness([], [totalsRow({ spanCount: "0", traceCount: "0" })])
+		try {
+			const response = await harness.post("/internal/ai-sessions/summary", SPANS_BODY)
+			expect(response.status).toBe(200)
+			expect(response.body).toMatchObject({ spanCount: 0, turns: [], tokenReporting: "none" })
+			expect(response.body).not.toHaveProperty("startTime")
 		} finally {
 			await harness.dispose()
 		}

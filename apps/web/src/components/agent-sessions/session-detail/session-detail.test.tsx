@@ -45,13 +45,14 @@ vi.mock("@/lib/services/atoms/warehouse-query-atoms", async (importOriginal) => 
 	return { ...actual, getSpanDetailResultAtom: () => disabledResultAtom() }
 })
 
-import type { AiSessionSpan } from "@maple/domain/http"
+import type { AiSessionSpan, GetAiSessionSummaryResponse } from "@maple/domain/http"
+import type { SessionSpansState } from "@/hooks/use-session-spans"
 import { agentSpan, llmSpan, makeSpan, toolSpan, userMessages } from "@/lib/agent-sessions/span-test-support"
 import { buildSessionSummary, type SessionSummary } from "@/lib/agent-sessions/session-summary"
 import { buildSessionTurns, type SessionTurn } from "@/lib/agent-sessions/session-turns"
 import { SessionFlow } from "./session-flow"
 import { SessionOverview } from "./session-overview"
-import { SessionViews, type SessionView } from "./session-views"
+import { SessionViews, type SessionPaging, type SessionView } from "./session-views"
 import { SessionWaterfall } from "./session-waterfall"
 import type { SpanDetailTab } from "./span-expansion"
 
@@ -303,6 +304,7 @@ function Waterfall(props: {
 	revealedTurnId?: string
 	onSelectSpan?: (spanId: string | undefined) => void
 	spanTab?: SpanDetailTab
+	appSpans?: SessionSpansState["appSpans"]
 }) {
 	return (
 		<SessionWaterfall
@@ -313,6 +315,7 @@ function Waterfall(props: {
 			collapseIdle={props.collapseIdle ?? true}
 			collapsedTurns={props.collapsedTurns ?? EMPTY}
 			onToggleTurn={props.onToggleTurn ?? noop}
+			appSpans={props.appSpans}
 			selectedSpanId={props.selectedSpanId}
 			revealedSpanId={props.revealedSpanId}
 			revealedTurnId={props.revealedTurnId}
@@ -587,6 +590,33 @@ describe("SessionWaterfall", () => {
 
 		view.rerender(<Waterfall agentSpansOnly={false} />)
 		expect(screen.getByText("GET /repo/file")).toBeTruthy()
+	})
+
+	// A partly loaded session: a turn past the first page holds agent spans
+	// alone, and the header is where the reader asks for the rest.
+	it("offers to load app spans for a turn that has none, once they would be shown", () => {
+		const load = vi.fn()
+		const appSpans = { of: () => undefined, load }
+		const view = render(<Waterfall appSpans={appSpans} />)
+		// Hidden under the agent-only toggle: fetching them would draw nothing.
+		expect(screen.queryByRole("button", { name: /^Load app spans/ })).toBeNull()
+
+		view.rerender(<Waterfall appSpans={appSpans} agentSpansOnly={false} />)
+		// Turn 1 came with its HTTP span; turn 2 did not.
+		const buttons = screen.getAllByRole("button", { name: /^Load app spans for Turn/ })
+		expect(buttons).toHaveLength(1)
+		expect(buttons[0]!.getAttribute("aria-label")).toBe("Load app spans for Turn 2")
+		fireEvent.click(buttons[0]!)
+		expect(load).toHaveBeenCalledWith(turns[1])
+	})
+
+	it("says how far a turn's app spans have come", () => {
+		const appSpans = {
+			of: () => ({ loading: false, loaded: 2000, cursor: { timestamp: "t", spanId: "s" }, complete: false, failed: false }),
+			load: noop,
+		}
+		render(<Waterfall appSpans={appSpans} agentSpansOnly={false} />)
+		expect(screen.getAllByRole("button", { name: /Load more app spans \(2,000 loaded\)/ }).length).toBe(2)
 	})
 
 	it("narrows to the spans that match the filter", () => {
@@ -1075,7 +1105,13 @@ describe("SessionFlow", () => {
 
 describe("SessionViews", () => {
 	/** `view` is a search param on the real page; here it is local state. */
-	function Views(props: { turns?: readonly SessionTurn[]; summary?: SessionSummary; view?: SessionView }) {
+	function Views(props: {
+		turns?: readonly SessionTurn[]
+		summary?: SessionSummary
+		view?: SessionView
+		paging?: SessionPaging
+		totals?: GetAiSessionSummaryResponse
+	}) {
 		const [view, setView] = useState<SessionView>(props.view ?? "trace")
 		const [selectedSpanId, setSelectedSpanId] = useState<string | undefined>(undefined)
 		return (
@@ -1084,12 +1120,59 @@ describe("SessionViews", () => {
 				onViewChange={setView}
 				turns={props.turns ?? turns}
 				summary={props.summary ?? summary}
-				truncated={false}
+				paging={props.paging}
+				totals={props.totals}
 				selectedSpanId={selectedSpanId}
 				onSelectSpan={setSelectedSpanId}
 			/>
 		)
 	}
+
+	const totals: GetAiSessionSummaryResponse = {
+		spanCount: 209_220,
+		aiSpanCount: 19_506,
+		traceCount: 1,
+		startTime: "2026-08-27 22:18:58.869000000",
+		endTime: "2026-08-27 23:56:55.809000000",
+		durationMs: 5_876_940,
+		llmCalls: 17_439,
+		toolCalls: 0,
+		errorSpanCount: 3,
+		tokens: { input: 1_000_000, output: 50_000, cacheRead: 0 },
+		tokenReporting: "per-call",
+		cost: 12.5,
+		models: ["gpt-5"],
+		agentNames: [],
+		turns: [],
+		turnsTruncated: false,
+	}
+
+	// A session larger than one page: the Overview leads with the whole
+	// session's totals, and the transcript ends on a way to load the rest.
+	it("shows the whole session's totals and a way to load more when partly loaded", () => {
+		const onLoadMore = vi.fn()
+		const paging = { hasMore: true, loadingMore: false, onLoadMore, appSpans: { of: () => undefined, load: noop } }
+		render(<Views view="overview" paging={paging} totals={totals} />)
+
+		const whole = screen.getByTestId("whole-session")
+		expect(within(whole).getByText("209,220")).toBeTruthy()
+		expect(within(whole).getByText("19,506")).toBeTruthy()
+		expect(within(whole).getByText("17,439")).toBeTruthy()
+		expect(within(whole).getByText("$12.50")).toBeTruthy()
+		expect(within(whole).getByText(/read from the 8 spans loaded so far/)).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("tab", { name: /Transcript/ }))
+		expect(screen.getByText("More of this session follows")).toBeTruthy()
+		fireEvent.click(screen.getByRole("button", { name: "Load more" }))
+		expect(onLoadMore).toHaveBeenCalledTimes(1)
+	})
+
+	it("shows neither for a session loaded whole", () => {
+		render(<Views view="overview" />)
+		expect(screen.queryByTestId("whole-session")).toBeNull()
+		fireEvent.click(screen.getByRole("tab", { name: /Transcript/ }))
+		expect(screen.queryByText("More of this session follows")).toBeNull()
+	})
 
 	// Both debug views read the query and the span-kind toggle, so both controls
 	// stay mounted in both.

@@ -200,8 +200,10 @@ export function buildSessionSummary({
 	const ordered = [...spans].sort((a, b) => spanStartMs(a) - spanStartMs(b))
 	const byId = new Map(ordered.map((span) => [span.spanId, span]))
 
-	const startMs = Math.min(...ordered.map(spanStartMs))
-	const endMs = Math.max(...ordered.map(spanEndMs))
+	// Reduced, not spread: a partly loaded session can hold tens of thousands
+	// of spans, past what a spread argument list survives.
+	const startMs = ordered.reduce((min, span) => Math.min(min, spanStartMs(span)), Number.POSITIVE_INFINITY)
+	const endMs = ordered.reduce((max, span) => Math.max(max, spanEndMs(span)), Number.NEGATIVE_INFINITY)
 	const wallClockMs = endMs - startMs
 
 	const idleGaps = findIdleGaps(ordered)

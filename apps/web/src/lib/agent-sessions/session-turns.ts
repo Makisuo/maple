@@ -11,6 +11,12 @@
 // `span-tree.ts` applies inside a single trace, so a child that a skewed clock
 // placed outside its parent can land in a neighbouring turn.
 
+import {
+	AI_AGENT_OPERATIONS,
+	AI_INFERENCE_OPERATIONS,
+	AI_RETRIEVAL_OPERATIONS,
+	AI_TOOL_OPERATIONS,
+} from "@maple/domain/gen-ai"
 import type { AiSessionSpan } from "@maple/domain/http"
 import { toEpochMs } from "@maple/ui/lib/time-format"
 
@@ -21,16 +27,16 @@ import { toEpochMs } from "@maple/ui/lib/time-format"
  */
 export type AiSpanCategory = "agent" | "inference" | "tool" | "other"
 
-// `gen_ai.operation.name` is an open set, so these group the semantic
-// convention's operation names plus `agent_step`, which the Vercel AI SDK emits
-// and production data carries. An unknown value falls through to the span-name
-// rules below rather than being rejected.
-const INFERENCE_OPS = new Set(["chat", "generate_content", "text_completion", "fetch_response"])
+// The operation vocabulary is shared with the server-side session summary
+// (`@maple/domain/gen-ai`), so an "llm call" is the same span in both places.
+// An unknown value falls through to the span-name rules below rather than
+// being rejected.
+const INFERENCE_OPS: ReadonlySet<string> = new Set(AI_INFERENCE_OPERATIONS)
 /** Inference-shaped work that is not a chat completion: counted as inference
  *  occupancy, never as an "llm call" — an embedding is not a model turn. */
-const RETRIEVAL_OPS = new Set(["embeddings", "retrieval"])
-const TOOL_OPS = new Set(["execute_tool"])
-const AGENT_OPS = new Set(["invoke_agent", "create_agent", "invoke_workflow", "plan", "agent_step"])
+const RETRIEVAL_OPS: ReadonlySet<string> = new Set(AI_RETRIEVAL_OPERATIONS)
+const TOOL_OPS: ReadonlySet<string> = new Set(AI_TOOL_OPERATIONS)
+const AGENT_OPS: ReadonlySet<string> = new Set(AI_AGENT_OPERATIONS)
 
 export function spanStartMs(span: AiSessionSpan): number {
 	return toEpochMs(span.timestamp)

@@ -13,8 +13,14 @@ export {
 	aiSessionPageQuery,
 	aiSessionSpansQuery,
 	aiSessionSpansRowSchema,
+	aiSessionSummaryQuery,
+	aiSessionSummaryRowSchema,
+	aiSessionTotalsQuery,
+	aiSessionTotalsRowSchema,
 	aiSessionWindowQuery,
 	aiTraceSpansQuery,
+	aiTraceSummaryQuery,
+	aiTraceTotalsQuery,
 	aiTraceWindowQuery,
 	idSearchPattern,
 	type AiSessionFacetType,
@@ -26,10 +32,13 @@ export {
 	type AiSessionPageOutput,
 	type AiSessionSpansOpts,
 	type AiSessionSpansOutput,
+	type AiSessionSummaryOutput,
+	type AiSessionTotalsOutput,
 	type AiSessionWindowOutput,
 } from "./ai-sessions"
 
 export {
+	aiFieldSourceKeys,
 	aiSpanAttributeKeys,
 	genAiIntegration,
 	mapAiSpan,

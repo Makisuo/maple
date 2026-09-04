@@ -13,8 +13,13 @@ import {
 	aiSessionPageQuery,
 	aiSessionSpansQuery,
 	aiSessionSpansRowSchema,
+	aiSessionSummaryQuery,
+	aiSessionSummaryRowSchema,
+	aiSessionTotalsQuery,
 	aiSessionWindowQuery,
 	aiTraceSpansQuery,
+	aiTraceSummaryQuery,
+	aiTraceTotalsQuery,
 	aiTraceWindowQuery,
 } from "./ai-sessions"
 
@@ -998,5 +1003,154 @@ describe("aiTraceSpansQuery", () => {
 
 		expect(row?.durationMs).toBe(250)
 		expect(row?.spanAttributes).toEqual({ "maple_ai.vendor.id": "llamaindex" })
+	})
+})
+
+describe("aiSessionSpansQuery — scope and cursor", () => {
+	it("keeps the agent spans alone under the ai scope, and the app's alone under app", () => {
+		const ai = compileUnsafe(aiSessionSpansQuery({ scope: "ai" }), spanParams).sql
+		const app = compileUnsafe(aiSessionSpansQuery({ scope: "app" }), spanParams).sql
+		const all = compileUnsafe(aiSessionSpansQuery(), spanParams).sql
+
+		expect(ai).toContain("AND SpanAttributes['maple_ai.vendor.id'] != ''")
+		expect(app).toContain("AND SpanAttributes['maple_ai.vendor.id'] = ''")
+		expect(all).not.toContain("AND SpanAttributes['maple_ai.vendor.id']")
+	})
+
+	it("resumes strictly after the cursor in the page order", () => {
+		const { sql } = compileUnsafe(
+			aiSessionSpansQuery({ after: { timestamp: "2026-08-19 10:00:00.123456789", spanId: "aa11" } }),
+			spanParams,
+		)
+
+		// Same pair, same direction as the ORDER BY — the tuple comparison
+		// spelled out, since the tie-breaker only applies at an equal timestamp.
+		expect(sql).toContain(
+			"(Timestamp > '2026-08-19 10:00:00.123456789' OR (Timestamp = '2026-08-19 10:00:00.123456789' AND SpanId > 'aa11'))",
+		)
+		expect(sql).toContain("ORDER BY timestamp ASC, spanId ASC")
+	})
+
+	it("escapes a cursor span id carrying a quote", () => {
+		const { sql } = compileUnsafe(
+			aiSessionSpansQuery({ after: { timestamp: "2026-08-19 10:00:00.000000000", spanId: "a'b" } }),
+			spanParams,
+		)
+		expect(sql).toContain("SpanId > 'a\\'b'")
+	})
+})
+
+describe("aiTraceSpansQuery — a turn's traces", () => {
+	it("reads the named traces and nothing else, with no detection level", () => {
+		const { sql } = compileUnsafe(
+			aiTraceSpansQuery({ traceIds: [TRACE_ID, "0123456789abcdef0123456789abcdef"], scope: "app" }),
+			{ orgId: "org_1", startTime: "2026-08-18 00:00:00", endTime: "2026-08-19 23:59:59" },
+		)
+
+		expect(sql).toContain(`TraceId IN ('${TRACE_ID}', '0123456789abcdef0123456789abcdef')`)
+		expect(sql).not.toContain("__PARAM_")
+		expect(sql).not.toContain("FROM traces")
+		expect(sql).toContain("SpanAttributes['maple_ai.vendor.id'] = ''")
+	})
+})
+
+describe("aiSessionSummaryQuery", () => {
+	const summaryParams = { ...spanParams }
+
+	it("groups the session's spans by conversation id, falling back to the trace", () => {
+		const { sql } = compileUnsafe(aiSessionSummaryQuery(), summaryParams)
+
+		expect(sql).toContain("FROM trace_detail_spans")
+		expect(sql).toContain("TraceId IN (SELECT")
+		expect(sql).toContain(`SpanAttributes['maple_ai.session.id'] = 'wrun_01M0CSAEW96BH2W9185XZPRPKH'`)
+		expect(sql).toContain("GROUP BY turnKey")
+		expect(sql).toContain("ORDER BY startTime ASC")
+		expect(sql).toContain("LIMIT 1001")
+		// The turn ids the refine hooks lift into the field are read alongside it.
+		expect(sql).toContain(
+			"coalesce(nullIf(SpanAttributes['gen_ai.conversation.id'], ''), nullIf(SpanAttributes['eve.turn.id'], ''), nullIf(SpanAttributes['maple_ai.turn.id'], ''), '')",
+		)
+	})
+
+	it("reads usage across every vendor spelling, per call and in total", () => {
+		const { sql } = compileUnsafe(aiSessionSummaryQuery(), summaryParams)
+
+		for (const key of ["gen_ai.usage.input_tokens", "gen_ai.usage.prompt_tokens", "ai.usage.inputTokens", "llm.token_count.prompt"]) {
+			expect(sql, key).toContain(`SpanAttributes['${key}']`)
+		}
+		expect(sql).toContain("AS inputTokens")
+		expect(sql).toContain("AS llmInputTokens")
+		expect(sql).toContain("IN ('chat', 'generate_content', 'text_completion', 'fetch_response')")
+		expect(sql).toContain("NOT IN ('embeddings', 'retrieval', 'execute_tool', 'invoke_agent'")
+	})
+
+	it("is org-scoped on both levels", () => {
+		const { sql } = compileUnsafe(aiSessionSummaryQuery(), summaryParams)
+		expect(orgPredicateCount(sql)).toBe(2)
+	})
+
+	it("keys a trace session on the trace, with the same projection", () => {
+		const session = compileUnsafe(aiSessionSummaryQuery(), summaryParams).sql
+		const trace = compileUnsafe(aiTraceSummaryQuery(), traceParams).sql
+
+		expect(trace).toContain(`TraceId = '${TRACE_ID}'`)
+		expect(trace).not.toContain("FROM traces")
+		expect(trace.split("FROM trace_detail_spans")[0]).toBe(session.split("FROM trace_detail_spans")[0])
+		expect(orgPredicateCount(trace)).toBe(1)
+	})
+
+	it("guards every usage sum against a non-finite attribute", () => {
+		const { sql } = compileUnsafe(aiSessionSummaryQuery(), summaryParams)
+		for (const alias of ["inputTokens", "llmInputTokens", "cost", "llmCost"]) {
+			expect(sql, alias).toMatch(new RegExp(`ifNotFinite\\(sum(If)?\\(toFloat64OrZero\\([^\\n]*, 0\\) AS ${alias},`))
+		}
+	})
+
+	it("reads the whole session's measures ungrouped, under the same detection", () => {
+		const totals = compileUnsafe(aiSessionTotalsQuery(), summaryParams).sql
+		const trace = compileUnsafe(aiTraceTotalsQuery(), traceParams).sql
+
+		expect(totals).toContain("uniqExact(TraceId) AS traceCount")
+		expect(totals).not.toContain("GROUP BY")
+		expect(totals).not.toContain("turnKey")
+		expect(totals).toContain("AS llmInputTokens")
+		expect(totals).toContain(`SpanAttributes['maple_ai.session.id'] = 'wrun_01M0CSAEW96BH2W9185XZPRPKH'`)
+		expect(orgPredicateCount(totals)).toBe(2)
+		expect(trace).toContain(`TraceId = '${TRACE_ID}'`)
+		expect(orgPredicateCount(trace)).toBe(1)
+	})
+
+	it("decodes the quoted 64-bit aggregates and the arrays", () => {
+		const compiled = compileUnsafe(aiSessionSummaryQuery(), summaryParams, {
+			rowSchema: aiSessionSummaryRowSchema,
+		})
+		const [row] = decodeRows(compiled, [
+			{
+				turnKey: "turn_0",
+				conversationId: "turn_0",
+				traceIds: ["6b0c0e0a"],
+				startTime: "2026-08-19 10:33:25.825000000",
+				endTime: "2026-08-19 10:33:26.825000000",
+				durationMs: "1000",
+				spanCount: "12",
+				aiSpanCount: "4",
+				llmCalls: "2",
+				toolCalls: "1",
+				errorSpanCount: "0",
+				inputTokens: "300",
+				outputTokens: "40",
+				cacheReadTokens: "0",
+				llmInputTokens: "300",
+				llmOutputTokens: "40",
+				llmCacheReadTokens: "0",
+				costReporters: "2",
+				cost: 0.0123,
+				llmCost: 0.0123,
+				models: ["gpt-5"],
+				agentNames: [],
+			},
+		])
+
+		expect(row).toMatchObject({ spanCount: 12, durationMs: 1000, inputTokens: 300, cost: 0.0123, models: ["gpt-5"] })
 	})
 })

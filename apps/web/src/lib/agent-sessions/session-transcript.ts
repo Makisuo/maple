@@ -47,7 +47,7 @@ import {
 /** Why a lane exists, which is also how its header reads. */
 export type LaneKind = "lane" | "subagent"
 
-export type TranscriptDividerKind = "compaction" | "truncated"
+export type TranscriptDividerKind = "compaction" | "more"
 
 /** Which halves of a call an emitter records. Mixed sessions have several. */
 export type CaptureCoverage = "both" | "input" | "output" | "none"
@@ -232,8 +232,8 @@ export interface TranscriptInput {
 	readonly query: string
 	/** The toolbar's "Thinking" chip. */
 	readonly showThinking: boolean
-	/** `GetAiSessionSpansResponse.truncated` — the END of the session is missing. */
-	readonly truncated: boolean
+	/** Agent spans remain past the loaded pages — the END of the session is not here yet. */
+	readonly hasMore: boolean
 	readonly collapsedTurns: ReadonlySet<string>
 }
 
@@ -250,7 +250,7 @@ export function buildTranscript(input: TranscriptInput): readonly TranscriptRow[
 
 /** What the read of the session takes: everything but the two inputs a
  *  reader flips row by row, which only `assembleTranscript` sees. */
-export type PrepareInput = Omit<TranscriptInput, "collapsedTurns" | "truncated">
+export type PrepareInput = Omit<TranscriptInput, "collapsedTurns" | "hasMore">
 
 /** The session read once: every turn's rows, and the session-wide facts the
  *  assembly needs to order them. */
@@ -306,7 +306,7 @@ export function prepareTranscript(input: PrepareInput): PreparedTranscript {
 /** The cheap half: the row list, in order, for what the reader has open. */
 export function assembleTranscript(
 	{ turnRows, concurrent, filtering, bannerUp, capturedCalls, anyAiActivity }: PreparedTranscript,
-	{ collapsedTurns, truncated }: Pick<TranscriptInput, "collapsedTurns" | "truncated">,
+	{ collapsedTurns, hasMore }: Pick<TranscriptInput, "collapsedTurns" | "hasMore">,
 ): readonly TranscriptRow[] {
 	const body: TranscriptRow[] = []
 	for (const entry of turnRows) {
@@ -356,9 +356,23 @@ export function assembleTranscript(
 		}
 	}
 
+	// Pages are the session's oldest spans first, so what is missing is the END
+	// of the session and the divider is terminal: it says where the reading
+	// stops, not where the agent did.
+	const moreDivider: TranscriptRow = {
+		kind: "divider",
+		key: "divider:more",
+		depth: 0,
+		dividerKind: "more",
+		startMs: undefined,
+	}
+
 	// Nothing survived. The empty state says which of the two reasons it was, and
-	// a lone banner or a divider hanging over nothing would only muddy it.
-	if (body.length === 0) return []
+	// a lone banner hanging over nothing would only muddy it. The exception is a
+	// session with more still to load and no filter in the way: "no AI activity"
+	// is not yet true of it — the opening was the app's own work — so the
+	// divider stands alone as the honest row.
+	if (body.length === 0) return hasMore && !filtering ? [moreDivider] : []
 
 	const rows: TranscriptRow[] = []
 	if (bannerUp) {
@@ -373,17 +387,7 @@ export function assembleTranscript(
 	}
 	rows.push(...body)
 
-	// Truncation drops the END of the session, so the divider is terminal and
-	// unconditional: it says where the reading stops, not where the agent did.
-	if (truncated) {
-		rows.push({
-			kind: "divider",
-			key: "divider:truncated",
-			depth: 0,
-			dividerKind: "truncated",
-			startMs: undefined,
-		})
-	}
+	if (hasMore) rows.push(moreDivider)
 	return rows
 }
 

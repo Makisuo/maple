@@ -168,9 +168,40 @@ export class ListAiSessionsFacetsResponse extends Schema.Class<ListAiSessionsFac
 	tools: Schema.Array(AiSessionFacetItem),
 }) {}
 
+/** Which of a session's spans a read returns. `ai` is the vendor-stamped
+ *  spans alone — the transcript's whole input — and `app` is the complement,
+ *  the service's own HTTP/DB work sharing the agent's traces. */
+export const AiSessionSpanScope = Schema.Literals(["all", "ai", "app"])
+export type AiSessionSpanScope = Schema.Schema.Type<typeof AiSessionSpanScope>
+
+/**
+ * Keyset position in a session's span order (`timestamp`, then `spanId`). Both
+ * values are copied from the last span of the previous page: the timestamp is
+ * the warehouse literal at nanosecond precision, which is what makes the pair
+ * unique — agent spans routinely share a millisecond.
+ */
+export const AiSessionSpanCursor = Schema.Struct({
+	timestamp: TinybirdDateTime,
+	spanId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+})
+export type AiSessionSpanCursor = Schema.Schema.Type<typeof AiSessionSpanCursor>
+
+const TraceIdHex = Schema.String.check(Schema.isPattern(/^[0-9a-f]{32}$/))
+
+/** Traces one span read may be pinned to — a turn's worth, not a session's. */
+export const AI_SESSION_SPANS_MAX_TRACE_IDS = 100
+
+/**
+ * Row ceiling for one page of a session's spans. The handler asks the query for
+ * one row past it, so an exactly-full page is distinguishable from one with a
+ * page after it.
+ */
+export const AI_SESSION_SPANS_MAX_SPANS = 2_000
+
 export class GetAiSessionSpansRequest extends Schema.Class<GetAiSessionSpansRequest>(
 	"GetAiSessionSpansRequest",
-)({
+)(
+	Schema.Struct({
 	/**
 	 * The framework's own session id, verbatim — `maple_ai.session.id` — or the
 	 * `trace:<TraceId>` id Maple synthesizes for a GenAI trace that carries none
@@ -196,6 +227,125 @@ export class GetAiSessionSpansRequest extends Schema.Class<GetAiSessionSpansRequ
 	// into its URL, which makes the second load of any such link the direct one.
 	startTime: Schema.optionalKey(TinybirdDateTime),
 	endTime: Schema.optionalKey(TinybirdDateTime),
+	/** Defaults to `all`. */
+	scope: Schema.optionalKey(AiSessionSpanScope),
+	/** Spans strictly after this position; absent for the first page. */
+	after: Schema.optionalKey(AiSessionSpanCursor),
+	/**
+	 * Read these traces of the session instead of resolving the session's
+	 * traces — the per-turn read the detail page makes for a turn's `app`
+	 * spans, where the turn already knows which traces it spans. Requires the
+	 * window, which is what bounds the read; the session id is then only the
+	 * span the request is annotated with.
+	 */
+	traceIds: Schema.optionalKey(Schema.Array(TraceIdHex).check(Schema.isMaxLength(AI_SESSION_SPANS_MAX_TRACE_IDS))),
+	/** Page size, at most `AI_SESSION_SPANS_MAX_SPANS` (the default). */
+	limit: Schema.optionalKey(
+		Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: AI_SESSION_SPANS_MAX_SPANS })),
+	),
+	}).check(
+		// The window is what bounds a trace-pinned read, and the session id
+		// cannot stand in for it: resolving the SESSION's bounds for traces named
+		// outright is a round trip that answers empty for a session nothing
+		// carries. Checked here so the miss is a 400 rather than an empty page.
+		Schema.makeFilter(
+			(request: { readonly traceIds?: readonly string[]; readonly startTime?: string; readonly endTime?: string }) =>
+				request.traceIds === undefined ||
+				(request.startTime !== undefined && request.endTime !== undefined) ||
+				"traceIds requires startTime and endTime",
+			{ identifier: "TraceIdsNeedWindow" },
+		),
+	),
+) {}
+
+export class GetAiSessionSummaryRequest extends Schema.Class<GetAiSessionSummaryRequest>(
+	"GetAiSessionSummaryRequest",
+)({
+	/** As on `GetAiSessionSpansRequest`, including the `trace:` form. */
+	sessionId: Schema.String.check(Schema.isMinLength(1)),
+	/** As on `GetAiSessionSpansRequest`: both or neither. */
+	startTime: Schema.optionalKey(TinybirdDateTime),
+	endTime: Schema.optionalKey(TinybirdDateTime),
+}) {}
+
+export const AiSessionTokenTotals = Schema.Struct({
+	input: Schema.Number,
+	output: Schema.Number,
+	cacheRead: Schema.Number,
+})
+export type AiSessionTokenTotals = Schema.Schema.Type<typeof AiSessionTokenTotals>
+
+/**
+ * How a session's usage was reported, which decides which spans' figures the
+ * totals sum. `per-call`: the model-call spans carry usage, and the totals are
+ * theirs alone — an agent span that also carries a roll-up of its children is
+ * not added on top. `roll-up`: no model-call span reported anything, so the
+ * totals are what the wrapping spans reported. `none`: nothing did.
+ */
+export const AiSessionTokenReporting = Schema.Literals(["per-call", "roll-up", "none"])
+export type AiSessionTokenReporting = Schema.Schema.Type<typeof AiSessionTokenReporting>
+
+/**
+ * One turn of a session as the warehouse groups it: by `gen_ai.conversation.id`
+ * (and the vendor spellings of it), falling back to the trace.
+ *
+ * The grouping sees one span at a time. A span that carries the id is the
+ * turn's; a child that does not — a model call under a turn span that alone
+ * was stamped — lands in its trace's row instead. The page's own turn model
+ * walks parents and so places those children; these rows therefore sum to the
+ * session exactly, but their count and their per-turn split are only as good
+ * as the emitter's stamping. Session totals in the response are exact.
+ */
+export const AiSessionTurnSummary = Schema.Struct({
+	turnKey: Schema.String,
+	/** Empty when the turn is a trace with no conversation id. */
+	conversationId: Schema.String,
+	traceIds: Schema.Array(Schema.String),
+	/** Warehouse datetime literals, like the list row's. */
+	startTime: Schema.String,
+	endTime: Schema.String,
+	durationMs: Schema.Number,
+	spanCount: Schema.Number,
+	aiSpanCount: Schema.Number,
+	llmCalls: Schema.Number,
+	toolCalls: Schema.Number,
+	errorSpanCount: Schema.Number,
+	tokens: AiSessionTokenTotals,
+	/** Absent when no span of the turn reported a cost. */
+	cost: Schema.optionalKey(Schema.Number),
+	models: Schema.Array(Schema.String),
+	agentNames: Schema.Array(Schema.String),
+})
+export type AiSessionTurnSummary = Schema.Schema.Type<typeof AiSessionTurnSummary>
+
+/** Turn rows one summary carries. A session grouping into more is summarised
+ *  from its first rows alone and says so with `turnsTruncated`. */
+export const AI_SESSION_SUMMARY_MAX_TURNS = 1_000
+
+/**
+ * The whole session's totals, computed in the warehouse — so they hold for a
+ * session far larger than one spans response, which is the reason this exists.
+ */
+export class GetAiSessionSummaryResponse extends Schema.Class<GetAiSessionSummaryResponse>(
+	"GetAiSessionSummaryResponse",
+)({
+	spanCount: Schema.Number,
+	aiSpanCount: Schema.Number,
+	traceCount: Schema.Number,
+	/** Absent for an unknown session — one with no spans. */
+	startTime: Schema.optionalKey(Schema.String),
+	endTime: Schema.optionalKey(Schema.String),
+	durationMs: Schema.Number,
+	llmCalls: Schema.Number,
+	toolCalls: Schema.Number,
+	errorSpanCount: Schema.Number,
+	tokens: AiSessionTokenTotals,
+	tokenReporting: AiSessionTokenReporting,
+	cost: Schema.optionalKey(Schema.Number),
+	models: Schema.Array(Schema.String),
+	agentNames: Schema.Array(Schema.String),
+	turns: Schema.Array(AiSessionTurnSummary),
+	turnsTruncated: Schema.Boolean,
 }) {}
 
 /**
@@ -219,18 +369,13 @@ export class GetAiSessionSpansResponse extends Schema.Class<GetAiSessionSpansRes
 )({
 	data: Schema.Array(AiSessionSpan),
 	/**
-	 * The session has more spans than one response carries. Truncation drops the
-	 * END of the session, so a client must say so rather than present the result
-	 * as a complete transcript.
+	 * Where the next page starts; absent when this page ended the read. A page
+	 * is the OLDEST spans not yet returned, so a client that stops paging holds
+	 * the session's beginning and must say the end is missing rather than
+	 * present what it has as a complete transcript.
 	 */
-	truncated: Schema.Boolean,
+	nextCursor: Schema.optionalKey(AiSessionSpanCursor),
 }) {}
-
-/**
- * Row ceiling for one session's spans. The handler asks the query for one row
- * past it, so an exactly-full session is distinguishable from a truncated one.
- */
-export const AI_SESSION_SPANS_MAX_SPANS = 2_000
 
 /**
  * Response ceiling for one session's spans, measured over the warehouse rows —
@@ -251,14 +396,14 @@ export const AI_SESSION_SPANS_MAX_SPANS = 2_000
 export const MAX_AI_SESSION_SPANS_RESPONSE_BYTES = 10_000_000
 
 /**
- * The session's spans exceed `MAX_AI_SESSION_SPANS_RESPONSE_BYTES`.
+ * One page of the session's spans exceeds `MAX_AI_SESSION_SPANS_RESPONSE_BYTES`.
  *
- * Distinct from the row cap, which truncates and reports `truncated: true`: the
+ * Distinct from the row cap, which ends the page and hands back a cursor: the
  * byte ceiling aborts the read before a response can be materialized, so there
- * is nothing to return. The endpoint takes no size parameter, but it does take
- * a window, and when one is supplied both the session detection and the span
- * fan-out are bounded by it — so a narrower range genuinely returns fewer
- * bytes, which is what `recovery: "fix_request"` points the caller at.
+ * is nothing to return. A smaller `limit` is the direct fix, and a narrower
+ * window bounds both the session detection and the span fan-out — either
+ * genuinely returns fewer bytes, which is what `recovery: "fix_request"`
+ * points the caller at.
  */
 export class AiSessionTooLargeError extends HttpTaggedError<AiSessionTooLargeError>()(
 	"@maple/http/ai-sessions/AiSessionTooLargeError",
@@ -271,7 +416,7 @@ export class AiSessionTooLargeError extends HttpTaggedError<AiSessionTooLargeErr
 		code: "ai_session_too_large",
 		title: "Session is too large to load",
 		message:
-			"This session's spans are too large to return in one response. Open it from the Agent Sessions list, or narrow the time range.",
+			"This page of the session's spans is too large to return in one response. Ask for fewer spans per page, or narrow the time range.",
 		retry: "never",
 		recovery: "fix_request",
 		exposure: "redacted",
@@ -298,6 +443,13 @@ export class AiSessionsInternalApiGroup extends HttpApiGroup.make("aiSessionsInt
 			payload: GetAiSessionSpansRequest,
 			success: GetAiSessionSpansResponse,
 			error: [...warehouseReadHttpErrors, AiSessionTooLargeError],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("summary", "/summary", {
+			payload: GetAiSessionSummaryRequest,
+			success: GetAiSessionSummaryResponse,
+			error: warehouseReadHttpErrors,
 		}),
 	)
 	.prefix("/internal/ai-sessions")

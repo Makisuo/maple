@@ -1,5 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react"
 
+import type { GetAiSessionSummaryResponse } from "@maple/domain/http"
+
 import { ArrowRightIcon, ChevronRightIcon, CircleXmarkIcon } from "@/components/icons"
 import { Button } from "@maple/ui/components/ui/button"
 import { formatNumber, formatPercent } from "@maple/ui/lib/format"
@@ -53,6 +55,7 @@ const SEVERITY_DOT = {
 export function SessionOverview({
 	turns,
 	summary,
+	totals,
 	selectedSpanId,
 	onSelectSpan,
 	spanTab,
@@ -63,6 +66,12 @@ export function SessionOverview({
 }: {
 	turns: readonly SessionTurn[]
 	summary: SessionSummary
+	/**
+	 * The whole session's totals from the warehouse, for a session only partly
+	 * loaded — everything else on this page is computed from the spans in
+	 * hand, and says so when these are present.
+	 */
+	totals?: GetAiSessionSummaryResponse
 	/** The one span open in the popover (`?span=`). */
 	selectedSpanId: string | undefined
 	/** Raised with a span id to open it, `undefined` to close. */
@@ -89,6 +98,7 @@ export function SessionOverview({
 		<div className="@container flex grow flex-col pt-5 pb-10">
 			<div className="flex flex-col gap-8 @4xl:flex-row @4xl:gap-8">
 				<div className="flex min-w-0 grow flex-col gap-7">
+					{totals !== undefined && <WholeSession totals={totals} loadedSpanCount={summary.spanCount} />}
 					<Verdict
 						verdict={report.verdict}
 						findingCount={report.findings.length}
@@ -116,6 +126,67 @@ export function SessionOverview({
 				onOpenTraceView={onOpenTraceView}
 			/>
 		</div>
+	)
+}
+
+/* -------------------------------------------------------------------------- */
+/* Whole session                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The warehouse's totals for a session the page holds only part of. Shown
+ * first, because every panel under it is computed from the loaded spans and
+ * would otherwise read as the whole story.
+ */
+function WholeSession({
+	totals,
+	loadedSpanCount,
+}: {
+	totals: GetAiSessionSummaryResponse
+	loadedSpanCount: number
+}) {
+	const tokens = totals.tokens.input + totals.tokens.output + totals.tokens.cacheRead
+	// Exact counts, not compact ones: these are the figures the rest of the page
+	// is measured against, and "209.2K" cannot be compared with "2,000 loaded".
+	const exact = (value: number) => value.toLocaleString("en-US")
+	const facts: ReadonlyArray<{ label: string; value: string }> = [
+		{ label: "Spans", value: exact(totals.spanCount) },
+		{ label: "Agent spans", value: exact(totals.aiSpanCount) },
+		{ label: "Traces", value: exact(totals.traceCount) },
+		{ label: "Duration", value: formatSessionDuration(totals.durationMs) },
+		{ label: "Model calls", value: exact(totals.llmCalls) },
+		{ label: "Tool calls", value: exact(totals.toolCalls) },
+		{ label: "Errors", value: exact(totals.errorSpanCount) },
+		{ label: "Tokens", value: totals.tokenReporting === "none" ? "—" : formatNumber(tokens) },
+		{ label: "Cost", value: totals.cost === undefined ? "—" : formatCost(totals.cost) },
+	]
+
+	return (
+		<section
+			data-testid="whole-session"
+			className="rounded-md border border-border bg-card px-4 py-3"
+			aria-label="Whole session"
+		>
+			<div className="flex flex-wrap items-baseline justify-between gap-2">
+				<h2 className="font-medium text-sm">Whole session</h2>
+				<p className="text-muted-foreground text-xs">
+					Everything below is read from the {exact(loadedSpanCount)} spans loaded so far.
+				</p>
+			</div>
+			<dl className="mt-3 grid grid-cols-3 gap-x-6 gap-y-2 @lg:grid-cols-9">
+				{facts.map((fact) => (
+					<div key={fact.label} className="flex flex-col">
+						<dt className="text-[10px] text-muted-foreground uppercase tracking-wider">{fact.label}</dt>
+						<dd className="font-mono text-sm tabular-nums">{fact.value}</dd>
+					</div>
+				))}
+			</dl>
+			{totals.models.length > 0 && (
+				<p className="mt-2 truncate text-muted-foreground text-xs" title={totals.models.join(", ")}>
+					{totals.models.map(shortTarget).join(" · ")}
+				</p>
+			)}
+		</section>
 	)
 }
 

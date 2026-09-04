@@ -382,7 +382,8 @@ export function AgentTranscriptBench({ turns }: { turns: number }) {
 							onViewChange={() => {}}
 							turns={sessionTurns}
 							summary={summary}
-							truncated={false}
+							paging={undefined}
+							totals={undefined}
 							selectedSpanId={selectedSpanId}
 							onSelectSpan={setSelectedSpanId}
 						/>

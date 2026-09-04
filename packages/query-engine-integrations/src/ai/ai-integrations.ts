@@ -265,6 +265,17 @@ export const aiSpanAttributeKeys: readonly string[] = [
 	]),
 ]
 
+/**
+ * Every source key any integration reads for one field, the canonical spelling
+ * first — what a warehouse aggregation coalesces over to read the field the
+ * way `mapAiSpan` would, whichever vendor stamped the span.
+ */
+export const aiFieldSourceKeys = (field: AiGenAiField): readonly string[] => [
+	...new Set(
+		[genAiIntegration, ...resolvedIntegrations.values()].flatMap((integration) => integration.sources[field]),
+	),
+]
+
 /** The integration for a vendor stamp, or the default for a stamp with no entry. */
 export const resolveAiIntegration = (vendorId: string | undefined): ResolvedAiIntegration => {
 	const resolved = vendorId === undefined ? undefined : resolvedIntegrations.get(vendorId)
