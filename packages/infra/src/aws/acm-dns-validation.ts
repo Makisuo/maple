@@ -47,11 +47,24 @@ import type { AwsRegionName } from "./stage.ts"
 const RECORD_POLL = Schedule.max([Schedule.fixed("2 seconds"), Schedule.recurs(60)])
 
 /**
- * Issuance follows the DNS record's propagation, which is Cloudflare-fast but
- * not instant, and ACM's own re-check interval is coarser than its record
- * publication. 5s apart for 5 minutes.
+ * Issuance follows the DNS record's propagation, which is Cloudflare-fast, but
+ * ACM's own re-check interval is much coarser and a first issuance regularly
+ * takes several minutes. Matches alchemy's own `waitForIssued` — 10s apart for
+ * 10 minutes; a first deploy that gives up early is a deploy that has to be
+ * re-run for no reason.
+ *
+ * `Schedule.max` recurs while EVERY schedule still wants to, so the `recurs`
+ * arm is what bounds this — it cannot spin forever.
  */
-const ISSUED_POLL = Schedule.max([Schedule.fixed("5 seconds"), Schedule.recurs(60)])
+const ISSUED_POLL = Schedule.max([Schedule.fixed("10 seconds"), Schedule.recurs(60)])
+
+/**
+ * A certificate in one of these is never going to issue, so the wait above
+ * must not burn its full window on it — the deploy should fail immediately,
+ * naming the status.
+ */
+const isTerminalFailure = (status: string | undefined): boolean =>
+	status === "FAILED" || status === "VALIDATION_TIMED_OUT"
 
 export class AcmValidationError extends Schema.TaggedError<AcmValidationError>()("Maple.AcmValidationError", {
 	certificateArn: Schema.String,
@@ -125,22 +138,52 @@ const stripTrailingDot = (name: string): string => name.replace(/\.$/, "")
 
 export const AcmValidationRecordProvider = () =>
 	Provider.succeed(AcmValidationRecord, {
-		stables: ["certificateArn"],
+		// No `stables`. `certificateArn` mirrors the prop, so it is precisely
+		// what changes when the certificate is REPLACED (a new domain, a new
+		// SAN, a region change) — and a stable attribute's OLD value is what
+		// alchemy feeds downstream consumers while this resource updates
+		// (`withStables` in `Plan.ts`). Declaring it stable would plan the ALB
+		// listener against the ARN of the certificate that just went away.
 		// Read-only: there is no such thing as listing "validation reads".
 		list: () => Effect.succeed([]),
 		delete: () => Effect.void,
 		reconcile: Effect.fn(function* ({ news }) {
 			const found = yield* describe(news.certificateArn, news.region).pipe(
 				Effect.flatMap((detail) => {
-					const record = detail?.DomainValidationOptions?.[0]?.ResourceRecord
-					return record?.Name && record.Value
-						? Effect.succeed({ name: record.Name, value: record.Value })
-						: Effect.fail(
-								new AcmValidationError({
-									certificateArn: news.certificateArn,
-									message: "ACM has not published a DNS validation record yet",
-								}),
-							)
+					const options = detail?.DomainValidationOptions ?? []
+					const records = options.flatMap((option) =>
+						option.ResourceRecord?.Name && option.ResourceRecord.Value
+							? [{ name: option.ResourceRecord.Name, value: option.ResourceRecord.Value }]
+							: [],
+					)
+					// Not yet published — retry.
+					if (records.length === 0 || records.length < options.length) {
+						return Effect.fail(
+							new AcmValidationError({
+								certificateArn: news.certificateArn,
+								message: "ACM has not published a DNS validation record yet",
+							}),
+						)
+					}
+					// A multi-name certificate has one validation option per name, and
+					// ACM frequently gives them the SAME record (a domain and its
+					// `www` SAN share one). Distinct ones would each need their own
+					// CNAME, which this resource does not model — publishing only the
+					// first would leave the certificate stuck short of ISSUED until
+					// the wait below times out, with nothing saying why. Say why here
+					// instead. Both of Maple's certificates are single-name today.
+					const distinct = new Map(records.map((record) => [record.name, record]))
+					const [first] = [...distinct.values()]
+					if (distinct.size > 1 || first === undefined) {
+						// oxlint-disable-next-line maple/no-effect-die -- unsupported stack shape, see above
+						return Effect.die(
+							new AcmValidationError({
+								certificateArn: news.certificateArn,
+								message: `certificate needs ${distinct.size} distinct validation records (${[...distinct.keys()].join(", ")}); this resource publishes one`,
+							}),
+						)
+					}
+					return Effect.succeed(first)
 				}),
 				Effect.retry({
 					while: (error) => error._tag === "Maple.AcmValidationError",
@@ -157,21 +200,31 @@ export const AcmValidationRecordProvider = () =>
 
 export const AcmCertificateIssuedProvider = () =>
 	Provider.succeed(AcmCertificateIssued, {
-		stables: ["certificateArn"],
+		// No `stables` — see `AcmValidationRecordProvider`.
 		list: () => Effect.succeed([]),
 		delete: () => Effect.void,
 		reconcile: Effect.fn(function* ({ news }) {
 			const status = yield* describe(news.certificateArn, news.region).pipe(
-				Effect.flatMap((detail) =>
-					detail?.Status === "ISSUED"
-						? Effect.succeed(detail.Status)
-						: Effect.fail(
-								new AcmValidationError({
-									certificateArn: news.certificateArn,
-									message: `certificate is ${detail?.Status ?? "unknown"}, not ISSUED`,
-								}),
-							),
-				),
+				Effect.flatMap((detail) => {
+					if (detail?.Status === "ISSUED") return Effect.succeed(detail.Status)
+					// Terminal: retrying for the full window would only delay the
+					// failure and bury the reason ACM gave for it.
+					if (isTerminalFailure(detail?.Status)) {
+						// oxlint-disable-next-line maple/no-effect-die -- the certificate can never issue, see above
+						return Effect.die(
+							new AcmValidationError({
+								certificateArn: news.certificateArn,
+								message: `certificate issuance failed: ${detail?.Status}${detail?.FailureReason ? ` (${detail.FailureReason})` : ""}`,
+							}),
+						)
+					}
+					return Effect.fail(
+						new AcmValidationError({
+							certificateArn: news.certificateArn,
+							message: `certificate is ${detail?.Status ?? "unknown"}, not ISSUED`,
+						}),
+					)
+				}),
 				Effect.retry({
 					while: (error) => error._tag === "Maple.AcmValidationError",
 					schedule: ISSUED_POLL,
