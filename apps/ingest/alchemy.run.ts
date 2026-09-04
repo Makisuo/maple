@@ -83,10 +83,8 @@ const EPHEMERAL_STORAGE_GIB = 60
 /**
  * Pinned rather than derived. The gateway defaults to `num_cpus * 2`, which
  * makes on-disk layout and fd count a function of task size — so a cpu bump, or
- * a move to another capacity provider, would silently reshape the WAL. Three
- * lanes per shard (Tinybird + ClickHouse + Tinybird mirror) means this is 12
- * open WAL files; the mirror lane is present but idle unless
- * `TINYBIRD_MIRROR_HOST`/`TINYBIRD_MIRROR_TOKEN` are set.
+ * a move to another capacity provider, would silently reshape the WAL. Two
+ * lanes per shard (Tinybird + ClickHouse) means this is 8 open WAL files.
  */
 const WAL_SHARDS = 4
 
@@ -247,21 +245,6 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 		const autumnSecret = autumnKey ? yield* secret("autumn-secret-key", autumnKey) : undefined
 
 		// Second Tinybird workspace to mirror writes into during a workspace
-		// migration. Both halves must be set together; the gateway rejects a
-		// half-configured mirror at startup rather than 401-ing its lane forever.
-		//
-		// Resolved through `optionalPlain`, not `process.env`: alchemy reads
-		// `--env-file`/`.env` through its own ConfigProvider and never copies
-		// those values into `process.env`, so a bare read would see the var in
-		// CI and miss it locally. The host is plain (not a secret); the token is
-		// resolved here only to mint the Secrets Manager entry below, exactly as
-		// TINYBIRD_TOKEN is, and never reaches `env`.
-		const tinybirdMirrorHostEntry = yield* optionalPlain("TINYBIRD_MIRROR_HOST")
-		const tinybirdMirrorTokenValue = (yield* optionalPlain("TINYBIRD_MIRROR_TOKEN")).TINYBIRD_MIRROR_TOKEN
-		const tinybirdMirrorToken = tinybirdMirrorTokenValue
-			? yield* secret("tinybird-mirror-token", tinybirdMirrorTokenValue)
-			: undefined
-
 		// Both halves are stack-minted (`createReplayBlobStore`), so there is no
 		// half-set config left to guard against. The access key id is not secret,
 		// but it only exists once the token does and `env` takes plan-time strings
@@ -573,9 +556,6 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 				MAPLE_INGEST_KEY_ENCRYPTION_KEY: keyEncryptionKey.secretArn,
 				MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: keyLookupHmacKey.secretArn,
 				...(autumnSecret ? { AUTUMN_SECRET_KEY: autumnSecret.secretArn } : undefined),
-				...(tinybirdMirrorToken
-					? { TINYBIRD_MIRROR_TOKEN: tinybirdMirrorToken.secretArn }
-					: undefined),
 				...(replayR2Secret && replayR2AccessKeyId
 					? {
 							INGEST_REPLAY_R2_SECRET_ACCESS_KEY: replayR2Secret.secretArn,
@@ -648,14 +628,6 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 				...(yield* optionalPlain("INGEST_MAX_REQUEST_BODY_BYTES")),
 				...(yield* optionalPlain("INGEST_EXPORT_MAX_ATTEMPTS")),
 				...(yield* optionalPlain("INGEST_TINYBIRD_CONCURRENCY_PER_SHARD")),
-				// Tinybird mirror. The host is plain (it is not a secret); the token
-				// goes through Secrets Manager above. Ramp with SAMPLE_PERCENT: start
-				// at 1, confirm rows land and `ingest_tinybird_mirror_dropped_total`
-				// stays flat, then climb to 100.
-				...tinybirdMirrorHostEntry,
-				...(yield* optionalPlain("INGEST_TINYBIRD_MIRROR_SAMPLE_PERCENT")),
-				...(yield* optionalPlain("INGEST_TINYBIRD_MIRROR_MAX_ATTEMPTS")),
-				...(yield* optionalPlain("INGEST_TINYBIRD_MIRROR_TIMEOUT_MS")),
 				...(yield* optionalPlain("INGEST_REPLAY_MAX_SESSION_BYTES")),
 				// The org Maple's own telemetry is filed under. Required here and in
 				// the gateway (`AppConfig::from_env`), with no fallback on either
