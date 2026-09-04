@@ -5557,7 +5557,7 @@ SELECT
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- pipe:error_detail_traces:default:baseline  [99fb32db]
+-- pipe:error_detail_traces:default:baseline  [ce04a4f1]
 SELECT
           TraceId AS traceId,
           min(Timestamp) AS startTime,
@@ -5565,7 +5565,16 @@ SELECT
           count() AS spanCount,
           groupUniqArray(ServiceName) AS services,
           anyIf(SpanName, ParentSpanId = '') AS rootSpanName,
-          any(StatusMessage) AS errorMessage
+          anyIf(StatusMessage, StatusCode = 'Error') AS errorMessage,
+          anyIf(SpanId, StatusCode = 'Error') AS errorSpanId,
+          anyIf(SpanName, StatusCode = 'Error') AS errorSpanName,
+          anyIf(ServiceName, StatusCode = 'Error') AS errorServiceName,
+          anyIf(SpanAttributes['gen_ai.request.model'], StatusCode = 'Error') AS errorModel,
+          anyIf(SpanAttributes['gen_ai.tool.name'], StatusCode = 'Error') AS errorToolName,
+          anyIf(SpanAttributes['http.request.method'], StatusCode = 'Error') AS errorHttpMethod,
+          anyIf(SpanAttributes['http.route'], StatusCode = 'Error') AS errorHttpRoute,
+          anyIf(SpanAttributes['query.context'], StatusCode = 'Error') AS errorQueryContext,
+          anyIf(SpanAttributes['error.type'], StatusCode = 'Error') AS errorType
         FROM trace_detail_spans
         WHERE OrgId = 'org_sql_catalog'
           AND TraceId IN (SELECT
@@ -5725,6 +5734,25 @@ SELECT
         GROUP BY fingerprintHash
         ORDER BY count DESC
         LIMIT 1
+        FORMAT JSON
+
+-- pipe:errors_by_type:unexpected-identity:baseline  [1457ff9b]
+SELECT
+          toString(FingerprintHash) AS fingerprintHash,
+          any(ErrorLabel) AS errorLabel,
+          any(StatusMessage) AS sampleMessage,
+          count() AS count,
+          uniq(ServiceName) AS affectedServicesCount,
+          min(Timestamp) AS firstSeen,
+          max(Timestamp) AS lastSeen
+        FROM error_events_by_time
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (ErrorLabel NOT LIKE '@maple/%' OR ErrorLabel IN ('@maple/api/http/Http5xxResponseError', '@maple/http/v2/UnexpectedError', '@maple/http/v1/V1UnexpectedError'))
+        GROUP BY fingerprintHash
+        ORDER BY count DESC
+        LIMIT 50
         FORMAT JSON
 
 -- pipe:errors_facets:default:baseline  [fe66f114]
@@ -6065,7 +6093,7 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- pipe:list_logs:searched:baseline  [f4e5cc5d]
+-- pipe:list_logs:searched:baseline  [af6a1e45]
 SELECT
           Timestamp AS timestamp,
           SeverityText AS severityText,
@@ -6084,7 +6112,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND SeverityText = 'ERROR'
+          AND SeverityText IN ('ERROR', 'Error', 'error')
           AND TraceId = '0af7651916cd43dd8448eb211c80319c'
           AND Body ILIKE '%connection refused%'
           AND Timestamp >= (SELECT min(ts) FROM (SELECT
@@ -6096,7 +6124,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND SeverityText = 'ERROR'
+          AND SeverityText IN ('ERROR', 'Error', 'error')
           AND TraceId = '0af7651916cd43dd8448eb211c80319c'
           AND Body ILIKE '%connection refused%'
         ORDER BY ts DESC
@@ -6105,7 +6133,7 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- pipe:list_logs:searched:bloom  [efc50db5]
+-- pipe:list_logs:searched:bloom  [d1878c6d]
 SELECT
           Timestamp AS timestamp,
           SeverityText AS severityText,
@@ -6124,7 +6152,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND SeverityText = 'ERROR'
+          AND SeverityText IN ('ERROR', 'Error', 'error')
           AND TraceId = '0af7651916cd43dd8448eb211c80319c'
           AND ((hasToken(lower(Body), 'connection') AND hasToken(lower(Body), 'refused')) AND Body ILIKE '%connection refused%')
           AND Timestamp >= (SELECT min(ts) FROM (SELECT
@@ -6136,7 +6164,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND SeverityText = 'ERROR'
+          AND SeverityText IN ('ERROR', 'Error', 'error')
           AND TraceId = '0af7651916cd43dd8448eb211c80319c'
           AND ((hasToken(lower(Body), 'connection') AND hasToken(lower(Body), 'refused')) AND Body ILIKE '%connection refused%')
         ORDER BY ts DESC
@@ -6145,7 +6173,7 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- pipe:list_logs:searched:text  [fad2e4f1]
+-- pipe:list_logs:searched:text  [7eef92d1]
 SELECT
           Timestamp AS timestamp,
           SeverityText AS severityText,
@@ -6164,7 +6192,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND SeverityText = 'ERROR'
+          AND SeverityText IN ('ERROR', 'Error', 'error')
           AND TraceId = '0af7651916cd43dd8448eb211c80319c'
           AND (hasAllTokens(lower(Body), 'connection refused') AND Body ILIKE '%connection refused%')
           AND Timestamp >= (SELECT min(ts) FROM (SELECT
@@ -6176,7 +6204,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND SeverityText = 'ERROR'
+          AND SeverityText IN ('ERROR', 'Error', 'error')
           AND TraceId = '0af7651916cd43dd8448eb211c80319c'
           AND (hasAllTokens(lower(Body), 'connection refused') AND Body ILIKE '%connection refused%')
         ORDER BY ts DESC

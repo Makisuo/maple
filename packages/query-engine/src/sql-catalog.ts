@@ -326,6 +326,7 @@ export const pipeFixtures: ReadonlyArray<PipeFixture> = [
 		label: "fingerprint-scoped",
 		params: { fingerprint_hashes: FINGERPRINT, deployment_envs: "production", limit: 1 },
 	},
+	{ pipe: "errors_by_type", label: "unexpected-identity", params: { identity: "unexpected" } },
 	{ pipe: "errors_timeseries", label: "default", params: { fingerprint_hash: FINGERPRINT } },
 	{ pipe: "errors_facets", label: "default", params: {} },
 	{ pipe: "errors_summary", label: "default", params: {} },
