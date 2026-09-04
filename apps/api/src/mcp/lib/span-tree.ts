@@ -70,7 +70,19 @@ function subtreeSize(node: SpanNode): number {
  * long/structural spans. Returns the original tree unchanged when it already
  * fits within `budget` (so small traces render exactly as before).
  */
-export function selectOverviewSpans(roots: ReadonlyArray<SpanNode>, budget: number): OverviewSelection {
+export interface OverviewOptions {
+	/**
+	 * Keep only error spans, their ancestor chains and the roots — no budget fill. Applies even
+	 * to traces that would fit the budget, since the point is to strip the healthy spans.
+	 */
+	readonly errorsOnly?: boolean
+}
+
+export function selectOverviewSpans(
+	roots: ReadonlyArray<SpanNode>,
+	budget: number,
+	options: OverviewOptions = {},
+): OverviewSelection {
 	let totalCount = 0
 	const parentOf = new Map<string, SpanNode | null>()
 	forEachNode(roots, (node, parent) => {
@@ -78,7 +90,7 @@ export function selectOverviewSpans(roots: ReadonlyArray<SpanNode>, budget: numb
 		parentOf.set(key(node), parent)
 	})
 
-	if (totalCount <= budget) {
+	if (totalCount <= budget && !options.errorsOnly) {
 		return {
 			roots: roots as SpanNode[],
 			renderedCount: totalCount,
@@ -106,10 +118,12 @@ export function selectOverviewSpans(roots: ReadonlyArray<SpanNode>, budget: numb
 	})
 
 	// 2. Fill remaining budget by score, highest first.
-	candidates.sort((a, b) => score(b) - score(a))
-	for (const node of candidates) {
-		if (selected.size >= budget) break
-		addWithAncestors(node)
+	if (!options.errorsOnly) {
+		candidates.sort((a, b) => score(b) - score(a))
+		for (const node of candidates) {
+			if (selected.size >= budget) break
+			addWithAncestors(node)
+		}
 	}
 
 	// 3. Rebuild a pruned tree of new nodes; record omissions per parent.
@@ -138,7 +152,7 @@ export function selectOverviewSpans(roots: ReadonlyArray<SpanNode>, budget: numb
 		roots: prunedRoots,
 		renderedCount: selected.size,
 		totalCount,
-		truncated: true,
+		truncated: selected.size < totalCount,
 		omittedByParent,
 	}
 }

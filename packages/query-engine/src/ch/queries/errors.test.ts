@@ -115,6 +115,25 @@ describe("errorsByTypeQuery", () => {
 		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("LIMIT 25")
 	})
+
+	it("keeps only unexpected identities: outside the namespace, or a 5xx/envelope marker", () => {
+		const q = errorsByTypeQuery({
+			unexpectedIdentity: {
+				namespacePrefix: "@maple/",
+				markerLabels: ["@maple/api/http/Http5xxResponseError"],
+			},
+		})
+		const { sql } = compileUnsafe(q, baseParams)
+		expect(sql).toContain("ErrorLabel NOT LIKE '@maple/%'")
+		expect(sql).toContain("ErrorLabel IN ('@maple/api/http/Http5xxResponseError')")
+		expect(sql).toContain("any(StatusMessage) AS sampleMessage")
+	})
+
+	it("escapes LIKE wildcards in the namespace prefix", () => {
+		const q = errorsByTypeQuery({ unexpectedIdentity: { namespacePrefix: "my_app%", markerLabels: [] } })
+		const { sql } = compileUnsafe(q, baseParams)
+		expect(sql).toContain("NOT LIKE 'my\\\\_app\\\\%%'")
+	})
 })
 
 // errorsTimeseriesQuery
@@ -216,6 +235,14 @@ describe("errorDetailTracesQuery", () => {
 		const { sql } = compileUnsafe(q, baseParams)
 		// The limit applies to the error subquery
 		expect(sql).toContain("LIMIT 20")
+	})
+	it("reports the failing span rather than an arbitrary one", () => {
+		const q = errorDetailTracesQuery({ fingerprintHash: "1" })
+		const { sql } = compileUnsafe(q, baseParams)
+		expect(sql).toContain("anyIf(StatusMessage, StatusCode = 'Error') AS errorMessage")
+		expect(sql).toContain("anyIf(SpanId, StatusCode = 'Error') AS errorSpanId")
+		expect(sql).toContain("anyIf(SpanName, StatusCode = 'Error') AS errorSpanName")
+		expect(sql).toContain("SpanAttributes['gen_ai.request.model']")
 	})
 })
 
