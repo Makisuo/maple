@@ -36,6 +36,43 @@ export const LEGACY_LOCAL_SCHEMA_VERSION = 0 as const
 export const LEGACY_SCHEMA_PROJECT_REVISION =
 	"d58ce4a83d3ad3f3a29b9bb972272b757547ae793c050194354454634f3abccd"
 export const LEGACY_SCHEMA_FINGERPRINT = "428701854f9fd30e"
+/**
+ * Every schema fingerprint that identifies a pre-versioning (legacy v0) local
+ * store. v0.0.12 shipped the original; v0.0.13/v0.0.14 shipped structurally
+ * identical raw tables under refreshed fingerprints that predate
+ * LOCAL_SCHEMA_HISTORY, so they are registered here rather than as history
+ * entries (the identity history is append-only and frozen).
+ */
+export const LEGACY_SCHEMA_VARIANTS: ReadonlyArray<{
+	readonly fingerprint: string
+	readonly projectRevision: string
+}> = Object.freeze([
+	Object.freeze({
+		fingerprint: "428701854f9fd30e",
+		projectRevision: "d58ce4a83d3ad3f3a29b9bb972272b757547ae793c050194354454634f3abccd",
+	}),
+	Object.freeze({
+		fingerprint: "ea2d7ee4f385544e",
+		projectRevision: "ffade4bccc59af00fd33a561c4c919fd0229e0505f659d3242081f670f034a41",
+	}),
+	Object.freeze({
+		fingerprint: "06d3f9912027129b",
+		projectRevision: "c3f2be342187b6f6cf09010043e775b68f0901081a9b861803e55f5fe299e4c6",
+	}),
+])
+export const LEGACY_SCHEMA_FINGERPRINTS: ReadonlyArray<string> = Object.freeze(
+	LEGACY_SCHEMA_VARIANTS.map((variant) => variant.fingerprint),
+)
+
+export const legacyLocalSchemaIdentity = (fingerprint: string): LocalSchemaIdentity | null => {
+	const variant = LEGACY_SCHEMA_VARIANTS.find((candidate) => candidate.fingerprint === fingerprint)
+	if (!variant) return null
+	return {
+		...LEGACY_LOCAL_SCHEMA,
+		fingerprint: variant.fingerprint,
+		projectRevision: variant.projectRevision,
+	}
+}
 
 export const CURRENT_SCHEMA_PROJECT_REVISION =
 	"ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a"

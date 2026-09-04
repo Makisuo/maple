@@ -6,6 +6,8 @@ import {
 	ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION,
 	LEGACY_LOCAL_SCHEMA,
 	LEGACY_SCHEMA_FINGERPRINT,
+	LEGACY_SCHEMA_VARIANTS,
+	legacyLocalSchemaIdentity,
 	LOCAL_SCHEMA_MANIFEST,
 	LOCAL_SCHEMA_V1,
 	LOCAL_SCHEMA_V2,
@@ -323,6 +325,44 @@ describe("local migration registry", () => {
 		expect(chain[4]?.to).toEqual(LOCAL_SCHEMA_V5)
 		expect(chain[5]?.to).toEqual(LOCAL_SCHEMA_V6)
 		expect(typeof chain[0]?.apply).toBe("function")
+	})
+
+	it("admits every released legacy v0 fingerprint to the frozen v0-to-v5 chain", () => {
+		expect(LEGACY_SCHEMA_VARIANTS).toEqual([
+			{
+				fingerprint: "428701854f9fd30e",
+				projectRevision: "d58ce4a83d3ad3f3a29b9bb972272b757547ae793c050194354454634f3abccd",
+			},
+			{
+				fingerprint: "ea2d7ee4f385544e",
+				projectRevision: "ffade4bccc59af00fd33a561c4c919fd0229e0505f659d3242081f670f034a41",
+			},
+			{
+				fingerprint: "06d3f9912027129b",
+				projectRevision: "c3f2be342187b6f6cf09010043e775b68f0901081a9b861803e55f5fe299e4c6",
+			},
+		])
+		for (const variant of LEGACY_SCHEMA_VARIANTS) {
+			const identity = legacyLocalSchemaIdentity(variant.fingerprint)
+			expect(identity).toMatchObject({ version: 0, ...variant })
+			expect(planMigration(identity!).chain.map((migration) => migration.id)).toEqual([
+				"local-0000-to-0001-raw-replay",
+				"local-0001-to-0002-error-rollup",
+				"local-0002-to-0003-service-map-ingest-bridge",
+				"local-0003-to-0004-web-events",
+				"local-0004-to-0005-service-overview-minutely",
+			])
+			expect(
+				identityFromMarker({
+					formatVersion: 1,
+					chdb: "dev",
+					maple: "dev",
+					createdAt: "unknown",
+					schema: variant.fingerprint,
+				}),
+			).toMatchObject({ version: 0, ...variant })
+		}
+		expect(legacyLocalSchemaIdentity("not-known")).toBeNull()
 	})
 
 	it("recognizes legacy and current markers without treating the fingerprint as physical proof", () => {
