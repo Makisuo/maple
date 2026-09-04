@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import type { MapleRegion } from "@maple/infra/aws"
 import { resolveAwsRegion, resolveAwsResourceName, resolveElectricTaskSize } from "@maple/infra/aws"
+import { issueCertificateViaCloudflare } from "@maple/infra/acm"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import { requiredPlain } from "@maple/infra/env"
 
@@ -121,11 +122,10 @@ export const createMapleElectric = ({ stage, domains, region, network }: CreateM
 		const apiSecret = yield* secret("api-secret", yield* requiredPlain("ELECTRIC_SECRET"))
 
 		// An ALB can only use a certificate from its own region, and ACM otherwise
-		// defaults to us-east-1. Without `hostedZoneId` the provider does not block
-		// on issuance, so a new stage's first deploy fails at the 443 listener with
-		// this PENDING_VALIDATION; the deploy workflows recover by running
-		// `scripts/acm-cert-validate.sh` and redeploying. A new certificate-bearing
-		// service MUST be added to that call.
+		// defaults to us-east-1. `hostedZoneId` is Route53-only and Maple's zone is
+		// on Cloudflare, so the provider does not block on issuance;
+		// `issueCertificateViaCloudflare` below publishes the validation CNAME into
+		// the zone and waits for ACM to mark the certificate ISSUED.
 		const certificate = domains.electric
 			? yield* AWS.ACM.Certificate("electric-cert", {
 					domainName: domains.electric,
@@ -134,6 +134,18 @@ export const createMapleElectric = ({ stage, domains, region, network }: CreateM
 					tags: { Service: "maple-electric", Region: region },
 				})
 			: undefined
+
+		// The ISSUED certificate's ARN — see the ingest stack for why the listener
+		// must consume this rather than `certificate.certificateArn`.
+		const issuedCertificateArn =
+			certificate && domains.electric
+				? yield* issueCertificateViaCloudflare({
+						id: "electric-cert",
+						certificateArn: certificate.certificateArn,
+						hostname: domains.electric,
+						region: resolveAwsRegion(region),
+					})
+				: undefined
 
 		const service = yield* AWS.ECS.Service("electric", {
 			cluster,
@@ -177,7 +189,7 @@ export const createMapleElectric = ({ stage, domains, region, network }: CreateM
 			public: true,
 			port: ELECTRIC_PORT,
 			healthCheckPath: "/v1/health",
-			...(certificate ? { certificateArn: certificate.certificateArn } : undefined),
+			...(issuedCertificateArn ? { certificateArn: issuedCertificateArn } : undefined),
 			// Covers the replication connect and, on a cold task, the first snapshot
 			// of the published tables.
 			healthCheckGracePeriod: "120 seconds",
@@ -212,8 +224,8 @@ export const createMapleElectric = ({ stage, domains, region, network }: CreateM
 
 		return {
 			serviceUrl: service.url,
-			// One-time manual DNS in the Cloudflare `maple.dev` zone, surfaced from
-			// the deploy rather than the AWS console: the ACM validation CNAME, and a
+			// The ACM validation CNAME is published by the stack now
+			// (`issueCertificateViaCloudflare`); what is still added by hand is a
 			// proxied CNAME for `domains.electric` at the ALB.
 			certificateValidation: certificate?.domainValidationOptions,
 		}

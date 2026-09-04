@@ -32,6 +32,7 @@ import {
 	parseMapleStage,
 	resolveMapleDomains,
 } from "@maple/infra/cloudflare"
+import * as Acm from "@maple/infra/acm"
 import * as Portless from "@maple/alchemy-portless"
 import { DEV_PROCESS_APPS, selectedDevApps, type DevApp } from "@maple/infra/dev-urls"
 import Alerting from "./apps/alerting/src/worker.ts"
@@ -141,6 +142,7 @@ type StackProviderServices =
 	| Layer.Services<ReturnType<typeof Cloudflare.providers>>
 	| Layer.Services<ReturnType<typeof AWS.providers>>
 	| Layer.Services<ReturnType<typeof Portless.providers>>
+	| Layer.Services<ReturnType<typeof Acm.providers>>
 
 /**
  * Both clouds, unconditionally.
@@ -152,7 +154,14 @@ type StackProviderServices =
  * `stageDeploysIngest`, below.
  */
 const providers: Layer.Layer<StackProviderServices, never, Alchemy.StackServices> =
-	Cloudflare.providers().pipe(Layer.provideMerge(AWS.providers()), Layer.provideMerge(Portless.providers()))
+	// `Acm.providers()` (the ACM-via-Cloudflare validation reads) requires the
+	// AWS credentials and HTTP client, so it is the layer being provided TO —
+	// `X.pipe(provideMerge(Y))` feeds Y into X, not the other way round.
+	Acm.providers().pipe(
+		Layer.provideMerge(Cloudflare.providers()),
+		Layer.provideMerge(AWS.providers()),
+		Layer.provideMerge(Portless.providers()),
+	)
 
 export default Alchemy.Stack(
 	"maple",
