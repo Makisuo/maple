@@ -1,5 +1,6 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import type { AlertDestinationDocument, AlertDestinationUpdateRequest, AuditChanges } from "@maple/domain/http"
+import type { AlertDestinationDocument, AlertDestinationUpdateRequest } from "@maple/domain/http"
+import { auditDiff } from "./audit-changes"
 import {
 	CurrentTenant,
 	DiscordAlertDestinationConfig,
@@ -193,62 +194,35 @@ const toUpdateRequest = (params: V2AlertDestinationUpdateParams): AlertDestinati
 }
 
 /** Credential-bearing config keys; their values must never reach the audit row. */
-const destinationSecretKeys = new Set(["integrationKey", "signingSecret", "url", "webhookUrl", "botToken"])
-
-/** Fields of an update that are readable back off the destination document. */
-const destinationObservableValue = (
-	doc: AlertDestinationDocument,
-	key: string,
-): string | boolean | ReadonlyArray<string> | null | undefined => {
-	switch (key) {
-		case "name":
-			return doc.name
-		case "enabled":
-			return doc.enabled
-		case "memberUserIds":
-			return doc.memberUserIds
-		default:
-			return undefined
-	}
-}
-
 /**
- * Diff an update against the pre/post documents. Secrets are recorded as
- * `<redacted>`; config knobs the wire doc doesn't echo (channel ids, chat ids)
- * are recorded as touched with `<updated>` placeholders.
+ * The three update fields a destination document echoes back. Everything else
+ * an update can carry is either a credential or a provider-side handle the
+ * document never returns, so the diff can only record that it was touched.
  */
-const buildDestinationChanges = (
-	request: AlertDestinationUpdateRequest,
-	before: AlertDestinationDocument | undefined,
-	after: AlertDestinationDocument,
-): AuditChanges | undefined => {
-	const fields: string[] = []
-	const beforeOut: Record<string, unknown> = {}
-	const afterOut: Record<string, unknown> = {}
-	for (const key of Object.keys(request)) {
-		if (key === "type") continue
-		const wireName = key.replace(/[A-Z]/g, (char) => `_${char.toLowerCase()}`)
-		if (destinationSecretKeys.has(key)) {
-			fields.push(wireName)
-			beforeOut[wireName] = "<redacted>"
-			afterOut[wireName] = "<redacted>"
-			continue
-		}
-		const prev = before === undefined ? undefined : destinationObservableValue(before, key)
-		const next = destinationObservableValue(after, key)
-		if (prev === undefined && next === undefined) {
-			fields.push(wireName)
-			beforeOut[wireName] = "<updated>"
-			afterOut[wireName] = "<updated>"
-			continue
-		}
-		if (JSON.stringify(prev) === JSON.stringify(next)) continue
-		fields.push(wireName)
-		beforeOut[wireName] = prev
-		afterOut[wireName] = next
-	}
-	return fields.length === 0 ? undefined : { fields, before: beforeOut, after: afterOut }
-}
+const destinationAuditView = (doc: AlertDestinationDocument | undefined) => ({
+	name: doc?.name,
+	enabled: doc?.enabled,
+	member_user_ids: doc?.memberUserIds,
+})
+
+export const destinationAuditDiff = auditDiff({
+	fields: ["name", "enabled", "member_user_ids"],
+	// A webhook URL is a credential: Discord's carries the token in the path, and
+	// a plain webhook's can carry one in userinfo or query.
+	writeOnly: ["integration_key", "signing_secret", "url", "webhook_url", "bot_token"],
+	// Provider-side handles. Not secret, but not readable back off the document
+	// either — recorded as touched so the change is not invisible.
+	opaque: [
+		"channel_id",
+		"channel_name",
+		"chat_id",
+		"hazel_organization_id",
+		"hazel_organization_name",
+		"hazel_organization_logo_url",
+		"hazel_channel_id",
+		"hazel_channel_name",
+	],
+})
 
 export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "alertDestinations", (handlers) =>
 	Effect.gen(function* () {
@@ -322,7 +296,11 @@ export const HttpV2AlertDestinationsLive = HttpApiBuilder.group(MapleApiV2, "ale
 						request,
 					)
 
-					const changes = buildDestinationChanges(request, current, updated)
+					const changes = destinationAuditDiff(
+						payload,
+						destinationAuditView(current),
+						destinationAuditView(updated),
+					)
 					yield* recordHttpAudit("alert_destination.updated", {
 						resourceId: updated.id,
 						changes,

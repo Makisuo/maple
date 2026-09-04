@@ -96,19 +96,25 @@ export const redactAuditUrl = (raw: string): string => {
  * The spec is declared once next to the resource's wire shape and applied per
  * request: `fields` are diffed through the wire view, `summarize` replaces a
  * config blob's value with a static placeholder, `redact` rewrites a value
- * (scrape URLs carry tokens), and `writeOnly` records credentials the response
- * never echoes as having rotated. `summarize` and `redact` are keyed by
+ * (scrape URLs carry tokens), `writeOnly` records credentials the response
+ * never echoes as having rotated, and `opaque` records a knob the response does
+ * not echo either but which is no secret — a channel id, a chat id — as simply
+ * touched. `summarize` and `redact` are keyed by
  * `fields`, so a renamed wire key is a type error rather than a silently
  * disabled redaction.
  *
  * Returns undefined when nothing observable changed, so the caller passes the
  * result straight through as `changes`.
  */
+const redactedField = (field: string): readonly [string, string] => [field, "<redacted>"]
+const updatedField = (field: string): readonly [string, string] => [field, "<updated>"]
+
 export const auditDiff = <Field extends string>(spec: {
 	readonly fields: ReadonlyArray<Field>
 	readonly summarize?: Partial<Record<Field, string>>
 	readonly redact?: Partial<Record<Field, (value: string) => string>>
 	readonly writeOnly?: ReadonlyArray<string>
+	readonly opaque?: ReadonlyArray<string>
 }) => {
 	const redactors: Record<string, ((value: string) => string) | undefined> = spec.redact ?? {}
 
@@ -136,14 +142,19 @@ export const auditDiff = <Field extends string>(spec: {
 		)
 		const compacted = diffed === undefined ? undefined : compactAuditChanges(diffed, spec.summarize ?? {})
 		const observable = compacted === undefined ? undefined : redactChanges(compacted)
-		// Write-only fields never appear in a response, so their rotation can only
-		// be inferred from the request carrying them.
+		// Neither kind appears in a response, so that the request carried them is
+		// the only evidence they changed. They differ in what may be said about
+		// them: a credential's value is withheld, a channel id's is simply not
+		// known here.
 		const present: Record<string, unknown> = payload
-		const rotated = (spec.writeOnly ?? []).filter((field) => present[field] !== undefined)
-		if (rotated.length === 0) return observable
-		const placeholders = Object.fromEntries(rotated.map((field) => [field, "<redacted>"]))
+		const touched = [
+			...(spec.writeOnly ?? []).filter((field) => present[field] !== undefined).map(redactedField),
+			...(spec.opaque ?? []).filter((field) => present[field] !== undefined).map(updatedField),
+		]
+		if (touched.length === 0) return observable
+		const placeholders = Object.fromEntries(touched)
 		return {
-			fields: [...(observable?.fields ?? []), ...rotated],
+			fields: [...(observable?.fields ?? []), ...touched.map(([field]) => field)],
 			before: { ...observable?.before, ...placeholders },
 			after: { ...observable?.after, ...placeholders },
 		}
