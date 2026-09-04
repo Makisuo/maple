@@ -698,6 +698,14 @@ export const start = Command.make("start", {
 			)
 			const pidPath = pidFilePath(dataDir)
 
+			// First run: `~/.maple` does not exist yet, and everything startup touches
+			// before the data dir itself — the PID file, the `--background` log, the
+			// restore/reset transactions, the migration journal, the maintenance lock —
+			// is a *sibling* of the data dir, i.e. lives in that missing parent. Create
+			// it up front so first-run ordering is a stated precondition rather than a
+			// side effect of whichever helper happens to run first.
+			yield* fs.makeDirectory(dirname(dataDir), { recursive: true })
+
 			// Already-running guard.
 			const existingPid = yield* readPid(fs, pidPath)
 			if (Option.isSome(existingPid) && isProcessAlive(existingPid.value)) {
