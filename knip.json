@@ -25,7 +25,16 @@
 		"apps/api": {
 			// src/worker.ts was auto-detected from wrangler.jsonc's `main` until the
 			// wrangler configs were deleted; the Worker entries are now named here.
-			"entry": ["src/worker.ts", "alchemy.run.ts", "autumn.config.ts", "scripts/cold-path/*.mjs"],
+			// A bench suite is an entry point by construction: it is edited in place
+			// against a populated snapshot and run on two revisions, so nothing ever
+			// imports it and `tsconfig.bench.json` is its only other reference.
+			"entry": [
+				"src/worker.ts",
+				"alchemy.run.ts",
+				"autumn.config.ts",
+				"scripts/cold-path/*.mjs",
+				"scripts/bench-suites/*.ts"
+			],
 			// Shelled out to by scripts/bench-startup-cpu.ts, never imported.
 			"ignoreDependencies": ["cloudflare"]
 		},
