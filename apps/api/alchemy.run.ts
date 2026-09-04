@@ -10,10 +10,9 @@ import type { MapleApiRpcContract } from "@maple/domain/internal-rpc"
 import * as Portless from "@maple/alchemy-portless"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
+	bindMapleDbRef,
 	CLOUDFLARE_WORKER_PLACEMENT,
 	formatMapleStage,
-	resolveHyperdriveName,
-	resolveHyperdriveRefId,
 	resolveWorkerName,
 } from "@maple/infra/cloudflare"
 import { stageEnablesReplayBlobs } from "@maple/infra/aws"
@@ -29,7 +28,6 @@ import {
 	optionalSecret,
 	planetScaleOAuthEnv,
 	plainWithDefault,
-	requiredPlain,
 	requireSecretEntry,
 	selfObservabilityEnv,
 	tinybirdEnv,
@@ -40,7 +38,7 @@ export interface CreateMapleApiOptions {
 	domains: MapleDomains
 	/** Read side of the replay payload store; see `createReplayBlobStore`. */
 	replayBlobs: Cloudflare.R2.Bucket
-	/** The managed application database from `createManagedMapleDb`; undefined on ref stages (stg/prd) and PR previews. */
+	/** The managed application database (`ManagedMapleDb`); undefined on ref stages (stg/prd) and PR previews. */
 	mapleDb: Cloudflare.Hyperdrive.Connection | undefined
 	/** Local dev-server block from `Portless.workerDev` under `bun dev`; undefined on a deploy. */
 	dev?: Portless.WorkerDev | undefined
@@ -265,7 +263,7 @@ const makeWorkerBindings = ({
 	auditEventsQueue: Cloudflare.Queues.Queue
 	auditEventsQueueName: string
 }) => ({
-	// Ref stages attach MAPLE_DB via worker.bind below.
+	// Ref stages attach MAPLE_DB via `bindMapleDbRef` below.
 	...(mapleDb ? { MAPLE_DB: mapleDb } : undefined),
 	// Workers AI (`env.AI`, the v1 `Ai()` binding), driving the AI-triage agent on
 	// `@opencode-ai/ai`. v2 emits the `{ type: "ai" }` binding by attaching an AI Gateway
@@ -352,41 +350,6 @@ const makeWorkerBindings = ({
 export type MapleApiWorkerEnv = Partial<Cloudflare.InferEnv<ReturnType<typeof makeWorkerBindings>>> &
 	Record<string, unknown>
 
-/**
- * A dev stage's managed Hyperdrive, origin parsed from MAPLE_PG_URL (Hyperdrive
- * wants a structured origin). Created once at the root for api and alerting.
- */
-export const createManagedMapleDb = Effect.fnUntraced(function* (stage: MapleStage) {
-	const pgUrl = new URL(yield* requiredPlain("MAPLE_PG_URL"))
-	return yield* Cloudflare.Hyperdrive.Connection("maple-db", {
-		name: resolveHyperdriveName(stage),
-		origin: {
-			scheme: "postgres",
-			host: pgUrl.hostname,
-			port: Number(pgUrl.port || "5432"),
-			// Connect-time db (`postgres`, the PlanetScale cluster default),
-			// not the PS resource name.
-			database: pgUrl.pathname.replace(/^\//, "") || "postgres",
-			user: decodeURIComponent(pgUrl.username),
-			password: Redacted.make(decodeURIComponent(pgUrl.password)),
-		},
-		// Read-after-write everywhere (alert state CAS, dashboard versioning) —
-		// revisit caching once read paths that tolerate staleness are identified.
-		caching: { disabled: true },
-		dev: {
-			scheme: "postgres",
-			host: "localhost",
-			port: 5499,
-			database: "maple",
-			user: "maple",
-			password: Redacted.make("maple"),
-			// Alchemy defaults dev origins to `sslmode=prefer`; the docker Postgres has
-			// no TLS and the dial would stall until the timeout.
-			sslmode: "disable",
-		},
-	})
-})
-
 export const createMapleApi = ({
 	stage,
 	domains,
@@ -396,22 +359,21 @@ export const createMapleApi = ({
 	devEnv,
 }: CreateMapleApiOptions) =>
 	Effect.gen(function* () {
-		// MAPLE_DB Hyperdrive comes in two flavors:
+		// MAPLE_DB Hyperdrive comes in two flavors (see `ManagedMapleDb` in
+		// `@maple/infra/cloudflare`):
 		//
 		// - stg/prd bind a DASHBOARD-MANAGED config by ID (v1's `HyperdriveRef`,
-		//   which v2 lacks — the binding is attached as raw `{ type: "hyperdrive",
-		//   id }` metadata after the Worker exists, see below). Origin/credentials
-		//   live only in the Cloudflare dashboard; deploys never see them and
-		//   MAPLE_PG_URL is not required.
+		//   which v2 lacks — attached after the Worker exists, see `bindMapleDbRef`
+		//   below). Origin/credentials live only in the Cloudflare dashboard;
+		//   deploys never see them and MAPLE_PG_URL is not required.
 		//
-		// - dev stages get the alchemy-MANAGED Hyperdrive the root creates with
-		//   `createManagedMapleDb` and passes in as `mapleDb`.
+		// - dev stages get the alchemy-MANAGED Hyperdrive the root yields as
+		//   `ManagedMapleDb` and passes in as `mapleDb`.
 		//
 		// - pr previews get NO database binding at all (resolveDatabaseMode →
 		//   "none"): PlanetScale PR branches are no longer provisioned. The worker
 		//   still boots and serves — DatabasePgLive fails per query instead of
 		//   dying — so DB-backed routes 500 while everything else works.
-		const hyperdriveRefId = resolveHyperdriveRefId(stage, "api")
 
 		// Resolved before any resource is created, so a misconfigured deploy fails
 		// with the full list of missing vars rather than part-way through applying.
@@ -495,14 +457,7 @@ export const createMapleApi = ({
 			},
 		})) as MapleApiWorker
 
-		if (hyperdriveRefId) {
-			// v1 `HyperdriveRef` equivalent: bind the dashboard-managed config by ID
-			// as raw binding metadata (same mechanism the env binder uses). No cloud
-			// resource is created and the origin credentials stay in the dashboard.
-			yield* worker.bind("MAPLE_DB", {
-				bindings: [{ type: "hyperdrive", name: "MAPLE_DB", id: hyperdriveRefId }],
-			})
-		}
+		yield* bindMapleDbRef(worker, stage, "api")
 
 		// Attach the api worker as the vcs-sync queue consumer (v1 `eventSources`).
 		yield* Cloudflare.Queues.Consumer("vcs-sync-consumer", {

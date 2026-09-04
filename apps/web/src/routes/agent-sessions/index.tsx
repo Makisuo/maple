@@ -1,13 +1,20 @@
 import { useMemo } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
+import { AiSessionSortDir, AiSessionSortKey } from "@maple/domain/http"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { AgentSessionsList } from "@/components/agent-sessions/agent-sessions-list"
 import { AgentSessionsFilterSidebar } from "@/components/agent-sessions/agent-sessions-filter-sidebar"
+import { AgentSessionsToolbar } from "@/components/agent-sessions/agent-sessions-toolbar"
+import {
+	agentSessionsFilterInputs,
+	sortOptionFor,
+} from "@/components/agent-sessions/agent-sessions-filter-inputs"
 import { NotFoundError } from "@/components/route-error"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { Result, useAtomValue } from "@/lib/effect-atom"
+import { BooleanFromStringParam, NumberFromStringParam, OptionalStringArrayParam } from "@/lib/search-params"
 import { aiSessionsFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
@@ -19,10 +26,35 @@ import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-fl
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { ToolbarStat } from "@maple/ui/components/toolbar"
 
+const BooleanParam = Schema.optional(Schema.Union([Schema.Boolean, BooleanFromStringParam]))
+const NumberParam = Schema.optional(Schema.Union([Schema.Number, NumberFromStringParam]))
+
 const agentSessionsSearchSchema = Schema.Struct({
-	/** Vendor id as stamped by the gateway (e.g. `eve`), not the display label. */
-	vendor: Schema.optional(Schema.String),
-	service: Schema.optional(Schema.String),
+	/** Vendor ids as stamped by the gateway (e.g. `eve`), not display labels. */
+	vendors: OptionalStringArrayParam,
+	services: OptionalStringArrayParam,
+	environments: OptionalStringArrayParam,
+	models: OptionalStringArrayParam,
+	agents: OptionalStringArrayParam,
+	tools: OptionalStringArrayParam,
+	/** Session or trace id prefix. */
+	q: Schema.optional(Schema.String),
+	hasErrors: BooleanParam,
+	/** Hide the `trace:` sessions — traces whose vendor exposes no session key. */
+	grouped: BooleanParam,
+	/** Seconds, like the replays list. */
+	durationMin: NumberParam,
+	durationMax: NumberParam,
+	costMin: NumberParam,
+	costMax: NumberParam,
+	tokensMin: NumberParam,
+	tokensMax: NumberParam,
+	llmCallsMin: NumberParam,
+	llmCallsMax: NumberParam,
+	toolCallsMin: NumberParam,
+	toolCallsMax: NumberParam,
+	sortBy: Schema.optional(AiSessionSortKey),
+	sortDir: Schema.optional(AiSessionSortDir),
 	...TimeRangeSearchFields,
 })
 
@@ -86,21 +118,19 @@ function AgentSessionsBody({
 	onTimeChange: (range: TimeRange, options?: { replace?: boolean }) => void
 }) {
 	const search = Route.useSearch()
+	const navigate = useNavigate({ from: Route.fullPath })
 	const { startTime, endTime } = useEffectiveTimeRange(
 		search.startTime,
 		search.endTime,
 		search.timePreset ?? "24h",
 	)
-	// Memoized on the resolved values: the hook keys its accumulated pages on
-	// these inputs, and a fresh object per render would reset them every time.
+	// Memoized on the search by VALUE, not by the reference the router hands
+	// back: the hook keys its accumulated pages on these inputs, and a fresh
+	// object per render would reset them every time.
+	const searchKey = JSON.stringify(search)
 	const filterInputs = useMemo(
-		() => ({
-			startTime,
-			endTime,
-			vendorIds: search.vendor ? [search.vendor] : undefined,
-			serviceNames: search.service ? [search.service] : undefined,
-		}),
-		[startTime, endTime, search.vendor, search.service],
+		() => agentSessionsFilterInputs(search, { startTime, endTime }),
+		[searchKey, startTime, endTime],
 	)
 	const { firstPageResult, allData, hasNextPage, isCapped, isFetchingNextPage, fetchNextPage } =
 		useInfiniteAiSessions(filterInputs)
@@ -110,6 +140,7 @@ function AgentSessionsBody({
 	// is enough.
 	const facetsResult = useAtomValue(aiSessionsFacetsResultAtom({ data: { startTime, endTime } }))
 	const sessions = allData
+	const sortOption = sortOptionFor(search.sortBy, search.sortDir)
 
 	const headerActions = (
 		<div className="flex flex-wrap items-center gap-2">
@@ -126,6 +157,36 @@ function AgentSessionsBody({
 		</div>
 	)
 
+	const toolbar = (
+		<AgentSessionsToolbar
+			query={search.q ?? ""}
+			onSearch={(value) => navigate({ search: (prev) => ({ ...prev, q: value }) })}
+			errorsOnly={search.hasErrors === true}
+			onToggleErrorsOnly={() =>
+				navigate({ search: (prev) => ({ ...prev, hasErrors: prev.hasErrors ? undefined : true }) })
+			}
+			sortKey={sortOption.key}
+			// The default sort leaves the URL clean, so a shared link only carries
+			// a sort when one was chosen.
+			onSortChange={(option) =>
+				navigate({
+					search: (prev) => ({
+						...prev,
+						sortBy:
+							option.sortBy === "startTime" && option.sortDir === "desc"
+								? undefined
+								: option.sortBy,
+						sortDir:
+							option.sortBy === "startTime" && option.sortDir === "desc"
+								? undefined
+								: option.sortDir,
+					}),
+				})
+			}
+			waiting={firstPageResult.waiting}
+		/>
+	)
+
 	return (
 		<>
 			<DashboardLayout.Filters>
@@ -139,6 +200,7 @@ function AgentSessionsBody({
 					>
 						{headerActions}
 					</DashboardLayout.Header>
+					{toolbar}
 				</DashboardLayout.Sticky>
 				<DashboardLayout.Scroll>
 					{Result.builder(firstPageResult)

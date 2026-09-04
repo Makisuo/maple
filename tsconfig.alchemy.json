@@ -1,6 +1,11 @@
 {
 	"compilerOptions": {
-		"lib": ["esnext"],
+		// apps/api's exact lib list: this program reaches its graph through
+		// alerting's ticks. workers-types alone lacks DOM-only members that code
+		// uses (`ResponseType` values, TextDecoder options), and `esnext` in place
+		// of ES2023 makes the DOM and workers-types stream globals disagree in
+		// packages/infra's worker-runtime modules.
+		"lib": ["ES2023", "DOM", "DOM.Iterable"],
 		"target": "esnext",
 		"module": "preserve",
 		"moduleResolution": "bundler",
@@ -21,7 +26,11 @@
 			"@maple/infra/aws": ["./packages/infra/src/aws/index.ts"],
 			"@maple/infra/cloudflare": ["./packages/infra/src/cloudflare/index.ts"],
 			"@maple/infra/env": ["./packages/infra/src/env.ts"],
-			"@maple/alchemy-portless": ["./lib/alchemy-portless/src/index.ts"]
+			"@maple/alchemy-portless": ["./lib/alchemy-portless/src/index.ts"],
+			// alerting's `src/worker.ts` dynamic-imports its ticks, which reach the api
+			// layer graph through `@maple/api/alerting` — written against apps/api's own
+			// `@/` alias, so the program needs it too.
+			"@/*": ["./apps/api/src/*"]
 		}
 	},
 	"include": ["alchemy.run.ts", "apps/*/alchemy.run.ts", "scripts/aws-probe.run.ts"]

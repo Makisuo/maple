@@ -12,7 +12,7 @@
  * test user at https://web.localhost. No metrics / dashboards — traces + logs only.
  *
  * The headline use case is the commit-SHA UI: each generated trace carries a
- * `deployment.commit_sha` *resource* attribute, which the `service_overview_spans`
+ * `vcs.ref.head.revision` *resource* attribute, which the `service_overview_spans`
  * materialized view extracts into the `CommitSha` column (per service, per deploy).
  * Pass real 40-char SHAs (`--shas`) — or let it pull recent ones from `git log` —
  * so the hover card can resolve them to actual commit messages via the GitHub app.
@@ -339,7 +339,7 @@ const resourceAttrs = (opts: Options, sha: string): Record<string, unknown>[] =>
 	// MVs still pre-extract. Emitting only one would hide UI bugs against the other.
 	attr("deployment.environment.name", opts.env),
 	attr("deployment.environment", opts.env),
-	attr("deployment.commit_sha", sha),
+	attr("vcs.ref.head.revision", sha),
 ]
 
 const chunk = <T>(xs: T[], size: number): T[][] => {

@@ -56,8 +56,8 @@ export function anomalyTraceSignalsQuery(opts: AnomalyTraceSignalsOpts) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.IsEntryPoint.eq(1),
-			$.Hour.gte(param.dateTimeString("startTime")),
-			$.Hour.lte(param.dateTimeString("endTime")),
+			$.Hour.gte(param.dateTimeSeconds("startTime")),
+			$.Hour.lte(param.dateTimeSeconds("endTime")),
 			CH.toHour($.Hour).in_(...opts.hoursOfDay),
 		])
 		.groupBy("serviceName", "deploymentEnv", "hour")
@@ -89,8 +89,8 @@ export function anomalyLogVolumeQuery(opts: AnomalyTraceSignalsOpts) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(param.dateTimeString("startTime")),
-			$.Hour.lte(param.dateTimeString("endTime")),
+			$.Hour.gte(param.dateTimeSeconds("startTime")),
+			$.Hour.lte(param.dateTimeSeconds("endTime")),
 			CH.toHour($.Hour).in_(...opts.hoursOfDay),
 		])
 		.groupBy("serviceName", "deploymentEnv", "hour")
@@ -121,8 +121,8 @@ export function anomalyErrorSpikeCurrentQuery(opts: { limit?: number }) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTimeString("startTime")),
-			$.Timestamp.lte(param.dateTimeString("endTime")),
+			$.Timestamp.gte(param.dateTimeSeconds("startTime")),
+			$.Timestamp.lte(param.dateTimeSeconds("endTime")),
 		])
 		.groupBy("fingerprintHash", "deploymentEnv")
 		.orderBy(["count", "desc"])
@@ -151,8 +151,8 @@ export function anomalyErrorSpikeBaselineQuery(opts: { limit?: number }) {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTimeString("startTime")),
-			$.Timestamp.lt(param.dateTimeString("endTime")),
+			$.Timestamp.gte(param.dateTimeSeconds("startTime")),
+			$.Timestamp.lt(param.dateTimeSeconds("endTime")),
 		])
 		.groupBy("fingerprintHash", "deploymentEnv", "h")
 
@@ -200,8 +200,8 @@ export function anomalyTraceSignalTimeseriesQuery() {
 			$.IsEntryPoint.eq(1),
 			$.ServiceName.eq(param.string("serviceName")),
 			$.DeploymentEnv.eq(param.string("deploymentEnv")),
-			$.Hour.gte(param.dateTimeString("startTime")),
-			$.Hour.lte(param.dateTimeString("endTime")),
+			$.Hour.gte(param.dateTimeSeconds("startTime")),
+			$.Hour.lte(param.dateTimeSeconds("endTime")),
 		])
 		.groupBy("hour")
 		.orderBy(["hour", "asc"])
@@ -225,8 +225,8 @@ export function anomalyLogVolumeTimeseriesQuery() {
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(param.string("serviceName")),
 			$.DeploymentEnv.eq(param.string("deploymentEnv")),
-			$.Hour.gte(param.dateTimeString("startTime")),
-			$.Hour.lte(param.dateTimeString("endTime")),
+			$.Hour.gte(param.dateTimeSeconds("startTime")),
+			$.Hour.lte(param.dateTimeSeconds("endTime")),
 		])
 		.groupBy("hour")
 		.orderBy(["hour", "asc"])
@@ -255,8 +255,8 @@ export function anomalyErrorSpikeTimeseriesQuery() {
 				$.OrgId.eq(param.string("orgId")),
 				$.FingerprintHash.eq(CH.toUInt64(param.string("fingerprintHash"))),
 				$.DeploymentEnv.eq(param.string("deploymentEnv")),
-				$.Timestamp.gte(param.dateTimeString("startTime")),
-				$.Timestamp.lte(param.dateTimeString("endTime")),
+				$.Timestamp.gte(param.dateTimeSeconds("startTime")),
+				$.Timestamp.lte(param.dateTimeSeconds("endTime")),
 			])
 			.groupBy("bucket")
 			.orderBy(["bucket", "asc"])
@@ -283,8 +283,8 @@ export function anomalyErrorSpikeServiceTimeseriesQuery() {
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(param.string("serviceName")),
 			$.DeploymentEnv.eq(param.string("deploymentEnv")),
-			$.Timestamp.gte(param.dateTimeString("startTime")),
-			$.Timestamp.lte(param.dateTimeString("endTime")),
+			$.Timestamp.gte(param.dateTimeSeconds("startTime")),
+			$.Timestamp.lte(param.dateTimeSeconds("endTime")),
 		])
 		.groupBy("bucket")
 		.orderBy(["bucket", "asc"])

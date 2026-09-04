@@ -176,7 +176,7 @@ const quote = (value: string): string => `'${value.replace(/\\/g, "\\\\").replac
 
 const seed = async (): Promise<void> => {
 	const rows = SEED_SPANS.map((row, index) => {
-		const resourceAttributes = `map('deployment.environment', ${quote(row.environment)}, 'service.namespace', ${quote(row.namespace)}, 'deployment.commit_sha', ${quote(row.commitSha)})`
+		const resourceAttributes = `map('deployment.environment', ${quote(row.environment)}, 'service.namespace', ${quote(row.namespace)}, 'vcs.ref.head.revision', ${quote(row.commitSha)})`
 		return `(${quote(ORG_ID)}, ${quote(chDateTime(row.ms))}, ${quote(`trace-${index}`)}, ${quote(`span-${index}`)}, '', ${quote("GET /x")}, 'Server', ${quote(row.service)}, ${row.durationNs}, ${quote(row.status)}, ${row.sampleRate}, ${resourceAttributes})`
 	}).join(",\n")
 

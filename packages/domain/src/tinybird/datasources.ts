@@ -730,7 +730,7 @@ export type ServicePlatformsHourlyRow = InferRow<typeof servicePlatformsHourly>
 
 /**
  * Lightweight projection of service entry point spans for service overview queries.
- * Pre-extracts deployment.environment and deployment.commit_sha from ResourceAttributes.
+ * Pre-extracts deployment.environment(.name) and vcs.ref.head.revision from ResourceAttributes.
  * Stores Server/Consumer spans (service entry points) plus root spans as fallback.
  * Populated by materialized view, not direct ingestion.
  */
@@ -1093,11 +1093,23 @@ export type TraceDetailSpansRow = InferRow<typeof traceDetailSpans>
  * one hour, timeout at a day). This table holds only those spans, pre-extracted
  * to plain columns, so the same detection is a scan of ~10k narrow rows per day.
  *
- * The columns are exactly what its readers need — the trace-id set, the
- * grouping key, the two filter dimensions, and the agent-span bounds that tell
- * the fan-out which hours to read. Everything else about an agent span (its
- * failure attributes, its vendor version) is read per-trace off
+ * The columns are what its readers need — the trace-id set, the grouping key,
+ * the agent-span bounds that tell the fan-out which hours to read, the filter
+ * dimensions the sidebar offers (service, environment, and the span's model,
+ * agent and tool coalesced across dialects), and the per-span measures the
+ * page ranks and filters on: whether the span is a model call, a tool call, a
+ * failure, and the tokens and cost it reported, with `SpanId`/`ParentSpanId`
+ * so a wrapper's roll-up of its children's usage can be taken off it. Every
+ * one of those is a fact of the GenAI span itself, so the index can carry it
+ * and the page can filter, sort and page on it without the fan-out. What the
+ * index cannot carry is the trace's non-agent spans: the row's `spanCount`,
+ * its all-span `errorSpanCount` and its true extent still come per-trace off
  * `trace_detail_spans`, over the page's bounds rather than the caller's window.
+ *
+ * `Model`/`AgentName`/`ToolName` are `''` on the rows that carry no such fact
+ * — a chat span has no tool, a tool span no model — and the facets drop the
+ * blank option. `DeploymentEnv` is the resource attribute under either semconv
+ * spelling, like every other MV that pre-extracts it.
  *
  * Session ids live only on the turn-owning spans, so `SessionId` is '' for most
  * rows — resolution to a session key stays per-TRACE at read time, exactly as
@@ -1114,6 +1126,20 @@ export const aiTraceIndex = defineDatasource("ai_trace_index", {
 		SessionId: t.string(),
 		VendorId: t.string().lowCardinality(),
 		ServiceName: t.string().lowCardinality(),
+		// Migration 0026 — the sidebar's other facet dimensions, and the per-span
+		// measures the page ranks and filters on. All `gen-ai-columns.ts`.
+		DeploymentEnv: t.string().lowCardinality(),
+		Model: t.string().lowCardinality(),
+		AgentName: t.string().lowCardinality(),
+		ToolName: t.string().lowCardinality(),
+		SpanId: t.string(),
+		ParentSpanId: t.string(),
+		Duration: t.uint64(),
+		IsError: t.uint8(),
+		IsLlmCall: t.uint8(),
+		IsToolCall: t.uint8(),
+		Tokens: t.float64(),
+		Cost: t.float64(),
 	},
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",

@@ -10,7 +10,20 @@ import { FILTER_SECTION_LABEL } from "./filter-styles"
 
 /** The unit the caller's numbers are already in. Only affects parsing and display —
  *  values cross this component's boundary unconverted. */
-export type RangeUnit = "ms" | "s"
+/** What a bare number in the inputs means: a duration in ms or s, a plain
+ *  count (tokens, calls), or US dollars. */
+export type RangeUnit = "ms" | "s" | "count" | "usd"
+
+const UNIT_WORDS = {
+	ms: "milliseconds",
+	s: "seconds",
+	count: "count",
+	usd: "US dollars",
+} satisfies Record<RangeUnit, string>
+
+/** The suffix after the inputs. Counts carry none — "≥ 100" needs no unit —
+ *  and dollars read as a sign, not a code. */
+const UNIT_SUFFIX = { ms: "ms", s: "s", count: "", usd: "$" } satisfies Record<RangeUnit, string>
 
 /** One shortcut below the inputs. `label` says why you'd click it ("Bounced",
  *  "> p50"); `value` shows the threshold it resolves to. */
@@ -208,7 +221,7 @@ export function RangeFilterSection({
 
 					<div className="flex items-center gap-1.5">
 						<Input
-							aria-label={`Minimum ${title.toLowerCase()} (${unit === "ms" ? "milliseconds" : "seconds"})`}
+							aria-label={`Minimum ${title.toLowerCase()} (${UNIT_WORDS[unit]})`}
 							inputMode="decimal"
 							size="sm"
 							className="text-xs"
@@ -220,7 +233,7 @@ export function RangeFilterSection({
 						/>
 						<span className="text-xs text-muted-foreground">–</span>
 						<Input
-							aria-label={`Maximum ${title.toLowerCase()} (${unit === "ms" ? "milliseconds" : "seconds"})`}
+							aria-label={`Maximum ${title.toLowerCase()} (${UNIT_WORDS[unit]})`}
 							inputMode="decimal"
 							size="sm"
 							className="text-xs"
@@ -234,7 +247,7 @@ export function RangeFilterSection({
 						    once a field spells its own out ("2.00s … ms"). Reserve the
 						    space either way — the row must not jitter mid-typing. */}
 						<span className="w-5 shrink-0 text-xs text-muted-foreground">
-							{/[a-z]/i.test(draft.min) || /[a-z]/i.test(draft.max) ? "" : unit}
+							{/[a-z$]/i.test(draft.min) || /[a-z$]/i.test(draft.max) ? "" : UNIT_SUFFIX[unit]}
 						</span>
 					</div>
 
@@ -457,15 +470,34 @@ const UNIT_MS: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_00
 	number
 >
 
+const COUNT_MULTIPLIERS = { k: 1_000, m: 1_000_000, b: 1_000_000_000 } satisfies Record<string, number>
+
 /** Accepts a bare number in the control's own unit, or a suffixed duration
- *  ("90s", "2m", "1h 30m"). Blank or unparseable means unbounded on that side. */
+ *  ("90s", "2m", "1h 30m"), a scaled count ("120k", "1.5m") or a dollar amount
+ *  ("$0.50"). Blank or unparseable means unbounded on that side. */
 export function parseRange(text: string, unit: RangeUnit): number | undefined {
-	const trimmed = text.trim().toLowerCase()
+	const trimmed = text
+		.trim()
+		.toLowerCase()
+		.replace(/^\$\s*/, unit === "usd" ? "" : "$")
 	if (trimmed === "") return undefined
 
 	if (/^\d+(\.\d+)?$/.test(trimmed)) {
 		const bare = Number(trimmed)
-		return Number.isFinite(bare) && bare >= 0 ? bare : undefined
+		if (!Number.isFinite(bare) || bare < 0) return undefined
+		// A count is whole: "1.5" calls is a typo, and the request schema
+		// rejects a fractional count outright.
+		return unit === "count" ? Math.round(bare) : bare
+	}
+
+	if (unit === "usd") return undefined
+	if (unit === "count") {
+		const scaled = /^(\d+(?:\.\d+)?)\s*([kmb])$/.exec(trimmed)
+		if (scaled === null) return undefined
+		const [, amount, suffix] = scaled
+		const multiplier =
+			suffix === "k" ? COUNT_MULTIPLIERS.k : suffix === "m" ? COUNT_MULTIPLIERS.m : COUNT_MULTIPLIERS.b
+		return Math.round(Number(amount) * multiplier)
 	}
 
 	if (!/^(\d+(\.\d+)?\s*(ms|s|m|h)\s*)+$/.test(trimmed)) return undefined
@@ -481,7 +513,16 @@ export function parseRange(text: string, unit: RangeUnit): number | undefined {
 /** Always carries its unit — for badges, ticks and readouts, where there's no
  *  input context to imply one. */
 export function formatValue(value: number, unit: RangeUnit): string {
-	return unit === "ms" ? formatMs(value) : formatSeconds(value)
+	switch (unit) {
+		case "ms":
+			return formatMs(value)
+		case "s":
+			return formatSeconds(value)
+		case "count":
+			return formatCount(value)
+		case "usd":
+			return formatUsd(value)
+	}
 }
 
 /** For input fields: bare inside the unit's natural range so typed numbers read
@@ -489,7 +530,9 @@ export function formatValue(value: number, unit: RangeUnit): string {
  *  round-trips through `parseRange`. */
 export function formatCompact(value: number | undefined, unit: RangeUnit): string {
 	if (value === undefined) return ""
-	const threshold = unit === "ms" ? 1000 : 60
+	// Dollars are always typed as the bare amount; "$" is the field's suffix.
+	if (unit === "usd") return String(value)
+	const threshold = unit === "ms" ? 1000 : unit === "s" ? 60 : 1000
 	if (value < threshold) return String(value)
 	// The display formats round to something readable — "2h 2m" for 7325s. That's
 	// right for a badge and wrong for a field the reader's own number goes back
@@ -502,6 +545,24 @@ function formatMs(ms: number): string {
 	if (ms < 1) return `${(ms * 1000).toFixed(0)}us`
 	if (ms < 1000) return `${ms.toFixed(1)}ms`
 	return `${(ms / 1000).toFixed(2)}s`
+}
+
+/** "120k", "1.5M", "2B" — and the bare number under a thousand. */
+export function formatCount(value: number): string {
+	const scaled = (divisor: number, suffix: string) => {
+		const n = value / divisor
+		return `${Number.isInteger(n) ? n : n.toFixed(1)}${suffix}`
+	}
+	if (value >= 1_000_000_000) return scaled(1_000_000_000, "B")
+	if (value >= 1_000_000) return scaled(1_000_000, "M")
+	if (value >= 1_000) return scaled(1_000, "k")
+	return String(value)
+}
+
+/** "$0.50"; sub-cent amounts keep the digits that make them non-zero. */
+export function formatUsd(value: number): string {
+	if (value > 0 && value < 0.01) return `$${value.toFixed(4)}`
+	return `$${value.toFixed(2)}`
 }
 
 export function formatSeconds(seconds: number): string {

@@ -48,7 +48,7 @@ export default defineConfig(({ mode }) => {
 		"VITE_CLERK_PUBLISHABLE_KEY",
 		"VITE_MAPLE_INGEST_KEY",
 		// Injected at deploy time (CI sets VITE_COMMIT_SHA=github.sha); stamped onto
-		// browser telemetry as `deployment.commit_sha` / `service.version`.
+		// browser telemetry as `vcs.ref.head.revision` / `service.version`.
 		"VITE_COMMIT_SHA",
 		// "off" disables rrweb self-recording. The perf bench sets it via
 		// process.env (playwright.config.ts) and must win over any `.env*` value,

@@ -1,7 +1,7 @@
 import * as React from "react"
 import { Result } from "@/lib/effect-atom"
 
-import { listAiSessions } from "@/api/warehouse/ai-sessions"
+import { listAiSessions, type ListAiSessionsInput } from "@/api/warehouse/ai-sessions"
 import { listAiSessionsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import type { AgentSessionRow } from "@/components/agent-sessions/agent-sessions-list"
@@ -14,14 +14,15 @@ export const MAX_RETAINED_AI_SESSIONS = 500
 
 /**
  * The filter inputs the agent-sessions route assembles (resolved time window +
- * sidebar filters). Pagination params are added by this hook — callers must not
- * set `limit`/`offset` themselves.
+ * sidebar filters + sort). Pagination params are added by this hook — callers
+ * must not set `limit`/`offset` themselves.
  */
-export interface AiSessionsFilterInputs {
+export type AiSessionsFilterInputs = Omit<
+	ListAiSessionsInput,
+	"limit" | "offset" | "startTime" | "endTime"
+> & {
 	startTime: string
 	endTime: string
-	vendorIds?: ReadonlyArray<string>
-	serviceNames?: ReadonlyArray<string>
 }
 
 interface AiSessionsPage {

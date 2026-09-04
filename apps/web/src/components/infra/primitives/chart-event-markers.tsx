@@ -8,10 +8,10 @@
 // Two things make this non-trivial and are the reason it lives here rather than
 // inline in one chart:
 //
-//  1. **The x-axis is categorical.** These charts plot bucket *labels* produced
-//     by `makeBucketLabeler`, not timestamps, and those labels are not unique
-//     over a multi-day window ("14:00" appears once per day). A marker therefore
-//     has to be snapped by bucket *index* and then read its label back out.
+//  1. **The window decides what is drawn.** The x axis is a time scale (see
+//     `makeBucketAxis`), so a marker sits at its own instant — but only inside
+//     the plotted window. An event just outside it is dropped, never clamped to
+//     an edge, and a band whose end is unknown degrades to a line.
 //  2. **Markers are MARKS, not children.** Recharts wanted `ReferenceLine` as a
 //     direct child of the chart element; here they are spread into
 //     `defineChart({ marks })` like any other mark, and they are `decorative` so
@@ -20,6 +20,7 @@
 import { ruleX, rect, text } from "@tanstack/charts"
 import { decorative } from "@tanstack/charts/mark/decorative"
 import { resolvePlotColor } from "@maple/ui/components/plot"
+import { toEpochMs } from "@maple/ui/lib/time-format"
 
 export type ChartEventTone = "neutral" | "warn" | "crit"
 
@@ -33,76 +34,59 @@ export interface ChartEventMarker {
 	readonly endsAt?: string
 }
 
-export interface SnappedMarker {
+export interface PlacedMarker {
 	readonly marker: ChartEventMarker
-	/** The bucket label the marker sits on. */
-	readonly x: string
-	/** End label, for banded markers. */
-	readonly x2?: string
+	/** The instant the marker sits on. */
+	readonly x: Date
+	/** End instant, for banded markers. */
+	readonly x2?: Date
 }
 
 /**
- * Place each marker on the bucket it falls in.
+ * Keep the markers that fall inside the plotted window, at their own instant.
  *
- * Snapping is by index (then the label is read back), because labels repeat
- * across days. Markers outside the window are dropped rather than clamped to an
- * edge: a deploy pinned to the first visible bucket reads as "this deploy caused
- * the thing at the start of the window", which is exactly the wrong conclusion.
+ * The window runs from the first bucket to the END of the last one — buckets
+ * are intervals, so an event 45 minutes into the final hourly bucket is still
+ * in view. Markers outside it are dropped rather than clamped to an edge: a
+ * deploy pinned to the first visible bucket reads as "this deploy caused the
+ * thing at the start of the window", which is exactly the wrong conclusion.
  *
- * `bucketIsos` must be ascending, which is what every timeseries builder here
- * already returns.
+ * Bucket order is not assumed; the extent is taken over all of them.
  */
-export function snapMarkersToBuckets(
+export function placeMarkersInWindow(
 	markers: ReadonlyArray<ChartEventMarker>,
 	bucketIsos: ReadonlyArray<string>,
-	labelFor: (iso: string) => string,
-): ReadonlyArray<SnappedMarker> {
+): ReadonlyArray<PlacedMarker> {
 	if (bucketIsos.length === 0 || markers.length === 0) return []
 
-	const times = bucketIsos.map((iso) => Date.parse(iso))
-	const first = times[0]!
-	const last = times[times.length - 1]!
-	// Buckets are evenly spaced; the width is what makes the last bucket a real
-	// interval rather than an instant, so an event inside it still lands.
+	const times = bucketIsos
+		.map((iso) => toEpochMs(iso))
+		.filter((ms) => Number.isFinite(ms))
+		.toSorted((a, b) => a - b)
+	const first = times[0]
+	const last = times[times.length - 1]
+	if (first === undefined || last === undefined) return []
+	// With a single bucket the width is unknown, so only the instant itself lands.
 	const width = times.length > 1 ? times[1]! - first : 0
+	const end = last + width
 
-	/** Index of the bucket containing `t`, or -1 when it falls outside. */
-	const indexOf = (t: number): number => {
-		if (Number.isNaN(t) || t < first || t > last + width) return -1
-		let low = 0
-		let high = times.length - 1
-		let found = -1
-		while (low <= high) {
-			const mid = (low + high) >> 1
-			if (times[mid]! <= t) {
-				found = mid
-				low = mid + 1
-			} else {
-				high = mid - 1
-			}
-		}
-		return found
-	}
+	const inWindow = (t: number) => Number.isFinite(t) && t >= first && t <= end
 
-	const snapped: SnappedMarker[] = []
+	const placed: PlacedMarker[] = []
 	for (const marker of markers) {
-		const index = indexOf(Date.parse(marker.at))
-		if (index === -1) continue
-		const x = labelFor(bucketIsos[index]!)
+		const at = toEpochMs(marker.at)
+		if (!inWindow(at)) continue
+		const x = new Date(at)
 		if (marker.endsAt === undefined) {
-			snapped.push({ marker, x })
+			placed.push({ marker, x })
 			continue
 		}
-		const endIndex = indexOf(Date.parse(marker.endsAt))
+		const until = toEpochMs(marker.endsAt)
 		// An unresolvable end (still running, or past the window) degrades to a
 		// line — better than a band that silently stops early.
-		snapped.push(
-			endIndex === -1 || endIndex <= index
-				? { marker, x }
-				: { marker, x, x2: labelFor(bucketIsos[endIndex]!) },
-		)
+		placed.push(inWindow(until) && until > at ? { marker, x, x2: new Date(until) } : { marker, x })
 	}
-	return snapped
+	return placed
 }
 
 /**
@@ -147,7 +131,7 @@ export interface ChartEventMarkerOptions {
  *
  * ```tsx
  * defineChart({
- *   marks: [dashedGridY(), ...chartEventMarkerMarks(snapped, { yDomain }), lineY(…)],
+ *   marks: [dashedGridY(), ...chartEventMarkerMarks(placed, { yDomain }), lineY(…)],
  * })
  * ```
  *
@@ -157,14 +141,14 @@ export interface ChartEventMarkerOptions {
  * point union beyond its row type.
  */
 export function chartEventMarkerMarks(
-	snapped: ReadonlyArray<SnappedMarker>,
+	placed: ReadonlyArray<PlacedMarker>,
 	{ yDomain }: ChartEventMarkerOptions,
 ) {
-	if (snapped.length === 0) return []
-	const labelled = snapped.length <= MAX_LABELLED_MARKERS
+	if (placed.length === 0) return []
+	const labelled = placed.length <= MAX_LABELLED_MARKERS
 
-	const lines = snapped.filter((entry) => entry.x2 === undefined)
-	const bands = snapped.filter((entry) => entry.x2 !== undefined)
+	const lines = placed.filter((entry) => entry.x2 === undefined)
+	const bands = placed.filter((entry) => entry.x2 !== undefined)
 
 	const marks = []
 
@@ -178,8 +162,8 @@ export function chartEventMarkerMarks(
 		marks.push(
 			decorative(
 				rect(ofTone, {
-					x1: (entry: SnappedMarker) => entry.x,
-					x2: (entry: SnappedMarker) => entry.x2 ?? entry.x,
+					x1: (entry: PlacedMarker) => entry.x,
+					x2: (entry: PlacedMarker) => entry.x2 ?? entry.x,
 					y1: () => yDomain[0],
 					y2: () => yDomain[1],
 					fill: toneColor(tone),
@@ -194,8 +178,8 @@ export function chartEventMarkerMarks(
 		marks.push(
 			decorative(
 				ruleX(lines, {
-					x: (entry: SnappedMarker) => entry.x,
-					stroke: (entry: SnappedMarker) => toneColor(entry.marker.tone),
+					x: (entry: PlacedMarker) => entry.x,
+					stroke: (entry: PlacedMarker) => toneColor(entry.marker.tone),
 					strokeOpacity: 1,
 					strokeWidth: 1,
 					strokeDasharray: "3 3",
@@ -207,11 +191,11 @@ export function chartEventMarkerMarks(
 			marks.push(
 				decorative(
 					text(lines, {
-						x: (entry: SnappedMarker) => entry.x,
+						x: (entry: PlacedMarker) => entry.x,
 						// Anchored at the top of the domain, which is where Recharts'
 						// `position: "top"` put it.
 						y: () => yDomain[1],
-						text: (entry: SnappedMarker) => entry.marker.label,
+						text: (entry: PlacedMarker) => entry.marker.label,
 						fill: resolvePlotColor("--muted-foreground", "#71717a"),
 						anchor: "middle",
 						dy: -4,

@@ -26,7 +26,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/
 import { parseBase64Aes256GcmKey } from "@/platform/Crypto"
 import { Env } from "@/platform/Env"
 import { buildScrapeAuthHeaders } from "@/services/auth/scrape-auth"
-import { validateExternalUrlSync } from "@/http/url-validator"
+import { validateExternalUrlSync } from "@maple/safe-fetch"
 import { decodeDiscoveryConfig } from "./planetscale/discovery-config"
 import {
 	PlanetScaleOAuthService,

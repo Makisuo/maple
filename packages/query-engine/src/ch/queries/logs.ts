@@ -211,8 +211,8 @@ function rawLogsTimeRange($: ColumnAccessor<typeof Logs.columns>): Array<CH.Cond
 	return [
 		// TimestampTime is the partition/index key; this filter unlocks
 		// partition pruning. Timestamp filter retained for sub-second accuracy.
-		$.TimestampTime.gte(param.dateTimeString("startTime")),
-		$.TimestampTime.lte(param.dateTimeString("endTime")),
+		$.TimestampTime.gte(param.dateTimeSeconds("startTime")),
+		$.TimestampTime.lte(param.dateTimeSeconds("endTime")),
 		$.Timestamp.gte(param.dateTimeString("startTime")),
 		$.Timestamp.lte(param.dateTimeString("endTime")),
 	]
@@ -330,7 +330,7 @@ export function logsTimeseriesQuery(opts: LogsTimeseriesOpts): CHQuery<ColumnDef
 			}))
 			.where(($) => [
 				$.OrgId.eq(param.string("orgId")),
-				$.Hour.gte(param.dateTimeString("startTime")),
+				$.Hour.gte(param.dateTimeSeconds("startTime")),
 				// `param.dateTimeString("endTime")` substitutes as a quoted string literal;
 				// `toStartOfHour` only accepts Date/DateTime, so wrap with `toDateTime`.
 				$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTimeString("endTime")))),
@@ -355,8 +355,8 @@ export function logsTimeseriesQuery(opts: LogsTimeseriesOpts): CHQuery<ColumnDef
 			$.OrgId.eq(param.string("orgId")),
 			// TimestampTime is the partition/index key; this filter unlocks
 			// partition pruning. Timestamp filter retained for sub-second accuracy.
-			$.TimestampTime.gte(param.dateTimeString("startTime")),
-			$.TimestampTime.lte(param.dateTimeString("endTime")),
+			$.TimestampTime.gte(param.dateTimeSeconds("startTime")),
+			$.TimestampTime.lte(param.dateTimeSeconds("endTime")),
 			$.Timestamp.gte(param.dateTimeString("startTime")),
 			$.Timestamp.lte(param.dateTimeString("endTime")),
 			...serviceSeverityConditions($, opts),
@@ -592,8 +592,8 @@ export function logsListQuery(opts: LogsListOpts) {
 
 	const baseWhere = ($: ColumnAccessor<typeof Logs.columns>): Array<CH.Condition | undefined> => [
 		$.OrgId.eq(param.string("orgId")),
-		$.TimestampTime.gte(param.dateTimeString("startTime")),
-		$.TimestampTime.lte(param.dateTimeString("endTime")),
+		$.TimestampTime.gte(param.dateTimeSeconds("startTime")),
+		$.TimestampTime.lte(param.dateTimeSeconds("endTime")),
 		$.Timestamp.gte(param.dateTimeString("startTime")),
 		$.Timestamp.lte(param.dateTimeString("endTime")),
 		...serviceSeverityConditions($, opts),
@@ -696,8 +696,8 @@ export function getLogByKeyQuery(opts: LogByKeyOpts) {
 			$.OrgId.eq(param.string("orgId")),
 			// TimestampTime is the partition/index key; bounding it unlocks
 			// partition pruning. Timestamp.eq pins the exact sub-second row.
-			$.TimestampTime.gte(param.dateTimeString("startTime")),
-			$.TimestampTime.lte(param.dateTimeString("endTime")),
+			$.TimestampTime.gte(param.dateTimeSeconds("startTime")),
+			$.TimestampTime.lte(param.dateTimeSeconds("endTime")),
 			$.Timestamp.eq(param.dateTimeString("timestamp")),
 			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
@@ -787,8 +787,8 @@ function logsFacetsQueryFromMv(
 		$: ColumnAccessor<typeof LogsAggregatesHourly.columns>,
 	): Array<CH.Condition | undefined> => [
 		$.OrgId.eq(param.string("orgId")),
-		$.Hour.gte(param.dateTimeString("startTime")),
-		$.Hour.lte(param.dateTimeString("endTime")),
+		$.Hour.gte(param.dateTimeSeconds("startTime")),
+		$.Hour.lte(param.dateTimeSeconds("endTime")),
 		CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 		CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
 		opts.environments?.length ? CH.inList($.DeploymentEnv, opts.environments) : undefined,
@@ -862,8 +862,8 @@ function logsFacetsQueryFromRaw(
 ): CHUnionQuery<LogsFacetsOutput> {
 	const baseWhere = ($: ColumnAccessor<typeof Logs.columns>): Array<CH.Condition | undefined> => [
 		$.OrgId.eq(param.string("orgId")),
-		$.TimestampTime.gte(param.dateTimeString("startTime")),
-		$.TimestampTime.lte(param.dateTimeString("endTime")),
+		$.TimestampTime.gte(param.dateTimeSeconds("startTime")),
+		$.TimestampTime.lte(param.dateTimeSeconds("endTime")),
 		$.Timestamp.gte(param.dateTimeString("startTime")),
 		$.Timestamp.lte(param.dateTimeString("endTime")),
 		CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),

@@ -24,7 +24,7 @@ import {
 
 const DEFAULT_PRESET = "12h"
 
-const NodeStatusParam = Schema.optional(Schema.Literals(["active", "idle", "down"]))
+const NodeStatusParam = Schema.optional(Schema.Literals(["active", "idle", "ended"]))
 
 const nodesSearchSchema = Schema.Struct({
 	q: Schema.optional(Schema.String),
@@ -44,9 +44,10 @@ export const Route = createFileRoute("/infra/kubernetes/nodes/")({
 
 /**
  * The states are collector freshness, not Kubernetes conditions: a node is
- * "Down" here when no kubelet metric has arrived recently, which is a fact about
- * the collector as much as about the node. `k8s.node.condition_ready` is
- * collected but unqueried — when it lands, it belongs beside these, not instead.
+ * "Ended" here when no kubelet metric has arrived recently, which on an ASG or
+ * a Karpenter-managed fleet usually means the node was scaled in, not that it
+ * failed — so it reads neutral. `k8s.node.condition_ready` is collected but
+ * unqueried; when it lands it belongs beside these, not instead.
  */
 const STATUS_CELLS: ReadonlyArray<{
 	status: HostStatus
@@ -55,13 +56,13 @@ const STATUS_CELLS: ReadonlyArray<{
 }> = [
 	{ status: "active", hint: "reporting", tone: "info" },
 	{ status: "idle", hint: "quiet >1m", tone: "warn" },
-	{ status: "down", hint: "silent >5m", tone: "crit" },
+	{ status: "ended", hint: "silent >5m", tone: "neutral" },
 ]
 
 const STATUS_SEGMENT: Record<HostStatus, string> = {
 	active: "bg-[var(--severity-info)]",
 	idle: "bg-[var(--severity-warn)]",
-	down: "bg-[var(--severity-error)]",
+	ended: "bg-muted-foreground/40",
 } satisfies Record<HostStatus, string>
 
 function NodesPage() {
@@ -148,7 +149,7 @@ function NodesPage() {
 
 					// The band counts the whole scope as of the window's end, so it keeps
 					// saying what the search and the status cell just hid.
-					const counts = { active: 0, idle: 0, down: 0 } satisfies Record<HostStatus, number>
+					const counts = { active: 0, idle: 0, ended: 0 } satisfies Record<HostStatus, number>
 					for (const node of nodes) counts[deriveHostStatus(node.lastSeen, endTime)]++
 
 					const q = searchText.trim().toLowerCase()

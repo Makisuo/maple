@@ -1,32 +1,26 @@
 import { describe, expect, it } from "vitest"
 
-import { errorFilterChips } from "./error-filter-chips"
+import { errorFilterChips, hasErrorFilters } from "./error-filter-chips"
 
 describe("errorFilterChips", () => {
 	it("is empty when nothing is filtered", () => {
 		expect(errorFilterChips({})).toEqual([])
+		expect(hasErrorFilters({})).toBe(false)
 	})
 
-	it("puts exclusions ahead of inclusions", () => {
-		const chips = errorFilterChips({ services: ["api"], excludedErrorTypes: ["TimeoutError"] })
-		expect(chips.map((c) => [c.label, c.negated])).toEqual([
-			["Error Type", true],
-			["Service", false],
+	it("keeps the sidebar's order", () => {
+		const chips = errorFilterChips({ regressed: true, kind: "alert", service: "api" })
+		expect(chips.map((c) => c.label)).toEqual(["Service", "Source", "State"])
+	})
+
+	it("names the param each chip clears and labels fixed vocabularies", () => {
+		expect(errorFilterChips({ kind: "integration", regressed: true })).toEqual([
+			{ param: "kind", label: "Source", values: ["Integrations"] },
+			{ param: "regressed", label: "State", values: ["Regressed"] },
 		])
 	})
 
-	it("names the param each chip clears", () => {
-		expect(errorFilterChips({ excludedServiceVersions: ["1.4.2"] })).toEqual([
-			{
-				param: "excludedServiceVersions",
-				label: "Version",
-				values: ["1.4.2"],
-				negated: true,
-			},
-		])
-	})
-
-	it("ignores params present but empty", () => {
-		expect(errorFilterChips({ services: [], excludedServices: [] })).toEqual([])
+	it("ignores an unset regression toggle and an empty environment", () => {
+		expect(errorFilterChips({ regressed: false, env: "" })).toEqual([])
 	})
 })

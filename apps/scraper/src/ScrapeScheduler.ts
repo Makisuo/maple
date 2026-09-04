@@ -16,6 +16,7 @@ import {
 } from "effect"
 import { ScrapeResultReport, ScrapeTargetId, type InternalScrapeTarget } from "@maple/domain/http"
 import { ApiClient } from "./ApiClient"
+import { TargetFetcher } from "./TargetFetcher"
 import { convertFamiliesToOtlp } from "./prometheus/otlp"
 import { parsePrometheusText } from "./prometheus/parser"
 import { OtlpIngest } from "./OtlpIngest"
@@ -194,7 +195,8 @@ export const backoffLogMessage = (reason: ScrapeFailureReason): string => {
  * start-to-start. A rate-limited, auth-rejected, or server-erroring scrape escalates
  * exponentially — honoring `Retry-After` when it is longer — capped at
  * {@link MAX_BACKOFF_MS} so the target keeps probing for recovery (an auth fix
- * needs no restart: the credential is resolved server-side per scrape); a
+ * needs no restart: each scrape reads the credential the latest target list
+ * carries); a
  * delivery-blocked one parks flat for {@link DELIVERY_BLOCKED_BACKOFF}. Either
  * delay runs from scrape end.
  */
@@ -303,6 +305,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 			const env = yield* ScraperEnv
 			const api = yield* ApiClient
 			const otlp = yield* OtlpIngest
+			const fetcher = yield* TargetFetcher
 
 			const semaphore = yield* Semaphore.make(env.SCRAPER_CONCURRENCY)
 			// Sliding: at capacity the oldest buffered result is dropped for the
@@ -312,6 +315,14 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 			// Loop count as of the last reconcile, for {@link stats}: the FiberMap
 			// itself lives inside `run`'s scope (see below), not the service.
 			const activeLoopsRef = yield* Ref.make(0)
+			// The newest copy of every desired target, keyed by {@link targetKey}. A
+			// loop is forked with a snapshot and only restarted when its
+			// {@link loopKey} changes, but `scrapeUrl` (PlanetScale's signed
+			// `?sig=&exp=` params rotate every discovery refresh) and `authHeaders`
+			// (a rotated credential) are deliberately outside that key: each scrape
+			// reads them from here instead, so a rotation neither restarts the loop
+			// nor leaves it fetching with an expired signature until the loop dies.
+			const latestTargets = yield* Ref.make(new Map<string, InternalScrapeTarget>())
 
 			// The gauge is republished after every queue transition rather than
 			// mutated inside one; the queue is the single source of truth for size.
@@ -368,7 +379,8 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 
 						const attempt: Effect.Effect<ScrapeOutcome, ScrapeAttemptFailed> = Effect.gen(
 							function* () {
-								const response = yield* api.scrapeTarget(target.id, target.subTargetKey)
+								const latest = yield* Ref.get(latestTargets)
+								const response = yield* fetcher.fetch(latest.get(targetKey(target)) ?? target)
 								if (response.status < 200 || response.status >= 300) {
 									return yield* attemptFailed({
 										// Identity in the message so the error issue and its
@@ -426,8 +438,15 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 							},
 						).pipe(
 							Effect.catchTags({
-								"@maple/scraper/ApiRequestError": (error) =>
-									attemptFailed({ message: error.message, reason: "scrape_failed" }),
+								"@maple/scraper/TargetFetchError": (error) =>
+									attemptFailed({
+										message: `target "${target.name}" (${targetHost}) ${error.message}`,
+										// An unreachable or stalled target backs off like an upstream
+										// 5xx; a URL that fails SSRF validation is a config fault no
+										// cadence clears, so it just keeps reporting at interval.
+										reason:
+											error.reason === "invalid_url" ? "scrape_failed" : "target_error",
+									}),
 								"@maple/scraper/OtlpIngestError": (error) =>
 									attemptFailed({
 										message: error.message,
@@ -480,8 +499,8 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 								// every scrape — across every target of that reconcile, for
 								// hours — became a child of that one span and propagated its
 								// traceparent to the API, collapsing thousands of independent
-								// scrapes into a single trace (prod: 10.8k `Server` spans on
-								// /api/internal/prometheus-scrape under one TraceId over 9h).
+								// scrapes into a single trace (prod: 10.8k `Server` spans on the
+								// API-side scrape proxy of the time under one TraceId over 9h).
 								root: true,
 								attributes: {
 									orgId: target.orgId,
@@ -580,6 +599,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 					const deduped = new Map<string, InternalScrapeTarget>()
 					for (const target of targets) deduped.set(targetKey(target), target)
 					const duplicateTargetsDropped = targets.length - deduped.size
+					yield* Ref.set(latestTargets, deduped)
 
 					const desired = new Map<string, InternalScrapeTarget>()
 					for (const target of deduped.values()) desired.set(loopKey(target), target)

@@ -1,4 +1,7 @@
-// The Maple stack: one `create*` factory per app, composed here.
+// The Maple stack: one module per app, composed here — a Worker's own
+// `src/worker.ts` (an alchemy Worker class, `yield* Alerting`) wherever its
+// props are stage-derived, a `create*` factory where it still takes another
+// resource as an argument (api, web) or is not a Worker (ingest, electric).
 //
 // Comments in these files explain what a reader needs in order not to break the
 // code. The history behind those decisions — the #378 deploy hang, the
@@ -12,7 +15,6 @@ import * as AWS from "alchemy/AWS"
 import * as Cloudflare from "alchemy/Cloudflare"
 import * as Command from "alchemy/Command"
 import * as Output from "alchemy/Output"
-import * as RemovalPolicy from "alchemy/RemovalPolicy"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import {
@@ -22,21 +24,23 @@ import {
 	stageDeploysIngest,
 } from "@maple/infra/aws"
 import {
+	bindMapleDbRef,
 	formatMapleStage,
+	ManagedMapleDb,
+	MapleStack,
+	type MapleStackContext,
 	parseMapleStage,
-	resolveDatabaseMode,
 	resolveMapleDomains,
 } from "@maple/infra/cloudflare"
 import * as Portless from "@maple/alchemy-portless"
 import { DEV_PROCESS_APPS, selectedDevApps, type DevApp } from "@maple/infra/dev-urls"
-import { requiredPlain } from "@maple/infra/env"
-import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
-import { createManagedMapleDb, createMapleApi, createReplayBlobStore } from "./apps/api/alchemy.run.ts"
+import Alerting from "./apps/alerting/src/worker.ts"
+import { createMapleApi, createReplayBlobStore } from "./apps/api/alchemy.run.ts"
 import { createMapleElectric } from "./apps/electric/alchemy.run.ts"
-import { createElectricSyncWorker } from "./apps/electric-sync/alchemy.run.ts"
+import ElectricSync from "./apps/electric-sync/src/worker.ts"
 import { createMapleIngest } from "./apps/ingest/alchemy.run.ts"
-import { createLandingWorker } from "./apps/landing/alchemy.run.ts"
-import { createLocalUiWorker } from "./apps/local-ui/alchemy.run.ts"
+import Landing from "./apps/landing/src/worker.ts"
+import LocalUi from "./apps/local-ui/src/worker.ts"
 import { createMapleWeb } from "./apps/web/alchemy.run.ts"
 
 // v1 read the account id from CLOUDFLARE_DEFAULT_ACCOUNT_ID (the name Infisical
@@ -82,11 +86,6 @@ const createDevRoute = (app: DevApp) => Portless.Route(`${app}-route`, { name: a
 const workerDev = (app: DevApp) =>
 	devApps === undefined ? undefined : devApps.has(app) ? Portless.workerDev(app) : Portless.workerUnserved
 
-const serveWorker = (app: DevApp, worker: Cloudflare.Worker) =>
-	devApps?.has(app)
-		? Effect.asVoid(Portless.Route(`${app}-route`, { name: app, port: Portless.workerPort(worker.url) }))
-		: Effect.void
-
 /** Inter-app URLs handed to the Workers as env, so `.env.local` cannot override them. */
 const devEnv = devApps
 	? {
@@ -95,6 +94,35 @@ const devEnv = devApps
 			MAPLE_ELECTRIC_SYNC_URL: Portless.routeUrl("electric-sync"),
 		}
 	: undefined
+
+/**
+ * What this deploy is, for the Worker classes (`yield* Alerting`, …) whose
+ * props read it instead of taking factory arguments.
+ */
+const MapleStackLive = Layer.effect(
+	MapleStack,
+	Effect.map(Alchemy.Stage, (raw): MapleStackContext => {
+		const stage = parseMapleStage(raw)
+		const domains = resolveMapleDomains(stage)
+		return {
+			stage,
+			domains,
+			urls: {
+				api: devEnv?.MAPLE_API_BASE_URL ?? resolveUrl(domains.api, "MAPLE_API_BASE_URL"),
+				ingest: resolveUrl(domains.ingest, "VITE_INGEST_URL", "https://ingest.maple.dev"),
+				electricSync:
+					devEnv?.MAPLE_ELECTRIC_SYNC_URL ?? resolveUrl(domains.sync, "MAPLE_ELECTRIC_SYNC_URL"),
+			},
+			workerDev,
+			devEnv,
+		}
+	}),
+)
+
+const serveWorker = (app: DevApp, worker: Cloudflare.Worker) =>
+	devApps?.has(app)
+		? Effect.asVoid(Portless.Route(`${app}-route`, { name: app, port: Portless.workerPort(worker.url) }))
+		: Effect.void
 
 /** A non-Worker app's own `dev` script under `Command.Dev`, which is a no-op on deploys. */
 const createDevProcess = (app: DevApp, route: Portless.Route) =>
@@ -107,44 +135,6 @@ const createDevProcess = (app: DevApp, route: Portless.Route) =>
 			PORTLESS_URL: Portless.routeUrl(app),
 			MAPLE_API_URL: Portless.routeUrl("api"),
 		},
-	})
-
-const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStage>) =>
-	Effect.gen(function* () {
-		// Bootstrap these account/zone-wide resources in production first. Other
-		// stages keep their existing bindings until the production state has been
-		// deployed, after which they can safely resolve these logical IDs via ref().
-		if (stage.kind !== "prd") {
-			return {}
-		}
-
-		const ingestEndpoint = (process.env.MAPLE_ENDPOINT?.trim() || "https://ingest.maple.dev").replace(
-			/\/+$/,
-			"",
-		)
-		const headers = { authorization: `Bearer ${yield* requiredPlain("MAPLE_OTEL_INGEST_KEY")}` }
-		const tracesDestination = yield* Cloudflare.Workers.ObservabilityDestination(
-			"workers-observability-traces",
-			{
-				name: "maple-workers-traces",
-				url: `${ingestEndpoint}/v1/traces`,
-				headers,
-				logpushDataset: "opentelemetry-traces",
-				enabled: true,
-			},
-		).pipe(RemovalPolicy.retain())
-		const logsDestination = yield* Cloudflare.Workers.ObservabilityDestination(
-			"workers-observability-logs",
-			{
-				name: "maple-workers-logs",
-				url: `${ingestEndpoint}/v1/logs`,
-				headers,
-				logpushDataset: "opentelemetry-logs",
-				enabled: true,
-			},
-		).pipe(RemovalPolicy.retain())
-
-		return { logsDestination, tracesDestination }
 	})
 
 type StackProviderServices =
@@ -184,9 +174,7 @@ export default Alchemy.Stack(
 		state: process.env.ALCHEMY_LOCAL_STATE ? Alchemy.localState() : Cloudflare.state(),
 	},
 	Effect.gen(function* () {
-		const stage = parseMapleStage(yield* Alchemy.Stage)
-		const domains = resolveMapleDomains(stage)
-		const shared = yield* createProductionSharedResources(stage)
+		const { stage, domains, urls } = yield* MapleStack
 
 		// Child-process routes; the Workers' routes follow their Workers below.
 		const routes = new Map<DevApp, Portless.Route>()
@@ -194,9 +182,6 @@ export default Alchemy.Stack(
 			if (devApps?.has(app)) routes.set(app, yield* createDevRoute(app))
 		}
 
-		const apiUrl = devEnv?.MAPLE_API_BASE_URL ?? resolveUrl(domains.api, "MAPLE_API_BASE_URL")
-		const electricSyncUrl =
-			devEnv?.MAPLE_ELECTRIC_SYNC_URL ?? resolveUrl(domains.sync, "MAPLE_ELECTRIC_SYNC_URL")
 		// Geographic instance this deploy belongs to. `us` today; an EU instance is
 		// the same stack deployed with MAPLE_REGION=eu against that instance's own
 		// Tinybird workspace and application database. Guarded here because a
@@ -235,12 +220,10 @@ export default Alchemy.Stack(
 				})
 			: undefined
 
-		const ingestUrl = resolveUrl(domains.ingest, "VITE_INGEST_URL", "https://ingest.maple.dev")
-
-		// Shared by api and alerting. Managed here on dev stages; stg/prd bind a
-		// dashboard config by id in their factories; PR previews get none.
-		const mapleDb =
-			resolveDatabaseMode(stage) === "managed" ? yield* createManagedMapleDb(stage) : undefined
+		// Shared by api and alerting: alchemy-managed on dev stages, undefined
+		// elsewhere (stg/prd bind a dashboard config by id, PR previews get none).
+		// `Alerting` yields the same resource itself; the factory still takes it.
+		const mapleDb = yield* ManagedMapleDb
 
 		// Chat and AI triage run inside the api worker (ChatSession Durable Object),
 		// so there is no separate chat worker to sequence against any more.
@@ -270,12 +253,10 @@ export default Alchemy.Stack(
 				: undefined
 
 		// Standalone ElectricSQL shape-proxy worker (DB-free); its public origin is
-		// baked into the web build (VITE_ELECTRIC_SYNC_URL).
-		const electricSync = yield* createElectricSyncWorker({
-			stage,
-			domains,
-			dev: workerDev("electric-sync"),
-		})
+		// baked into the web build (VITE_ELECTRIC_SYNC_URL). Like alerting, landing
+		// and local-ui below, a single module: its props read `MapleStack` and the
+		// module is also the bundle entry.
+		const electricSync = yield* ElectricSync
 		yield* serveWorker("electric-sync", electricSync)
 
 		// See `isDevServer`: each of these three is gated on a production
@@ -287,37 +268,20 @@ export default Alchemy.Stack(
 					stage,
 					domains,
 					api,
-					apiUrl,
-					ingestUrl,
-					electricSyncUrl,
+					apiUrl: urls.api,
+					ingestUrl: urls.ingest,
+					electricSyncUrl: urls.electricSync,
 				})
 
-		const landing = isDevServer
-			? undefined
-			: yield* createLandingWorker({
-					stage,
-					domains,
-					ingestUrl,
-					logsDestination: shared.logsDestination,
-					tracesDestination: shared.tracesDestination,
-				})
+		const landing = isDevServer ? undefined : yield* Landing
 
-		const localUi = isDevServer
-			? undefined
-			: yield* createLocalUiWorker({
-					stage,
-					domains,
-					logsDestination: shared.logsDestination,
-					tracesDestination: shared.tracesDestination,
-				})
+		const localUi = isDevServer ? undefined : yield* LocalUi
 
-		const alerting = yield* createAlertingWorker({
-			stage,
-			domains,
-			mapleDb,
-			dev: workerDev("alerting"),
-			devEnv,
-		})
+		const alerting = yield* Alerting
+		// stg/prd: the dashboard-managed Hyperdrive, by id. Not a prop — alchemy has
+		// no `env` form for a binding it did not create — so it is attached here,
+		// after the Worker exists, exactly as the api factory does for its own.
+		yield* bindMapleDbRef(alerting, stage, "alerting")
 		yield* serveWorker("alerting", alerting)
 
 		// Dev only: the vite/astro dev servers, `cargo run`, and the scraper.
@@ -328,9 +292,9 @@ export default Alchemy.Stack(
 
 		const summary = {
 			stage: formatMapleStage(stage),
-			apiUrl,
-			ingestUrl,
-			electricSyncUrl,
+			apiUrl: urls.api,
+			ingestUrl: urls.ingest,
+			electricSyncUrl: urls.electricSync,
 			webUrl: domains.web ? `https://${domains.web}` : "",
 			landingUrl: domains.landing ? `https://${domains.landing}` : "",
 			localUiUrl: domains.local ? `https://${domains.local}` : "",
@@ -383,5 +347,7 @@ export default Alchemy.Stack(
 			localUiWorker: localUi?.workerName,
 			alertingWorker: alerting.workerName,
 		}
-	}),
+		// The stack IS the entry point: the one place `MapleStack` is provided.
+		// oxlint-disable-next-line effecttsgo/strict-effect-provide
+	}).pipe(Effect.provide(MapleStackLive)),
 )

@@ -16,7 +16,7 @@ import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, MetricsSum } from "../tables"
-import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
+import { containerRuntimeExpr, deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { avgIfOrZero, facetAttrExpr, maxIfOrZero, type FacetOutput } from "./query-helpers"
 
 const HOSTMETRIC_NAMES = [
@@ -325,6 +325,8 @@ export interface ListPodsOpts {
 	sortDir?: SortDirection
 	/** One-click fleet scope from the summary band. */
 	scope?: PodScope
+	/** Defaults to `live` — see PodLifecycle. */
+	lifecycle?: PodLifecycle
 	limit?: number
 	offset?: number
 }
@@ -335,7 +337,20 @@ export interface ListPodsOpts {
  * the grouped query and filters outside it — same plan ClickHouse would produce
  * for HAVING, and it keeps the unscoped query (the common case) single-level.
  */
-export type PodScope = "saturated" | "elevated" | "unbounded" | "stale"
+export type PodScope = "saturated" | "elevated" | "unbounded"
+
+/**
+ * Which slice of the window's pods the caller wants.
+ *
+ * A windowed pod list is the union of everything that reported at any point in
+ * it, so on an autoscaled fleet most of those pods no longer exist — scaled in
+ * by an HPA, rolled out by a deploy, replaced when a Fargate task or spot node
+ * was cycled. Ending is the normal end of a pod's life, not a fault, so the
+ * list defaults to `live` and offers the rest as a deliberate scope. Without
+ * this the ranking, the denominator and the fleet band all mix the dead in with
+ * the running.
+ */
+export type PodLifecycle = "live" | "ended" | "all"
 
 export interface ListPodsOutput {
 	readonly podName: string
@@ -441,8 +456,37 @@ const podFilterConditions = (
 	),
 ]
 
-/** Ten collection intervals at the chart's 30s default. */
-const STALE_POD_SECONDS = 300
+/**
+ * Ten collection intervals at the chart's 30s default. A pod whose newest
+ * datapoint predates this is one whose series ended, which for a pod means it
+ * stopped existing — the same cutoff `deriveHostStatus` uses in the web app, so
+ * the badge on a row and the predicate that selected it never disagree.
+ */
+const ENDED_POD_SECONDS = 300
+
+/**
+ * `lastSeen` is an aggregate, so these belong outside the grouping. The cutoff
+ * rides on `endTime` rather than wall-clock now, so a window that ended an hour
+ * ago still reports who was live *then*.
+ */
+type PodLifecycleColumns = { lastSeen: CH.Expr<string> }
+const endedCutoff = () => CH.intervalSub(param.dateTimeString("endTime"), ENDED_POD_SECONDS)
+const podLiveCondition = ($: PodLifecycleColumns) => $.lastSeen.gte(endedCutoff())
+const podEndedCondition = ($: PodLifecycleColumns) => $.lastSeen.lt(endedCutoff())
+
+const podLifecycleCondition = (
+	$: PodLifecycleColumns,
+	lifecycle: PodLifecycle,
+): CH.Condition | undefined => {
+	switch (lifecycle) {
+		case "live":
+			return podLiveCondition($)
+		case "ended":
+			return podEndedCondition($)
+		case "all":
+			return undefined
+	}
+}
 
 export function listPodsQuery(opts: ListPodsOpts = {}) {
 	const sortBy = opts.sortBy ?? "saturation"
@@ -512,7 +556,10 @@ export function listPodsQuery(opts: ListPodsOpts = {}) {
 			memoryLimitPctPeak: $.memoryLimitPctPeak,
 			saturation: $.saturation,
 		}))
-		.where(($) => [opts.scope ? podScopeCondition($, opts.scope) : undefined])
+		.where(($) => [
+			podLifecycleCondition($, opts.lifecycle ?? "live"),
+			opts.scope ? podScopeCondition($, opts.scope) : undefined,
+		])
 		.orderBy(...(orderBy as Array<[never, SortDirection]>))
 		.limit(opts.limit ?? 50)
 		.offset(opts.offset ?? 0)
@@ -528,7 +575,6 @@ function podScopeCondition(
 	$: {
 		saturation: CH.Expr<number>
 		cpuUsagePeak: CH.Expr<number>
-		lastSeen: CH.Expr<string>
 	},
 	scope: PodScope,
 ): CH.Condition {
@@ -539,8 +585,6 @@ function podScopeCondition(
 			return $.saturation.gte(0.6).and($.saturation.lt(0.9))
 		case "unbounded":
 			return $.saturation.eq(0).and($.cpuUsagePeak.gt(0))
-		case "stale":
-			return $.lastSeen.lt(CH.intervalSub(param.dateTimeString("endTime"), STALE_POD_SECONDS))
 	}
 }
 
@@ -551,15 +595,20 @@ function podScopeCondition(
 // the size of the page.
 
 export interface ListPodsSummaryOutput {
-	readonly totalPods: number
+	/** Still reporting at the window's end — the fleet as it stands. */
+	readonly livePods: number
+	/**
+	 * Reported earlier in the window and stopped. Scale-in, a rollout, a cycled
+	 * Fargate task: expected churn, counted separately so it can be offered as a
+	 * scope instead of inflating the denominator.
+	 */
+	readonly endedPods: number
 	/** Peak of either limit ≥ 0.9 — matches severityLevel("crit") in the web app. */
 	readonly saturatedPods: number
 	/** Peak of either limit in [0.6, 0.9). */
 	readonly elevatedPods: number
 	/** Burning CPU with no limit set at all — invisible to a saturation ranking. */
 	readonly unboundedPods: number
-	/** Last scrape older than ten collection intervals (5 min at the 30s default). */
-	readonly stalePods: number
 }
 
 /**
@@ -587,16 +636,23 @@ export function listPodsSummaryQuery(opts: ListPodsOpts = {}) {
 		.where(($) => [...podBaseConditions($), ...podFilterConditions($, opts)])
 		.groupBy("podName")
 
+	// Live/ended are absolute so the band can always offer "and N more that
+	// ended"; the saturation buckets are counted WITHIN the requested lifecycle
+	// so they stay a valid denominator for the list that ran beside them.
+	const lifecycle = opts.lifecycle ?? "live"
 	return fromQuery(perPod, "pods")
-		.select(($) => ({
-			totalPods: CH.count(),
-			saturatedPods: CH.countIf($.saturation.gte(0.9)),
-			elevatedPods: CH.countIf($.saturation.gte(0.6).and($.saturation.lt(0.9))),
-			unboundedPods: CH.countIf($.limitSamples.eq(0).and($.cpuUsagePeak.gt(0))),
-			stalePods: CH.countIf(
-				$.lastSeen.lt(CH.intervalSub(param.dateTimeString("endTime"), STALE_POD_SECONDS)),
-			),
-		}))
+		.select(($) => {
+			const inScope = podLifecycleCondition($, lifecycle)
+			const within = (condition: CH.Condition) =>
+				CH.countIf(inScope ? inScope.and(condition) : condition)
+			return {
+				livePods: CH.countIf(podLiveCondition($)),
+				endedPods: CH.countIf(podEndedCondition($)),
+				saturatedPods: within($.saturation.gte(0.9)),
+				elevatedPods: within($.saturation.gte(0.6).and($.saturation.lt(0.9))),
+				unboundedPods: within($.limitSamples.eq(0).and($.cpuUsagePeak.gt(0))),
+			}
+		})
 		.format("JSON")
 }
 
@@ -790,7 +846,7 @@ export function nodeDetailSummaryQuery(opts: NodeDetailSummaryOpts) {
 			nodeName: $.ResourceAttributes.get("k8s.node.name"),
 			nodeUid: CH.any_($.ResourceAttributes.get("k8s.node.uid")),
 			kubeletVersion: CH.any_($.ResourceAttributes.get("k8s.kubelet.version")),
-			containerRuntime: CH.any_($.ResourceAttributes.get("container.runtime")),
+			containerRuntime: CH.any_(containerRuntimeExpr($.ResourceAttributes)),
 			firstSeen: CH.min_($.TimeUnix),
 			lastSeen: CH.max_($.TimeUnix),
 			cpuUsage: avgIfOrZero($.Value, $.MetricName.eq("k8s.node.cpu.usage")),

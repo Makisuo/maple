@@ -19,7 +19,7 @@
 			]
 		},
 		"apps/landing": {
-			"entry": ["src/worker.ts", "alchemy.run.ts", "tools/**/*.ts", "tools/**/*.js"],
+			"entry": ["src/worker.ts", "tools/**/*.ts", "tools/**/*.js"],
 			"ignoreDependencies": ["@paper-design/shaders"]
 		},
 		"apps/api": {
@@ -27,16 +27,18 @@
 			// wrangler configs were deleted; the Worker entries are now named here.
 			"entry": ["src/worker.ts", "alchemy.run.ts", "autumn.config.ts", "scripts/cold-path/*.mjs"],
 			// Shelled out to by scripts/bench-startup-cpu.ts, never imported.
-			"ignoreDependencies": ["cloudflare", "wrangler"]
+			"ignoreDependencies": ["cloudflare"]
 		},
+		// Single-module Workers: the root alchemy.run.ts imports src/worker.ts, and
+		// alchemy bundles it, so it is the app's one entry.
 		"apps/alerting": {
-			"entry": ["src/worker.ts", "alchemy.run.ts"]
+			"entry": ["src/worker.ts"]
 		},
 		"apps/electric-sync": {
-			"entry": ["src/worker.ts", "alchemy.run.ts"]
+			"entry": ["src/worker.ts"]
 		},
 		"apps/local-ui": {
-			"entry": ["src/worker.ts", "alchemy.run.ts"]
+			"entry": ["src/worker.ts"]
 		},
 		"apps/cli": {
 			"entry": [
@@ -57,7 +59,8 @@
 			"ignore": ["src/generated/**"],
 			"ignoreDependencies": ["tailwindcss"]
 		},
-		"lib/effect-cloudflare": {
+		"packages/infra": {
+			// `cloudflare:workers` is a Workers runtime module, not a package.
 			"ignoreDependencies": ["cloudflare"]
 		},
 		"lib/alchemy-portless": {

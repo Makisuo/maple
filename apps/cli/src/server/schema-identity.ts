@@ -14,6 +14,8 @@ import schemaV12Sql from "./schema/local-schema-v12.sql" with { type: "text" }
 import schemaV13Sql from "./schema/local-schema-v13.sql" with { type: "text" }
 import schemaV14Sql from "./schema/local-schema-v14.sql" with { type: "text" }
 import schemaV15Sql from "./schema/local-schema-v15.sql" with { type: "text" }
+import schemaV16Sql from "./schema/local-schema-v16.sql" with { type: "text" }
+import schemaV17Sql from "./schema/local-schema-v17.sql" with { type: "text" }
 import { schemaDigest as digestSchema, schemaFingerprint as fingerprintSchema } from "./store-version"
 import { buildLocalSchemaManifest, type LocalSchemaManifest } from "./schema-manifest"
 import { LOCAL_SCHEMA_VERSION } from "./local-schema-version"
@@ -37,7 +39,7 @@ export const LEGACY_SCHEMA_PROJECT_REVISION =
 export const LEGACY_SCHEMA_FINGERPRINT = "428701854f9fd30e"
 
 export const CURRENT_SCHEMA_PROJECT_REVISION =
-	"20753c5593ff6ab808b536d455b944d5cc300ae0eed841dfa951ff998dcefbaf"
+	"ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a"
 /** Revision recorded by the issue-297 recovery report. The refreshed upstream
  * generator currently emits CURRENT_SCHEMA_PROJECT_REVISION; the structural
  * fingerprint is the compatibility identity used by the migration. */
@@ -73,6 +75,8 @@ const SNAPSHOT_SQL: ReadonlyArray<string> = [
 	schemaV13Sql,
 	schemaV14Sql,
 	schemaV15Sql,
+	schemaV16Sql,
+	schemaV17Sql,
 ]
 
 export interface LocalSchemaSnapshot {
@@ -127,6 +131,10 @@ export const LOCAL_SCHEMA_V14_SQL = snapshotAt(14).sql
 export const LOCAL_SCHEMA_V14_MANIFEST = snapshotAt(14).manifest
 export const LOCAL_SCHEMA_V15_SQL = snapshotAt(15).sql
 export const LOCAL_SCHEMA_V15_MANIFEST = snapshotAt(15).manifest
+export const LOCAL_SCHEMA_V16_SQL = snapshotAt(16).sql
+export const LOCAL_SCHEMA_V16_MANIFEST = snapshotAt(16).manifest
+export const LOCAL_SCHEMA_V17_SQL = snapshotAt(17).sql
+export const LOCAL_SCHEMA_V17_MANIFEST = snapshotAt(17).manifest
 
 export interface LocalSchemaIdentity {
 	readonly version: number
@@ -172,6 +180,8 @@ export const LOCAL_SCHEMA_V12 = identityAt(12)
 export const LOCAL_SCHEMA_V13 = identityAt(13)
 export const LOCAL_SCHEMA_V14 = identityAt(14)
 export const LOCAL_SCHEMA_V15 = identityAt(15)
+export const LOCAL_SCHEMA_V16 = identityAt(16)
+export const LOCAL_SCHEMA_V17 = identityAt(17)
 
 export const CURRENT_LOCAL_SCHEMA: LocalSchemaIdentity = Object.freeze({
 	version: LOCAL_SCHEMA_VERSION,

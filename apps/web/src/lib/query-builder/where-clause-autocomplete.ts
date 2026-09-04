@@ -104,8 +104,8 @@ const KEY_DEFINITIONS: Record<QueryBuilderDataSource, KeyDefinition[]> = {
 			description: "Filter by deployment environment",
 		},
 		{
-			label: "deployment.commit_sha",
-			insertText: "deployment.commit_sha",
+			label: "vcs.ref.head.revision",
+			insertText: "vcs.ref.head.revision",
 			description: "Filter by commit sha",
 		},
 		{
@@ -775,7 +775,7 @@ function buildValueSuggestions(
 		"service.name": uniqueValues(values?.services ?? []),
 		"span.name": uniqueValues(values?.spanNames ?? []),
 		"deployment.environment": uniqueValues(values?.environments ?? []),
-		"deployment.commit_sha": uniqueValues(values?.commitShas ?? []),
+		"vcs.ref.head.revision": uniqueValues(values?.commitShas ?? []),
 		severity: uniqueValues(values?.severities ?? []),
 		...(scope === "trace_search"
 			? {

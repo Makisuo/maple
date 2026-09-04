@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import { ChatBubbleSparkleIcon, ClaudeIcon, LangchainIcon, OpenAiIcon } from "@/components/icons"
+import {
+	ChatBubbleSparkleIcon,
+	ClaudeIcon,
+	LangchainIcon,
+	OpenAiIcon,
+	OpenRouterIcon,
+} from "@/components/icons"
 import { vendorIcon } from "./vendor-icon"
 
 describe("vendorIcon", () => {
@@ -10,6 +16,7 @@ describe("vendorIcon", () => {
 		// Two ids, one framework: the OpenInference instrumentation is still OpenAI.
 		expect(vendorIcon("openai_agents_sdk")).toBe(OpenAiIcon)
 		expect(vendorIcon("openinference-openai")).toBe(OpenAiIcon)
+		expect(vendorIcon("openrouter")).toBe(OpenRouterIcon)
 	})
 
 	it("falls back for frameworks without a mark, and for no vendor at all", () => {

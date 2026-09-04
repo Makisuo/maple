@@ -64,7 +64,7 @@ const KIND_OPTIONS = [
  * pods view is where a spike shows.
  */
 function scopeOf(workload: WorkloadRow, referenceTime: string): WorkloadScope | null {
-	if (deriveHostStatus(workload.lastSeen, referenceTime) === "down") return "stale"
+	if (deriveHostStatus(workload.lastSeen, referenceTime) === "ended") return "stale"
 	const level = severityLevel(Math.max(workload.avgCpuLimitPct, workload.avgMemoryLimitPct))
 	if (level === "crit") return "saturated"
 	if (level === "warn") return "elevated"

@@ -33,7 +33,7 @@ export const traces = Command.make("traces", {
 	limit: f.limit,
 	offset: f.offset,
 }).pipe(
-	Command.withDescription("Search traces/spans in local Maple"),
+	Command.withDescription("Search traces/spans"),
 	Command.withHandler(
 		Effect.fnUntraced(function* (a) {
 			const range = yield* resolveRangeChecked(a)

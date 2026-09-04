@@ -84,9 +84,10 @@ describe("integration sql catalog", () => {
 				return `  ${entry.id} — undeclared: [${mismatch.undeclared.join(", ")}] unselected: [${mismatch.unselected.join(", ")}]`
 			})
 
-		expect(drifted, `declared row schemas that no longer match their query:\n${drifted.join("\n")}`).toEqual(
-			[],
-		)
+		expect(
+			drifted,
+			`declared row schemas that no longer match their query:\n${drifted.join("\n")}`,
+		).toEqual([])
 	})
 
 	it("emits the same SQL as the recorded baseline", async () => {

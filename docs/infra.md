@@ -10,15 +10,29 @@ put it here instead. Git blame does not survive a refactor of the line it annota
 
 ## Layout
 
-- `alchemy.run.ts` — the root stack. Composes one `create*` factory per app, resolves
-  stage/domains, and returns the deploy summary (also emitted as GitHub step outputs).
-- `apps/<app>/alchemy.run.ts` — one factory per deployable. Owns that app's resources and
-  bindings, and nothing else's.
-- `packages/infra` — stage/region/domain/naming logic and the shared deploy-time env
-  groups. Pure functions, unit-tested, no cloud calls.
+- `alchemy.run.ts` — the root stack. Provides `MapleStack` (stage, domains, public URLs,
+  the `bun dev` blocks) once, yields one module per app, and returns the deploy summary
+  (also emitted as GitHub step outputs).
+- `apps/<app>/src/worker.ts` — a Worker as one module: the alchemy Worker class the root
+  yields, whose props are an Effect over `MapleStack`, and the bundle alchemy deploys
+  (`alerting`, `electric-sync`, `landing`, `local-ui`; see "Single-module Workers" below).
+- `apps/<app>/alchemy.run.ts` — a `create*` factory, only where the Worker still takes
+  another resource as an argument (`api`, `web`) or the app is not a Worker (`ingest`,
+  `electric` on ECS). Owns that app's resources and bindings and nothing else's.
+- `packages/infra` — stage/region/domain/naming logic, the shared deploy-time env groups,
+  and the few resources several Worker modules bind.
     - `cloudflare/stage.ts` — `MapleStage`, domains, worker names, Hyperdrive resolution.
+      Pure functions, unit-tested, no cloud calls.
+    - `cloudflare/stack.ts` — `MapleStack`, what the root stack tells the Worker classes.
+    - `cloudflare/maple-db.ts` / `cloudflare/observability.ts` — the managed Hyperdrive
+      and the Workers Observability destinations, declared once and yielded from every
+      module that binds them (alchemy registers a resource by id; a second yield returns
+      the first's).
     - `aws/stage.ts` — `MapleRegion`, AWS naming, task sizing, Cloud Map.
     - `env.ts` — the deploy-time env primitives and the shared groups the workers spread.
+    - `config-helpers.ts` / `cloudflare/worker-runtime.ts` / `cloudflare/workers-cache.ts` /
+      `cloudflare/r2.ts` — the *runtime* (in-Worker) side, each behind its own subpath
+      export so a worker bundle never reaches the deploy graph through `./cloudflare`.
 
 **Read deploy-time config through `@maple/infra/env`, not `process.env`.** Alchemy resolves
 config through a ConfigProvider built as `fromDotEnv(--env-file ?? ".env")` **orElse**
@@ -29,7 +43,7 @@ into `process.env`. A `process.env` read therefore silently ignores `.env` and
 half does not. `Config` also reports every missing key in one pass instead of throwing on
 the first, and keeps the failure in the typed error channel. `packages/alchemy-maple`'s
 `MapleEnvironment` is the same pattern inside a provider; the runtime worker env schemas
-use `@maple/effect-cloudflare/config-helpers`, which `env.ts` builds on.
+use `@maple/infra/config-helpers`, which `env.ts` builds on.
 
 ## Local dev: one `alchemy dev` stack
 
@@ -114,6 +128,65 @@ Gotchas worth knowing:
 - If portless is not installed or its proxy is down, a route logs a warning and the app is
   reachable on `127.0.0.1:<port>` only; the inter-app URLs still name the `*.localhost`
   hosts, so start the proxy (`portless proxy start`) rather than work around it.
+
+## Single-module Workers
+
+A Worker is one module, `apps/<app>/src/worker.ts`: the alchemy Worker class the root stack
+yields (`export default class Alerting extends Cloudflare.Worker<Alerting>()("alerting",
+props, impl) {}`) and the bundle alchemy builds (`main: import.meta.url`). `props` is an
+Effect that reads `MapleStack` (`@maple/infra/cloudflare`, provided once by the root from
+`Alchemy.Stage`) and yields whatever other resources the Worker binds — its `Command.Build`,
+the shared `ManagedMapleDb` or `WorkersObservabilityDestinations` (alchemy registers a
+resource by id, so a second module yielding the same one gets the first's). `impl` runs once
+per isolate on the first event and returns the handlers. No hand-written `export default
+{ fetch }`, no per-app `alchemy.run.ts`, no factory arguments. electric-sync, alerting,
+landing and local-ui ship this way.
+
+What each kind of Worker keeps beside the module:
+
+- **Crons** (`alerting`): `Cloudflare.Workers.cron(expression, handler)` in `impl`, under
+  `CronEventSourceLive`, attaches the schedule at plan time and the listener at runtime.
+  The source reports every fire as successful, so the platform's retry never engages — and
+  nothing is lost: the ticks already log and swallow their own failures, the schedules
+  re-fire, and the shell logs a failure outside a tick. The ticks live in `src/scheduled.ts`
+  behind a dynamic import, so the api layer graph is off the startup path and out of the
+  deploy process (where `impl` also runs), and the test imports it without a runtime.
+- **Assets** (`landing`, `local-ui`): the handler reads `Cloudflare.Workers.Request` and
+  `env.ASSETS` and hands the web `Response` back through `HttpServerResponse.fromWeb`.
+  landing's negotiation is a plain function in `src/handler.ts` for the same test reason.
+- **The stg/prd Hyperdrive bound by id** (`alerting`, `api`): alchemy has no `env` form for a
+  binding it did not create (its own `Hyperdrive.Connect` attaches the same raw metadata),
+  so the root stack calls `bindMapleDbRef` after the yield.
+
+Still factories: `api` (its Durable Object and Workflow classes are exported from the async
+entry, and `web` needs its Worker value for the service binding) and `web` (takes `api`);
+`ingest` and `electric` are ECS services. Alchemy has Effect-native Workflows and a Queues
+event source, so api is the next conversion, and `web` follows once its props can
+`yield* Api`.
+
+Alchemy evaluates that module in three places — the deploy process, `alchemy dev`, and the
+deployed isolate — and two rules keep it honest about which one it is in:
+
+- **Props are a plan-time Effect, guarded for the bundle.** The stage-derived props (`name`,
+  `domain`, `env`, the portless `dev` block) read `MapleStack` (`@maple/infra/cloudflare`), a
+  service the root stack provides once from `Alchemy.Stage`, so the module never imports
+  portless or parses the stage itself. Alchemy also evaluates props inside the deployed
+  bundle, where they are inert, so the props Effect returns early under
+  `globalThis.__ALCHEMY_RUNTIME__` — alchemy's bundler folds it to `true`, and the stack-side
+  branch plus the `@maple/infra` modules only it reaches are dead-code-eliminated. Check by
+  grepping the bundle under `.alchemy/bundles/electric-sync/` for a `maple.dev` hostname.
+- **The app layer is built on the first request, not in init.** `impl` (init) also runs at
+  plan time, and alchemy's plan-time ConfigProvider auto-binds every `Config` it sees read
+  during init onto the Worker as a secret — which would override the explicit `env` contract
+  (a PR preview deliberately gets no `ELECTRIC_URL`). So the route graph is dynamic-imported
+  and built once per isolate on the first `fetch` (`Effect.cached`), against a scope that is
+  never closed: workerd has no isolate teardown, so nothing in the layer may need releasing.
+
+What it costs: the root stack imports the worker module, so the Alchemy-entrypoints
+typecheck (`tsconfig.alchemy.json`) covers electric-sync's runtime graph and needs
+`@maple-dev/effect-sdk` built first and `@maple/electric-sync` installed in the quality
+shard (`ci.yml`). Measured on the pilot (#745, local workerd A/B): +15ms startup CPU
+(41→56ms, budget ~1s), ~+8ms cold first request, ~+0.2ms/request warm.
 
 ## The retired AWS opt-in flag (`MAPLE_DEPLOY_AWS_INGEST`)
 
@@ -204,6 +277,25 @@ when reading old code or docs:
   (`resolveMapleDomains`) and why inter-app URLs are plain strings chosen by the stack
   rather than read off resources.
 - **DO classes are SQLite-backed by default** in v2.
+- **The vendored runtime lib is gone.** `lib/effect-cloudflare` was a hand-copied subset of
+  `alchemy-effect`'s `Cloudflare/Workers/*`, from before that package shipped; ~1600 of its
+  2520 lines had no consumer at all (the DO/Workflow/RPC/KV/fetcher/websocket cluster —
+  apps/api's own DO and Workflows extend `cloudflare:workers` directly). It was deleted; the
+  ~250 lines with consumers live in `packages/infra` behind runtime-only subpaths
+  (`/worker-runtime`, `/workers-cache`, `/r2`, `/config-helpers`).
+- **Alchemy's runtime services are not importable from a hand-written Worker entry.** The
+  obvious follow-up — drop our `WorkerEnvironment` and import alchemy's — does not work
+  today. Its exports map has no entry finer than a directory (`./Cloudflare/*` →
+  `*/index.ts`), and the `Cloudflare/Workers` barrel re-exports `Source.ts` /
+  `WorkerProvider.ts` / `LocalWorkerProvider.ts` next to the two runtime services, so
+  bundling it pulls `fdir`, rolldown glue and Node builtins: **426 KB minified against 14 KB
+  for the tag alone**, and `node:module` does not exist in workerd. Same for `R2`, `KV` and
+  service-binding clients, which additionally want the deploy-side resource value and the
+  `Worker` service (`makeBucketBinding` indexes `env[bucket.LogicalId]`). All of it comes
+  for free the day api/alerting move to the class-form `Cloudflare.Worker` and let alchemy's
+  bundler generate the entry — that is the migration these are waiting on. Until then
+  `packages/infra/src/cloudflare/worker-env.ts` defines the tag under alchemy's exact key
+  (`"Cloudflare.Workers.WorkerEnvironment"`), so both resolve to the same service.
 
 ## Cost decisions
 

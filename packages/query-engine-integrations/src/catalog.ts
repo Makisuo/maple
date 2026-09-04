@@ -123,6 +123,62 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 			),
 	},
 	{
+		// Every filter the sidebar can send at once, plus a measure sort: the
+		// per-trace existence tests, the HAVING level and the raw lambda usage
+		// sum only compile in this shape.
+		module: "ai-sessions",
+		name: "aiSessionPageQuery",
+		label: "every-filter",
+		compile: () =>
+			compileUnsafe(
+				CH.aiSessionPageQuery({
+					vendorIds: ["eve"],
+					serviceNames: ["maple-slack-agent"],
+					deploymentEnvs: ["production"],
+					models: ["gpt-5.5"],
+					agentNames: ["billing-agent"],
+					toolNames: ["send_email"],
+					search: "wrun_01",
+					hasErrors: true,
+					excludeTraceSessions: true,
+					durationMinMs: 1_000,
+					durationMaxMs: 600_000,
+					costMin: 0.01,
+					costMax: 5,
+					tokensMin: 100,
+					tokensMax: 1_000_000,
+					llmCallsMin: 1,
+					llmCallsMax: 50,
+					toolCallsMin: 1,
+					toolCallsMax: 50,
+					sortBy: "cost",
+					sortDir: "asc",
+					limit: 25,
+					offset: 25,
+				}),
+				window,
+			),
+	},
+	{
+		// The same page under every counted filter — the aggregation runs with
+		// the filters the page ranked under, never without them.
+		module: "ai-sessions",
+		name: "aiSessionListQuery",
+		label: "every-counted-filter",
+		compile: () =>
+			compileUnsafe(
+				CH.aiSessionListQuery({
+					sessionIds: AI_PAGE_SESSION_IDS,
+					deploymentEnvs: ["production"],
+					models: ["gpt-5.5"],
+					agentNames: ["billing-agent"],
+					toolNames: ["send_email"],
+					search: "wrun_01",
+				}),
+				aiPageBounds,
+			),
+	},
+	{
 		module: "ai-sessions",
 		name: "aiSessionFacetsQuery",
 		label: "default",

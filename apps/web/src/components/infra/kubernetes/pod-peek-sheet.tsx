@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, type KeyboardEvent as ReactKeyboardEvent } from "react"
 import { Link } from "@tanstack/react-router"
 import { useHotkeys } from "@tanstack/react-hotkeys"
 
@@ -23,37 +23,79 @@ import { QueryErrorState } from "@/components/common/query-error-state"
 import { bucketSecondsForRange } from "@/components/infra/constants"
 import { severityLevel } from "@/components/infra/format"
 import { PodDetailChart } from "@/components/infra/k8s-detail-chart"
-import type { PodRow } from "@/components/infra/pod-table"
+import { podKey, type PodRow } from "@/components/infra/pod-table"
 import { HeroChip } from "@/components/infra/primitives/page-hero"
-import { SegmentPivot } from "@/components/infra/primitives/segment-pivot"
 import { StatRail, StatRailItem } from "@/components/infra/primitives/stat-rail"
 import { HostStatusBadge } from "@/components/infra/status-badge"
 import type { TimeRangeSearch } from "@/components/time-range-picker/search"
-import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
-import { podDetailSummaryResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import { Result, useAtomMount, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
+import {
+	podDetailSummaryResultAtom,
+	podInfraTimeseriesResultAtom,
+} from "@/lib/services/atoms/warehouse-query-atoms"
 
 /**
  * The peek: a pod's page, in a sheet, without leaving the list.
  *
  * Triage is a walk down a sorted list, and a full navigation per row costs the
  * sort, the scroll and the filters each time. The sheet shows what the pod page
- * would — the four limit ratios and the chart — over the SAME window the list
- * is on, and ↑/↓ walk the list behind it. "Open pod" is there when a row earns
- * the whole page.
+ * would — the four limit ratios and every metric chart — over the SAME window
+ * the list is on, and ↑/↓ walk the list behind it. "Open pod" is there when a
+ * row earns the whole page.
+ *
+ * The charts are stacked, not tabbed: a peek is a glance, and a glance that
+ * has to click through five tabs to see whether memory moved with CPU is not
+ * one. The panel scrolls instead.
  */
 
-const METRIC_OPTIONS = [
-	{ value: "cpu_limit", label: "CPU / limit" },
-	{ value: "memory_limit", label: "Mem / limit" },
-	{ value: "cpu_usage", label: "CPU cores" },
-	{ value: "cpu_request", label: "CPU / request" },
-	{ value: "memory_request", label: "Mem / request" },
-] as const satisfies ReadonlyArray<{ value: PodInfraMetric; label: string }>
+/** Limits first — they are what the list is sorted by — then the raw cores and the requests. */
+const PEEK_METRICS: ReadonlyArray<PodInfraMetric> = [
+	"cpu_limit",
+	"memory_limit",
+	"cpu_usage",
+	"cpu_request",
+	"memory_request",
+]
+
+/** Shorter than the pod page's plot: five of them stack in a 576px sheet. */
+const PEEK_CHART_HEIGHT = 150
+
+/** ↓/J step forward, ↑/K back — the list idiom, mirrored in the footer hint. */
+function stepFor(key: string): 1 | -1 | undefined {
+	switch (key) {
+		case "ArrowDown":
+		case "j":
+		case "J":
+			return 1
+		case "ArrowUp":
+		case "k":
+		case "K":
+			return -1
+		default:
+			return undefined
+	}
+}
+
+function isTextEntry(target: EventTarget | null): boolean {
+	if (!(target instanceof HTMLElement)) return false
+	return (
+		target instanceof HTMLInputElement ||
+		target instanceof HTMLTextAreaElement ||
+		target instanceof HTMLSelectElement ||
+		target.isContentEditable
+	)
+}
 
 interface PodPeekSheetProps {
 	pod: PodRow | null
 	/** Where the pod sits in the list, for the footer's "3 of 50" and the arrows. */
 	position: { index: number; count: number } | null
+	/**
+	 * The rows a step lands on — the one before and the one after. Their summary
+	 * and chart are fetched while this pod is on screen, so ↑/↓ swaps to data
+	 * that has already arrived instead of waiting a round trip per row.
+	 */
+	neighbors: ReadonlyArray<PodRow>
 	onStep: (delta: 1 | -1) => void
 	onClose: () => void
 	startTime: string
@@ -65,6 +107,7 @@ interface PodPeekSheetProps {
 export function PodPeekSheet({
 	pod,
 	position,
+	neighbors,
 	onStep,
 	onClose,
 	startTime,
@@ -72,19 +115,48 @@ export function PodPeekSheet({
 	timeSearch,
 	referenceTime,
 }: PodPeekSheetProps) {
-	const [metric, setMetric] = useState<PodInfraMetric>("cpu_limit")
+	/**
+	 * The keys are handled in two places, split by where focus is.
+	 *
+	 * Inside the popup, in the CAPTURE phase: opening the sheet from a row moves
+	 * focus onto the metric toggle, the first tabbable thing, and a real ↑/↓
+	 * press from there is stopped by the toggle group's own arrow-key handling
+	 * before it bubbles to the document, where the hotkeys library listens. J/K
+	 * reached it; the arrows the footer advertises did not. Capturing on the
+	 * popup runs before any descendant.
+	 *
+	 * Outside it, as document hotkeys: a page loaded with `peek` already in the
+	 * URL opens the sheet with focus still on the body, and nothing inside the
+	 * popup ever sees those presses. The document handler yields whenever the
+	 * press came from inside, so a key is handled exactly once.
+	 */
+	const popupRef = useRef<HTMLDivElement>(null)
 
-	// Page-level, not on the popup: opening the sheet from a row leaves focus on
-	// that row, outside the sheet, so a handler on the popup would only fire once
-	// the user had tabbed into it. The keys exist so they never have to.
+	const handleKeyDownCapture = (event: ReactKeyboardEvent<HTMLElement>) => {
+		const delta = stepFor(event.key)
+		if (delta === undefined) return
+		if (event.metaKey || event.ctrlKey || event.altKey) return
+		if (isTextEntry(event.target)) return
+		event.preventDefault()
+		event.stopPropagation()
+		onStep(delta)
+	}
+
+	const stepFromOutside = (delta: 1 | -1) => (event: KeyboardEvent) => {
+		if (event.target instanceof Node && popupRef.current?.contains(event.target)) return
+		onStep(delta)
+	}
+
 	useHotkeys(
 		[
-			{ hotkey: "ArrowDown", callback: () => onStep(1), options: { ignoreInputs: true } },
-			{ hotkey: "J", callback: () => onStep(1), options: { ignoreInputs: true } },
-			{ hotkey: "ArrowUp", callback: () => onStep(-1), options: { ignoreInputs: true } },
-			{ hotkey: "K", callback: () => onStep(-1), options: { ignoreInputs: true } },
+			{ hotkey: "ArrowDown", callback: stepFromOutside(1) },
+			{ hotkey: "J", callback: stepFromOutside(1) },
+			{ hotkey: "ArrowUp", callback: stepFromOutside(-1) },
+			{ hotkey: "K", callback: stepFromOutside(-1) },
 		],
-		{ enabled: pod !== null },
+		// `stopPropagation: false` so Base UI's own document-level key handling
+		// (Escape closes the sheet) is never starved.
+		{ enabled: pod !== null, ignoreInputs: true, stopPropagation: false },
 	)
 
 	const canStepBack = position !== null && position.index > 0
@@ -92,7 +164,7 @@ export function PodPeekSheet({
 
 	return (
 		<Sheet open={pod !== null} onOpenChange={(open) => !open && onClose()}>
-			<SheetContent className="p-0 sm:max-w-xl">
+			<SheetContent ref={popupRef} className="p-0 sm:max-w-xl" onKeyDownCapture={handleKeyDownCapture}>
 				{pod ? (
 					<>
 						<SheetHeader className="gap-1.5 pr-14">
@@ -124,28 +196,37 @@ export function PodPeekSheet({
 							</div>
 						</SheetHeader>
 
-						<SheetPanel className="space-y-5">
-							<PeekSummary
-								key={`${pod.namespace}/${pod.podName}`}
-								pod={pod}
+						{neighbors.map((neighbor) => (
+							<PeekPrefetch
+								key={podKey(neighbor)}
+								pod={neighbor}
 								startTime={startTime}
 								endTime={endTime}
 							/>
+						))}
+
+						<SheetPanel className="space-y-5">
+							{/*
+							 * Deliberately NOT keyed by pod. `useAtomValue` hands back the
+							 * previous pod's success, flagged `waiting`, while the next one
+							 * loads — the same call every detail page makes — so a step dims
+							 * the rail for a beat instead of dropping it to a skeleton and
+							 * back, which read as the whole drawer being slow.
+							 */}
+							<PeekSummary pod={pod} startTime={startTime} endTime={endTime} />
 							<div className="space-y-3">
-								<SegmentPivot
-									ariaLabel="Metric"
-									options={METRIC_OPTIONS}
-									value={metric}
-									onChange={setMetric}
-								/>
-								<PodDetailChart
-									podName={pod.podName}
-									namespace={pod.namespace || undefined}
-									metric={metric}
-									startTime={startTime}
-									endTime={endTime}
-									bucketSeconds={bucketSecondsForRange(startTime, endTime)}
-								/>
+								{PEEK_METRICS.map((metric) => (
+									<PodDetailChart
+										key={metric}
+										podName={pod.podName}
+										namespace={pod.namespace || undefined}
+										metric={metric}
+										startTime={startTime}
+										endTime={endTime}
+										bucketSeconds={bucketSecondsForRange(startTime, endTime)}
+										height={PEEK_CHART_HEIGHT}
+									/>
+								))}
 							</div>
 						</SheetPanel>
 
@@ -200,6 +281,62 @@ export function PodPeekSheet({
 	)
 }
 
+/**
+ * Warms a neighbouring pod's queries without rendering anything.
+ *
+ * Mounting the atoms is enough: the family runs the query on first mount and
+ * the idle TTL keeps the result for the step that follows. When the step
+ * happens the charts and rail mount the very same atoms in the same commit, so
+ * the subscription never drops to zero in between. One child per metric rather
+ * than a loop of hooks, so the hook count stays fixed.
+ */
+function PeekPrefetch({ pod, startTime, endTime }: { pod: PodRow; startTime: string; endTime: string }) {
+	const namespace = pod.namespace || undefined
+	useAtomMount(
+		podDetailSummaryResultAtom({
+			data: { podName: pod.podName, namespace, startTime, endTime },
+		}),
+	)
+	return PEEK_METRICS.map((metric) => (
+		<PeekPrefetchSeries
+			key={metric}
+			podName={pod.podName}
+			namespace={namespace}
+			metric={metric}
+			startTime={startTime}
+			endTime={endTime}
+		/>
+	))
+}
+
+function PeekPrefetchSeries({
+	podName,
+	namespace,
+	metric,
+	startTime,
+	endTime,
+}: {
+	podName: string
+	namespace: string | undefined
+	metric: PodInfraMetric
+	startTime: string
+	endTime: string
+}) {
+	useAtomMount(
+		podInfraTimeseriesResultAtom({
+			data: {
+				podName,
+				namespace,
+				metric,
+				startTime,
+				endTime,
+				bucketSeconds: bucketSecondsForRange(startTime, endTime),
+			},
+		}),
+	)
+	return null
+}
+
 /** The four limit ratios the pod page leads with, over the list's window. */
 function PeekSummary({ pod, startTime, endTime }: { pod: PodRow; startTime: string; endTime: string }) {
 	const atom = podDetailSummaryResultAtom({
@@ -213,7 +350,7 @@ function PeekSummary({ pod, startTime, endTime }: { pod: PodRow; startTime: stri
 		.onError((error) => (
 			<QueryErrorState error={error} titleOverride="Failed to load pod metrics" onRetry={refresh} />
 		))
-		.onSuccess((response) => {
+		.onSuccess((response, holder) => {
 			const summary = response.data
 			if (!summary) {
 				return (
@@ -223,7 +360,7 @@ function PeekSummary({ pod, startTime, endTime }: { pod: PodRow; startTime: stri
 				)
 			}
 			return (
-				<StatRail>
+				<StatRail className={holder.waiting ? "opacity-60 transition-opacity" : "transition-opacity"}>
 					<StatRailItem
 						eyebrow="CPU vs limit"
 						value={formatPercent(summary.cpuLimitPct)}

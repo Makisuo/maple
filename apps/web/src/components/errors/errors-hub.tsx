@@ -1,11 +1,10 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 
-import type { ErrorIssueDocument } from "@maple/domain/http"
-import { warehouseDateTimeToIso } from "@maple/query-engine"
+import type { ErrorIssueDocument, IssueKind } from "@maple/domain/http"
 
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Atom, Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import {
 	getErrorsByTypeResultAtom,
 	getErrorsSparkResultAtom,
@@ -21,6 +20,7 @@ import {
 import {
 	ACTIONABLE_VIEWS,
 	ErrorsHubView,
+	type HubPaging,
 	type HubSort,
 	type HubView,
 	type SeverityFilter,
@@ -37,14 +37,38 @@ import { ErrorsStatStrip } from "./errors-stat-strip"
  * row answers the whole triage question. See `lib/models/error-signal.ts` for
  * why the fingerprint is the join key and why the issue table is the spine.
  *
+ * The list is not a time-range view. It is every issue, newest activity first,
+ * paged back through older ones on demand, and every filter is one the issues
+ * API applies itself. The only windowed things on the page are the trend, the
+ * count and the totals, which look back a fixed `ERRORS_WINDOW`. The one
+ * exception is the volume sort, which only the warehouse can answer and so is
+ * scoped to that window too (see `warehouseFirst` below).
+ *
  * Everything the join produces is handed to `ErrorsHubView`, which is also what
  * `/lab/errors` renders over fixtures.
  */
 
+/**
+ * How far back the trend, count and totals look. A day, because a sparkline of
+ * the last twelve hours reads as silence for anything that errors nightly, and
+ * a week flattens a burst into a tick. Not a URL param: the list does not
+ * change with it, and a picker on a list that ignores it is what this replaced.
+ */
+export const ERRORS_WINDOW = "24h"
+
 /** How many buckets the row sparkline gets. Enough to show a shape, few enough
- *  that 50 of them stay cheap to render. */
+ *  that a page of them stays cheap to render. */
 const SPARK_BUCKETS = 32
-const PAGE_LIMIT = 100
+/** Rows per page. The v2 list caps at 100; half that keeps a page's sparklines
+ *  cheap and puts "Load more" a scroll away rather than a scroll and a half. */
+const PAGE_LIMIT = 50
+/** How many fingerprints a volume-ranked list considers. Also the URL budget:
+ *  these hashes travel to the issues endpoint as a query param. */
+const VOLUME_RANK_LIMIT = 100
+const INVESTIGATIONS_LIMIT = 100
+
+const NO_CURSORS: ReadonlyArray<string> = []
+const NO_HASHES: Array<string> = []
 
 export {
 	HUB_SORTS,
@@ -59,150 +83,199 @@ export interface ErrorsHubProps {
 	view: HubView
 	sort: HubSort
 	severity: SeverityFilter
+	/** The trend window — see `ERRORS_WINDOW`. Warehouse format. */
 	range: { startTime: string; endTime: string }
-	services?: ReadonlyArray<string>
-	deploymentEnvs?: ReadonlyArray<string>
-	errorTypes?: ReadonlyArray<string>
-	serviceVersions?: ReadonlyArray<string>
-	excludedServices?: ReadonlyArray<string>
-	excludedDeploymentEnvs?: ReadonlyArray<string>
-	excludedErrorTypes?: ReadonlyArray<string>
-	excludedServiceVersions?: ReadonlyArray<string>
-	/** Drops every excluded* param at once, for the empty state's hint. Owned by the route, which
-	 *  is where navigation lives. */
-	onClearExclusions: () => void
-	rootOnly?: boolean
-	showSpam?: boolean
+	service?: string
+	env?: string
+	kind?: IssueKind
+	regressed?: boolean
+	/** Present while a sidebar filter is on, for the empty state's way out.
+	 *  Owned by the route, which is where navigation lives. */
+	onClearFilters?: () => void
 }
 
 export function ErrorsHub(props: ErrorsHubProps) {
-	// Volume-ranked lists run warehouse-first: rank fingerprints by occurrences
-	// in the window, then fetch exactly those issues. The other sorts run
-	// issue-first, because Postgres already orders them and the warehouse only
-	// knows about the window.
+	// The sidebar's service and environment narrow the warehouse side too, so a
+	// row's count and trend are about the same slice as the rows themselves.
+	// Every span counts: the issue's own occurrence count does not stop at root
+	// spans, and a 24h number that did would never add up to it.
 	const warehouseFilters = useMemo(
 		() => ({
 			startTime: props.range.startTime,
 			endTime: props.range.endTime,
-			services: props.services ? [...props.services] : undefined,
-			deploymentEnvs: props.deploymentEnvs ? [...props.deploymentEnvs] : undefined,
-			errorLabels: props.errorTypes ? [...props.errorTypes] : undefined,
-			serviceVersions: props.serviceVersions ? [...props.serviceVersions] : undefined,
-			excludedServices: props.excludedServices ? [...props.excludedServices] : undefined,
-			excludedDeploymentEnvs: props.excludedDeploymentEnvs
-				? [...props.excludedDeploymentEnvs]
-				: undefined,
-			excludedErrorLabels: props.excludedErrorTypes ? [...props.excludedErrorTypes] : undefined,
-			excludedServiceVersions: props.excludedServiceVersions
-				? [...props.excludedServiceVersions]
-				: undefined,
-			showSpam: props.showSpam,
-			rootOnly: props.rootOnly !== false,
-			limit: PAGE_LIMIT,
+			services: props.service ? [props.service] : undefined,
+			deploymentEnvs: props.env ? [props.env] : undefined,
 		}),
-		[
-			props.range.startTime,
-			props.range.endTime,
-			props.services,
-			props.deploymentEnvs,
-			props.errorTypes,
-			props.serviceVersions,
-			props.excludedServices,
-			props.excludedDeploymentEnvs,
-			props.excludedErrorTypes,
-			props.excludedServiceVersions,
-			props.showSpam,
-			props.rootOnly,
-		],
+		[props.range.startTime, props.range.endTime, props.service, props.env],
 	)
 
-	const volumeResult = useRefreshableAtomValue(getErrorsByTypeResultAtom({ data: warehouseFilters }))
-	const volumeRows = Result.isSuccess(volumeResult) ? (volumeResult.value.data ?? []) : []
-
-	const isVolumeSort = props.sort === "volume"
-
 	/**
-	 * The sidebar filters (service, environment, error type, version) are
-	 * warehouse columns — Postgres has no idea which deploy an issue was seen on.
-	 * The only way they can filter the ROWS, rather than just the ranking, is to
-	 * resolve them to a fingerprint set here and ask for exactly those issues.
-	 *
-	 * So the list goes warehouse-first whenever a facet is active, and stays
-	 * issue-first (Postgres orders, no cap) when nothing is filtered. The cost of
-	 * warehouse-first is that the row set is capped to the window's top
-	 * PAGE_LIMIT fingerprints by volume — which is also the URL budget, since
-	 * these hashes travel as a query param.
+	 * Only the warehouse can rank by occurrences in the window, so the volume
+	 * sort goes warehouse-first: rank fingerprints, then ask for exactly those
+	 * issues. Everything else is issue-first — Postgres orders, nothing is
+	 * capped, and every page is reachable. The cost of warehouse-first is that
+	 * the row set is the window's top VOLUME_RANK_LIMIT fingerprints by volume,
+	 * paged from there.
 	 */
-	// An empty list under an exclusion cannot explain itself — see `ExcludedEmptyHint`.
-	const excludedValues = [
-		...(props.excludedServices ?? []),
-		...(props.excludedDeploymentEnvs ?? []),
-		...(props.excludedErrorTypes ?? []),
-		...(props.excludedServiceVersions ?? []),
-	]
+	const warehouseFirst = props.sort === "volume"
 
-	// Exclusions count here too. They are warehouse predicates like the rest, so a page left
-	// issue-first would order by Postgres and never apply them — the excluded rows would simply
-	// stay on screen.
-	const hasFacetFilter =
-		(props.services?.length ?? 0) > 0 ||
-		(props.deploymentEnvs?.length ?? 0) > 0 ||
-		(props.errorTypes?.length ?? 0) > 0 ||
-		(props.serviceVersions?.length ?? 0) > 0 ||
-		(props.excludedServices?.length ?? 0) > 0 ||
-		(props.excludedDeploymentEnvs?.length ?? 0) > 0 ||
-		(props.excludedErrorTypes?.length ?? 0) > 0 ||
-		(props.excludedServiceVersions?.length ?? 0) > 0
-	const warehouseFirst = isVolumeSort || hasFacetFilter
-	// Wait for the ranking before asking for issues, or the first render would
-	// request an unfiltered page and then immediately discard it.
-	const volumeReady = !warehouseFirst || Result.isSuccess(volumeResult)
+	// The ranking is only consulted warehouse-first. A hook cannot be skipped, but an
+	// explicit empty fingerprint list is "rank nothing", which `getErrorsByType`
+	// answers without a round-trip — so an issue-first page never scans the window.
+	const rankData = useMemo(
+		() => ({
+			...warehouseFilters,
+			limit: VOLUME_RANK_LIMIT,
+			...(warehouseFirst ? undefined : { fingerprintHashes: NO_HASHES }),
+		}),
+		[warehouseFilters, warehouseFirst],
+	)
+	const rankResult = useRefreshableAtomValue(getErrorsByTypeResultAtom({ data: rankData }))
+	const rankedHashes = useMemo(
+		() =>
+			Result.isSuccess(rankResult)
+				? (rankResult.value.data ?? []).map((row) => row.fingerprintHash)
+				: NO_HASHES,
+		[rankResult],
+	)
+	// A ranking still `waiting` with no rows is not a ranking: it is the previous
+	// mode's "rank nothing" answer, or a window that had nothing, kept on screen by
+	// retention. Asking the issues endpoint for it fetches an empty page and then
+	// the real one. An empty ranking loses nothing by waiting for the fresh one.
+	const rankReady =
+		!warehouseFirst ||
+		(Result.isSuccess(rankResult) && !(rankResult.waiting && rankedHashes.length === 0))
 
 	const listQuery = useMemo(() => {
 		return {
 			limit: PAGE_LIMIT,
-			// The page's range is warehouse format ("YYYY-MM-DD HH:mm:ss"); the v2
-			// contract takes ISO. Handing the raw range over fails to encode, and
-			// the request never leaves the browser.
-			start_time: warehouseDateTimeToIso(props.range.startTime),
-			end_time: warehouseDateTimeToIso(props.range.endTime),
 			sort: props.sort === "severity" ? ("severity" as const) : ("last_seen" as const),
 			...(props.severity !== "all" ? { severity: props.severity } : undefined),
+			...(props.service ? { service_name: props.service } : undefined),
+			...(props.env ? { deployment_environment: props.env } : undefined),
+			...(props.kind ? { kind: props.kind } : undefined),
 			// One state per request is all the API takes, so multi-state views are
-			// filtered client-side from the window's page. `actionable` covers the
-			// common triage+active case server-side so that page is the right one.
-			...(ACTIONABLE_VIEWS.includes(props.view) ? { actionable: "true" as const } : undefined),
-			...(warehouseFirst && volumeReady
-				? { fingerprint_hash: volumeRows.map((row) => row.fingerprintHash).join(",") }
-				: undefined),
+			// filtered client-side from the page. `actionable` covers the common
+			// triage+active case server-side so that page is the right one; the
+			// regression toggle is a single state and replaces it outright.
+			...(props.regressed
+				? { workflow_state: "regressed" as const }
+				: ACTIONABLE_VIEWS.includes(props.view)
+					? { actionable: "true" as const }
+					: undefined),
+			...(warehouseFirst ? { fingerprint_hash: rankedHashes.join(",") } : undefined),
 		}
 	}, [
 		props.view,
 		props.sort,
 		props.severity,
-		props.range.startTime,
-		props.range.endTime,
+		props.service,
+		props.env,
+		props.kind,
+		props.regressed,
 		warehouseFirst,
-		volumeReady,
-		volumeRows,
+		rankedHashes,
 	])
 
-	const issuesResult = useAtomValue(
-		retainedQueryV2("errorIssues", "list", {
-			query: listQuery,
-			reactivityKeys: ["errorIssues"],
-		}),
-	)
+	/**
+	 * Pages beyond the first, as the cursors that fetched them.
+	 *
+	 * Keyed by the query they extend: a change of view, sort or filter is a new
+	 * list, and the old pages must not be appended to it. Each page is its own
+	 * query atom under the `errorIssues` reactivity key, so a triage action on
+	 * page three refreshes page three in place rather than collapsing the list
+	 * back to page one.
+	 */
+	const listKey = JSON.stringify(listQuery)
+	const [loaded, setLoaded] = useState<{ key: string; cursors: ReadonlyArray<string> }>({
+		key: listKey,
+		cursors: NO_CURSORS,
+	})
+	const cursors = loaded.key === listKey ? loaded.cursors : NO_CURSORS
+
+	const pageAtoms = useMemo(() => {
+		// Wait for the ranking before asking for issues, or the first render would
+		// request an unranked page and then immediately discard it.
+		if (!rankReady) return []
+		return [undefined, ...cursors].map((cursor) =>
+			retainedQueryV2("errorIssues", "list", {
+				query: cursor === undefined ? listQuery : { ...listQuery, cursor },
+				reactivityKeys: ["errorIssues"],
+			}),
+		)
+	}, [listQuery, cursors, rankReady])
+
+	// One subscription over every open page, however many there are.
+	const pagesAtom = useMemo(() => Atom.make((get) => pageAtoms.map((atom) => get(atom))), [pageAtoms])
+	const pages = useAtomValue(pagesAtom)
+	// Retrying a failed "Load more" refreshes that page's atom; the derived atom
+	// stands in only so the hook has something to hold before any page exists.
+	const lastPageAtom: Atom.Atom<unknown> = pageAtoms[pageAtoms.length - 1] ?? pagesAtom
+	const retryLastPage = useAtomRefresh(lastPageAtom)
+
+	const firstPage = pages[0]
+	const lastPage = pages[pages.length - 1]
+	const status =
+		firstPage === undefined || Result.isInitial(firstPage)
+			? "loading"
+			: Result.isFailure(firstPage)
+				? "failed"
+				: "ready"
+
+	const nextCursor =
+		lastPage !== undefined && Result.isSuccess(lastPage) && lastPage.value.has_more
+			? lastPage.value.next_cursor
+			: null
+	const loadingMore = pages.length > 1 && lastPage !== undefined && Result.isInitial(lastPage)
+	const failedMore = pages.length > 1 && lastPage !== undefined && Result.isFailure(lastPage)
+
+	const paging: HubPaging = {
+		state: failedMore ? "failed" : loadingMore ? "loading" : nextCursor !== null ? "more" : "end",
+		onLoadMore: () => {
+			if (failedMore) {
+				retryLastPage()
+				return
+			}
+			if (nextCursor === null || loadingMore || cursors.includes(nextCursor)) return
+			setLoaded({ key: listKey, cursors: [...cursors, nextCursor] })
+		},
+	}
 
 	const issues = useMemo<ReadonlyArray<ErrorIssueDocument>>(() => {
-		if (!Result.isSuccess(issuesResult)) return []
-		const all = issuesResult.value.data.map(errorIssueFromV2)
-		return all.filter((issue) => viewCovers(props.view, issue.workflowState))
-	}, [issuesResult, props.view])
+		const byId = new Map<string, ErrorIssueDocument>()
+		for (const page of pages) {
+			if (!Result.isSuccess(page)) continue
+			for (const raw of page.value.data) {
+				const issue = errorIssueFromV2(raw)
+				// An issue seen again while its page was loading can appear on two
+				// pages; it keeps the slot it was first given.
+				if (!byId.has(issue.id)) byId.set(issue.id, issue)
+			}
+		}
+		return [...byId.values()].filter((issue) => viewCovers(props.view, issue.workflowState))
+	}, [pages, props.view])
 
-	// The sparkline set follows the rows actually on screen, so a filtered view
+	// The warehouse sets follow the rows actually on screen, so a filtered view
 	// never pays for fingerprints it will not draw.
 	const fingerprintHashes = useMemo(() => sparkFingerprintHashes(issues), [issues])
+
+	// Window counts for the rows on screen, asked for by fingerprint. The ranking
+	// only knows the window's top VOLUME_RANK_LIMIT fingerprints, and a
+	// recency-ordered list is mostly not those — an issue seen a minute ago would
+	// read as quiet in the very window it was just seen in.
+	const volumeData = useMemo(
+		() => ({
+			...warehouseFilters,
+			fingerprintHashes: [...fingerprintHashes],
+			limit: Math.max(1, fingerprintHashes.length),
+		}),
+		[warehouseFilters, fingerprintHashes],
+	)
+	const volumeResult = useRefreshableAtomValue(getErrorsByTypeResultAtom({ data: volumeData }))
+	const volumeRows = useMemo(
+		() => (Result.isSuccess(volumeResult) ? (volumeResult.value.data ?? []) : []),
+		[volumeResult],
+	)
 
 	const bucketSeconds = useMemo(() => {
 		const startMs = Date.parse(props.range.startTime.replace(" ", "T") + "Z")
@@ -213,30 +286,13 @@ export function ErrorsHub(props: ErrorsHubProps) {
 
 	const sparkResult = useRefreshableAtomValue(
 		getErrorsSparkResultAtom({
-			data: {
-				fingerprintHashes: [...fingerprintHashes],
-				startTime: props.range.startTime,
-				endTime: props.range.endTime,
-				services: props.services ? [...props.services] : undefined,
-				deploymentEnvs: props.deploymentEnvs ? [...props.deploymentEnvs] : undefined,
-				errorLabels: props.errorTypes ? [...props.errorTypes] : undefined,
-				serviceVersions: props.serviceVersions ? [...props.serviceVersions] : undefined,
-				excludedServices: props.excludedServices ? [...props.excludedServices] : undefined,
-				excludedDeploymentEnvs: props.excludedDeploymentEnvs
-					? [...props.excludedDeploymentEnvs]
-					: undefined,
-				excludedErrorLabels: props.excludedErrorTypes ? [...props.excludedErrorTypes] : undefined,
-				excludedServiceVersions: props.excludedServiceVersions
-					? [...props.excludedServiceVersions]
-					: undefined,
-				bucketSeconds,
-			},
+			data: { ...warehouseFilters, fingerprintHashes: [...fingerprintHashes], bucketSeconds },
 		}),
 	)
 
 	const investigationsResult = useAtomValue(
 		retainedQueryV2("investigations", "list", {
-			query: { limit: PAGE_LIMIT },
+			query: { limit: INVESTIGATIONS_LIMIT },
 			reactivityKeys: ["investigations"],
 		}),
 	)
@@ -271,24 +327,18 @@ export function ErrorsHub(props: ErrorsHubProps) {
 
 	return (
 		<ErrorsHubView
-			status={
-				Result.isInitial(issuesResult)
-					? "loading"
-					: Result.isFailure(issuesResult)
-						? "failed"
-						: "ready"
-			}
+			status={status}
 			signals={signals}
 			sparkWindow={sparkWindow}
 			view={props.view}
 			sort={props.sort}
 			severity={props.severity}
 			onViewChange={(value) => setSearch({ view: value === "open" ? undefined : value })}
-			onSortChange={(value) => setSearch({ sort: value === "volume" ? undefined : value })}
+			onSortChange={(value) => setSearch({ sort: value === "last_seen" ? undefined : value })}
 			onSeverityChange={(value) => setSearch({ severity: value === "all" ? undefined : value })}
 			stats={<ErrorsStatStrip filters={warehouseFilters} />}
-			excludedValues={excludedValues}
-			onClearExclusions={props.onClearExclusions}
+			paging={paging}
+			onClearFilters={props.onClearFilters}
 			onRetry={() => window.location.reload()}
 		/>
 	)

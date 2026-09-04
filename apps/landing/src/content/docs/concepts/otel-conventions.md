@@ -68,7 +68,7 @@ Tag every span with these and you get per-environment and per-version slices for
 | `vcs.ref.head.revision`       | `c0b92f68`                    | Git commit SHA. Enables release markers on charts and per-version metrics.                          |
 | `vcs.repository.url.full`     | `https://github.com/acme/api` | Canonical repo URL. Links telemetry to source.                                                      |
 
-`vcs.repository.url.full` and `vcs.ref.head.revision` are the OpenTelemetry semantic-convention keys — prefer them over legacy names like `deployment.commit_sha`, `git.repo`, or `app.repo_url`.
+`vcs.repository.url.full` and `vcs.ref.head.revision` are the OpenTelemetry semantic-convention keys — use them exactly as named; legacy spellings like `deployment.commit_sha`, `git.repo`, or `app.repo_url` are not read.
 
 Set resource attributes via environment variable:
 
@@ -330,7 +330,7 @@ In Maple's WHERE-clause search bar (trace list, log search, dashboard widgets), 
 | `service`            | `service.name`                                     |
 | `span`               | `span.name`                                        |
 | `environment`, `env` | `deployment.environment`                           |
-| `commit_sha`         | `deployment.commit_sha`                            |
+| `commit_sha`         | `vcs.ref.head.revision`                            |
 | `root.only`          | `root_only` (synthetic boolean — root spans only)  |
 | `errors_only`        | `has_error` (synthetic boolean — error spans only) |
 

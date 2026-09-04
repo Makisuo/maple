@@ -7,7 +7,7 @@ import { AuditLogEntryId as AuditLogEntryIdSchema } from "@maple/domain/primitiv
 import * as CH from "@maple/query-engine/ch"
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import type { Queue } from "@cloudflare/workers-types"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { msToWarehouseDateTime64 } from "@/platform/time"
 import { systemTenant } from "@/services/alerts/system-tenant"
 import { CurrentAuditActor } from "@/services/auth/audit-actor"

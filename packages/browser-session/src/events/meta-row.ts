@@ -119,7 +119,10 @@ export function buildSessionMetaRow(input: SessionMetaRowInput): SessionMetaRow 
 						"deployment.environment.name": input.environment,
 					}
 				: undefined),
-			...(input.serviceVersion ? { "deployment.commit_sha": input.serviceVersion } : undefined),
+			// Only a SHA-shaped version is a head revision; a semver string stays out of `vcs.*`.
+			...(input.serviceVersion && /^[0-9a-f]{7,40}$/i.test(input.serviceVersion)
+				? { "vcs.ref.head.revision": input.serviceVersion }
+				: undefined),
 		},
 
 		// Everything below is on the base row on purpose.

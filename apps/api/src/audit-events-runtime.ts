@@ -3,7 +3,7 @@ import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { EdgeCacheService } from "@maple/cache"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import type { OrgId } from "@maple/domain/primitives"
-import { WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-cloudflare"
+import { WorkerConfigProviderLayer, workerEnvironmentLayer } from "@maple/infra/worker-runtime"
 import { Clock, Effect, Layer } from "effect"
 import { CacheBackendLive } from "@/platform/CacheBackendLive"
 import { layerPg } from "@/platform/DatabasePgLive"
@@ -30,7 +30,7 @@ const telemetry = MapleCloudflareSDK.make({
  */
 export const buildAuditEventsLayer = (_env: Record<string, unknown>) => {
 	const EnvLive = Env.layer.pipe(Layer.provide(WorkerConfigProviderLayer))
-	const DatabaseLive = layerPg.pipe(Layer.provide(WorkerEnvironment.layer))
+	const DatabaseLive = layerPg.pipe(Layer.provide(workerEnvironmentLayer))
 	const EdgeCacheServiceLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
 	const OrgClickHouseSettingsLive = OrgClickHouseSettingsService.layer.pipe(
 		Layer.provide(Layer.mergeAll(EnvLive, DatabaseLive, EdgeCacheServiceLive)),
@@ -41,7 +41,7 @@ export const buildAuditEventsLayer = (_env: Record<string, unknown>) => {
 	)
 	return WarehouseQueryServiceLive.pipe(
 		Layer.provideMerge(telemetry.layer),
-		Layer.provideMerge(WorkerEnvironment.layer),
+		Layer.provideMerge(workerEnvironmentLayer),
 		Layer.provideMerge(WorkerConfigProviderLayer),
 	)
 }

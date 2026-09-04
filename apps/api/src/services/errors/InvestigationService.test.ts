@@ -26,7 +26,7 @@ import {
 } from "@maple/db"
 import type { MaplePgClient } from "@maple/db/client"
 import { createMaplePgliteClient } from "@maple/db/pglite"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { eq } from "drizzle-orm"
 import { Env } from "@/platform/Env"
 import { Database } from "@/platform/DatabaseLive"

@@ -105,3 +105,49 @@ describe("formatRange", () => {
 		expect(formatRange(2500, undefined, "ms")).toBe("≥ 2.50s")
 	})
 })
+
+// Counts and dollars share the control with durations: same draft/commit
+// cycle, different vocabulary. A typed "120k" has to come back as 120000 and
+// print as "120k" again, and a dollar amount must never grow a time suffix.
+describe("count and usd units", () => {
+	it("parses scaled counts and bare numbers", () => {
+		expect(parseRange("100", "count")).toBe(100)
+		expect(parseRange("120k", "count")).toBe(120_000)
+		expect(parseRange("1.5M", "count")).toBe(1_500_000)
+		expect(parseRange("2b", "count")).toBe(2_000_000_000)
+		expect(parseRange("2m", "count")).toBe(2_000_000)
+		expect(parseRange("1.5", "count")).toBe(2)
+		expect(parseRange("90s", "count")).toBeUndefined()
+	})
+
+	it("parses a dollar amount with or without the sign, and nothing else", () => {
+		expect(parseRange("0.5", "usd")).toBe(0.5)
+		expect(parseRange("$ 1.25", "usd")).toBe(1.25)
+		expect(parseRange("$1", "usd")).toBe(1)
+		expect(parseRange("1k", "usd")).toBeUndefined()
+		expect(parseRange("$", "usd")).toBeUndefined()
+	})
+
+	it("formats counts compactly and dollars as money", () => {
+		expect(formatValue(999, "count")).toBe("999")
+		expect(formatValue(120_000, "count")).toBe("120k")
+		expect(formatValue(1_500_000, "count")).toBe("1.5M")
+		expect(formatValue(0.5, "usd")).toBe("$0.50")
+		expect(formatValue(0.0004, "usd")).toBe("$0.0004")
+		expect(formatRange(100_000, undefined, "count")).toBe("≥ 100k")
+		expect(formatRange(undefined, 2, "usd")).toBe("≤ $2.00")
+	})
+
+	it("round-trips the field text through parseRange", () => {
+		for (const count of [0, 100, 999, 1000, 1500, 1234, 120_000, 1_000_000]) {
+			expect(parseRange(formatCompact(count, "count"), "count")).toBe(count)
+		}
+		for (const usd of [0, 0.01, 0.5, 1.25, 10]) {
+			expect(parseRange(formatCompact(usd, "usd"), "usd")).toBe(usd)
+		}
+		// Bare inside the natural range, scaled only where it means the same thing.
+		expect(formatCompact(1234, "count")).toBe("1234")
+		expect(formatCompact(1500, "count")).toBe("1.5k")
+		expect(formatCompact(1.25, "usd")).toBe("1.25")
+	})
+})
