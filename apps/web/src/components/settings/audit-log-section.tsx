@@ -55,6 +55,9 @@ const COL_HEADER = "text-muted-foreground/70 font-mono text-[10px] uppercase tra
  * its first letter rather than parsing a local part that is rarely a name.
  */
 function initialsOf(label: string): string {
+	// A row we could not name falls back to the raw `user_…` id; "U" would read
+	// as a name it is not.
+	if (label.startsWith("user_")) return "?"
 	const words = label.trim().split(/\s+/).filter(Boolean)
 	if (words.length === 0 || label.includes("@")) return label.slice(0, 1).toUpperCase()
 	return words
@@ -314,17 +317,21 @@ function AuditLogRow({ entry }: { entry: V2AuditLogEntry }) {
 				{formatRelativeTime(entry.occurred_at)}
 			</span>
 			<div className={cn(COL.actor, "flex items-center gap-1.5")}>
-				<Badge variant={badge.variant} size="sm" className="shrink-0">
-					{badge.label}
-				</Badge>
-				{/* A face only for people. A key or an agent carries a user id too —
-				    the person who minted it — and showing them here would credit a
-				    human for something they may not have done. */}
-				{entry.actor_type === "user" && entry.actor_name !== null && (
+				{/* A person is shown as a face, not as the word "User" — the avatar
+				    already says which kind of actor this is, and the name says who.
+				    Keys, agents and system entries have no face and keep their badge.
+				    The face is never lent to a key or an agent: those rows carry the
+				    minting user's id too, and wearing it would credit a human for
+				    something they may not have done. */}
+				{entry.actor_type === "user" ? (
 					<Avatar className="size-4 shrink-0 text-[9px]">
 						{entry.actor_avatar_url !== null && <AvatarImage src={entry.actor_avatar_url} alt="" />}
-						<AvatarFallback>{initialsOf(entry.actor_name)}</AvatarFallback>
+						<AvatarFallback>{initialsOf(actorLabel)}</AvatarFallback>
 					</Avatar>
+				) : (
+					<Badge variant={badge.variant} size="sm" className="shrink-0">
+						{badge.label}
+					</Badge>
 				)}
 				<span className="truncate text-xs" title={entry.actor_id ?? undefined}>
 					{actorLabel}
