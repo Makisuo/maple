@@ -61,6 +61,7 @@ const auditLogEntryExample = {
 	actor_type: "user",
 	actor_id: "user_2fj3K9dLqWm8xYbT",
 	actor_name: "David",
+	actor_avatar_url: "https://img.clerk.com/eyJ0eXBlIjoiZGVmYXVsdCJ9",
 	affected_user: null,
 	source: "dashboard",
 	resource_type: "alert_rule",
@@ -100,6 +101,11 @@ export const V2AuditLogEntry = Schema.Struct({
 		description:
 			"Display name of the actor at the time of the action (agent name, API key name, …), or `null` when none was recorded.",
 		examples: ["David"],
+	}),
+	actor_avatar_url: Schema.NullOr(Schema.String).annotate({
+		description:
+			"Avatar for a user actor, resolved from the workspace directory when the log is read. `null` for every non-user actor, and for a user who is no longer a member.",
+		examples: ["https://img.clerk.com/eyJ0eXBlIjoi…"],
 	}),
 	affected_user: Schema.NullOr(Schema.String).annotate({
 		description:

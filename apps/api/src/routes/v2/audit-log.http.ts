@@ -25,7 +25,7 @@ const adminOnly = () => V2InsufficientPermissions.make("Only org admins can read
 const unnamed = (cause: unknown) =>
 	Effect.logWarning("Audit log: member directory unavailable; entries keep their ids", {
 		cause,
-	}).pipe(Effect.as(new Map<string, string>()))
+	}).pipe(Effect.as(new Map<string, ActorProfile>()))
 
 const decodeApiKeyIdOption = Schema.decodeUnknownOption(ApiKeyId)
 const decodeActorIdOption = Schema.decodeUnknownOption(ActorId)
@@ -76,15 +76,43 @@ const publicActorId = (row: AuditLogEntry): string | null => {
 	}
 }
 
+/** What the workspace directory can tell us about one member. */
+export interface ActorProfile {
+	readonly name: string
+	readonly imageUrl: string | null
+}
+
 /**
  * The name to show for one entry: the label frozen at write time when there is
- * one, else the current directory name for the acting user, else nothing —
- * which renders as the id the entry already carries.
+ * one, else the current directory name — but only for a user actor, and only
+ * ever their own.
+ *
+ * Every API-key and agent row also carries a `userId`, the person who minted
+ * the credential. Naming those rows from the directory puts that person's name
+ * on an action a key took, which is precisely the attribution an audit log
+ * exists to keep straight. Entries written before keys carried their name show
+ * an id, which is honest.
  */
 export const actorDisplayName = (
-	row: Pick<AuditLogEntry, "actorLabel" | "userId">,
-	names: ReadonlyMap<string, string>,
-): string | null => row.actorLabel ?? (row.userId === null ? null : (names.get(row.userId) ?? null))
+	row: Pick<AuditLogEntry, "actorLabel" | "actorType" | "userId">,
+	directory: ReadonlyMap<string, ActorProfile>,
+): string | null =>
+	row.actorLabel ??
+	(row.actorType !== "user" || row.userId === null
+		? null
+		: (directory.get(row.userId)?.name ?? null))
+
+/**
+ * The avatar, for user actors only. An API key or an agent has no face, and a
+ * departed member has no directory entry to take one from.
+ */
+export const actorAvatarUrl = (
+	row: Pick<AuditLogEntry, "actorType" | "userId">,
+	directory: ReadonlyMap<string, ActorProfile>,
+): string | null =>
+	row.actorType !== "user" || row.userId === null
+		? null
+		: (directory.get(row.userId)?.imageUrl ?? null)
 
 /**
  * Name the humans. An API key freezes its name into `actorLabel` when the entry
@@ -97,7 +125,7 @@ export const actorDisplayName = (
  */
 const toV2AuditLogEntry = (
 	row: AuditLogEntry,
-	names: ReadonlyMap<string, string>,
+	directory: ReadonlyMap<string, ActorProfile>,
 ): V2AuditLogEntry => ({
 	id: row.id,
 	object: "audit_log_entry",
@@ -106,7 +134,8 @@ const toV2AuditLogEntry = (
 	denial_reason: row.denialReason,
 	actor_type: row.actorType,
 	actor_id: publicActorId(row),
-	actor_name: actorDisplayName(row, names),
+	actor_name: actorDisplayName(row, directory),
+	actor_avatar_url: actorAvatarUrl(row, directory),
 	affected_user: row.affectedUserId,
 	source: row.source,
 	resource_type: row.resourceType,
@@ -126,20 +155,29 @@ export const HttpV2AuditLogLive = HttpApiBuilder.group(MapleApiV2, "auditLog", (
 		const members = yield* OrgMembersService
 
 		/**
-		 * Display names for the user ids on one page, or none at all: a directory
+		 * Names and avatars for the acting users, or nothing at all: a directory
 		 * that is unconfigured (self-hosted without Clerk) or briefly unavailable
 		 * must never turn reading the audit log into an error. Ids still render.
+		 *
+		 * A member with no name set falls back to their email, which is what the
+		 * rest of the product shows and what an admin reading an audit trail
+		 * actually recognises — an opaque `user_…` is the last resort, not the
+		 * second one.
 		 *
 		 * `catch` + `catchDefect` rather than `catchCause`, which would also
 		 * swallow the interrupt that tears this request down.
 		 */
-		const displayNames = (orgId: OrgId) =>
+		const directory = (orgId: OrgId) =>
 			members.listMembers(orgId).pipe(
 				Effect.map(
 					(all) =>
 						new Map(
-							all.flatMap((member) =>
-								member.name === null ? [] : [[member.userId, member.name] as const],
+							all.map(
+								(member) =>
+									[
+										member.userId,
+										{ name: member.name ?? member.email, imageUrl: member.imageUrl },
+									] as const,
 							),
 						),
 				),
@@ -191,8 +229,10 @@ export const HttpV2AuditLogLive = HttpApiBuilder.group(MapleApiV2, "auditLog", (
 							Effect.flatMap((rows) =>
 								rows.length === 0
 									? Effect.succeed([])
-									: displayNames(tenant.orgId).pipe(
-											Effect.map((names) => rows.map((row) => toV2AuditLogEntry(row, names))),
+									: directory(tenant.orgId).pipe(
+											Effect.map((known) =>
+												rows.map((row) => toV2AuditLogEntry(row, known)),
+											),
 										),
 							),
 						),

@@ -14,6 +14,8 @@ export interface OrgMember {
 	readonly userId: string
 	readonly email: string
 	readonly name: string | null
+	/** Provider-hosted avatar; Clerk serves one for every user, initials included. */
+	readonly imageUrl: string | null
 }
 
 export interface OrgMembersServiceApi {
@@ -91,7 +93,7 @@ const make = Effect.gen(function* () {
 					[member.publicUserData?.firstName, member.publicUserData?.lastName]
 						.filter(Boolean)
 						.join(" ") || null
-				all.push({ userId, email, name })
+				all.push({ userId, email, name, imageUrl: member.publicUserData?.imageUrl ?? null })
 			}
 			offset += page.data.length
 			if (offset >= page.totalCount || page.data.length === 0) break

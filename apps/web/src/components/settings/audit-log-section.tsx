@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react"
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { auditLogPageAtom } from "@/lib/services/atoms/audit-log-atoms"
 
+import { Avatar, AvatarFallback, AvatarImage } from "@maple/ui/components/ui/avatar"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
@@ -47,6 +48,20 @@ const COL = {
 	source: "hidden w-[80px] shrink-0 lg:block",
 }
 const COL_HEADER = "text-muted-foreground/70 font-mono text-[10px] uppercase tracking-[0.12em]"
+
+/**
+ * Up to two initials from a display name, for the moment before the avatar
+ * loads and for the members Clerk serves no picture for. An email falls back to
+ * its first letter rather than parsing a local part that is rarely a name.
+ */
+function initialsOf(label: string): string {
+	const words = label.trim().split(/\s+/).filter(Boolean)
+	if (words.length === 0 || label.includes("@")) return label.slice(0, 1).toUpperCase()
+	return words
+		.slice(0, 2)
+		.map((word) => word.slice(0, 1).toUpperCase())
+		.join("")
+}
 
 function formatDateTime(value: string): string {
 	return new Date(value).toLocaleString(undefined, {
@@ -302,6 +317,15 @@ function AuditLogRow({ entry }: { entry: V2AuditLogEntry }) {
 				<Badge variant={badge.variant} size="sm" className="shrink-0">
 					{badge.label}
 				</Badge>
+				{/* A face only for people. A key or an agent carries a user id too —
+				    the person who minted it — and showing them here would credit a
+				    human for something they may not have done. */}
+				{entry.actor_type === "user" && entry.actor_name !== null && (
+					<Avatar className="size-4 shrink-0 text-[9px]">
+						{entry.actor_avatar_url !== null && <AvatarImage src={entry.actor_avatar_url} alt="" />}
+						<AvatarFallback>{initialsOf(entry.actor_name)}</AvatarFallback>
+					</Avatar>
+				)}
 				<span className="truncate text-xs" title={entry.actor_id ?? undefined}>
 					{actorLabel}
 				</span>
