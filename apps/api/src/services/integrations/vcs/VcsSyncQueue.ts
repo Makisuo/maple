@@ -1,6 +1,6 @@
 import type { Queue } from "@cloudflare/workers-types"
 import { VcsQueueError, VcsSyncJob } from "@maple/domain/http"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { Context, Effect, Layer, Schema } from "effect"
 
 // Vendor-agnostic queue producer. Reads the `VCS_SYNC_QUEUE` binding from the

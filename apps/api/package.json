@@ -38,7 +38,6 @@
 		"@maple/cache": "workspace:*",
 		"@maple/db": "workspace:*",
 		"@maple/domain": "workspace:*",
-		"@maple/effect-cloudflare": "workspace:*",
 		"@maple/email": "workspace:*",
 		"@maple/infra": "workspace:*",
 		"@maple/query-engine": "workspace:*",

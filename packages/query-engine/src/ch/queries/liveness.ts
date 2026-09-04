@@ -66,8 +66,8 @@ export function serviceLivenessQuery(opts: ServiceLivenessOpts = {}) {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.ServiceName.eq(param.string("serviceName")),
-			$.Minute.gte(param.dateTimeString("startTime")),
-			$.Minute.lte(param.dateTimeString("endTime")),
+			$.Minute.gte(param.dateTimeSeconds("startTime")),
+			$.Minute.lte(param.dateTimeSeconds("endTime")),
 			opts.scopeToEnvironment ? $.DeploymentEnv.eq(param.string("deploymentEnv")) : undefined,
 		])
 		.format("JSON")
@@ -106,8 +106,8 @@ export function orgTelemetryPulseQuery(): CHUnionQuery<TelemetryPulseOutput> {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Timestamp.gte(param.dateTimeString("startTime")),
-			$.Timestamp.lte(param.dateTimeString("endTime")),
+			$.Timestamp.gte(param.dateTimeSeconds("startTime")),
+			$.Timestamp.lte(param.dateTimeSeconds("endTime")),
 		])
 
 	const logs = from(Logs)
@@ -118,8 +118,8 @@ export function orgTelemetryPulseQuery(): CHUnionQuery<TelemetryPulseOutput> {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.TimestampTime.gte(param.dateTimeString("startTime")),
-			$.TimestampTime.lte(param.dateTimeString("endTime")),
+			$.TimestampTime.gte(param.dateTimeSeconds("startTime")),
+			$.TimestampTime.lte(param.dateTimeSeconds("endTime")),
 			$.Timestamp.gte(param.dateTimeString("startTime")),
 			$.Timestamp.lte(param.dateTimeString("endTime")),
 		])

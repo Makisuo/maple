@@ -21,7 +21,7 @@ import {
 	type WorkflowState,
 } from "@maple/domain/http"
 
-import { resolveSignalState, type ErrorSignal, type InvestigationSummary } from "@/lib/models/error-signal"
+import type { ErrorSignal, InvestigationSummary } from "@/lib/models/error-signal"
 
 // The whole document decodes in one go, nested actor included, so no fixture
 // value is ever branded by hand.
@@ -368,7 +368,7 @@ export function buildErrorsLabFixture(nowMs: number): ErrorsLabFixture {
 			detail: issue.exceptionMessage,
 			serviceName: issue.serviceName,
 			severity: issue.severity,
-			state: resolveSignalState(issue, seed.investigation),
+			investigation: seed.investigation ?? null,
 			windowCount: seed.windowCount,
 			totalCount: seed.totalCount,
 			affectedServicesCount: seed.windowCount === null ? null : 1 + (seed.n % 3),

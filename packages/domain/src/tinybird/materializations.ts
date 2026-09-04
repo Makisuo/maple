@@ -916,6 +916,16 @@ export const errorEventsMv = defineMaterializedView("error_events_mv", {
 	description:
 		"Materializes per-occurrence error events from traces. Unwraps the first OTel exception event (falling back to exception.* / error.* span attributes) and computes a cityHash64 FingerprintHash for issue grouping.",
 	datasource: errorEvents,
+	// This change rewrites the pipe's SELECT, and Tinybird treats a changed MV
+	// node as a reason to REBUILD the target by replaying its source. That is
+	// wrong twice over here: `traces` keeps 30 days against this target's 90, so
+	// a rebuild silently drops two months of occurrences, and replaying would
+	// recompute FingerprintHash for every existing row — re-bucketing every
+	// triaged issue, which is exactly what migration 0027 refuses to do. `alter`
+	// swaps the SQL at promotion with no data movement, matching the migration's
+	// forward-only contract: stored rows keep their labels, new events get the
+	// attribute fallback.
+	deploymentMethod: "alter",
 	nodes: [
 		node({
 			name: "error_events_mv_node",
@@ -936,6 +946,10 @@ export const errorEventsByTimeMv = defineMaterializedView("error_events_by_time_
 	description:
 		"Time-ordered copy of error_events_mv's projection, written to error_events_by_time (sorted by OrgId, Timestamp, FingerprintHash) for recent-window error scans.",
 	datasource: errorEventsByTime,
+	// Same reason as error_events_mv, whose projection this shares byte-for-byte:
+	// a replay would truncate to the 30-day `traces` window and re-bucket every
+	// issue. The two must also deploy the same way, or the tables disagree.
+	deploymentMethod: "alter",
 	nodes: [
 		node({
 			name: "error_events_by_time_mv_node",
@@ -1026,6 +1040,12 @@ export const aiTraceIndexMv = defineMaterializedView("ai_trace_index_mv", {
 	description:
 		"Populates ai_trace_index with GenAI agent spans (maple_ai.vendor.id stamped), pre-extracting the maple_ai.* identity, the environment, the GenAI model/agent/tool and the span's kind, failure and usage to plain columns.",
 	datasource: aiTraceIndex,
+	// Migration 0026's columns are additive, and the rows already in the target
+	// are explicitly allowed to carry ''/0 for them (see above). Without this,
+	// Tinybird migrates the target by replaying `traces` through this pipe — the
+	// backfill that crashed the maple_us deploy with an internal error. `alter`
+	// adds the columns at promotion with no data movement.
+	deploymentMethod: "alter",
 	nodes: [
 		node({
 			name: "ai_trace_index_mv_node",

@@ -26,7 +26,7 @@ import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, MetricsSum } from "../tables"
-import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
+import { containerRuntimeExpr, deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { avgIfOrZero, facetAttrExpr, maxIfOrZero, type FacetOutput } from "./query-helpers"
 import type { SortDirection } from "./infra"
 
@@ -178,7 +178,7 @@ export function listContainersQuery(opts: ListContainersOpts = {}) {
 			imageName: CH.any_($.ResourceAttributes.get("container.image.name")),
 			composeProject: CH.any_($.ResourceAttributes.get("compose.project")),
 			composeService: CH.any_($.ResourceAttributes.get("compose.service")),
-			runtime: CH.any_($.ResourceAttributes.get("container.runtime")),
+			runtime: CH.any_(containerRuntimeExpr($.ResourceAttributes)),
 			environment: CH.any_(deploymentEnvExpr($.ResourceAttributes)),
 			lastSeen: CH.max_($.TimeUnix),
 			cpuPct: avgIfOrZero($.Value, $.MetricName.eq("container.cpu.utilization")).div(100),
@@ -316,7 +316,7 @@ export function containerDetailSummaryQuery(opts: ContainerDetailSummaryOpts) {
 			imageName: CH.any_($.ResourceAttributes.get("container.image.name")),
 			composeProject: CH.any_($.ResourceAttributes.get("compose.project")),
 			composeService: CH.any_($.ResourceAttributes.get("compose.service")),
-			runtime: CH.any_($.ResourceAttributes.get("container.runtime")),
+			runtime: CH.any_(containerRuntimeExpr($.ResourceAttributes)),
 			firstSeen: CH.min_($.TimeUnix),
 			lastSeen: CH.max_($.TimeUnix),
 			cpuPct: avgIfOrZero($.Value, $.MetricName.eq("container.cpu.utilization")).div(100),

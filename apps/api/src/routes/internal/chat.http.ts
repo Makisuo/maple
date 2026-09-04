@@ -9,7 +9,7 @@ import {
 	MapleInternalApi,
 } from "@maple/domain/http"
 import { Cause, Effect, Schema } from "effect"
-import { WorkerEnvironment } from "@maple/effect-cloudflare"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { orgIdFromChatSessionId } from "@maple/domain/chat-session"
 import { chatSessionStub } from "@/chat/session"
 import { mapleToolCatalog } from "@/mcp/tools/registry"

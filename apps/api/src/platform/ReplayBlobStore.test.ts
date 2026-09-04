@@ -1,7 +1,7 @@
 import { describe, it } from "@effect/vitest"
 import { expect } from "vitest"
 import { Effect, Layer } from "effect"
-import { layerFromEnvRecord } from "@maple/effect-cloudflare/worker-environment"
+import { layerFromEnvRecord } from "@maple/infra/worker-runtime"
 import { ReplayBlobStore, replayObjectKey, REPLAY_BLOBS_BINDING } from "./ReplayBlobStore"
 
 const gzip = (text: string): Effect.Effect<Uint8Array> =>

@@ -98,6 +98,16 @@ const SHORTCUTS = {
 		label: "Toggle selection (issues)",
 		group: "Lists & Tables",
 	},
+	"issue.status": {
+		combo: "S",
+		label: "Change status of focused issue",
+		group: "Lists & Tables",
+	},
+	"issue.severity": {
+		combo: "P",
+		label: "Change severity of focused issue",
+		group: "Lists & Tables",
+	},
 	"list.clear": {
 		combo: "Escape",
 		label: "Clear focus / selection",

@@ -7,8 +7,8 @@ import {
 	layerFromEnvRecord,
 	runScheduledEffect,
 	WorkerConfigProviderLayer,
-	WorkerEnvironment,
-} from "@maple/effect-cloudflare"
+	workerEnvironmentLayer,
+} from "@maple/infra/worker-runtime"
 import { WorkerEntrypoint } from "cloudflare:workers"
 import { Cause, Context, Effect, Exit, FileSystem, Layer, ManagedRuntime, Path } from "effect"
 import { HttpRouter, type HttpMiddleware } from "effect/unstable/http"
@@ -124,7 +124,7 @@ const buildHandler = async () => {
 			Layer.provideMerge(ApiObservabilityLive),
 			Layer.provideMerge(WorkerPlatformLive),
 			Layer.provideMerge(layerPg),
-			Layer.provideMerge(WorkerEnvironment.layer),
+			Layer.provideMerge(workerEnvironmentLayer),
 			Layer.provideMerge(telemetry.layer),
 			Layer.provideMerge(WorkerConfigProviderLayer),
 		),

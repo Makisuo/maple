@@ -1,17 +1,21 @@
-// Simplified port of alchemy-effect's R2 bucket binding:
-//   https://github.com/alchemy-run/alchemy-effect/blob/main/packages/alchemy/src/Cloudflare/R2/R2BucketBinding.ts
+// A binding-name-keyed R2 client. `R2Bucket("MY_BUCKET")` is a lightweight
+// token naming the env binding; `R2Bucket.bind(token)` yields the client.
 //
-// As with KV, we drop the resource half (bucket provisioning via the CF
-// Account API) and keep the runtime half. `R2Bucket("MY_BUCKET")` is a
-// lightweight token; `R2Bucket.bind(token)` yields the client.
+// NOT `alchemy/Cloudflare/R2`'s `ReadWriteBucket`: that client takes the
+// deploy-side `Bucket` *resource* and yields the `Worker` service to register
+// the binding (see `makeBucketBinding` in alchemy's `R2/BucketBinding.ts`).
+// apps/api's entry is a hand-written `WorkerEntrypoint` that imports
+// `alchemy.run.ts` type-only and has no `Worker` in context, so adopting it
+// means first moving the app onto alchemy's class-form Worker. Until then this
+// stays — as does `bindOptional`, which alchemy has no equivalent for.
 import type * as runtime from "@cloudflare/workers-types"
 import * as Schema from "effect/Schema"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
-import { WorkerEnvironment } from "./worker-environment.ts"
+import { WorkerEnvironment } from "./worker-env.ts"
 
-export class R2Error extends Schema.TaggedError<R2Error>()("@maple/effect-cloudflare/R2Error", {
+export class R2Error extends Schema.TaggedError<R2Error>()("@maple/infra/R2Error", {
 	message: Schema.String,
 	cause: Schema.Defect(),
 }) {}
@@ -214,7 +218,7 @@ export const R2Bucket = Object.assign((logicalId: string): R2BucketToken => make
 		WorkerEnvironment.pipe(
 			Effect.map((env) => {
 				// The env itself can be absent, not just the binding: outside a
-				// Worker isolate `cloudflare-workers.ts` falls back to a stub, and
+				// Worker isolate alchemy's `cloudflare_workers` falls back to a stub, and
 				// under vitest that stub's `env` may be undefined rather than `{}`.
 				// Both mean the same thing here.
 				const bindings = env as Record<string, unknown> | undefined | null
