@@ -41,8 +41,9 @@ export const AUDIT_LOG_DATASOURCE = "audit_log"
 
 /**
  * `queue.send` sits on the response path of every mutation, denial, and
- * audited read. A healthy send is tens of ms; 2s bounds a stalling broker
- * before the entry degrades to a direct warehouse write.
+ * audited read, and is the only thing that does. A healthy send is tens of ms;
+ * 2s bounds a stalling broker, after which the entry is dropped with a warning
+ * rather than charged to the response as a second network round trip.
  */
 export const AUDIT_QUEUE_SEND_TIMEOUT = "2 seconds"
 
@@ -98,9 +99,11 @@ export interface AuditLogListFilters {
 
 export interface AuditLogServiceApi {
 	/**
-	 * Append one entry, durably: published to the audit events queue when the
-	 * binding is present (the consumer performs the warehouse write, retried by
-	 * the queue), written straight to the warehouse otherwise (local dev, crons).
+	 * Append one entry: published to the audit events queue when the binding is
+	 * present (the consumer performs the warehouse write, retried by the queue
+	 * and parked in the DLQ after that), written straight to the warehouse only
+	 * where there is no queue at all — local dev, crons, the consumer itself —
+	 * none of which are serving a response.
 	 * Never fails: an action that succeeded must not 500 because its audit
 	 * write did not — terminal failures are logged and swallowed.
 	 */
@@ -233,11 +236,20 @@ export class AuditLogService extends Context.Service<AuditLogService, AuditLogSe
 			// Queue unavailability must not lose the entry: degrade to a direct
 			// write before giving up. Only typed send failures land here — an
 			// interrupt must propagate, not spawn a warehouse write mid-teardown.
-			const fallbackToDirect = (event: AuditLogEvent, error: AuditQueueSendError) =>
-				Effect.logWarning("Audit queue send failed; writing directly", { cause: error }).pipe(
-					Effect.andThen(writeDirect(event)),
-				)
-
+			/**
+			 * One queue send, and that is the whole write path wherever a queue
+			 * exists. It used to fall back to a direct warehouse write when the
+			 * send failed — which put a second network round trip on the response
+			 * path exactly when the platform was already degraded, turning a
+			 * Queues brown-out into slow requests for every audited read. The
+			 * queue is the durability story (retries, DLQ); if the send itself
+			 * cannot be made, the entry is lost and says so in the logs rather
+			 * than being bought at the caller's expense.
+			 *
+			 * `writeDirect` remains for runtimes with no queue binding at all —
+			 * local dev, crons, and the consumer itself — none of which are
+			 * serving a response.
+			 */
 			const publish = (event: AuditLogEvent) =>
 				queue === undefined
 					? writeDirect(event)
@@ -246,15 +258,14 @@ export class AuditLogService extends Context.Service<AuditLogService, AuditLogSe
 							catch: (cause) =>
 								new AuditQueueSendError({ message: "Audit queue send failed", cause }),
 						}).pipe(
-							// A Queues brown-out that stalls (rather than rejects) must not
+							// A Queues brown-out that stalls rather than rejects must not
 							// hang the response: 2s is far above a healthy send's latency
-							// yet bounds the worst case before the direct-write fallback.
+							// yet bounds the worst case.
 							Effect.timeout(AUDIT_QUEUE_SEND_TIMEOUT),
 							Effect.catchTag("TimeoutError", (error) =>
-								Effect.fail(new AuditQueueSendError({ message: "Audit queue send timed out", cause: error })),
-							),
-							Effect.catchTag("@maple/api/services/audit/AuditQueueSendError", (error) =>
-								fallbackToDirect(event, error),
+								Effect.fail(
+									new AuditQueueSendError({ message: "Audit queue send timed out", cause: error }),
+								),
 							),
 						)
 

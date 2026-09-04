@@ -140,7 +140,7 @@ describe("AuditLogService (warehouse-backed)", () => {
 		}),
 	)
 
-	it.effect("degrades to a direct write when the queue send fails", () =>
+	it.effect("drops the entry rather than writing to the warehouse on the response path", () =>
 		Effect.gen(function* () {
 			const warehouse = recordingWarehouse()
 			yield* Effect.gen(function* () {
@@ -167,8 +167,11 @@ describe("AuditLogService (warehouse-backed)", () => {
 					),
 				),
 			)
-			expect(warehouse.ingested).toHaveLength(1)
-			expect(warehouse.ingested[0]!.rows[0]!.Action).toBe("alert_rule.updated")
+			// The queue owns durability (retries, DLQ). A failed send must not buy a
+			// second network round trip with the caller's response time, which is
+			// exactly when the platform is already degraded — the caller still
+			// succeeds, and the loss is in the logs.
+			expect(warehouse.ingested).toHaveLength(0)
 		}),
 	)
 
