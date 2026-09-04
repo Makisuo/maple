@@ -6,6 +6,7 @@ import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService
 import { AlertRulesService } from "@/services/alerts/AlertRulesService"
 import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
 import { InvestigationService } from "@/services/errors/InvestigationService"
@@ -166,33 +167,22 @@ export const Phase1ResourceStubsLayer = Layer.mergeAll(
 		listOpenIncidents: die,
 	}),
 	Layer.succeed(ErrorsService, {
-		listIssues: die,
-		countOpenIssuesByService: die,
-		getIssue: die,
 		transitionIssue: die,
 		claimIssue: die,
-		heartbeatIssue: die,
-		releaseIssue: die,
-		assignIssue: die,
-		setSeverity: die,
-		commentOnIssue: die,
 		proposeFix: die,
-		listIssueEvents: die,
+		recordAnomalyLinkEvent: die,
+		runTick: die,
+	}),
+	Layer.succeed(ErrorActorsService, {
 		registerAgent: die,
 		listAgents: die,
 		lookupActor: die,
 		ensureUserActor: die,
-		recordAnomalyLinkEvent: die,
-		listIssueIncidents: die,
-		listOpenIncidents: die,
-		getNotificationPolicy: die,
-		upsertNotificationPolicy: die,
-		getEscalationPolicy: die,
-		upsertEscalationPolicy: die,
-		evaluateEscalationPolicy: die,
-		listIssueEscalations: die,
-		listRecentEscalations: die,
-		runTick: die,
+		actorExists: die,
+		ensureSystemActor: die,
+		ensureAgentActor: die,
+		touchActor: die,
+		collectActorDocs: die,
 	}),
 	Layer.succeed(OrganizationService, {
 		retrieve: die,

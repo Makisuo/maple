@@ -144,7 +144,6 @@ const ErrorsServiceLive = ErrorsService.layer.pipe(
 			EdgeCacheServiceLive,
 			NotificationDispatcherLive,
 			ErrorActorsServiceLive,
-			ErrorIssueReadModelsServiceLive,
 			ErrorIssueWorkflowServiceLive,
 			ErrorPolicyServiceLive,
 			// Lets `propose_fix` turn its `pr_url` into a durable link. Optional in
