@@ -10,7 +10,6 @@
 		"@maple-dev/effect-sdk": "workspace:*",
 		"@maple/auth": "workspace:*",
 		"@maple/domain": "workspace:*",
-		"@maple/effect-cloudflare": "workspace:*",
 		"@maple/infra": "workspace:*",
 		"effect": "catalog:effect"
 	},

@@ -1,6 +1,6 @@
 import { Array as Arr, Context, Effect, Layer, Option } from "effect"
-import { R2Bucket, type R2BucketClient } from "@maple/effect-cloudflare/r2-bucket"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { R2Bucket, type R2BucketClient } from "@maple/infra/r2"
+import { WorkerEnvironment, workerEnvironmentLayer } from "@maple/infra/worker-runtime"
 
 // ReplayBlobStore — reads rrweb chunk payloads out of R2.
 //
@@ -123,4 +123,4 @@ export class ReplayBlobStore extends Context.Service<ReplayBlobStore, ReplayBlob
 	static readonly layer = Layer.effect(this, this.make)
 }
 
-export const ReplayBlobStoreLive = ReplayBlobStore.layer.pipe(Layer.provide(WorkerEnvironment.layer))
+export const ReplayBlobStoreLive = ReplayBlobStore.layer.pipe(Layer.provide(workerEnvironmentLayer))

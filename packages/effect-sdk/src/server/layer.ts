@@ -88,7 +88,7 @@ export interface MapleConfig {
  *
  * For Cloudflare Workers, prefer `@maple-dev/effect-sdk/cloudflare`'s `make()`
  * — it has no background fiber and exposes an explicit `flush` Effect that
- * `@maple/effect-cloudflare`'s `withRequestRuntime` schedules in
+ * `@maple/infra/worker-runtime`'s `withRequestRuntime` schedules in
  * `ctx.waitUntil`. This layer's `Otlp.layerJson` background-export fiber
  * doesn't tick on Workers between invocations.
  *

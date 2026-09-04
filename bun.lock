@@ -30,7 +30,6 @@
       "dependencies": {
         "@maple-dev/effect-sdk": "workspace:*",
         "@maple/api": "workspace:*",
-        "@maple/effect-cloudflare": "workspace:*",
         "effect": "catalog:effect",
       },
       "devDependencies": {
@@ -57,7 +56,6 @@
         "@maple/cache": "workspace:*",
         "@maple/db": "workspace:*",
         "@maple/domain": "workspace:*",
-        "@maple/effect-cloudflare": "workspace:*",
         "@maple/email": "workspace:*",
         "@maple/infra": "workspace:*",
         "@maple/query-engine": "workspace:*",
@@ -114,7 +112,6 @@
         "@maple-dev/effect-sdk": "workspace:*",
         "@maple/auth": "workspace:*",
         "@maple/domain": "workspace:*",
-        "@maple/effect-cloudflare": "workspace:*",
         "@maple/infra": "workspace:*",
         "effect": "catalog:effect",
       },
@@ -370,18 +367,6 @@
         "effect": ">=4.0.0-rc.111 <5",
       },
     },
-    "lib/effect-cloudflare": {
-      "name": "@maple/effect-cloudflare",
-      "dependencies": {
-        "effect": "catalog:effect",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "4.20260603.1",
-        "@effect/language-service": "catalog:effect",
-        "@types/node": "catalog:tooling",
-        "typescript": "catalog:tooling",
-      },
-    },
     "lib/effect-db": {
       "name": "@maple/effect-db",
       "dependencies": {
@@ -627,11 +612,11 @@
       "name": "@maple/infra",
       "dependencies": {
         "@maple/alchemy-portless": "workspace:*",
-        "@maple/effect-cloudflare": "workspace:*",
         "alchemy": "2.0.0-beta.74",
         "effect": "catalog:effect",
       },
       "devDependencies": {
+        "@cloudflare/workers-types": "4.20260603.1",
         "@types/node": "catalog:tooling",
         "typescript": "catalog:tooling",
         "vitest": "catalog:",
@@ -1366,8 +1351,6 @@
     "@maple/db": ["@maple/db@workspace:packages/db"],
 
     "@maple/domain": ["@maple/domain@workspace:packages/domain"],
-
-    "@maple/effect-cloudflare": ["@maple/effect-cloudflare@workspace:lib/effect-cloudflare"],
 
     "@maple/effect-db": ["@maple/effect-db@workspace:lib/effect-db"],
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ApiKeyId } from "@maple/domain/http"
 import { Effect, Layer, Schema } from "effect"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import {
 	API_V2_RATE_LIMIT_BINDING,
 	API_V2_RATE_LIMIT_PARTITION,

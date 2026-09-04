@@ -25,7 +25,7 @@ import { revokeRefreshFamily } from "./mcp-oauth-family"
 import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { Database } from "@/platform/DatabaseLive"
 import { Env } from "@/platform/Env"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 
 const AUTHORIZATION_REQUEST_TTL_MS = 10 * 60 * 1000
 const AUTHORIZATION_CODE_TTL_MS = 5 * 60 * 1000
@@ -801,11 +801,16 @@ export class McpOAuthService extends Context.Service<
 						db.transaction((tx) => revokeRefreshFamily(tx, row.familyId, new Date(now))),
 					)
 					.pipe(Effect.mapError(persistenceError))
-				return yield* protocolError("invalid_grant", "The grant behind this refresh token was revoked")
+				return yield* protocolError(
+					"invalid_grant",
+					"The grant behind this refresh token was revoked",
+				)
 			}
 			if (row.revokedAt) {
 				yield* database
-					.execute((db) => db.transaction((tx) => revokeRefreshFamily(tx, row.familyId, new Date(now))))
+					.execute((db) =>
+						db.transaction((tx) => revokeRefreshFamily(tx, row.familyId, new Date(now))),
+					)
 					.pipe(Effect.mapError(persistenceError))
 				return yield* protocolError(
 					"invalid_grant",

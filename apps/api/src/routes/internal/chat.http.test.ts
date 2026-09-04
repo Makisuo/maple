@@ -1,7 +1,7 @@
 // SAFETY-FILE: JSON in this test is emitted by the fixture or unit under test before its fields are asserted.
 import { describe, expect, it } from "@effect/vitest"
 import { ChatApiGroup, CurrentTenant, V1SchemaErrors, V1UnexpectedErrors } from "@maple/domain/http"
-import { WorkerEnvironment } from "@maple/effect-cloudflare"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { Context, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"

@@ -2,7 +2,7 @@ import * as Config from "effect/Config"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
-import { optionalString } from "@maple/effect-cloudflare/config-helpers"
+import { optionalString } from "./config-helpers.ts"
 import type { MapleStage } from "./cloudflare/stage.ts"
 import { resolveDeploymentEnvironment } from "./cloudflare/stage.ts"
 
@@ -50,7 +50,7 @@ export type WorkerEnv = Record<string, string | Redacted.Redacted<string>>
 /**
  * Present-and-non-blank, trimmed.
  *
- * Built on `@maple/effect-cloudflare/config-helpers`' `optionalString`, which
+ * Built on `./config-helpers.ts`' `optionalString`, which
  * already encodes "blank or whitespace-only counts as absent" for the runtime
  * worker env schemas. The trim on top is the one thing it does not do — it
  * returns the raw value — and the deploy path has always trimmed.

@@ -56,7 +56,7 @@ import {
 } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { INVESTIGATION_FANOUT_BINDING, maybeEnqueueTriage } from "@/services/errors/ai-triage-enqueue"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { Database } from "@/platform/DatabaseLive"
 import { makeDbExecute, makePersistenceErrorMapper } from "@/platform/db-execute"
 import { Env } from "@/platform/Env"

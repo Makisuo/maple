@@ -9,7 +9,6 @@
 	"dependencies": {
 		"@maple-dev/effect-sdk": "workspace:*",
 		"@maple/api": "workspace:*",
-		"@maple/effect-cloudflare": "workspace:*",
 		"effect": "catalog:effect"
 	},
 	"devDependencies": {

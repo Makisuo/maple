@@ -201,8 +201,6 @@ export function makeBucketAxis(bucketIsos: ReadonlyArray<string>) {
 	}
 }
 
-export type BucketAxis = ReturnType<typeof makeBucketAxis>
-
 /** Pivot long-form `{bucket, attributeValue, value}` rows into per-bucket points keyed by series. */
 export function transformRows(
 	rows: ReadonlyArray<{ bucket: string; attributeValue: string; value: number }>,
