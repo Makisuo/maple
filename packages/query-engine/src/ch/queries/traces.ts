@@ -437,7 +437,7 @@ const OVERVIEW_ROLLUP_GROUP_KEYS: ReadonlySet<string> = new Set(["service", "non
  *
  * Exported because it names a distinct SQL *route*: the SQL it selects is
  * structurally unlike every other branch of `tracesTimeseriesQuery`, so the
- * catalog sweep in `sql-catalog.ts` asserts a fixture exercises it both ways.
+ * catalog sweep in `benchmark/catalog.ts` asserts a fixture exercises it both ways.
  * A route with no fixture is a route no test has ever executed — which is
  * exactly how a `NO_COMMON_TYPE` shipped to prod here.
  */
