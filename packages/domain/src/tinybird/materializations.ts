@@ -996,6 +996,12 @@ export const aiTraceIndexMv = defineMaterializedView("ai_trace_index_mv", {
 	description:
 		"Populates ai_trace_index with GenAI agent spans (maple_ai.vendor.id stamped), pre-extracting the maple_ai.* identity, the environment, the GenAI model/agent/tool and the span's kind, failure and usage to plain columns.",
 	datasource: aiTraceIndex,
+	// Migration 0026's columns are additive, and the rows already in the target
+	// are explicitly allowed to carry ''/0 for them (see above). Without this,
+	// Tinybird migrates the target by replaying `traces` through this pipe — the
+	// backfill that crashed the maple_us deploy with an internal error. `alter`
+	// adds the columns at promotion with no data movement.
+	deploymentMethod: "alter",
 	nodes: [
 		node({
 			name: "ai_trace_index_mv_node",
