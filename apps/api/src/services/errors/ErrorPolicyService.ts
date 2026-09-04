@@ -93,7 +93,7 @@ export interface ErrorPolicyPublicApi {
 	) => Effect.Effect<IssueEscalationAttemptsResponse, ErrorPersistenceError>
 }
 
-/** Policy persistence shared with the compatibility facade's notification and tick paths. */
+/** Policy persistence shared with ErrorsService's notification and tick paths. */
 export interface ErrorPolicyServiceApi extends ErrorPolicyPublicApi {
 	readonly defaultNotificationPolicy: (orgId: OrgId, timestamp: number) => ErrorNotificationPolicyRow
 	readonly parseNotificationDestinationIds: (raw: unknown) => ReadonlyArray<AlertDestinationId>

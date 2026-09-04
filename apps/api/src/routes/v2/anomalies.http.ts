@@ -18,6 +18,7 @@ import { Effect } from "effect"
 import { requireAdmin } from "@/services/auth/auth"
 import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 
 const toV2Incident = (doc: AnomalyIncidentDocument): V2AnomalyIncident => ({
 	id: doc.id,
@@ -77,6 +78,7 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 	Effect.gen(function* () {
 		const anomalies = yield* AnomalyDetectionService
 		const errors = yield* ErrorsService
+		const actors = yield* ErrorActorsService
 
 		/** Best-effort issue-timeline audit entry; the link itself already committed. */
 		const recordLinkEvent = (
@@ -193,7 +195,7 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 			.handle("setIncidentIssue", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const actor = yield* errors.ensureUserActor(tenant.orgId, tenant.userId)
+					const actor = yield* actors.ensureUserActor(tenant.orgId, tenant.userId)
 
 					const { incident, previousIssueId } = yield* anomalies.setIncidentIssue(
 						tenant.orgId,

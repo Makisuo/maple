@@ -4,7 +4,6 @@
 	"type": "module",
 	"sideEffects": false,
 	"exports": {
-		"./atom": "./src/atom/index.ts",
 		"./electric": "./src/electric/index.ts"
 	},
 	"scripts": {

@@ -1,17 +1,6 @@
 import { Schema } from "effect"
 
 /**
- * Base error for Electric Collection operations
- */
-export class ElectricCollectionError extends Schema.TaggedError<ElectricCollectionError>()(
-	"@maple/effect-db/ElectricCollectionError",
-	{
-		message: Schema.String,
-		cause: Schema.optional(Schema.Unknown),
-	},
-) {}
-
-/**
  * Error thrown when an insert operation fails
  */
 export class InsertError extends Schema.TaggedError<InsertError>()("@maple/effect-db/InsertError", {
@@ -81,51 +70,5 @@ export class AwaitTxIdError extends Schema.TaggedError<AwaitTxIdError>()("@maple
 	message: Schema.String,
 	txid: Schema.Number,
 	collectionId: Schema.optional(Schema.String),
-	cause: Schema.optional(Schema.Unknown),
-}) {}
-
-/**
- * Error thrown when the backoff retry budget is exhausted for a collection.
- */
-export class MaxRetriesExceededError extends Schema.TaggedError<MaxRetriesExceededError>()(
-	"@maple/effect-db/MaxRetriesExceededError",
-	{
-		message: Schema.String,
-		collectionId: Schema.optional(Schema.String),
-		maxRetries: Schema.Number,
-		cause: Schema.optional(Schema.Unknown),
-	},
-) {}
-
-/**
- * Error thrown when sync configuration is invalid
- */
-export class SyncConfigError extends Schema.TaggedError<SyncConfigError>()(
-	"@maple/effect-db/SyncConfigError",
-	{
-		message: Schema.String,
-		cause: Schema.optional(Schema.Unknown),
-	},
-) {}
-
-/**
- * Error thrown when an optimistic action fails
- */
-export class OptimisticActionError extends Schema.TaggedError<OptimisticActionError>()(
-	"@maple/effect-db/OptimisticActionError",
-	{
-		message: Schema.String,
-		cause: Schema.optional(Schema.Unknown),
-	},
-) {}
-
-/**
- * Error thrown when collection sync fails during optimistic action
- */
-export class SyncError extends Schema.TaggedError<SyncError>()("@maple/effect-db/SyncError", {
-	message: Schema.String,
-	txid: Schema.optional(Schema.Number),
-	collectionName: Schema.optional(Schema.String),
-	timeout: Schema.optional(Schema.Number),
 	cause: Schema.optional(Schema.Unknown),
 }) {}
