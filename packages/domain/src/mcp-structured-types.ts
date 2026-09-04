@@ -72,6 +72,8 @@ export interface FindSlowTracesData {
 export interface ErrorTypeRow {
 	fingerprintHash: string
 	label: string
+	/** One occurrence's status message, to tell fingerprints with the same label apart. */
+	sampleMessage: string
 	count: number
 	affectedServicesCount: number
 	lastSeen: string
@@ -79,7 +81,18 @@ export interface ErrorTypeRow {
 
 export interface FindErrorsData {
 	timeRange: { start: string; end: string }
+	/** "all", or "unexpected" when the list was narrowed to policy-violating identities. */
+	identity: string
 	errors: ErrorTypeRow[]
+}
+
+/** The span that failed inside a sampled trace, with the attributes that say what it was doing. */
+export interface ErrorDetailSpanSummary {
+	spanId: string
+	name: string
+	serviceName: string
+	statusMessage: string
+	attributes: Record<string, string>
 }
 
 export interface ErrorDetailTrace {
@@ -90,6 +103,7 @@ export interface ErrorDetailTrace {
 	services: string[]
 	startTime: string
 	errorMessage?: string
+	errorSpan?: ErrorDetailSpanSummary
 	logs: Array<{
 		timestamp: string
 		severityText: string
@@ -661,8 +675,26 @@ export interface ErrorIssueRow {
 	hasOpenIncident: boolean
 }
 
+/** The `compact: true` row — identity, state and volume; no assignment, lease or notes. */
+export interface ErrorIssueCompactRow {
+	id: string
+	kind: string
+	fingerprintHash: string
+	workflowState: string
+	severity: string | null
+	serviceName: string
+	errorLabel: string
+	occurrenceCount: number
+	firstSeenAt: string
+	lastSeenAt: string
+	regressionCount: number
+	lastResolvedAt: string | null
+	hasOpenIncident: boolean
+}
+
 export interface ListErrorIssuesData {
-	issues: ErrorIssueRow[]
+	compact: boolean
+	issues: ErrorIssueRow[] | ErrorIssueCompactRow[]
 	total: number
 }
 

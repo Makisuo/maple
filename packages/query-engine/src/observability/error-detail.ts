@@ -21,6 +21,15 @@ const logRangeAround = (traceStartTime: string): { start_time: string; end_time:
 	}
 }
 
+/** The span that failed, with the handful of attributes that identify what it was doing. */
+export interface ErrorDetailSpan {
+	readonly spanId: string
+	readonly name: string
+	readonly serviceName: string
+	readonly statusMessage: string
+	readonly attributes: Readonly<Record<string, string>>
+}
+
 export interface ErrorDetailTrace {
 	readonly traceId: string
 	readonly rootSpanName: string
@@ -29,7 +38,29 @@ export interface ErrorDetailTrace {
 	readonly services: readonly string[]
 	readonly startTime: string
 	readonly errorMessage: string
+	readonly errorSpan: ErrorDetailSpan | undefined
 	readonly logs: ReadonlyArray<{ timestamp: string; severityText: string; body: string }>
+}
+
+const errorSpanOf = (t: ErrorDetailTracesOutput): ErrorDetailSpan | undefined => {
+	if (!t.errorSpanId) return undefined
+	const attributes: Record<string, string> = {}
+	const attr = (key: string, value: string | undefined) => {
+		if (value) attributes[key] = value
+	}
+	attr("gen_ai.request.model", t.errorModel)
+	attr("gen_ai.tool.name", t.errorToolName)
+	attr("http.request.method", t.errorHttpMethod)
+	attr("http.route", t.errorHttpRoute)
+	attr("query.context", t.errorQueryContext)
+	attr("error.type", t.errorType)
+	return {
+		spanId: t.errorSpanId,
+		name: t.errorSpanName ?? "",
+		serviceName: t.errorServiceName ?? "",
+		statusMessage: t.errorMessage ?? "",
+		attributes,
+	}
 }
 
 export interface ErrorDetailOutput {
@@ -129,6 +160,7 @@ export const errorDetail = Effect.fn("Observability.errorDetail")(function* (inp
 					services: t.services,
 					startTime: t.startTime,
 					errorMessage: t.errorMessage ?? "",
+					errorSpan: errorSpanOf(t),
 					logs: pipe(
 						logsResults[i]?.data ?? [],
 						Arr.take(5),
