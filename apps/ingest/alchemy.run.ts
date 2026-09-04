@@ -20,6 +20,7 @@ import {
 	stageDeploysCollector,
 } from "@maple/infra/aws"
 import type { ReplayBlobCredentials } from "../api/alchemy.run.ts"
+import { issueCertificateViaCloudflare } from "@maple/infra/acm"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import { resolveDeploymentEnvironment } from "@maple/infra/cloudflare"
 // Only the primitives. The grouped helpers in that module return Worker-binding
@@ -376,10 +377,11 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 		// ALB actually lands — CI must set AWS_REGION to the same value, since
 		// that is what `AWS.providers()` places every other resource with.
 		//
-		// Without `hostedZoneId` the provider does not block on issuance, so the
-		// first deploy of a new stage lands the certificate PENDING_VALIDATION;
-		// add the DNS validation record in Cloudflare, then re-run to attach the
-		// listener once ACM reports ISSUED.
+		// `hostedZoneId` is Route53-only and Maple's zone is on Cloudflare, so the
+		// provider does not block on issuance and the certificate lands
+		// PENDING_VALIDATION. `issueCertificateViaCloudflare` below closes that:
+		// it publishes the validation CNAME into the `maple.dev` zone and waits
+		// for ACM to mark the certificate ISSUED.
 		const certificate = domains.ingest
 			? yield* AWS.ACM.Certificate("ingest-cert", {
 					domainName: domains.ingest,
@@ -388,6 +390,20 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 					tags: { Service: "maple-ingest", Region: region },
 				})
 			: undefined
+
+		// The ARN of the ISSUED certificate. Deliberately NOT
+		// `certificate.certificateArn`: consuming this one is what orders the
+		// listener after validation, so the first deploy of a new domain no
+		// longer fails on a certificate ACM has not issued yet.
+		const issuedCertificateArn =
+			certificate && domains.ingest
+				? yield* issueCertificateViaCloudflare({
+						id: "ingest-cert",
+						certificateArn: certificate.certificateArn,
+						hostname: domains.ingest,
+						region: resolveAwsRegion(region),
+					})
+				: undefined
 
 		// The gateway marks its own task scale-in-protected while the WAL holds
 		// backlog (`apps/ingest/src/task_protection.rs`). The ECS agent endpoint it
@@ -541,7 +557,7 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 			// `/health` and the service would never stabilize.
 			port: INGEST_PORT,
 			healthCheckPath: "/health",
-			...(certificate ? { certificateArn: certificate.certificateArn } : undefined),
+			...(issuedCertificateArn ? { certificateArn: issuedCertificateArn } : undefined),
 
 			// `/health` returns a bare 200 with no dependency checks, so it detects a
 			// dead task but not a wedged export lane or a dead Postgres pool. The
@@ -687,13 +703,11 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 			// VPC; surfaced so a preview's logs say where the gateway is pointing.
 			collectorEndpoint,
 			collectorServiceName: collector?.serviceName,
-			// One-time manual DNS, surfaced here so it is discoverable from the
-			// deploy output rather than the AWS console:
-			//   1. the ACM validation CNAME (below) — added once per domain, reused
-			//      for every renewal;
-			//   2. a CNAME for `domains.ingest` at `serviceUrl` (the ALB), proxied.
-			// Both live in the Cloudflare `maple.dev` zone, which this stack does
-			// not otherwise touch.
+			// The validation CNAME is published by the stack now
+			// (`issueCertificateViaCloudflare`); this stays as the record of what
+			// was published, and for diagnosing a certificate stuck short of
+			// ISSUED. The one record still added by hand is a proxied CNAME for
+			// `domains.ingest` at `serviceUrl` (the ALB).
 			certificateValidation: certificate?.domainValidationOptions,
 		}
 	})
