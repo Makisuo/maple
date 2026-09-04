@@ -21,10 +21,19 @@
  *
  * Step 3 is a separate resource rather than part of step 1 because the wait has
  * to happen AFTER the record exists, and an alchemy resource orders itself by
- * the Outputs it consumes: it takes the record's id, so it cannot run early.
+ * the Outputs it consumes: it takes the published record's name, so it cannot
+ * run early.
  *
  * Both are read-only against AWS — they create nothing and delete nothing, so
  * teardown is a no-op and re-running them is free.
+ *
+ * They are nonetheless RESOURCES rather than `Output.mapEffect` transforms over
+ * the certificate's ARN, which is the shorter way to write "await something and
+ * hand on a value" and is the wrong one here. `Plan.ts` resolves an `EffectExpr`
+ * during PLANNING as soon as its upstream is resolved (`resolveOutput`), so
+ * once the certificate exists in state, a plain `alchemy plan` — a dry run that
+ * should touch nothing — would sit inside the ISSUED wait for up to ten
+ * minutes. A resource's `reconcile` runs at apply only.
  */
 import * as acm from "@distilled.cloud/aws/acm"
 import * as AwsRegion from "@distilled.cloud/aws/Region"
@@ -66,10 +75,20 @@ const ISSUED_POLL = Schedule.max([Schedule.fixed("10 seconds"), Schedule.recurs(
 const isTerminalFailure = (status: string | undefined): boolean =>
 	status === "FAILED" || status === "VALIDATION_TIMED_OUT"
 
-export class AcmValidationError extends Schema.TaggedError<AcmValidationError>()("Maple.AcmValidationError", {
-	certificateArn: Schema.String,
-	message: Schema.String,
-}) {}
+/**
+ * Context is `optionalKey` because the two failure sites know different things:
+ * a certificate read has an ARN and no hostname, a zone lookup the reverse.
+ * Carrying a hostname in a field named `certificateArn` would read as an ARN in
+ * every log line that printed it.
+ */
+export class AcmValidationError extends Schema.TaggedError<AcmValidationError>()(
+	"Maple.ACM.ValidationError",
+	{
+		certificateArn: Schema.optionalKey(Schema.String),
+		hostname: Schema.optionalKey(Schema.String),
+		message: Schema.String,
+	},
+) {}
 
 export interface AcmValidationRecordProps {
 	/** The certificate to read. Accepts the `certificateArn` Output of an `AWS.ACM.Certificate`. */
@@ -87,23 +106,25 @@ export interface AcmValidationRecordAttributes {
 }
 
 export type AcmValidationRecord = Resource<
-	"Maple.AcmValidationRecord",
+	"Maple.ACM.ValidationRecord",
 	AcmValidationRecordProps,
 	AcmValidationRecordAttributes
 >
 
-export const AcmValidationRecord = Resource<AcmValidationRecord>("Maple.AcmValidationRecord")
+export const AcmValidationRecord = Resource<AcmValidationRecord>("Maple.ACM.ValidationRecord")
 
 export interface AcmCertificateIssuedProps {
 	certificateArn: string
 	/** The region the certificate was requested in. */
 	region: AwsRegionName
 	/**
-	 * Anything that must exist first — in practice the published
-	 * `Cloudflare.DNS.Record`'s id. Consuming it is what orders this resource
-	 * after the record; the value itself is never read.
+	 * The validation record's name, as published. Never read — it is consumed
+	 * purely to order this resource AFTER the `Cloudflare.DNS.Record`, which is
+	 * how alchemy expresses a dependency: a resource waits for every Output its
+	 * props consume. Naming the published record (rather than an opaque id)
+	 * also puts it in the plan output, where a stuck certificate is diagnosed.
 	 */
-	after: string
+	publishedRecordName: string
 }
 
 export interface AcmCertificateIssuedAttributes {
@@ -112,12 +133,12 @@ export interface AcmCertificateIssuedAttributes {
 }
 
 export type AcmCertificateIssued = Resource<
-	"Maple.AcmCertificateIssued",
+	"Maple.ACM.CertificateIssued",
 	AcmCertificateIssuedProps,
 	AcmCertificateIssuedAttributes
 >
 
-export const AcmCertificateIssued = Resource<AcmCertificateIssued>("Maple.AcmCertificateIssued")
+export const AcmCertificateIssued = Resource<AcmCertificateIssued>("Maple.ACM.CertificateIssued")
 
 /**
  * A certificate lives in one region and must be described there — an ALB can
@@ -138,6 +159,10 @@ const stripTrailingDot = (name: string): string => name.replace(/\.$/, "")
 
 export const AcmValidationRecordProvider = () =>
 	Provider.succeed(AcmValidationRecord, {
+		// Nothing to delete, so `alchemy unsafe nuke` must not try — otherwise it
+		// reports the "deleted but still there" loop alchemy documents for
+		// existence-only resources.
+		nuke: { skip: true },
 		// No `stables`. `certificateArn` mirrors the prop, so it is precisely
 		// what changes when the certificate is REPLACED (a new domain, a new
 		// SAN, a region change) — and a stable attribute's OLD value is what
@@ -186,7 +211,7 @@ export const AcmValidationRecordProvider = () =>
 					return Effect.succeed(first)
 				}),
 				Effect.retry({
-					while: (error) => error._tag === "Maple.AcmValidationError",
+					while: (error) => error._tag === "Maple.ACM.ValidationError",
 					schedule: RECORD_POLL,
 				}),
 			)
@@ -200,6 +225,7 @@ export const AcmValidationRecordProvider = () =>
 
 export const AcmCertificateIssuedProvider = () =>
 	Provider.succeed(AcmCertificateIssued, {
+		nuke: { skip: true },
 		// No `stables` — see `AcmValidationRecordProvider`.
 		list: () => Effect.succeed([]),
 		delete: () => Effect.void,
@@ -226,7 +252,7 @@ export const AcmCertificateIssuedProvider = () =>
 					)
 				}),
 				Effect.retry({
-					while: (error) => error._tag === "Maple.AcmValidationError",
+					while: (error) => error._tag === "Maple.ACM.ValidationError",
 					schedule: ISSUED_POLL,
 				}),
 			)
@@ -281,7 +307,7 @@ export const issueCertificateViaCloudflare = Effect.fn(function* ({
 			// oxlint-disable-next-line maple/no-effect-die -- stack wiring invariant, see above
 			Effect.die(
 				new AcmValidationError({
-					certificateArn: hostname,
+					hostname,
 					message: `no Cloudflare zone for ${hostname}: ${cause.message}`,
 				}),
 			),
@@ -309,7 +335,7 @@ export const issueCertificateViaCloudflare = Effect.fn(function* ({
 	const issued = yield* AcmCertificateIssued(`${id}-issued`, {
 		certificateArn,
 		region,
-		after: record.recordId,
+		publishedRecordName: record.name,
 	})
 
 	return issued.certificateArn
