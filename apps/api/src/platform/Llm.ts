@@ -184,10 +184,16 @@ const withUsageAccounting = (model: LanguageModel): LanguageModel =>
 const MODEL_LIMITS: Record<string, { readonly context: number; readonly output: number }> = {
 	// Verified against OpenRouter's public model catalogue.
 	"openai/gpt-5.6-luna": { context: 1_050_000, output: 128_000 },
-	// Context set from the operator-supplied figure, not the catalogue. Output is not stated with
-	// it, so it stays at the conservative default; raise it with `MAPLE_TRIAGE_MODEL_OUTPUT` if
-	// completions are being cut short.
-	"z-ai/glm-5.3-flash:nitro": { context: 130_000, output: 8_000 },
+	// Verified against OpenRouter's public model catalogue: context_length 1_310_720,
+	// top_provider.max_completion_tokens 131_072. The prior 130_000/8_000 pair was an
+	// operator-supplied guess, off by ~10x on context — it made `isNearContextLimit` trip
+	// far earlier than the model can actually take, so investigations with long tool-call
+	// transcripts were hitting `dropOldestToolStep` repeatedly, and each drop invalidates
+	// OpenRouter's implicit-prefix cache for the rest of the turn (this route gets no
+	// explicit cache breakpoints — see `chat/loop/context.ts`). Kept a notch under the
+	// catalogue numbers rather than exactly at them, same conservative-margin reasoning as
+	// the other rows here.
+	"z-ai/glm-5.3-flash:nitro": { context: 1_000_000, output: 128_000 },
 	// Moonshot's own `kimi-k2.6` is 262_144, but Cloudflare does not publish the window its Workers
 	// AI deployment actually serves, and a serving deployment is usually narrower than upstream's
 	// maximum. Held at the conservative default until someone measures it; override with

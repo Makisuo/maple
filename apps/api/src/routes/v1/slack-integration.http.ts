@@ -2,7 +2,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { Effect, Option, Redacted, Schema } from "effect"
 import { timingSafeEqual } from "node:crypto"
 import { SlackBotResolutionResponseSchema } from "@maple/domain/http"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { Env } from "@/platform/Env"
 import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import {
@@ -365,7 +365,8 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 						// org, and logs-not-throws on an Autumn rejection), so this endpoint
 						// deliberately cannot confirm that usage was recorded.
 						const env = Option.getOrUndefined(workerEnv)
-						const forwarded = env !== undefined && (usage.inputTokens > 0 || usage.outputTokens > 0)
+						const forwarded =
+							env !== undefined && (usage.inputTokens > 0 || usage.outputTokens > 0)
 						if (forwarded) {
 							yield* Effect.tryPromise(() =>
 								trackTokenUsage(env, {

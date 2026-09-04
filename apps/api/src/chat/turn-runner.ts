@@ -27,7 +27,7 @@ import {
 	type ChatMessage,
 	type ChatTurnTenantEncoded,
 } from "@maple/domain/chat-session"
-import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/effect-cloudflare"
+import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/infra/worker-runtime"
 import { LLM, Message, type LanguageModel, type LLMClientService } from "@opencode-ai/ai"
 import { Cause, Effect, Layer, ManagedRuntime, Option, Schema, Stream } from "effect"
 import type { ChatSession } from "./ChatSession"

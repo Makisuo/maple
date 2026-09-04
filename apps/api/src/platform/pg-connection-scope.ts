@@ -5,7 +5,7 @@ import {
 	wrapMaplePgClient,
 } from "@maple/db/client"
 import { trackOutboundSlot } from "@maple/cache"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { Context, Effect, Schema } from "effect"
 import type { HttpMiddleware } from "effect/unstable/http"
 import type { DatabaseClient, DatabaseError } from "./DatabaseLive"

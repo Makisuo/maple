@@ -3,7 +3,7 @@
 // is no caller that could answer a missing or malformed env var differently, and
 // a worker that boots with one is worse than one that refuses to boot. Each is a
 // tagged `EnvValidationError` so the crash names the variable.
-import { optionalRedacted, optionalString, stringWithDefault } from "@maple/effect-cloudflare/config-helpers"
+import { optionalRedacted, optionalString, stringWithDefault } from "@maple/infra/config-helpers"
 import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 
 /** Fatal misconfiguration discovered at startup — surfaces as a tagged defect in the Cause. */

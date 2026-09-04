@@ -40,7 +40,11 @@ export const deriveContainerAttributes = (probe: ContainerProbe): Record<string,
 	const inDocker = trySyncOrUndefined(() => probe.exists("/.dockerenv")) ?? false
 
 	const attrs: Record<string, string> = {}
-	if (inDocker) attrs["container.runtime"] = "docker"
+	// `container.runtime.name` since semconv v1.37.0; the bare `container.runtime`
+	// it replaced is not emitted, because every read path coalesces both
+	// spellings anyway (`containerRuntimeExpr`) for the sake of third-party
+	// collectors that still send the old one.
+	if (inDocker) attrs["container.runtime.name"] = "docker"
 
 	// Lazy fallback chain — this runs at every SDK boot (customer processes),
 	// and mountinfo can run to hundreds of KB, so later probes only fire when

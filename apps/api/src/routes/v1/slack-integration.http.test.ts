@@ -2,7 +2,7 @@ import { createCipheriv, randomBytes } from "node:crypto"
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
-import { layerFromEnvRecord } from "@maple/effect-cloudflare/worker-environment"
+import { layerFromEnvRecord } from "@maple/infra/worker-runtime"
 import { Env } from "@/platform/Env"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
@@ -609,10 +609,7 @@ describe("SlackInternalRouter (usage)", () => {
 				}),
 				AUTUMN_ENV,
 			)
-		}).pipe(
-			Effect.provide(testDb.layer),
-			Effect.ensuring(Effect.sync(() => autumn.restore())),
-		)
+		}).pipe(Effect.provide(testDb.layer), Effect.ensuring(Effect.sync(() => autumn.restore())))
 	})
 
 	it.effect("returns 404 for an unknown team without touching Autumn", () => {
@@ -724,10 +721,7 @@ describe("SlackInternalRouter (usage)", () => {
 					assert.strictEqual(autumn.calls.length, 0)
 				}),
 			)
-		}).pipe(
-			Effect.provide(testDb.layer),
-			Effect.ensuring(Effect.sync(() => autumn.restore())),
-		)
+		}).pipe(Effect.provide(testDb.layer), Effect.ensuring(Effect.sync(() => autumn.restore())))
 	})
 
 	it.effect("accepts an all-zero report but does not post to Autumn", () => {
@@ -761,9 +755,6 @@ describe("SlackInternalRouter (usage)", () => {
 				}),
 				AUTUMN_ENV,
 			)
-		}).pipe(
-			Effect.provide(testDb.layer),
-			Effect.ensuring(Effect.sync(() => autumn.restore())),
-		)
+		}).pipe(Effect.provide(testDb.layer), Effect.ensuring(Effect.sync(() => autumn.restore())))
 	})
 })

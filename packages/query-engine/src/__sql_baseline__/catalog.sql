@@ -45,7 +45,7 @@ SELECT
         GROUP BY hostName) AS hosts
         FORMAT JSON
 
--- builder:containers:containerDetailSummaryQuery:default  [6063da9a]
+-- builder:containers:containerDetailSummaryQuery:default  [58383940]
 SELECT
           ResourceAttributes['container.name'] AS containerName,
           any(ResourceAttributes['host.name']) AS hostName,
@@ -53,7 +53,7 @@ SELECT
           any(ResourceAttributes['container.image.name']) AS imageName,
           any(ResourceAttributes['compose.project']) AS composeProject,
           any(ResourceAttributes['compose.service']) AS composeService,
-          any(ResourceAttributes['container.runtime']) AS runtime,
+          any(coalesce(nullIf(ResourceAttributes['container.runtime.name'], ''), ResourceAttributes['container.runtime'])) AS runtime,
           min(TimeUnix) AS firstSeen,
           max(TimeUnix) AS lastSeen,
           ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,
@@ -250,7 +250,7 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- builder:containers:listContainersQuery:default  [fe84ad79]
+-- builder:containers:listContainersQuery:default  [df58f91f]
 SELECT
           containerName AS containerName,
           hostName AS hostName,
@@ -275,7 +275,7 @@ SELECT
           any(ResourceAttributes['container.image.name']) AS imageName,
           any(ResourceAttributes['compose.project']) AS composeProject,
           any(ResourceAttributes['compose.service']) AS composeService,
-          any(ResourceAttributes['container.runtime']) AS runtime,
+          any(coalesce(nullIf(ResourceAttributes['container.runtime.name'], ''), ResourceAttributes['container.runtime'])) AS runtime,
           any(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment'])) AS environment,
           max(TimeUnix) AS lastSeen,
           ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,
@@ -298,7 +298,7 @@ SELECT
         OFFSET 0
         FORMAT JSON
 
--- builder:containers:listContainersQuery:filtered  [75408df7]
+-- builder:containers:listContainersQuery:filtered  [16c1f98d]
 SELECT
           containerName AS containerName,
           hostName AS hostName,
@@ -323,7 +323,7 @@ SELECT
           any(ResourceAttributes['container.image.name']) AS imageName,
           any(ResourceAttributes['compose.project']) AS composeProject,
           any(ResourceAttributes['compose.service']) AS composeService,
-          any(ResourceAttributes['container.runtime']) AS runtime,
+          any(coalesce(nullIf(ResourceAttributes['container.runtime.name'], ''), ResourceAttributes['container.runtime'])) AS runtime,
           any(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment'])) AS environment,
           max(TimeUnix) AS lastSeen,
           ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,
@@ -351,7 +351,7 @@ SELECT
         OFFSET 0
         FORMAT JSON
 
--- builder:containers:listContainersQuery:scoped  [41805227]
+-- builder:containers:listContainersQuery:scoped  [34d4c009]
 SELECT
           containerName AS containerName,
           hostName AS hostName,
@@ -376,7 +376,7 @@ SELECT
           any(ResourceAttributes['container.image.name']) AS imageName,
           any(ResourceAttributes['compose.project']) AS composeProject,
           any(ResourceAttributes['compose.service']) AS composeService,
-          any(ResourceAttributes['container.runtime']) AS runtime,
+          any(coalesce(nullIf(ResourceAttributes['container.runtime.name'], ''), ResourceAttributes['container.runtime'])) AS runtime,
           any(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment'])) AS environment,
           max(TimeUnix) AS lastSeen,
           ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,

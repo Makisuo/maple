@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { layerFromEnvRecord } from "@maple/effect-cloudflare"
+import { layerFromEnvRecord } from "@maple/infra/worker-runtime"
 import { sql } from "drizzle-orm"
 import { Cause, Effect, Exit, Layer, Tracer } from "effect"
 import { Database, type DatabaseClient } from "./DatabaseLive"

@@ -30,7 +30,7 @@ import {
 	orgIdFromChatSessionId,
 	type ChatTurnTenantEncoded,
 } from "@maple/domain/chat-session"
-import { WorkerEnvironment } from "@maple/effect-cloudflare"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { Effect, Option, Schema, Stream } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { chatSessionStub, type ChatSessionStub } from "@/chat/session"

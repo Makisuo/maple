@@ -1,7 +1,7 @@
 import type { MessageBatch } from "@cloudflare/workers-types"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
-import { WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-cloudflare"
+import { WorkerConfigProviderLayer, workerEnvironmentLayer } from "@maple/infra/worker-runtime"
 import { Cause, Effect, Layer, Option } from "effect"
 import { layerPg } from "@/platform/DatabasePgLive"
 import { Env } from "@/platform/Env"
@@ -39,8 +39,8 @@ const telemetry = MapleCloudflareSDK.make({
 export const buildVcsSyncLayer = (_env: Record<string, unknown>) => {
 	const ConfigLive = WorkerConfigProviderLayer
 	const EnvLive = Env.layer.pipe(Layer.provide(ConfigLive))
-	const DatabaseLive = layerPg.pipe(Layer.provide(WorkerEnvironment.layer))
-	const Base = Layer.mergeAll(EnvLive, DatabaseLive, WorkerEnvironment.layer)
+	const DatabaseLive = layerPg.pipe(Layer.provide(workerEnvironmentLayer))
+	const Base = Layer.mergeAll(EnvLive, DatabaseLive, workerEnvironmentLayer)
 
 	const VcsRepositoryLive = VcsRepository.layer.pipe(Layer.provide(Base))
 	const GithubAppClientLive = GithubAppClient.layer.pipe(
@@ -50,7 +50,7 @@ export const buildVcsSyncLayer = (_env: Record<string, unknown>) => {
 		Layer.provide(Layer.mergeAll(EnvLive, GithubAppClientLive)),
 	)
 	const VcsProviderRegistryLive = VcsProviderRegistry.layer.pipe(Layer.provide(GithubProviderLive))
-	const VcsSyncQueueLive = VcsSyncQueue.layer.pipe(Layer.provide(WorkerEnvironment.layer))
+	const VcsSyncQueueLive = VcsSyncQueue.layer.pipe(Layer.provide(workerEnvironmentLayer))
 	// The issue side of a pull-request webhook. Only the queue consumer needs it —
 	// the scheduled producer below never sees a PR event — so it is built here
 	// rather than in `Base`, keeping the cron layer as light as it was.
@@ -85,7 +85,7 @@ export const buildVcsSyncLayer = (_env: Record<string, unknown>) => {
 	// `withPgConnectionScope` can resolve the `MAPLE_DB` binding when it opens
 	// the batch's single Postgres socket.
 	return VcsSyncServiceLive.pipe(
-		Layer.provideMerge(WorkerEnvironment.layer),
+		Layer.provideMerge(workerEnvironmentLayer),
 		Layer.provideMerge(telemetry.layer),
 		Layer.provideMerge(ConfigLive),
 	)
@@ -97,17 +97,17 @@ export const buildVcsSyncLayer = (_env: Record<string, unknown>) => {
 export const buildVcsScheduledLayer = (_env: Record<string, unknown>) => {
 	const ConfigLive = WorkerConfigProviderLayer
 	const EnvLive = Env.layer.pipe(Layer.provide(ConfigLive))
-	const DatabaseLive = layerPg.pipe(Layer.provide(WorkerEnvironment.layer))
-	const Base = Layer.mergeAll(EnvLive, DatabaseLive, WorkerEnvironment.layer)
+	const DatabaseLive = layerPg.pipe(Layer.provide(workerEnvironmentLayer))
+	const Base = Layer.mergeAll(EnvLive, DatabaseLive, workerEnvironmentLayer)
 
 	const VcsRepositoryLive = VcsRepository.layer.pipe(Layer.provide(Base))
-	const VcsSyncQueueLive = VcsSyncQueue.layer.pipe(Layer.provide(WorkerEnvironment.layer))
+	const VcsSyncQueueLive = VcsSyncQueue.layer.pipe(Layer.provide(workerEnvironmentLayer))
 	const VcsScheduledSyncServiceLive = VcsScheduledSyncService.layer.pipe(
 		Layer.provide(Layer.mergeAll(VcsRepositoryLive, VcsSyncQueueLive)),
 	)
 
 	return VcsScheduledSyncServiceLive.pipe(
-		Layer.provideMerge(WorkerEnvironment.layer),
+		Layer.provideMerge(workerEnvironmentLayer),
 		Layer.provideMerge(telemetry.layer),
 		Layer.provideMerge(ConfigLive),
 	)
@@ -118,10 +118,10 @@ export const buildVcsScheduledLayer = (_env: Record<string, unknown>) => {
 // PlanetScale discovery/OAuth dependencies.
 export const buildScrapeRetentionLayer = (_env: Record<string, unknown>) => {
 	const ConfigLive = WorkerConfigProviderLayer
-	const DatabaseLive = layerPg.pipe(Layer.provide(WorkerEnvironment.layer))
+	const DatabaseLive = layerPg.pipe(Layer.provide(workerEnvironmentLayer))
 
 	return DatabaseLive.pipe(
-		Layer.provideMerge(WorkerEnvironment.layer),
+		Layer.provideMerge(workerEnvironmentLayer),
 		Layer.provideMerge(telemetry.layer),
 		Layer.provideMerge(ConfigLive),
 	)

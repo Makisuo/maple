@@ -16,6 +16,7 @@ import {
 } from "@/components/filters/filter-sidebar"
 import { RangeFilterSection, type RangePreset } from "@maple/ui/components/filters/range-filter-section"
 import { Separator } from "@maple/ui/components/ui/separator"
+import { vendorIcon } from "@/lib/agent-sessions/vendor-icon"
 import { vendorLabel } from "@/lib/agent-sessions/vendor-label"
 import { shortTarget } from "@/lib/agent-sessions/span-filters"
 import {
@@ -145,6 +146,7 @@ export function AgentSessionsFilterSidebar({ facetsResult }: AgentSessionsFilter
 							selected={search.vendors ?? []}
 							onChange={(vals) => setList("vendors", vals)}
 							getOptionLabel={vendorLabel}
+							getOptionIcon={vendorIcon}
 						/>
 
 						<SearchableFilterSection

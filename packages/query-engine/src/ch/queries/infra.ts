@@ -16,7 +16,7 @@ import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { MetricsGauge, MetricsSum } from "../tables"
-import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
+import { containerRuntimeExpr, deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { avgIfOrZero, facetAttrExpr, maxIfOrZero, type FacetOutput } from "./query-helpers"
 
 const HOSTMETRIC_NAMES = [
@@ -846,7 +846,7 @@ export function nodeDetailSummaryQuery(opts: NodeDetailSummaryOpts) {
 			nodeName: $.ResourceAttributes.get("k8s.node.name"),
 			nodeUid: CH.any_($.ResourceAttributes.get("k8s.node.uid")),
 			kubeletVersion: CH.any_($.ResourceAttributes.get("k8s.kubelet.version")),
-			containerRuntime: CH.any_($.ResourceAttributes.get("container.runtime")),
+			containerRuntime: CH.any_(containerRuntimeExpr($.ResourceAttributes)),
 			firstSeen: CH.min_($.TimeUnix),
 			lastSeen: CH.max_($.TimeUnix),
 			cpuUsage: avgIfOrZero($.Value, $.MetricName.eq("k8s.node.cpu.usage")),

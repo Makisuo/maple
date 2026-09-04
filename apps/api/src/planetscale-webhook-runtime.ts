@@ -1,7 +1,7 @@
 import type { MessageBatch } from "@cloudflare/workers-types"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
-import { WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-cloudflare"
+import { WorkerConfigProviderLayer, workerEnvironmentLayer } from "@maple/infra/worker-runtime"
 import { Effect, Layer, Schema } from "effect"
 import { layerPg } from "@/platform/DatabasePgLive"
 import type { Database, DatabaseError } from "@/platform/DatabaseLive"
@@ -22,10 +22,10 @@ const telemetry = MapleCloudflareSDK.make({
 })
 
 export const buildPlanetScaleWebhookLayer = (_env: Record<string, unknown>) => {
-	const DatabaseLive = layerPg.pipe(Layer.provide(WorkerEnvironment.layer))
+	const DatabaseLive = layerPg.pipe(Layer.provide(workerEnvironmentLayer))
 	return DatabaseLive.pipe(
 		Layer.provideMerge(telemetry.layer),
-		Layer.provideMerge(WorkerEnvironment.layer),
+		Layer.provideMerge(workerEnvironmentLayer),
 		Layer.provideMerge(WorkerConfigProviderLayer),
 	)
 }

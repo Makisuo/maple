@@ -408,8 +408,8 @@ export function serviceOverviewWhereConditions(
 	const services = inclusionValues(opts.serviceName, opts.serviceNames)
 	const conditions: Array<CH.Condition | undefined> = [
 		$.OrgId.eq(param.string("orgId")),
-		$.Timestamp.gte(param.dateTimeString("startTime")),
-		$.Timestamp.lte(param.dateTimeString("endTime")),
+		$.Timestamp.gte(param.dateTimeSeconds("startTime")),
+		$.Timestamp.lte(param.dateTimeSeconds("endTime")),
 		CH.when(services, (v: readonly string[]) =>
 			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),
@@ -514,10 +514,10 @@ export function tracesAggregatesWhereConditions(
 		$.OrgId.eq(param.string("orgId")),
 		hourBounds
 			? $.Hour.gte(CH.rawExpr(hourBounds.gte, T.dateTimeString))
-			: $.Hour.gte(param.dateTimeString("startTime")),
+			: $.Hour.gte(param.dateTimeSeconds("startTime")),
 		hourBounds
 			? $.Hour.lt(CH.rawExpr(hourBounds.lt, T.dateTimeString))
-			: $.Hour.lte(param.dateTimeString("endTime")),
+			: $.Hour.lte(param.dateTimeSeconds("endTime")),
 		CH.when(services, (v: readonly string[]) =>
 			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),
