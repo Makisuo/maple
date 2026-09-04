@@ -104,6 +104,12 @@ export const withRequestRuntime = <R, Env extends Record<string, unknown>, Ctx e
  * draining the scheduler first and registering the whole thing with
  * `ctx.waitUntil`. Rethrows so the CF runtime reports the failure.
  *
+ * `onSettled` runs once the runtime is disposed, inside the same `waitUntil`
+ * registration — for the telemetry flush every handler owes at the end of an
+ * invocation. Registering it here rather than in a caller's `finally` keeps it
+ * inside a `waitUntil` the platform has already accepted, and keeps the flush
+ * after dispose, where the last spans have been emitted.
+ *
  * `onInterrupt` decides what an interrupt-only exit (isolate teardown mid-run)
  * looks like to the caller:
  * - `"reject"` (default): rethrow, so the CF runtime reports the invocation as
@@ -117,7 +123,10 @@ export const runScheduledEffect = <A, E, R>(
 	layer: Layer.Layer<R, unknown, never>,
 	program: Effect.Effect<A, E, R>,
 	ctx: ExecutionContextLike,
-	options?: { readonly onInterrupt?: "reject" | "graceful" },
+	options?: {
+		readonly onInterrupt?: "reject" | "graceful"
+		readonly onSettled?: () => Promise<void>
+	},
 ): Promise<A | undefined> => {
 	const runtime = ManagedRuntime.make(layer)
 	const done = runtime
@@ -134,6 +143,9 @@ export const runScheduledEffect = <A, E, R>(
 			await drainScheduler()
 			await runtime.dispose().catch((err) => {
 				console.error("[worker-runtime] scheduled runtime dispose failed:", err)
+			})
+			await options?.onSettled?.().catch((err) => {
+				console.error("[worker-runtime] scheduled onSettled failed:", err)
 			})
 		})
 	ctx.waitUntil(done.catch(() => undefined))
