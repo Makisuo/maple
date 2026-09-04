@@ -43,6 +43,7 @@ import { HttpV2OrganizationLive } from "./organization.http"
 import { HttpV2InstrumentationRecommendationsLive } from "./recommendations.http"
 import { HttpV2AuditLogLive } from "./audit-log.http"
 import { AuditLogService } from "@/services/audit/AuditLogService"
+import { OrgMembersService } from "@/services/org/OrgMembersService"
 import { HttpV2ScrapeTargetsLive } from "./scrape-targets.http"
 import { HttpV2SessionReplaysLive } from "./session-replays.http"
 import { HttpV2InstrumentationAuditLive } from "./setup-audit.http"
@@ -66,6 +67,15 @@ import { HttpV2WidgetCredentialsLive } from "./widget-credentials.http"
  * the groups it does not exercise.
  */
 
+/**
+ * An empty workspace directory: the audit log falls back to rendering ids,
+ * which is the same shape a self-hosted deployment without Clerk sees.
+ */
+export const OrgMembersServiceStubLayer = Layer.succeed(OrgMembersService, {
+	listMembers: () => Effect.succeed([]),
+	resolveMembers: () => Effect.succeed([]),
+})
+
 export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2ApiKeysLive,
 	HttpV2SlackIntegrationsLive,
@@ -78,8 +88,12 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2IngestKeysLive,
 	HttpV2ErrorIssuesLive,
 	HttpV2AttributeMappingsLive,
-	// Real service, no stub: it needs only the Database every harness already provides.
-	HttpV2AuditLogLive.pipe(Layer.provide(AuditLogService.layerMemory)),
+	// Real service, no stub: it needs only the Database every harness already
+	// provides. The member directory IS stubbed — the route asks it for display
+	// names, and every harness would otherwise reach for Clerk.
+	HttpV2AuditLogLive.pipe(
+		Layer.provide(Layer.merge(AuditLogService.layerMemory, OrgMembersServiceStubLayer)),
+	),
 	HttpV2ScrapeTargetsLive,
 	HttpV2InstrumentationRecommendationsLive,
 	HttpV2InstrumentationAuditLive,

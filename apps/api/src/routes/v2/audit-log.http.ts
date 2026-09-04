@@ -1,6 +1,6 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant } from "@maple/domain/http"
-import { ActorId, ApiKeyId, UserId } from "@maple/domain/primitives"
+import { ActorId, ApiKeyId, OrgId, UserId } from "@maple/domain/primitives"
 import {
 	decodePublicId,
 	encodePublicId,
@@ -15,10 +15,17 @@ import type { V2AuditLogEntry } from "@maple/domain/http/v2"
 import type { AuditLogEntry } from "@/services/audit/audit-event"
 import { Effect, Option, Schema } from "effect"
 import { AuditLogService } from "@/services/audit/AuditLogService"
+import { OrgMembersService } from "@/services/org/OrgMembersService"
 import { requireAdmin } from "@/services/auth/auth"
 import type { AuditLogListFilters } from "@/services/audit/AuditLogService"
 
 const adminOnly = () => V2InsufficientPermissions.make("Only org admins can read the audit log")
+
+/** No directory, no names — the entries still carry every id they were written with. */
+const unnamed = (cause: unknown) =>
+	Effect.logWarning("Audit log: member directory unavailable; entries keep their ids", {
+		cause,
+	}).pipe(Effect.as(new Map<string, string>()))
 
 const decodeApiKeyIdOption = Schema.decodeUnknownOption(ApiKeyId)
 const decodeActorIdOption = Schema.decodeUnknownOption(ActorId)
@@ -69,7 +76,29 @@ const publicActorId = (row: AuditLogEntry): string | null => {
 	}
 }
 
-const toV2AuditLogEntry = (row: AuditLogEntry): V2AuditLogEntry => ({
+/**
+ * The name to show for one entry: the label frozen at write time when there is
+ * one, else the current directory name for the acting user, else nothing —
+ * which renders as the id the entry already carries.
+ */
+export const actorDisplayName = (
+	row: Pick<AuditLogEntry, "actorLabel" | "userId">,
+	names: ReadonlyMap<string, string>,
+): string | null => row.actorLabel ?? (row.userId === null ? null : (names.get(row.userId) ?? null))
+
+/**
+ * Name the humans. An API key freezes its name into `actorLabel` when the entry
+ * is written, which is what an audit trail wants — the name the credential had
+ * at the time. A dashboard session has nothing to freeze: Clerk's claims carry
+ * no name, and resolving one per write would put a directory call on every
+ * telemetry read. So user rows are labelled here, from the directory as it
+ * stands, and an id that no longer belongs to a member simply keeps showing as
+ * an id.
+ */
+const toV2AuditLogEntry = (
+	row: AuditLogEntry,
+	names: ReadonlyMap<string, string>,
+): V2AuditLogEntry => ({
 	id: row.id,
 	object: "audit_log_entry",
 	action: row.action,
@@ -77,7 +106,7 @@ const toV2AuditLogEntry = (row: AuditLogEntry): V2AuditLogEntry => ({
 	denial_reason: row.denialReason,
 	actor_type: row.actorType,
 	actor_id: publicActorId(row),
-	actor_name: row.actorLabel,
+	actor_name: actorDisplayName(row, names),
 	affected_user: row.affectedUserId,
 	source: row.source,
 	resource_type: row.resourceType,
@@ -94,6 +123,29 @@ const toV2AuditLogEntry = (row: AuditLogEntry): V2AuditLogEntry => ({
 export const HttpV2AuditLogLive = HttpApiBuilder.group(MapleApiV2, "auditLog", (handlers) =>
 	Effect.gen(function* () {
 		const audit = yield* AuditLogService
+		const members = yield* OrgMembersService
+
+		/**
+		 * Display names for the user ids on one page, or none at all: a directory
+		 * that is unconfigured (self-hosted without Clerk) or briefly unavailable
+		 * must never turn reading the audit log into an error. Ids still render.
+		 *
+		 * `catch` + `catchDefect` rather than `catchCause`, which would also
+		 * swallow the interrupt that tears this request down.
+		 */
+		const displayNames = (orgId: OrgId) =>
+			members.listMembers(orgId).pipe(
+				Effect.map(
+					(all) =>
+						new Map(
+							all.flatMap((member) =>
+								member.name === null ? [] : [[member.userId, member.name] as const],
+							),
+						),
+				),
+				Effect.catch((error) => unnamed(error)),
+				Effect.catchDefect((defect) => unnamed(defect)),
+			)
 
 		return handlers.handle("list", ({ query }) =>
 			Effect.gen(function* () {
@@ -135,7 +187,15 @@ export const HttpV2AuditLogLive = HttpApiBuilder.group(MapleApiV2, "auditLog", (
 							limit,
 							offset,
 						})
-						.pipe(Effect.map((rows) => rows.map(toV2AuditLogEntry))),
+						.pipe(
+							Effect.flatMap((rows) =>
+								rows.length === 0
+									? Effect.succeed([])
+									: displayNames(tenant.orgId).pipe(
+											Effect.map((names) => rows.map((row) => toV2AuditLogEntry(row, names))),
+										),
+							),
+						),
 				)
 				return { object: "list" as const, ...page }
 			}),

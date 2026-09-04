@@ -110,6 +110,26 @@ describe("auditAttribution", () => {
 		})
 	})
 
+	it("freezes the API key's name onto the entry", () => {
+		const apiKeyId = Schema.decodeUnknownSync(Schema.String)("key_1")
+		expect(
+			auditAttribution(
+				{ orgId: ORG, userId: USER },
+				{ type: "api_key", apiKeyId: apiKeyId as never, label: "Deploy bot", source: "api" },
+			),
+		).toEqual({
+			actor: { type: "api_key", userId: USER, apiKeyId, label: "Deploy bot" },
+			source: "api",
+		})
+	})
+
+	it("leaves a dashboard session unlabelled — its name is resolved when the log is read", () => {
+		expect(auditAttribution({ orgId: ORG, userId: USER }, { type: "user", source: "dashboard" })).toEqual({
+			actor: { type: "user", userId: USER },
+			source: "dashboard",
+		})
+	})
+
 	it("keeps a system token as system regardless of the tenant", () => {
 		expect(auditAttribution({ orgId: ORG, userId: USER }, { type: "system", source: "system" })).toEqual({
 			actor: { type: "system" },

@@ -44,6 +44,8 @@ export interface ApiDenialInput {
 	readonly orgId: OrgId
 	readonly userId: UserId
 	readonly apiKeyId: ApiKeyId
+	/** The key's name, frozen onto the entry — a refused key is often revoked next. */
+	readonly apiKeyName: string
 	readonly denialReason: string
 }
 
@@ -75,6 +77,7 @@ export const recordApiDenial = (
 				type: "api_key",
 				userId: input.userId,
 				apiKeyId: input.apiKeyId,
+				label: input.apiKeyName,
 			},
 			source: "api",
 			action: "api.request",

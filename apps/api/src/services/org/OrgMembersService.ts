@@ -22,6 +22,17 @@ export interface OrgMembersServiceApi {
 	 * Fails when any id is not a member of the org, or when member resolution
 	 * is unavailable (self-hosted mode without Clerk).
 	 */
+	/**
+	 * Every member of the org. Unlike {@link resolveMembers} this answers for
+	 * the directory as it is now, so a caller labelling historical records gets
+	 * the members it can name and nothing for ids that have since left.
+	 */
+	readonly listMembers: (
+		orgId: OrgId,
+	) => Effect.Effect<
+		ReadonlyArray<OrgMember>,
+		AlertMemberDirectoryNotConfiguredError | AlertMemberDirectoryUnavailableError
+	>
 	readonly resolveMembers: (
 		orgId: OrgId,
 		userIds: ReadonlyArray<UserId>,
@@ -119,7 +130,7 @@ const make = Effect.gen(function* () {
 		return resolved
 	})
 
-	return { resolveMembers } satisfies OrgMembersServiceApi
+	return { listMembers, resolveMembers } satisfies OrgMembersServiceApi
 })
 
 export class OrgMembersService extends Context.Service<OrgMembersService, OrgMembersServiceApi>()(

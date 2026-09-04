@@ -72,6 +72,7 @@ export const auditAttribution = (tenant: AuditTenant, info: AuditActorInfo | und
 			type: info?.type ?? "user",
 			userId: tenant.userId,
 			...(info?.apiKeyId !== undefined ? { apiKeyId: info.apiKeyId } : undefined),
+			...(info?.label !== undefined ? { label: info.label } : undefined),
 		},
 		source: info?.source ?? "dashboard",
 	}

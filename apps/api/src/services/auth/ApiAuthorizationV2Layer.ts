@@ -106,6 +106,7 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 								orgId: resolved.orgId,
 								userId: resolved.userId,
 								apiKeyId: resolved.keyId,
+								apiKeyName: resolved.name,
 								denialReason,
 							})
 						// Deny-list, not an allow-list: `mcp` keys are minted through a
@@ -203,12 +204,18 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 							Effect.provideService(CurrentAuditActor, {
 								type: "api_key",
 								apiKeyId: resolved.keyId,
+								label: resolved.name,
 								source: "api",
 							}),
 							// Telemetry and replay reads are recorded (see `AuditedRead`).
 							withAuditedRead(audit, request, options, {
 								orgId: resolved.orgId,
-								actor: { type: "api_key", userId: resolved.userId, apiKeyId: resolved.keyId },
+								actor: {
+									type: "api_key",
+									userId: resolved.userId,
+									apiKeyId: resolved.keyId,
+									label: resolved.name,
+								},
 								source: "api",
 							}),
 						)

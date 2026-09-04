@@ -12,6 +12,13 @@ export interface AuditActorInfo {
 	/** `system` is Maple itself acting through an internal service token. */
 	readonly type: "user" | "api_key" | "system"
 	readonly apiKeyId?: ApiKeyId
+	/**
+	 * A display name for the credential, frozen into the entry. Set for API
+	 * keys, whose name is already on the row auth resolved; a dashboard session
+	 * has no name to carry (Clerk's claims hold none), so those entries are
+	 * labelled when the log is read.
+	 */
+	readonly label?: string
 	/** The surface the request arrived through, recorded as the entry's `source`. */
 	readonly source: AuditLogSource
 }

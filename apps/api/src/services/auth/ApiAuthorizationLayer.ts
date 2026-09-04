@@ -56,6 +56,7 @@ export const ApiAuthorizationLayer = Layer.effect(
 								orgId: resolved.orgId,
 								userId: resolved.userId,
 								apiKeyId: resolved.keyId,
+								apiKeyName: resolved.name,
 								denialReason,
 							})
 						if (resolved.kind !== "standard") {
@@ -86,11 +87,17 @@ export const ApiAuthorizationLayer = Layer.effect(
 							Effect.provideService(CurrentAuditActor, {
 								type: "api_key",
 								apiKeyId: resolved.keyId,
+								label: resolved.name,
 								source: "api",
 							}),
 							withAuditedRead(audit, request, options, {
 								orgId: resolved.orgId,
-								actor: { type: "api_key", userId: resolved.userId, apiKeyId: resolved.keyId },
+								actor: {
+									type: "api_key",
+									userId: resolved.userId,
+									apiKeyId: resolved.keyId,
+									label: resolved.name,
+								},
 								source: "api",
 							}),
 						)

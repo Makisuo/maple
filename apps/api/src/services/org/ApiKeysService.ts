@@ -26,6 +26,8 @@ export interface ResolvedApiKey {
 	readonly orgId: OrgId
 	readonly userId: UserId
 	readonly keyId: ApiKeyId
+	/** The key's display name, frozen into audit entries at write time. */
+	readonly name: string
 	readonly kind: ApiKeyKind
 	readonly metadataJson: string | null
 	/** v2 scope strings; null = legacy full access. */
@@ -594,6 +596,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				orgId: row.value.orgId,
 				userId: row.value.createdBy,
 				keyId: row.value.id,
+				name: row.value.name,
 				kind: row.value.kind,
 				metadataJson: row.value.metadataJson == null ? null : JSON.stringify(row.value.metadataJson),
 				scopes: row.value.scopes ?? null,
