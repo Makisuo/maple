@@ -1,6 +1,7 @@
+import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import {
-	collectIntegrationCatalog,
+	collectIntegrationQueryCatalog,
 	EXEMPT_INTEGRATION_BUILDERS,
 	exportedIntegrationBuilders,
 	integrationFixtures,
@@ -8,14 +9,14 @@ import {
 	UNDECODED_INTEGRATION_QUERIES,
 	undecodedIntegrationColumns,
 	undecodedIntegrationQueries,
-} from "./catalog"
+} from "./index"
 
 // The integration-side half of the SQL gate. `@maple/query-engine`'s catalog
 // cannot reach these builders — it must not depend on this package — so the
 // same guarantees are asserted here: every shape compiles, is tenant-scoped,
 // and is pinned byte-for-byte.
 describe("integration sql catalog", () => {
-	const entries = collectIntegrationCatalog()
+	const entries = Effect.runSync(collectIntegrationQueryCatalog())
 
 	it("compiles every fixture", () => {
 		expect(entries.length).toBeGreaterThan(0)
@@ -96,6 +97,6 @@ describe("integration sql catalog", () => {
 			.map((entry) => `-- ${entry.id}\n${entry.sql}`)
 			.join("\n\n")
 
-		await expect(rendered).toMatchFileSnapshot("__sql_baseline__/integrations.sql")
+		await expect(rendered).toMatchFileSnapshot("../__sql_baseline__/integrations.sql")
 	})
 })

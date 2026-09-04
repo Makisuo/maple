@@ -24,7 +24,9 @@ import { SlackIntegrationService } from "./services/integrations/SlackIntegratio
 // this wiring.
 
 const telemetry = MapleCloudflareSDK.make({
-	serviceName: "maple-api",
+	// Deliberately not `maple-api`: background work sharing the request-facing
+	// service's name skewed its percentiles (p99 32s, 2026-09-04).
+	serviceName: "maple-slack-reconcile",
 	serviceNamespace: "core",
 	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],

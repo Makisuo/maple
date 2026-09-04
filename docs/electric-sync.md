@@ -13,22 +13,17 @@ sync worker or its upstream unreachable they show `SyncUnavailable` and a retry.
 So an Electric outage is visible, and a deploy of the singleton service is a
 short one.
 
-The reusable machinery lives in the **`@maple/effect-db`** workspace package
-(source-only, consumed by `apps/web`'s Vite and, later, the mobile app):
+The reusable machinery lives in two workspace libraries:
 
-- `@maple/effect-db/electric` — `createEffectCollection` (an Effect-native wrapper
-  over `@tanstack/electric-db-collection`: Effect Schema rows + `Effect` write
-  handlers run on a `ManagedRuntime` + exponential backoff + typed `awaitTxIdEffect`),
-  and `optimisticAction` (declare collections → optimistic apply → `Effect` server
-  call returning a txid → automatic `awaitTxId` across all declared collections →
-  typed errors). The backoff `onError` also dispatches the `auth:session-expired`
-  (401) and `collection:schema-error` (post-deploy schema drift) window events.
-- `@maple/effect-db/atom` — `makeQuery`/`makeQueryUnsafe`/`makeCollectionAtom`,
-  bridging a TanStack DB live query to an effect-atom `Atom<AsyncResult<…>>`.
-
-Ported and adapted from the hazel repo's two libraries to effect `4.0.0-beta.93`
-(`Effect.catch` → `Effect.catchEager`; the electric collection utils slimmed to
-`{ awaitTxId, awaitMatch }`).
+- `@maple/effect-db/electric` — `createEffectCollection` wraps
+  `@tanstack/electric-db-collection` with Effect Schema rows, Effect write
+  handlers run on a `ManagedRuntime`, exponential backoff, and typed
+  `awaitTxIdEffect`. The backoff `onError` also dispatches the
+  `auth:session-expired` (401) and `collection:schema-error` (post-deploy schema
+  drift) window events.
+- `@maple/unitflow/db` — collection subscriptions feed model-scoped Stores used
+  by the dashboards and alerts lists. Mutations use the typed API write paths;
+  alert toggles run through `Mutation.make`.
 
 ## How it fits together
 

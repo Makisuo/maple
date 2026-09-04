@@ -5,13 +5,15 @@
 // the builders instead. Same contract as the core catalog — compile the REAL
 // exported builder with production-shaped params, so every SQL shape the
 // product can emit is enumerated and snapshotted. The ClickHouse e2e sweep in
-// apps/api (`sql-catalog.clickhouse.e2e.test.ts`) analyzes these fixtures
+// apps/api (`query-benchmark.clickhouse.e2e.test.ts`) analyzes these fixtures
 // against the real migrations alongside the core catalog.
 
 import { Effect } from "effect"
 import { compileUnionUnsafe, compileUnsafe, type CompiledQuery } from "@maple/query-engine/ch"
 import { MAPLE_AI_TRACE_SESSION_PREFIX } from "@maple/domain/gen-ai"
-import * as CH from "./index"
+import * as CH from "../index"
+import { BenchmarkError, type CatalogEntry } from "@maple/query-engine/benchmark"
+import { fingerprintSql } from "@maple/query-engine/execution"
 
 export interface IntegrationFixture {
 	/** Source module basename, e.g. `"cloudflare-infra"`. */
@@ -523,31 +525,39 @@ export const integrationFixtures: ReadonlyArray<IntegrationFixture> = [
 	},
 ]
 
-export interface IntegrationCatalogEntry {
-	readonly id: string
-	readonly sql: string
+export interface IntegrationCatalogEntry extends CatalogEntry {
 	readonly compiled: CompiledQuery<unknown>
 }
 
 /** Compile every fixture. A fixture that throws fails here, not in production. */
-export function collectIntegrationCatalog(): ReadonlyArray<IntegrationCatalogEntry> {
-	return integrationFixtures.map((fixture) => {
-		const compiled = fixture.compile()
-		// The executor dies on unresolved placeholders at runtime; a fixture
-		// missing a compile param must fail HERE.
-		if (compiled.sql.includes("__PARAM_")) {
-			throw new Error(
-				`Integration catalog: ${fixture.module}/${fixture.name} (${fixture.label}) ` +
-					`left an unresolved __PARAM_ placeholder — a compile param is missing.`,
-			)
-		}
-		return {
-			id: `builder:${fixture.module}:${fixture.name}:${fixture.label}`,
-			sql: compiled.sql,
-			compiled,
-		}
+export const collectIntegrationQueryCatalog = () =>
+	Effect.try({
+		try: (): ReadonlyArray<IntegrationCatalogEntry> =>
+			integrationFixtures.map((fixture) => {
+				const compiled = fixture.compile()
+				// The executor dies on unresolved placeholders at runtime; a fixture
+				// missing a compile param must fail HERE.
+				if (compiled.sql.includes("__PARAM_")) {
+					throw new Error(
+						`Integration catalog: ${fixture.module}/${fixture.name} (${fixture.label}) ` +
+							`left an unresolved __PARAM_ placeholder — a compile param is missing.`,
+					)
+				}
+				return {
+					id: `builder:${fixture.module}:${fixture.name}:${fixture.label}`,
+					name: fixture.name,
+					source: "builder",
+					label: fixture.label,
+					capabilityLabel: "baseline",
+					route: undefined,
+					fingerprint: fingerprintSql(compiled.sql),
+					sql: compiled.sql,
+					compiled,
+				}
+			}),
+		catch: (cause) =>
+			new BenchmarkError({ message: `Integration catalog compilation failed: ${String(cause)}` }),
 	})
-}
 
 // Anti-rot assertion — the integration half of `UNDECODED_QUERIES`
 

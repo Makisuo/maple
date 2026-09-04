@@ -207,7 +207,7 @@ windowSeconds, filters })` → per-step `count`, `conversion_from_prev`, `conver
 - `productEventsFunnelBreakdownQuery` — same, `GROUP BY` one dimension (`UtmSource`,
   `ReferrerHost`, `Country`, `Attributes[k]`).
 - `productEventNamesQuery` — the step picker's autocomplete (names + counts, 30d).
-- Every query keeps `$.OrgId.eq(param.string("orgId"))`; register in `sql-catalog.ts` and add
+- Every query keeps `$.OrgId.eq(param.string("orgId"))`; register in `benchmark/catalog.ts` and add
   parity coverage in the ClickHouse e2e like `web-analytics-parity.clickhouse.e2e.test.ts`
   (seed dates must be now-relative — TTL).
 - `apps/api/src/routes/internal/query-engine.http.ts` fallback message and the

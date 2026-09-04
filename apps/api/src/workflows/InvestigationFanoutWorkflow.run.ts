@@ -169,7 +169,9 @@ const PERSIST_STEP = { retries: { limit: 5, delay: "2 seconds", backoff: "expone
 // error. It was the top `investigation.hypothesis` error in production and none of
 // it was a bug.
 const fanoutTelemetry = MapleCloudflareSDK.make({
-	serviceName: "maple-api",
+	// Deliberately not `maple-api`: background work sharing the request-facing
+	// service's name skewed its percentiles (p99 32s, 2026-09-04).
+	serviceName: "maple-investigations",
 	serviceNamespace: "core",
 	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS, ...MCP_ANTICIPATED_ERROR_IDENTIFIERS],
