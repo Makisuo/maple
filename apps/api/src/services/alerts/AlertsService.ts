@@ -1,4 +1,4 @@
-import { formatWarehouseDateTime, snapAlertWindowEndMs } from "@maple/query-engine"
+import { formatWarehouseDateTime, snapAlertWindowEndMs, warehouseDateTime64 } from "@maple/query-engine"
 import {
 	AlertComparator as AlertComparatorSchema,
 	AlertDeliveryError,
@@ -89,7 +89,7 @@ import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
 import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
 import { makeDbExecute } from "@/platform/db-execute"
-import { dateToMs, msToDate, msToSqlTimestamp, msToWarehouseDateTime64 } from "@/platform/time"
+import { dateToMs, msToDate, msToSqlTimestamp } from "@/platform/time"
 import { makePersistenceError } from "./alert-persistence"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
@@ -283,7 +283,7 @@ export const interleaveAlertRulesByOrg = <T extends { readonly orgId: string }>(
 	return fair
 }
 
-const toIngestDateTime64 = msToWarehouseDateTime64
+const toIngestDateTime64 = warehouseDateTime64
 
 const compareThreshold = (
 	value: number,

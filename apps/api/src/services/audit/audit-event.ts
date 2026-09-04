@@ -7,7 +7,8 @@ import {
 import { ActorId, ApiKeyId, AuditLogEntryId, OrgId, UserId } from "@maple/domain/primitives"
 import type { AuditLogRow } from "@maple/domain/tinybird"
 import { Schema, SchemaTransformation } from "effect"
-import { msToDate, msToWarehouseDateTime64 } from "@/platform/time"
+import { warehouseDateTime64 } from "@maple/query-engine/datetime"
+import { msToDate } from "@/platform/time"
 
 /**
  * The serialized audit event as it travels the audit queue. `occurredAtMs` is
@@ -74,8 +75,8 @@ export interface AuditLogEntry {
 export const auditEventToRow = (event: AuditLogEvent, recordedAtMs: number): AuditLogRow => ({
 	OrgId: event.orgId,
 	Id: event.id,
-	OccurredAt: msToWarehouseDateTime64(event.occurredAtMs),
-	RecordedAt: msToWarehouseDateTime64(recordedAtMs),
+	OccurredAt: warehouseDateTime64(event.occurredAtMs),
+	RecordedAt: warehouseDateTime64(recordedAtMs),
 	ActorType: event.actorType,
 	UserId: event.userId ?? "",
 	ApiKeyId: event.apiKeyId ?? "",
@@ -146,12 +147,14 @@ const jsonDocument = <S extends Schema.Top>(schema: S) => emptyAsNull(Schema.fro
  * `YYYY-MM-DD HH:mm:ss.SSS` (UTC, as the warehouse emits DateTime64) ⇄ `Date`;
  * an ISO rendering with `T`/`Z` is accepted as-is should a backend emit one.
  */
-const warehouseDateTime = Schema.String.pipe(
+const warehouseDateTime64Column = Schema.String.pipe(
 	Schema.decodeTo(
 		Schema.Date,
 		SchemaTransformation.transform({
 			decode: (value: string) => new Date(/[TZ]/.test(value) ? value : `${value.replace(" ", "T")}Z`),
-			encode: (value: Date) => msToWarehouseDateTime64(value.getTime()),
+			// The brand is the minting side's guarantee; a codec encodes to the
+			// wire type, which is a plain string.
+			encode: (value: Date): string => warehouseDateTime64(value.getTime()),
 		}),
 	),
 )
@@ -162,8 +165,8 @@ const warehouseDateTime = Schema.String.pipe(
  */
 export const StoredAuditLogEntry = Schema.Struct({
 	id: AuditLogEntryId,
-	occurredAt: warehouseDateTime,
-	recordedAt: warehouseDateTime,
+	occurredAt: warehouseDateTime64Column,
+	recordedAt: warehouseDateTime64Column,
 	actorType: AuditActorType,
 	userId: emptyAsNull(UserId),
 	apiKeyId: emptyAsNull(ApiKeyId),

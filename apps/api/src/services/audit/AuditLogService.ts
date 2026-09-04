@@ -8,7 +8,7 @@ import * as CH from "@maple/query-engine/ch"
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import type { Queue } from "@cloudflare/workers-types"
 import { WorkerEnvironment } from "@maple/infra/worker-runtime"
-import { msToWarehouseDateTime64 } from "@/platform/time"
+import { warehouseDateTime64 } from "@maple/query-engine/datetime"
 import { systemTenant } from "@/services/alerts/system-tenant"
 import { CurrentAuditActor } from "@/services/auth/audit-actor"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
@@ -167,8 +167,8 @@ const neverFail = (action: string) => (write: Effect.Effect<void, unknown>) =>
 
 /** Which optional filters bind, and the parameter values behind them. */
 const listQueryInputs = (orgId: OrgId, filters: AuditLogListFilters) => {
-	const since = filters.sinceMs === undefined ? undefined : msToWarehouseDateTime64(filters.sinceMs)
-	const until = filters.untilMs === undefined ? undefined : msToWarehouseDateTime64(filters.untilMs)
+	const since = filters.sinceMs === undefined ? undefined : warehouseDateTime64(filters.sinceMs)
+	const until = filters.untilMs === undefined ? undefined : warehouseDateTime64(filters.untilMs)
 	const opts: CH.AuditLogEntriesOpts = {
 		actorType: filters.actorType !== undefined,
 		userId: filters.userId !== undefined,

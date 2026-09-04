@@ -42,6 +42,14 @@ const message = (body: unknown, attempts: number) => {
 const batchOf = (...messages: ReadonlyArray<{ readonly message: unknown }>) =>
 	({ messages: messages.map((entry) => entry.message) }) as never
 
+/** A warehouse whose `ingest` dies rather than failing — an unexpected defect. */
+const dyingWarehouse = Layer.succeed(
+	WarehouseQueryService,
+	makeWarehouseServiceStub({
+		ingest: () => Effect.die(new Error("ingest exploded")),
+	}),
+)
+
 /** A warehouse whose `ingest` records each call, or fails every call. */
 const warehouse = (fail = false) => {
 	const written: Array<{ orgId: string; rows: ReadonlyArray<AuditLogRow> }> = []
@@ -102,6 +110,18 @@ describe("processAuditEventsBatch", () => {
 			yield* processAuditEventsBatch(batchOf(a, b)).pipe(Effect.provide(warehouse(true).layer))
 			expect(a.calls).toEqual(["retry"])
 			expect(b.calls).toEqual(["retry"])
+		}),
+	)
+
+	// A typed failure retries; so must a defect. Catching only the failure
+	// channel would let an unexpected throw escape the consumer, and Cloudflare
+	// treats a consumer that neither acked nor retried as a retry anyway — but
+	// silently, with no log and no DLQ accounting.
+	it.effect("retries when the write dies instead of failing", () =>
+		Effect.gen(function* () {
+			const defect = message(event("77777777-7777-4777-8777-777777777777"), 2)
+			yield* processAuditEventsBatch(batchOf(defect)).pipe(Effect.provide(dyingWarehouse))
+			expect(defect.calls).toEqual(["retry"])
 		}),
 	)
 

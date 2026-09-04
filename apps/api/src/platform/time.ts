@@ -33,13 +33,3 @@ export function dateToMs(date: Date | null | undefined): number | null {
 	return date === null || date === undefined ? null : date.getTime()
 }
 
-/**
- * Tinybird `DateTime64(3)` wire format for `ingest` rows: `YYYY-MM-DD HH:mm:ss.SSS`,
- * UTC, no zone. Every direct warehouse write (alert checks, audit entries) sends
- * timestamps this way; ISO's `T`/`Z` is rejected by the Events API JSONPath parser.
- */
-export function msToWarehouseDateTime64(ms: number): string {
-	const d = new Date(ms)
-	const pad = (n: number, w = 2) => n.toString().padStart(w, "0")
-	return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`
-}

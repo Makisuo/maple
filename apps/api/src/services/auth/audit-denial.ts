@@ -1,7 +1,7 @@
 import { Clock, Effect } from "effect"
 import type { HttpServerRequest } from "effect/unstable/http"
 import type { ApiKeyId, OrgId, UserId } from "@maple/domain/primitives"
-import type { AuditLogServiceApi } from "@/services/audit/AuditLogService"
+import { httpRequestForensics, type AuditLogServiceApi } from "@/services/audit/AuditLogService"
 
 /** Suppress duplicate denial rows for the same key/reason within this window. */
 export const AUDIT_DENIAL_COALESCE_WINDOW_MS = 60_000
@@ -84,14 +84,6 @@ export const recordApiDenial = (
 			outcome: "denied",
 			denialReason: input.denialReason,
 			metadata: { method: request.method, path },
-			...(request.headers["cf-ray"] !== undefined
-				? { requestId: request.headers["cf-ray"] }
-				: undefined),
-			...(request.headers["cf-connecting-ip"] !== undefined
-				? { originIp: request.headers["cf-connecting-ip"] }
-				: undefined),
-			...(request.headers["cf-ipcountry"] !== undefined
-				? { originCountry: request.headers["cf-ipcountry"] }
-				: undefined),
+			...httpRequestForensics(request),
 		})
 	})

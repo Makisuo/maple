@@ -157,8 +157,19 @@ export const processAuditEventsBatch = (batch: MessageBatch<unknown>) =>
 							}),
 						),
 						Effect.withSpan("auditEvents.writeOrgBatch", { attributes: { orgId, rows: group.length } }),
-						Effect.catchCause((cause) =>
-							Effect.forEach(group, ({ message }) => retryOrExhaust(message, cause), {
+						// `catch` + `catchDefect`, never `catchCause`: v4's catchCause also
+						// catches interruption, and an interrupted batch (a deploy, an
+						// isolate torn down) would then be counted as a failed attempt —
+						// pushing messages toward the DLQ for something that never failed.
+						// Left uncaught, the interrupt simply leaves the batch unacked and
+						// the platform redelivers it.
+						Effect.catch((error) =>
+							Effect.forEach(group, ({ message }) => retryOrExhaust(message, error), {
+								discard: true,
+							}),
+						),
+						Effect.catchDefect((defect) =>
+							Effect.forEach(group, ({ message }) => retryOrExhaust(message, defect), {
 								discard: true,
 							}),
 						),
