@@ -707,10 +707,29 @@ describe("aiSessionSpansQuery", () => {
 		expect(sql).toContain("TraceId IN (SELECT")
 		expect(sql).toContain("FROM traces")
 		expect(sql).toContain("Duration / 1000000 AS durationMs")
-		expect(sql).toContain("SpanAttributes AS spanAttributes")
-		expect(sql).toContain("ResourceAttributes AS resourceAttributes")
+		expect(sql).toContain("mapFilter((k, v) -> (k IN ('maple_ai.session.id', ")
+		expect(sql).toContain("OR k LIKE 'gen_ai.prompt.variable.%'), SpanAttributes) AS spanAttributes")
+		expect(sql).not.toContain("ResourceAttributes")
 		expect(sql).toContain("ORDER BY timestamp ASC")
 		expect(sql).toContain("LIMIT 2000")
+	})
+
+	it("projects every key the mapper reads, across vendors", () => {
+		const { sql } = compileUnsafe(aiSessionSpansQuery(), spanParams)
+
+		for (const key of [
+			"maple_ai.vendor.id",
+			"gen_ai.input.messages",
+			"gen_ai.usage.prompt_tokens", // legacy alias
+			"ai.usage.inputTokens", // vercel_ai_sdk
+			"llm.token_count.prompt", // openinference
+			"openinference.span.kind", // read by a refine hook, not a source list
+			"eve.turn.id",
+			"maple_ai.turn.id",
+			"error.type",
+		]) {
+			expect(sql, key).toContain(`'${key}'`)
+		}
 	})
 
 	it("repeats the org predicate on every level that reads a table", () => {
@@ -769,7 +788,6 @@ describe("aiSessionSpansQuery", () => {
 					"maple_ai.vendor.id": "eve",
 					"maple_ai.session.id": "wrun_01M0CSAEW96BH2W9185XZPRPKH",
 				},
-				resourceAttributes: { "service.name": "maple-slack-agent" },
 			},
 		])
 
@@ -778,7 +796,6 @@ describe("aiSessionSpansQuery", () => {
 			"maple_ai.vendor.id": "eve",
 			"maple_ai.session.id": "wrun_01M0CSAEW96BH2W9185XZPRPKH",
 		})
-		expect(row?.resourceAttributes).toEqual({ "service.name": "maple-slack-agent" })
 	})
 })
 
@@ -919,7 +936,8 @@ describe("aiTraceSpansQuery", () => {
 		expect(sql).toContain(`TraceId = '${TRACE_ID}'`)
 		expect(sql).not.toContain("TraceId IN (SELECT")
 		expect(sql).not.toContain("FROM traces")
-		expect(sql).not.toContain("maple_ai.session.id")
+		// The projection still names the key; only the predicate is gone.
+		expect(sql).not.toContain("SpanAttributes['maple_ai.session.id']")
 	})
 
 	it("keeps the projection and the order of the session form", () => {
@@ -927,8 +945,8 @@ describe("aiTraceSpansQuery", () => {
 
 		// One shape whichever kind of session the detail page opened.
 		expect(sql).toContain("Duration / 1000000 AS durationMs")
-		expect(sql).toContain("SpanAttributes AS spanAttributes")
-		expect(sql).toContain("ResourceAttributes AS resourceAttributes")
+		expect(sql).toContain("SpanAttributes) AS spanAttributes")
+		expect(sql).not.toContain("ResourceAttributes")
 		expect(sql).toContain("ORDER BY timestamp ASC, spanId ASC")
 		expect(sql).toContain("LIMIT 2000")
 		expect(compileUnsafe(aiTraceSpansQuery({ limit: 100 }), traceParams).sql).toContain("LIMIT 100")
@@ -975,7 +993,6 @@ describe("aiTraceSpansQuery", () => {
 				timestamp: "2026-08-19 10:33:25.825000000",
 				// A sessionless vendor: the stamp is there, the session key is not.
 				spanAttributes: { "maple_ai.vendor.id": "llamaindex" },
-				resourceAttributes: { "service.name": "rag-service" },
 			},
 		])
 
