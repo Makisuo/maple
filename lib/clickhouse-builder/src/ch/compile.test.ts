@@ -1,11 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, DateTime, Effect, Exit, Option, Result, Schema } from "effect"
-import {
-	CompiledQueryDecodeError,
-	compileCHUnsafe,
-	compileUnionUnsafe,
-	rawCompiledQuery,
-} from "./compile"
+import { CompiledQueryDecodeError, compileCHUnsafe, compileUnionUnsafe, rawCompiledQuery } from "./compile"
 import * as CH from "./index"
 import * as T from "./types"
 
@@ -156,9 +151,13 @@ describe("CompiledQuery.decodeRows", () => {
 			CH.from(table)
 				.select(($) => ({ status: $.Status }))
 				.where(($) => [$.OrgId.eq("org"), $.Status.eq(status)])
-		const compiled = compileUnionUnsafe(CH.unionAll(branch("ok"), branch("error")), {}, {
-			rowSchema: erased({ status: Schema.String, missing: Schema.String }),
-		})
+		const compiled = compileUnionUnsafe(
+			CH.unionAll(branch("ok"), branch("error")),
+			{},
+			{
+				rowSchema: erased({ status: Schema.String, missing: Schema.String }),
+			},
+		)
 
 		expect(compiled.rowSchemaMismatch).toEqual({ undeclared: [], unselected: ["missing"] })
 	})

@@ -13,22 +13,17 @@ sync worker or its upstream unreachable they show `SyncUnavailable` and a retry.
 So an Electric outage is visible, and a deploy of the singleton service is a
 short one.
 
-The reusable machinery lives in the **`@maple/effect-db`** workspace package
-(source-only, consumed by `apps/web`'s Vite and, later, the mobile app):
+The reusable machinery lives in two workspace libraries:
 
-- `@maple/effect-db/electric` — `createEffectCollection` (an Effect-native wrapper
-  over `@tanstack/electric-db-collection`: Effect Schema rows + `Effect` write
-  handlers run on a `ManagedRuntime` + exponential backoff + typed `awaitTxIdEffect`),
-  and `optimisticAction` (declare collections → optimistic apply → `Effect` server
-  call returning a txid → automatic `awaitTxId` across all declared collections →
-  typed errors). The backoff `onError` also dispatches the `auth:session-expired`
-  (401) and `collection:schema-error` (post-deploy schema drift) window events.
-- `@maple/effect-db/atom` — `makeQuery`/`makeQueryUnsafe`/`makeCollectionAtom`,
-  bridging a TanStack DB live query to an effect-atom `Atom<AsyncResult<…>>`.
-
-Ported and adapted from the hazel repo's two libraries to effect `4.0.0-beta.93`
-(`Effect.catch` → `Effect.catchEager`; the electric collection utils slimmed to
-`{ awaitTxId, awaitMatch }`).
+- `@maple/effect-db/electric` — `createEffectCollection` wraps
+  `@tanstack/electric-db-collection` with Effect Schema rows, Effect write
+  handlers run on a `ManagedRuntime`, exponential backoff, and typed
+  `awaitTxIdEffect`. The backoff `onError` also dispatches the
+  `auth:session-expired` (401) and `collection:schema-error` (post-deploy schema
+  drift) window events.
+- `@maple/unitflow/db` — collection subscriptions feed model-scoped Stores used
+  by the dashboards and alerts lists. Mutations use the typed API write paths;
+  alert toggles run through `Mutation.make`.
 
 ## How it fits together
 
@@ -190,12 +185,11 @@ like local docker does.
    plaintext `env`.
 4. **Migrate,** then `alchemy deploy`. No new migration is needed — the service
    reads the publication `0009`/`0011`/`0014`/`0037` already maintain.
-5. **DNS.** The certificate lands `PENDING_VALIDATION` on the first deploy and the
-   443 listener fails; the deploy workflows recover on their own by creating the
-   validation CNAME and redeploying (`scripts/acm-cert-validate.sh`, which now
-   names the electric domains alongside ingest). The one manual record is a
-   **proxied CNAME for `electric.maple.dev` at the ALB** — the deploy output
-   carries the hostname.
+5. **DNS.** The stack publishes the ACM validation CNAME into the `maple.dev`
+   zone and waits for the certificate to reach `ISSUED` before attaching the 443
+   listener (`@maple/infra/acm`), so the first deploy needs no second pass. The
+   one manual record is a **proxied CNAME for `electric.maple.dev` at the ALB** —
+   the deploy output carries the hostname.
 6. **Verify** before pointing anything at it:
    `curl https://electric.maple.dev/v1/health`, then a shape through the proxy —
    `curl -g 'https://sync.maple.dev/api/sync/shape?shape=dashboards&offset=-1' -H "authorization: Bearer <token>"`.

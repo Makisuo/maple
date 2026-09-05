@@ -18,13 +18,7 @@ import {
 	type SessionFailureKind,
 	type SessionSummary,
 } from "./session-summary"
-import {
-	classifyAiSpan,
-	isLlmCall,
-	spanEndMs,
-	spanStartMs,
-	type SessionTurn,
-} from "./session-turns"
+import { classifyAiSpan, isLlmCall, spanEndMs, spanStartMs, type SessionTurn } from "./session-turns"
 
 /** Same tool this often within one turn reads as the agent going in circles. */
 const REPEATED_TOOL_MIN_CALLS = 8
@@ -93,9 +87,7 @@ export function buildSessionFindings(
 	turns: readonly SessionTurn[],
 	summary: SessionSummary,
 ): SessionFindingsReport {
-	const spans = turns
-		.flatMap((turn) => turn.spans)
-		.sort((a, b) => spanStartMs(a) - spanStartMs(b))
+	const spans = turns.flatMap((turn) => turn.spans).sort((a, b) => spanStartMs(a) - spanStartMs(b))
 	const turnIndexBySpan = new Map<string, number>()
 	turns.forEach((turn, index) => {
 		for (const span of turn.spans) turnIndexBySpan.set(span.spanId, index)
@@ -159,8 +151,7 @@ function failureFindings(
 	return [...byLabel].map(([label, group]) => {
 		const turnIndices = distinctSorted(group.members.map((member) => member.turnIndex))
 		const terminal =
-			causeSpanId !== undefined &&
-			group.members.some((member) => member.span.spanId === causeSpanId)
+			causeSpanId !== undefined && group.members.some((member) => member.span.spanId === causeSpanId)
 		// The terminal group links the span the turn died on; a recovered group
 		// links its first event, where the trouble began.
 		const linked = terminal
@@ -179,7 +170,10 @@ function failureFindings(
 			turnText: turnListText(turnIndices, turns, terminal),
 			detail:
 				(group.kind === "contextExceeded" ? promptGrowth(spans) : undefined) ??
-				failureDetail(group.members.map((member) => member.span), label),
+				failureDetail(
+					group.members.map((member) => member.span),
+					label,
+				),
 			spanId: linked.span.spanId,
 			atMs: spanStartMs(group.members[0]!.span),
 		}
@@ -292,9 +286,7 @@ function truncationFindings(
 	turnIndexBySpan: ReadonlyMap<string, number>,
 ): SessionFinding[] {
 	const shadowed = shadowedAncestorIds(spans, truncationSignal)
-	const members = spans.filter(
-		(span) => truncationSignal(span) !== undefined && !shadowed.has(span.spanId),
-	)
+	const members = spans.filter((span) => truncationSignal(span) !== undefined && !shadowed.has(span.spanId))
 	if (members.length === 0) return []
 	const reason = truncationSignal(members[0]!)!
 	return [
@@ -398,11 +390,7 @@ function healthOf(
 }
 
 /** `Turn 4 (final)`, `Turns 9, 11`, `Segments 1, 2`, `6 of 14 turns`. */
-function turnListText(
-	indices: readonly number[],
-	turns: readonly SessionTurn[],
-	terminal: boolean,
-): string {
+function turnListText(indices: readonly number[], turns: readonly SessionTurn[], terminal: boolean): string {
 	const word = turns[0]?.anchorKind === "trace" ? "Segment" : "Turn"
 	if (indices.length === 1) {
 		const one = `${word} ${turns[indices[0]!]?.index ?? indices[0]! + 1}`

@@ -119,7 +119,7 @@ export interface IssueActivityRollup {
 	readonly mergedPullRequestCount: number
 }
 
-/** Internal workflow kernel shared with the compatibility facade's broad operations and tick. */
+/** Internal workflow kernel shared with ErrorsService's transitions, claims, fixes, and tick. */
 export interface ErrorIssueWorkflowServiceApi extends ErrorIssueWorkflowPublicApi {
 	readonly rowToIssue: (
 		row: ErrorIssueRow,

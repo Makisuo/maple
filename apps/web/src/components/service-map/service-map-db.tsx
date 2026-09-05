@@ -16,6 +16,12 @@ import {
 } from "@/components/icons"
 import { PLANETSCALE_COLOR } from "@/components/infra/planetscale/metrics"
 
+import { POSTGRES_MARK_PATH } from "@/components/icons/postgres"
+import { MYSQL_MARK_PATH } from "@/components/icons/mysql"
+import { REDIS_MARK_PATH } from "@/components/icons/redis"
+import { CLICKHOUSE_MARK_PATH } from "@/components/icons/clickhouse"
+import { MONGODB_MARK_PATH } from "@/components/icons/mongodb"
+
 type DbCategory = "database" | "cache" | "queue" | "search"
 
 export interface DbDescriptor {
@@ -29,6 +35,8 @@ export interface DbDescriptor {
 	color: string
 	/** Whether `Icon` carries its own brand colors (so callers shouldn't recolor it). */
 	branded: boolean
+	/** Shared SVG artwork for marks on 3D machines; absent for category fallbacks. */
+	markPath?: string
 }
 
 const CATEGORY_COLOR: Record<DbCategory, string> = {
@@ -69,7 +77,7 @@ function categoryOf(system: string): DbCategory {
  * category label always agree.
  */
 export function getDbDescriptor(system: string | undefined): DbDescriptor {
-	const s = (system ?? "").toLowerCase()
+	const s = (system ?? "").trim().toLowerCase()
 
 	switch (s) {
 		case "postgresql":
@@ -77,6 +85,7 @@ export function getDbDescriptor(system: string | undefined): DbDescriptor {
 			return {
 				category: "database",
 				Icon: PostgresIcon,
+				markPath: POSTGRES_MARK_PATH,
 				label: "PostgreSQL",
 				color: "oklch(0.6 0.12 255)",
 				branded: true,
@@ -86,6 +95,7 @@ export function getDbDescriptor(system: string | undefined): DbDescriptor {
 			return {
 				category: "database",
 				Icon: MysqlIcon,
+				markPath: MYSQL_MARK_PATH,
 				label: s === "mariadb" ? "MariaDB" : "MySQL",
 				color: "oklch(0.62 0.1 215)",
 				branded: true,
@@ -94,6 +104,7 @@ export function getDbDescriptor(system: string | undefined): DbDescriptor {
 			return {
 				category: "database",
 				Icon: ClickhouseIcon,
+				markPath: CLICKHOUSE_MARK_PATH,
 				label: "ClickHouse",
 				color: "oklch(0.8 0.16 95)",
 				branded: true,
@@ -102,6 +113,7 @@ export function getDbDescriptor(system: string | undefined): DbDescriptor {
 			return {
 				category: "database",
 				Icon: MongodbIcon,
+				markPath: MONGODB_MARK_PATH,
 				label: "MongoDB",
 				color: "oklch(0.66 0.16 150)",
 				branded: true,
@@ -110,6 +122,7 @@ export function getDbDescriptor(system: string | undefined): DbDescriptor {
 			return {
 				category: "cache",
 				Icon: RedisIcon,
+				markPath: REDIS_MARK_PATH,
 				label: "Redis",
 				color: "oklch(0.58 0.2 25)",
 				branded: true,

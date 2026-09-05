@@ -90,8 +90,8 @@ describe("metricsTimeseriesQuery", () => {
 			seriesLimit: 7,
 		})
 		const { sql } = compileUnsafe(q, baseParams)
-		expect(sql).toContain("WITH __series_base AS")
-		expect(sql).toContain("LIMIT 7")
+		expect(sql).toContain("max(dataPointCount) OVER (PARTITION BY groupName)")
+		expect(sql).toContain("__series_rank <= 7")
 	})
 
 	it("applies serviceName filter", () => {
@@ -139,8 +139,8 @@ describe("metricsTimeseriesRateQuery", () => {
 	it("caps grouped rate timeseries before returning the long tail", () => {
 		const q = metricsTimeseriesRateQuery({ groupBy: ["service"], seriesLimit: 7 })
 		const { sql } = compileUnsafe(q, baseParams)
-		expect(sql).toContain("WITH __series_base AS")
-		expect(sql).toContain("LIMIT 7")
+		expect(sql).toContain("max(dataPointCount) OVER (PARTITION BY groupName)")
+		expect(sql).toContain("__series_rank <= 7")
 	})
 
 	it("compiles CTE-based rate query", () => {

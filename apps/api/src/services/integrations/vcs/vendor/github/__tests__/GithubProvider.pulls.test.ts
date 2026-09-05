@@ -35,8 +35,7 @@ const env = Env.layer.pipe(
 const jsonResponse = (body: unknown, status = 200) =>
 	new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 
-const tokenResponse = () =>
-	jsonResponse({ token: "installation-token", expires_at: "2099-01-01T00:00:00Z" })
+const tokenResponse = () => jsonResponse({ token: "installation-token", expires_at: "2099-01-01T00:00:00Z" })
 
 const INSTALLATION = { externalInstallationId: "42" } as VcsInstallation
 const REPO = { externalRepoId: "1", owner: "octo", name: "shop" }
@@ -153,10 +152,7 @@ describe("GithubProvider pull requests", () => {
 		// Someone mistyped, or pasted a URL for another repository. Routine, not a
 		// provider failure — the caller keeps going with an unenriched link.
 		Effect.gen(function* () {
-			const layer = providerLayer([
-				tokenResponse(),
-				jsonResponse({ message: "Not Found" }, 404),
-			])
+			const layer = providerLayer([tokenResponse(), jsonResponse({ message: "Not Found" }, 404)])
 			yield* Effect.gen(function* () {
 				const provider = yield* GithubProvider
 				const pr = yield* provider.fetchPullRequest(INSTALLATION, REPO, 99_999)

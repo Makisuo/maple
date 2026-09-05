@@ -23,6 +23,7 @@ export const TRAFFIC_FILTER_STEPS = [0, 0.1, 1, 5] as const
 const trafficStepLabel = (pct: number): string => (pct === 0 ? "All traffic" : `> ${pct}% of peak`)
 
 export interface ServiceMapToolbarProps {
+	showPresentationControls?: boolean
 	colorMode: ServiceMapColorMode
 	onColorModeChange: (mode: ServiceMapColorMode) => void
 	onResort: () => void
@@ -45,6 +46,7 @@ export interface ServiceMapToolbarProps {
  * half is presentation (color-by, re-layout).
  */
 export const ServiceMapToolbar = memo(function ServiceMapToolbar({
+	showPresentationControls = true,
 	colorMode,
 	onColorModeChange,
 	onResort,
@@ -189,39 +191,44 @@ export const ServiceMapToolbar = memo(function ServiceMapToolbar({
 				</Tooltip>
 			)}
 
-			<div className="ml-auto flex items-center gap-2">
-				<Select value={colorMode} onValueChange={(v) => onColorModeChange(v as ServiceMapColorMode)}>
-					<SelectTrigger size="sm" className="min-w-0 capitalize" aria-label="Color nodes by">
-						<PaletteIcon size={14} className="text-muted-foreground" />
-						<SelectValue />
-					</SelectTrigger>
-					<SelectContent>
-						<SelectItem value="service">Service</SelectItem>
-						<SelectItem value="health">Health</SelectItem>
-						<SelectItem value="platform">Platform</SelectItem>
-					</SelectContent>
-				</Select>
+			{showPresentationControls && (
+				<div className="ml-auto flex items-center gap-2">
+					<Select
+						value={colorMode}
+						onValueChange={(v) => onColorModeChange(v as ServiceMapColorMode)}
+					>
+						<SelectTrigger size="sm" className="min-w-0 capitalize" aria-label="Color nodes by">
+							<PaletteIcon size={14} className="text-muted-foreground" />
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="service">Service</SelectItem>
+							<SelectItem value="health">Health</SelectItem>
+							<SelectItem value="platform">Platform</SelectItem>
+						</SelectContent>
+					</Select>
 
-				<Tooltip>
-					<TooltipTrigger
-						render={
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={onResort}
-								aria-label="Re-sort"
-								className="max-sm:size-8 max-sm:px-0"
-							>
-								<ArrowRotateAnticlockwiseIcon size={13} />
-								<span className="max-sm:sr-only">Re-sort</span>
-							</Button>
-						}
-					/>
-					<TooltipContent side="bottom">
-						<p>Discard manual positions and auto-arrange</p>
-					</TooltipContent>
-				</Tooltip>
-			</div>
+					<Tooltip>
+						<TooltipTrigger
+							render={
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={onResort}
+									aria-label="Re-sort"
+									className="max-sm:size-8 max-sm:px-0"
+								>
+									<ArrowRotateAnticlockwiseIcon size={13} />
+									<span className="max-sm:sr-only">Re-sort</span>
+								</Button>
+							}
+						/>
+						<TooltipContent side="bottom">
+							<p>Discard manual positions and auto-arrange</p>
+						</TooltipContent>
+					</Tooltip>
+				</div>
+			)}
 		</div>
 	)
 })

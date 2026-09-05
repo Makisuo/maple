@@ -189,8 +189,7 @@ function HealthDot({ health }: { health: ServiceHealth | undefined }) {
 	)
 }
 
-// Mirrors MIN_BASELINE_SPANS in service-health.ts: a baseline computed from
-// fewer spans is noise, so the delta line is withheld entirely.
+// Withhold the delta when the baseline has too few spans to be meaningful.
 const MIN_BASELINE_SPANS = 100
 
 interface BaselineDelta {

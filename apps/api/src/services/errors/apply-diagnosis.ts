@@ -198,9 +198,7 @@ const writeDiagnosis = async (db: MaplePgClient, input: ApplyDiagnosisInput): Pr
  */
 export const applyDiagnosisWrites: (
 	input: ApplyDiagnosisInput,
-) => Effect.Effect<void, DatabaseError, Database> = Effect.fn("applyDiagnosisWrites")(function* (
-	input,
-) {
+) => Effect.Effect<void, DatabaseError, Database> = Effect.fn("applyDiagnosisWrites")(function* (input) {
 	const database = yield* Database
 	yield* makeDbExecute(database, "applyDiagnosisWrites", identity)((db) => writeDiagnosis(db, input))
 })
@@ -273,11 +271,7 @@ const writeInconclusive = async (db: MaplePgClient, input: ApplyInconclusiveInpu
  */
 export const applyInconclusiveWrites: (
 	input: ApplyInconclusiveInput,
-) => Effect.Effect<void, DatabaseError, Database> = Effect.fn("applyInconclusiveWrites")(function* (
-	input,
-) {
+) => Effect.Effect<void, DatabaseError, Database> = Effect.fn("applyInconclusiveWrites")(function* (input) {
 	const database = yield* Database
-	yield* makeDbExecute(database, "applyInconclusiveWrites", identity)((db) =>
-		writeInconclusive(db, input),
-	)
+	yield* makeDbExecute(database, "applyInconclusiveWrites", identity)((db) => writeInconclusive(db, input))
 })

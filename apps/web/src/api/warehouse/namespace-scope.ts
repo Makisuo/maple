@@ -48,7 +48,11 @@ export const scopeServicesToNamespaces = Effect.fn("QueryEngine.scopeServicesToN
 
 	if (opts.services?.length) {
 		const services = opts.services.filter((service) => names.has(service))
-		return { services, empty: services.length === 0, memberServices: names } satisfies NamespaceServiceScope
+		return {
+			services,
+			empty: services.length === 0,
+			memberServices: names,
+		} satisfies NamespaceServiceScope
 	}
 
 	const services = yield* decodeInput(Schema.Array(ServiceName), [...names], "scopeServicesToNamespaces")

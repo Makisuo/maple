@@ -13,6 +13,7 @@
 // so the two adapters are not duplicates.
 
 import type { TracesMetric, AttributeFilter, MetricType } from "@maple/domain/query-engine"
+import { DEFAULT_ERROR_NAMESPACE_PREFIX, UNEXPECTED_IDENTITY_MARKERS } from "./queries/errors"
 import type { OrgId } from "@maple/domain"
 import { compile, compileUnion, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import { rawCompiledQuery } from "./raw-sql"
@@ -475,6 +476,14 @@ export function compilePipeQuery(
 							services: str("services")?.split(",").filter(Boolean),
 							deploymentEnvs: str("deployment_envs")?.split(",").filter(Boolean),
 							fingerprintHashes: str("fingerprint_hashes")?.split(",").filter(Boolean),
+							unexpectedIdentity:
+								str("identity") === "unexpected"
+									? {
+											namespacePrefix:
+												str("namespace_prefix") ?? DEFAULT_ERROR_NAMESPACE_PREFIX,
+											markerLabels: UNEXPECTED_IDENTITY_MARKERS,
+										}
+									: undefined,
 							limit: int("limit", 50),
 						}),
 						{ orgId, startTime, endTime },

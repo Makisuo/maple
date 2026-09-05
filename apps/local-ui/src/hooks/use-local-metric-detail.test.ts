@@ -19,8 +19,8 @@ describe("metric detail timeseries queries", () => {
 	// the render limit ever applies.
 	it("caps the value timeseries to the chart's series budget in the query", () => {
 		const { sql } = Effect.runSync(compileMetricValueTimeseriesQuery({ metricType: "gauge" }, params))
-		expect(sql).toContain("WITH __series_base AS")
-		expect(sql).toContain("LIMIT 60")
+		expect(sql).toContain("max(dataPointCount) OVER (PARTITION BY groupName)")
+		expect(sql).toContain("WHERE __series_rank <= 60")
 	})
 
 	it("caps the rate timeseries the same way", () => {
@@ -30,7 +30,7 @@ describe("metric detail timeseries queries", () => {
 				params,
 			),
 		)
-		expect(sql).toContain("WITH __series_base AS")
-		expect(sql).toContain("LIMIT 60")
+		expect(sql).toContain("max(dataPointCount) OVER (PARTITION BY groupName)")
+		expect(sql).toContain("WHERE __series_rank <= 60")
 	})
 })

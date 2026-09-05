@@ -62,23 +62,23 @@ Notes on the flags:
 
 ```yaml
 services:
-  maple-agent:
-    image: ghcr.io/mapletechlabs/maple/otel-collector-maple:0.2.0
-    command: ["--config", "/etc/otel/docker-config.yaml"]
-    restart: unless-stopped
-    user: "0:0"
-    environment:
-      MAPLE_INGEST_KEY: YOUR_MAPLE_INGEST_KEY
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - maple-agent-state:/var/lib/otelcol
-    ports:
-      - "4317:4317"
-      - "4318:4318"
+    maple-agent:
+        image: ghcr.io/mapletechlabs/maple/otel-collector-maple:0.2.0
+        command: ["--config", "/etc/otel/docker-config.yaml"]
+        restart: unless-stopped
+        user: "0:0"
+        environment:
+            MAPLE_INGEST_KEY: YOUR_MAPLE_INGEST_KEY
+        volumes:
+            - /var/run/docker.sock:/var/run/docker.sock:ro
+            - /var/lib/docker/containers:/var/lib/docker/containers:ro
+            - maple-agent-state:/var/lib/otelcol
+        ports:
+            - "4317:4317"
+            - "4318:4318"
 
 volumes:
-  maple-agent-state:
+    maple-agent-state:
 ```
 
 Compose projects get first-class facets: the agent maps the `com.docker.compose.project` and
@@ -87,15 +87,15 @@ filter by project and service.
 
 ## What gets collected
 
-| Metric                                         | What it powers                                    |
-| ---------------------------------------------- | ------------------------------------------------- |
-| `container.cpu.utilization`                    | CPU column, saturation ranking, CPU chart         |
-| `container.memory.percent`                     | Memory-vs-limit column and chart                  |
-| `container.memory.usage.total` / `.limit`      | Memory bytes chart + limit metadata               |
-| `container.network.io.usage.rx_bytes`/`tx_bytes` | Network I/O chart                               |
-| `container.blockio.io_service_bytes_recursive` | Block I/O chart (by operation)                    |
-| `container.restarts`, `container.uptime`       | Restart count and uptime on the detail page       |
-| `container.cpu.limit`, `container.pids.count`  | Served on the container API; not charted yet      |
+| Metric                                           | What it powers                               |
+| ------------------------------------------------ | -------------------------------------------- |
+| `container.cpu.utilization`                      | CPU column, saturation ranking, CPU chart    |
+| `container.memory.percent`                       | Memory-vs-limit column and chart             |
+| `container.memory.usage.total` / `.limit`        | Memory bytes chart + limit metadata          |
+| `container.network.io.usage.rx_bytes`/`tx_bytes` | Network I/O chart                            |
+| `container.blockio.io_service_bytes_recursive`   | Block I/O chart (by operation)               |
+| `container.restarts`, `container.uptime`         | Restart count and uptime on the detail page  |
+| `container.cpu.limit`, `container.pids.count`    | Served on the container API; not charted yet |
 
 Identity rides on resource attributes: `container.name`, `container.id`, `container.image.name`,
 `container.runtime`, and `host.name` (detected from the Docker daemon, so it reports the host —
@@ -117,10 +117,10 @@ app's SDK has to stamp it:
 - Any other OTel SDK: set it explicitly in your compose file — Docker's default hostname **is**
   the short container id:
 
-  ```yaml
-  environment:
-    OTEL_RESOURCE_ATTRIBUTES: "container.id=${HOSTNAME},container.name=myservice"
-  ```
+    ```yaml
+    environment:
+        OTEL_RESOURCE_ATTRIBUTES: "container.id=${HOSTNAME},container.name=myservice"
+    ```
 
 If your containers set a custom `hostname:`, the fallback can't fire — set
 `OTEL_RESOURCE_ATTRIBUTES` explicitly.

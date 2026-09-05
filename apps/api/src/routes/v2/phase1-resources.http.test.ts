@@ -56,6 +56,7 @@ import { AuthService } from "@/services/auth/AuthService"
 import { DashboardPersistenceService } from "@/services/dashboards/DashboardPersistenceService"
 import { SharedDashboardService } from "@/services/dashboards/SharedDashboardService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
+import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 import { ErrorIssueReadModelsService } from "@/services/errors/ErrorIssueReadModelsService"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 import { OrganizationService } from "@/services/org/OrganizationService"
@@ -515,33 +516,22 @@ const makeHarness = (
 		}),
 		// The anomalies group still exercises the issue-link audit mutation.
 		Layer.succeed(ErrorsService, {
-			listIssues: die,
-			countOpenIssuesByService: die,
-			getIssue: die,
 			transitionIssue: die,
 			claimIssue: die,
-			heartbeatIssue: die,
-			releaseIssue: die,
-			assignIssue: die,
-			setSeverity: die,
-			commentOnIssue: die,
 			proposeFix: die,
-			listIssueEvents: die,
+			recordAnomalyLinkEvent: () => Effect.void,
+			runTick: die,
+		}),
+		Layer.succeed(ErrorActorsService, {
 			registerAgent: die,
 			listAgents: die,
 			lookupActor: die,
 			ensureUserActor: () => Effect.succeed(actorFixture),
-			recordAnomalyLinkEvent: () => Effect.void,
-			listIssueIncidents: die,
-			listOpenIncidents: die,
-			getNotificationPolicy: die,
-			upsertNotificationPolicy: die,
-			getEscalationPolicy: die,
-			upsertEscalationPolicy: die,
-			evaluateEscalationPolicy: die,
-			listIssueEscalations: die,
-			listRecentEscalations: die,
-			runTick: die,
+			actorExists: die,
+			ensureSystemActor: die,
+			ensureAgentActor: die,
+			touchActor: die,
+			collectActorDocs: die,
 		}),
 		Layer.succeed(OrganizationService, {
 			retrieve: (orgId) =>

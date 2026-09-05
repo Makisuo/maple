@@ -46,7 +46,7 @@ describe("applyGlobalNamespace", () => {
 		})
 	})
 
-	it("pins into nested filters for the \"filters\" scope", () => {
+	it('pins into nested filters for the "filters" scope', () => {
 		setGlobalNamespace("checkout")
 		const result = applyGlobalNamespace(
 			{ data: { source: "logs", filters: { environments: ["prod"], excludedNamespaces: ["x"] } } },

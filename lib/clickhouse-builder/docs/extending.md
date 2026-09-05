@@ -45,7 +45,7 @@ const anyLast = CH.defineFn<[CH.Expr<string>], string>("anyLast", CH.sameAs(0))
 
 Any function of your own works: the rule is `(...args) => Schema.Codec | undefined`.
 
-A rule is an *assertion*, the same way `rawExpr`'s type is: nothing checks that `sameAs(0)` on a
+A rule is an _assertion_, the same way `rawExpr`'s type is: nothing checks that `sameAs(0)` on a
 function you declared as returning a `number` actually yields one. Declare the rule that matches
 what ClickHouse does.
 
@@ -90,7 +90,7 @@ const quantileExact = (q: number) => (expr: CH.Expr<number>) =>
 ```
 
 This is how the bundled `quantile` is built. Note the second argument: `makeExpr` requires a
-schema — passing `undefined` is how a wrapper *forwards* the untypedness of its own argument
+schema — passing `undefined` is how a wrapper _forwards_ the untypedness of its own argument
 (`schemaOf(arg)`), not something to write. For an expression that genuinely has no type, use
 `makeUntypedExpr`, which says so and costs the query its row schema knowingly.
 

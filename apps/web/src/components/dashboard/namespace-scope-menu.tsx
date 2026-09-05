@@ -101,13 +101,15 @@ function NamespaceScopeList({ emptyNotice = false }: { emptyNotice?: boolean }) 
 				{matches.length === 0 && trimmed !== "" && (
 					<div className="px-2 py-1.5 text-xs text-muted-foreground">No namespaces match</div>
 				)}
-				{!pinnedIsObserved && pinned !== null && (trimmed === "" || pinned.toLowerCase().includes(trimmed)) && (
-					<DropdownMenuItem onClick={() => select(pinned)}>
-						<span className="truncate">{pinned}</span>
-						<span className="ml-2 text-xs text-muted-foreground">no recent data</span>
-						<CheckIcon size={16} className="ml-auto" />
-					</DropdownMenuItem>
-				)}
+				{!pinnedIsObserved &&
+					pinned !== null &&
+					(trimmed === "" || pinned.toLowerCase().includes(trimmed)) && (
+						<DropdownMenuItem onClick={() => select(pinned)}>
+							<span className="truncate">{pinned}</span>
+							<span className="ml-2 text-xs text-muted-foreground">no recent data</span>
+							<CheckIcon size={16} className="ml-auto" />
+						</DropdownMenuItem>
+					)}
 			</div>
 		</>
 	)

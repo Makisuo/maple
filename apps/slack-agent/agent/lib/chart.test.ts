@@ -159,7 +159,10 @@ describe("renderChartSvg", () => {
 		const svg = renderChartSvg(
 			spec({
 				unit: "percent",
-				points: Array.from({ length: 12 }, (_, i) => [T0 + i * 300_000, 0.005 + (0.035 * i) / 11] as const),
+				points: Array.from(
+					{ length: 12 },
+					(_, i) => [T0 + i * 300_000, 0.005 + (0.035 * i) / 11] as const,
+				),
 			}),
 		)
 		const labels = [...svg.matchAll(/x="56" y="[^"]+" text-anchor="end"[^>]*>([^<]+)<\/text>/gu)].map(

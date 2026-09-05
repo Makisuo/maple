@@ -82,35 +82,35 @@ has an S3 gateway endpoint and no NAT, so this traffic is free.
 
 ## Configuration
 
-| Variable | Default | Notes |
-| --- | --- | --- |
-| `INGEST_QUEUE_MAX_BYTES` | — | Total WAL budget; divided evenly across lanes |
-| `INGEST_WAL_SHARDS` | `max(cpus × 2, 2)` | Shards, not lanes — lanes are `shards × destinations` |
-| `INGEST_WAL_SEGMENT_MAX_BYTES` | 8 MiB | Seal threshold, and so the shipped object size |
-| `INGEST_WAL_S3_BUCKET` | unset | Unset keeps the WAL local-only (self-hosted, local dev) |
-| `INGEST_WAL_S3_REGION` | `$AWS_REGION` | Required with a bucket |
-| `INGEST_WAL_S3_ENDPOINT` | `https://s3.<region>.amazonaws.com` | For an S3-compatible target |
-| `INGEST_WAL_S3_PREFIX` | `wal` | Key prefix inside the bucket |
-| `INGEST_WAL_S3_ORPHAN_AFTER_SECS` | 600 | How stale a heartbeat must be to be claimable |
-| `INGEST_WAL_S3_HEARTBEAT_SECS` | 60 | Owner heartbeat interval |
-| `INGEST_WAL_S3_TIMEOUT_MS` | 10000 | Per-request timeout |
-| `INGEST_SHUTDOWN_DRAIN_SECS` | 90 | Must stay inside the task's 120s `stopTimeout` |
+| Variable                          | Default                             | Notes                                                   |
+| --------------------------------- | ----------------------------------- | ------------------------------------------------------- |
+| `INGEST_QUEUE_MAX_BYTES`          | —                                   | Total WAL budget; divided evenly across lanes           |
+| `INGEST_WAL_SHARDS`               | `max(cpus × 2, 2)`                  | Shards, not lanes — lanes are `shards × destinations`   |
+| `INGEST_WAL_SEGMENT_MAX_BYTES`    | 8 MiB                               | Seal threshold, and so the shipped object size          |
+| `INGEST_WAL_S3_BUCKET`            | unset                               | Unset keeps the WAL local-only (self-hosted, local dev) |
+| `INGEST_WAL_S3_REGION`            | `$AWS_REGION`                       | Required with a bucket                                  |
+| `INGEST_WAL_S3_ENDPOINT`          | `https://s3.<region>.amazonaws.com` | For an S3-compatible target                             |
+| `INGEST_WAL_S3_PREFIX`            | `wal`                               | Key prefix inside the bucket                            |
+| `INGEST_WAL_S3_ORPHAN_AFTER_SECS` | 600                                 | How stale a heartbeat must be to be claimable           |
+| `INGEST_WAL_S3_HEARTBEAT_SECS`    | 60                                  | Owner heartbeat interval                                |
+| `INGEST_WAL_S3_TIMEOUT_MS`        | 10000                               | Per-request timeout                                     |
+| `INGEST_SHUTDOWN_DRAIN_SECS`      | 90                                  | Must stay inside the task's 120s `stopTimeout`          |
 
 The bucket, its lifecycle rule (7-day expiry as a backstop for deletes that were lost) and the
 task-role policy are in `apps/ingest/alchemy.run.ts`.
 
 ## Metrics
 
-| Metric | Read it for |
-| --- | --- |
-| `ingest_wal_shard_bytes` | Bytes a lane holds on disk, exported prefix included |
-| `ingest_wal_shard_full_total` | Appends rejected because a lane hit its cap — customer-visible 429s |
-| `ingest_wal_segments_sealed_total` | Segment rotation rate |
-| `ingest_wal_reclaimed_bytes_total` | Bytes freed by deleting exported segments |
-| `ingest_wal_shipped_bytes_total` | Bytes that reached the bucket |
-| `ingest_wal_ship_outcomes_total` | `outcome=exported_first` (healthy), `queue_full`, `failed` |
-| `ingest_wal_frames_recovered_total` | Frames claimed from a dead task — non-zero means a task died dirty |
-| `ingest_wal_commit_bytes` | Per-append size; the `ingest.wal_commit` span carries the latency |
+| Metric                              | Read it for                                                         |
+| ----------------------------------- | ------------------------------------------------------------------- |
+| `ingest_wal_shard_bytes`            | Bytes a lane holds on disk, exported prefix included                |
+| `ingest_wal_shard_full_total`       | Appends rejected because a lane hit its cap — customer-visible 429s |
+| `ingest_wal_segments_sealed_total`  | Segment rotation rate                                               |
+| `ingest_wal_reclaimed_bytes_total`  | Bytes freed by deleting exported segments                           |
+| `ingest_wal_shipped_bytes_total`    | Bytes that reached the bucket                                       |
+| `ingest_wal_ship_outcomes_total`    | `outcome=exported_first` (healthy), `queue_full`, `failed`          |
+| `ingest_wal_frames_recovered_total` | Frames claimed from a dead task — non-zero means a task died dirty  |
+| `ingest_wal_commit_bytes`           | Per-append size; the `ingest.wal_commit` span carries the latency   |
 
 `queue_full` means the object store cannot keep up with segment rotation, and those segments stay
 local-only. Sustained non-zero is the signal that the durability tier is not actually covering the

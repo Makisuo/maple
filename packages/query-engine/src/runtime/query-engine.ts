@@ -30,6 +30,7 @@ import type { OrgId } from "@maple/domain"
 import { Array as Arr, Duration, Effect, Match, Option, Result, Schema } from "effect"
 import type { QueryProfileName, SqlQueryOptions, WarehouseQuerySettings } from "../profiles"
 import { canonicalJSON } from "../canonical-json"
+import { memoizeAlertBuckets } from "./alert-evaluation-scope"
 import {
 	alertWindowBucketSeconds,
 	BUCKET_POLICIES,
@@ -2463,12 +2464,21 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 		const bucketSeconds = yield* prepareAlertEvaluation(request)
 
-		const obs = yield* computeAlertBuckets(
-			warehouse,
-			tenant,
-			{ source: request.source, startTime: request.startTime, endTime: request.endTime },
-			bucketSeconds,
-		)
+		const bucketRequest = {
+			source: request.source,
+			startTime: request.startTime,
+			endTime: request.endTime,
+		}
+		const load = computeAlertBuckets(warehouse, tenant, bucketRequest, bucketSeconds)
+		// Raw SQL may contain volatile functions. Keep its existing whole-result
+		// cache policy; only structured queries share buckets across reducers.
+		const obs = yield* request.source.kind === "spec"
+			? memoizeAlertBuckets(
+					warehouse,
+					canonicalJSON({ tenant, request: bucketRequest, bucketSeconds }),
+					load,
+				)
+			: load
 
 		const result = reduceAlertBuckets(obs, request.reducer)
 		yield* Effect.annotateCurrentSpan("result.groupCount", result.length)

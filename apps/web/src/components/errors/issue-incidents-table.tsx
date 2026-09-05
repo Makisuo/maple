@@ -65,7 +65,9 @@ export function IssueIncidentsTable({ incidents }: IssueIncidentsTableProps) {
 							<TableCell>
 								<Tooltip>
 									<TooltipTrigger
-										render={<span className="inline-flex cursor-default items-center gap-2" />}
+										render={
+											<span className="inline-flex cursor-default items-center gap-2" />
+										}
 									>
 										<span className="relative inline-flex size-1.5">
 											{isOpen ? (

@@ -60,7 +60,7 @@ on its normal read path.
 concern, and the builder does not execute. Most clients take them out of band, which is what the
 example above does.
 
-When they have to travel *in the SQL* — a gateway that forwards a statement verbatim, a
+When they have to travel _in the SQL_ — a gateway that forwards a statement verbatim, a
 `/v0/sql`-style endpoint that takes one string — the `/sql` subpath has the two functions for it:
 
 ```ts

@@ -64,7 +64,7 @@ export interface ErrorActorsPublicApi {
 export interface ErrorActorsServiceApi extends ErrorActorsPublicApi {
 	/** Existence check used by assignment without changing its span topology. */
 	readonly actorExists: (orgId: OrgId, actorId: ActorId) => Effect.Effect<boolean, ErrorPersistenceError>
-	/** Compatibility-facade support for the scheduled error workflow. */
+	/** System actor used by the scheduled error workflow. */
 	readonly ensureSystemActor: (orgId: OrgId) => Effect.Effect<ActorDocument, ErrorPersistenceError>
 	/**
 	 * Idempotent get-or-create of an agent actor by name. Unlike

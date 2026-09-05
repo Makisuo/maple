@@ -31,7 +31,7 @@ put it here instead. Git blame does not survive a refactor of the line it annota
     - `aws/stage.ts` — `MapleRegion`, AWS naming, task sizing, Cloud Map.
     - `env.ts` — the deploy-time env primitives and the shared groups the workers spread.
     - `config-helpers.ts` / `cloudflare/worker-runtime.ts` / `cloudflare/workers-cache.ts` /
-      `cloudflare/r2.ts` — the *runtime* (in-Worker) side, each behind its own subpath
+      `cloudflare/r2.ts` — the _runtime_ (in-Worker) side, each behind its own subpath
       export so a worker bundle never reaches the deploy graph through `./cloudflare`.
 
 **Read deploy-time config through `@maple/infra/env`, not `process.env`.** Alchemy resolves
@@ -356,8 +356,11 @@ Short list; each has a comment at the site.
   `/apps/ingest/target` becomes the glob `apps/ingest/target/**` evaluated with
   `cwd=apps/ingest`, matching nothing. The whole target dir would be walked and hashed on
   every deploy.
-- **A first deploy of a new stage with the AWS half on.** Each service's ACM certificate
-  lands `PENDING_VALIDATION` and its 443 listener fails. The workflows recover by creating
-  the validation CNAMEs (`scripts/acm-cert-validate.sh <domain>...`) and redeploying; the
-  script is a no-op on an ISSUED certificate. Every certificate-bearing service has to be
-  named in that call — a new one that is not cannot complete its first deploy unattended.
+- **A first deploy of a new stage with the AWS half on** used to fail: each service's ACM
+  certificate landed `PENDING_VALIDATION` and its 443 listener refused it, and the
+  workflows recovered by publishing the validation CNAMEs with a script and deploying
+  again. `@maple/infra/acm` now does that inside the stack — it resolves the Cloudflare
+  zone from the certificate's own hostname, publishes the CNAME ACM asks for, and blocks
+  the listener on `ISSUED` — so a new certificate-bearing service needs no registration
+  anywhere and no second pass. The remaining manual record is the **proxied CNAME at the
+  ALB** for each public service, which the deploy output names.
