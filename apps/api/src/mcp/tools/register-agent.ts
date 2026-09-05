@@ -8,6 +8,7 @@ import {
 import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "@/mcp/lib/structured-output"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 
 const decodeStringArray = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))
@@ -57,6 +58,16 @@ export function registerRegisterAgentTool(server: McpToolRegistrar) {
 							}),
 					),
 				)
+
+			const audit = yield* AuditLogService
+			yield* audit.record({
+				orgId: tenant.orgId,
+				actor: { type: "user", userId: tenant.userId },
+				source: "mcp",
+				action: "agent.registered",
+				resourceId: actor.id,
+				metadata: { name: actor.agentName ?? name },
+			})
 
 			const lines = [
 				`## Agent registered`,

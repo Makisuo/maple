@@ -1,7 +1,9 @@
 import {
 	McpQueryError,
+	optionalBooleanParam,
 	optionalNumberParam,
 	optionalStringParam,
+	optionalTimeParam,
 	validationError,
 	type McpToolRegistrar,
 } from "./types"
@@ -48,6 +50,12 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 				"Filter by issue kind: error (fingerprint groups) or alert (alert-rule incidents)",
 			),
 			service: optionalStringParam("Filter by service name"),
+			last_seen_after: optionalTimeParam(
+				'Only issues that received an occurrence after this time (YYYY-MM-DD HH:mm:ss). The way to ask "what fired recently" without paging the whole backlog.',
+			),
+			compact: optionalBooleanParam(
+				"Narrow table and payload: id, state, severity, service, exception, events, last seen, fingerprint. Omits assignment, lease and notes.",
+			),
 			limit: optionalNumberParam("Max results (default 50)"),
 			include_archived: optionalStringParam("Pass '1' to include archived issues in results"),
 		}),
@@ -56,6 +64,8 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 			severity,
 			kind,
 			service,
+			last_seen_after,
+			compact,
 			limit,
 			include_archived,
 		}) {
@@ -65,6 +75,8 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 				workflowState: workflow_state ?? "all",
 				severity: severity ?? "all",
 				service: service ?? "all",
+				lastSeenAfter: last_seen_after ?? "none",
+				compact: compact === true,
 				limit: limit ?? 50,
 			})
 			const readModels = yield* ErrorIssueReadModelsService
@@ -110,6 +122,7 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 					severity: typedSeverity,
 					kind: typedKind,
 					service,
+					startTime: last_seen_after ?? undefined,
 					limit: limit ?? 50,
 					includeArchived: include_archived === "1",
 				})
@@ -132,6 +145,28 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 
 			if (issues.length === 0) {
 				lines.push("No error issues found.")
+			} else if (compact) {
+				const headers = [
+					"Issue ID",
+					"State",
+					"Severity",
+					"Service",
+					"Exception",
+					"Events",
+					"Last seen",
+					"Fingerprint",
+				]
+				const rows = issues.map((i) => [
+					i.id,
+					i.hasOpenIncident ? `${i.workflowState} (incident)` : i.workflowState,
+					i.severity ?? "—",
+					i.serviceName,
+					truncate(i.errorLabel || `${i.exceptionType}: ${i.exceptionMessage}`, 50),
+					formatNumber(i.occurrenceCount),
+					i.lastSeenAt.slice(0, 19),
+					i.fingerprintHash,
+				])
+				lines.push(formatTable(headers, rows))
 			} else {
 				const headers = [
 					// Full id, not a prefix. The 8-char truncation this used to render was
@@ -152,6 +187,9 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 					"Last seen",
 					"Assigned",
 					"Holder",
+					// The warehouse identity, so an issue can go straight to error_detail
+					// instead of being re-derived through find_errors.
+					"Fingerprint",
 				]
 				const rows = issues.map((i) => [
 					i.id,
@@ -174,6 +212,7 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 							? `agent:${i.leaseHolder.agentName ?? "?"}`
 							: (i.leaseHolder.userId ?? "user")
 						: "—",
+					i.fingerprintHash,
 				])
 				lines.push(formatTable(headers, rows))
 			}
@@ -191,6 +230,12 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 					} and regressed; read what was already tried before investigating it as new`,
 				)
 			}
+			const topError = issues.find((i) => i.kind === "error")
+			if (topError) {
+				nextSteps.push(
+					`\`error_detail fingerprint="${topError.fingerprintHash}"\` — sample traces for the most recent issue`,
+				)
+			}
 			for (const id of triageIds) {
 				nextSteps.push(`\`claim_error_issue issue_id="${id}"\` — pick up this issue`)
 				nextSteps.push(
@@ -203,46 +248,63 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
 				content: createDualContent(lines.join("\n"), {
 					tool: "list_error_issues",
 					data: {
-						issues: issues.map((i) => ({
-							id: i.id,
-							kind: i.kind,
-							fingerprintHash: i.fingerprintHash,
-							workflowState: i.workflowState,
-							priority: i.priority,
-							severity: i.severity,
-							severitySource: i.severitySource,
-							serviceName: i.serviceName,
-							errorLabel: i.errorLabel,
-							exceptionType: i.exceptionType,
-							exceptionMessage: i.exceptionMessage,
-							topFrame: i.topFrame,
-							occurrenceCount: i.occurrenceCount,
-							firstSeenAt: i.firstSeenAt,
-							lastSeenAt: i.lastSeenAt,
-							assignedActor: i.assignedActor
-								? {
-										id: i.assignedActor.id,
-										type: i.assignedActor.type,
-										userId: i.assignedActor.userId,
-										agentName: i.assignedActor.agentName,
-										model: i.assignedActor.model,
-										capabilities: i.assignedActor.capabilities,
-									}
-								: null,
-							leaseHolder: i.leaseHolder
-								? {
-										id: i.leaseHolder.id,
-										type: i.leaseHolder.type,
-										userId: i.leaseHolder.userId,
-										agentName: i.leaseHolder.agentName,
-										model: i.leaseHolder.model,
-										capabilities: i.leaseHolder.capabilities,
-									}
-								: null,
-							leaseExpiresAt: i.leaseExpiresAt,
-							notes: i.notes,
-							hasOpenIncident: i.hasOpenIncident,
-						})),
+						compact: compact === true,
+						issues: compact
+							? issues.map((i) => ({
+									id: i.id,
+									kind: i.kind,
+									fingerprintHash: i.fingerprintHash,
+									workflowState: i.workflowState,
+									severity: i.severity,
+									serviceName: i.serviceName,
+									errorLabel: i.errorLabel,
+									occurrenceCount: i.occurrenceCount,
+									firstSeenAt: i.firstSeenAt,
+									lastSeenAt: i.lastSeenAt,
+									regressionCount: i.regressionCount,
+									lastResolvedAt: i.lastResolvedAt,
+									hasOpenIncident: i.hasOpenIncident,
+								}))
+							: issues.map((i) => ({
+									id: i.id,
+									kind: i.kind,
+									fingerprintHash: i.fingerprintHash,
+									workflowState: i.workflowState,
+									priority: i.priority,
+									severity: i.severity,
+									severitySource: i.severitySource,
+									serviceName: i.serviceName,
+									errorLabel: i.errorLabel,
+									exceptionType: i.exceptionType,
+									exceptionMessage: i.exceptionMessage,
+									topFrame: i.topFrame,
+									occurrenceCount: i.occurrenceCount,
+									firstSeenAt: i.firstSeenAt,
+									lastSeenAt: i.lastSeenAt,
+									assignedActor: i.assignedActor
+										? {
+												id: i.assignedActor.id,
+												type: i.assignedActor.type,
+												userId: i.assignedActor.userId,
+												agentName: i.assignedActor.agentName,
+												model: i.assignedActor.model,
+												capabilities: i.assignedActor.capabilities,
+											}
+										: null,
+									leaseHolder: i.leaseHolder
+										? {
+												id: i.leaseHolder.id,
+												type: i.leaseHolder.type,
+												userId: i.leaseHolder.userId,
+												agentName: i.leaseHolder.agentName,
+												model: i.leaseHolder.model,
+												capabilities: i.leaseHolder.capabilities,
+											}
+										: null,
+									leaseExpiresAt: i.leaseExpiresAt,
+									notes: i.notes,
+									hasOpenIncident: i.hasOpenIncident,
+								})),
 						total: issues.length,
 					},
 				}),

@@ -15,7 +15,9 @@ import {
 import { PlanetScaleWebhookJob } from "./services/integrations/planetscale/PlanetScaleWebhookQueue"
 
 const telemetry = MapleCloudflareSDK.make({
-	serviceName: "maple-api",
+	// Deliberately not `maple-api`: background work sharing the request-facing
+	// service's name skewed its percentiles (p99 32s, 2026-09-04).
+	serviceName: "maple-planetscale-webhooks",
 	serviceNamespace: "core",
 	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],

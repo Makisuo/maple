@@ -1,6 +1,7 @@
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { useMemo } from "react"
+import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
@@ -24,6 +25,7 @@ const ALL_ENVIRONMENTS = "__all__"
 const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60
 
 const serviceMapSearchSchema = Schema.Struct({
+	view: Schema.optional(Schema.Literals(["2d", "3d"])),
 	environment: Schema.optional(Schema.String),
 	// Focus mode: dim/hide everything outside a service's neighborhood. Kept in
 	// the URL so a focused view is shareable / survives reloads.
@@ -153,6 +155,24 @@ function ServiceMapContent() {
 							    on one narrow row left it ~70px, and unwrapped they stacked
 							    into a ragged two-line block. */}
 							<div className="flex flex-wrap items-center gap-2">
+								<ToggleGroup
+									variant="outline"
+									size="sm"
+									aria-label="Service map view"
+									value={[search.view ?? "2d"]}
+									onValueChange={(values) => {
+										const view = values[0]
+										if (view === "2d" || view === "3d")
+											void navigate({ search: (prev) => ({ ...prev, view }) })
+									}}
+								>
+									<ToggleGroupItem value="2d" aria-label="2D map">
+										2D
+									</ToggleGroupItem>
+									<ToggleGroupItem value="3d" aria-label="3D map">
+										3D
+									</ToggleGroupItem>
+								</ToggleGroup>
 								<Select
 									items={environmentItems}
 									value={selectedEnvironment}
@@ -193,6 +213,7 @@ function ServiceMapContent() {
 						) : (
 							<div className="-mx-4 -mb-4 h-[calc(100vh-10rem)]">
 								<ServiceMapView
+									viewMode={search.view ?? "2d"}
 									startTime={effectiveStartTime}
 									endTime={effectiveEndTime}
 									deploymentEnv={deploymentEnv}

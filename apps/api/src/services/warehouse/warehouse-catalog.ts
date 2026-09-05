@@ -14,7 +14,7 @@ import * as Datasources from "@maple/domain/tinybird"
 
 const TABLE_NOTES: Record<string, ReadonlyArray<string>> = {
 	logs: [
-		"`SeverityText` values are Title Case: 'Trace', 'Debug', 'Info', 'Warn', 'Error', 'Fatal'. Filter with `SeverityText = 'Error'` (NOT `'ERROR'`).",
+		"`SeverityText` casing varies by SDK ('Error' from Effect services, 'ERROR' from OTel SDKs), so filter on the OTel level number instead: `SeverityNumber BETWEEN 17 AND 20` is ERROR, 13-16 WARN, 9-12 INFO, 5-8 DEBUG, 1-4 TRACE, 21-24 FATAL. Where you must use text, use `upper(SeverityText) = 'ERROR'`.",
 		"`SeverityNumber` follows OTel: 1-4 Trace, 5-8 Debug, 9-12 Info, 13-16 Warn, 17-20 Error, 21-24 Fatal.",
 		"`ResourceAttributes` and `LogAttributes` are `Map(LowCardinality(String), String)` — access with `LogAttributes['key']`; missing keys return '' (empty string), not NULL.",
 		"Use `TimestampTime` (DateTime) for `$__timeFilter(TimestampTime)` if you want sort-key-prefix-friendly filtering; `Timestamp` is DateTime64 (nanosecond precision).",
@@ -99,12 +99,23 @@ export interface TableInfo extends TableSummary {
 	readonly partitionKey?: string
 }
 
+/**
+ * Datasources that raw SQL must never reach, even inside the caller's own org.
+ * The audit log records every member's activity and origin IP and is served
+ * only through the admin-gated `GET /v2/audit_log`; letting `run_sql` or a
+ * dashboard widget read it would bypass that gate (and let the log observe
+ * itself being read).
+ */
+const RAW_SQL_HIDDEN_DATASOURCES: ReadonlySet<string> = new Set(["audit_log"])
+
 function collectDatasources() {
 	// `Datasources` exports a mix of datasource definitions, type aliases, helper
 	// functions, and constant lookup tables. `isDatasourceDefinition` is the
 	// runtime filter; we cast to `unknown` first because the static union of all
 	// exports is too wide for TS to narrow with the predicate.
-	return (Object.values(Datasources) as ReadonlyArray<unknown>).filter(isDatasourceDefinition)
+	return (Object.values(Datasources) as ReadonlyArray<unknown>)
+		.filter(isDatasourceDefinition)
+		.filter((ds) => !RAW_SQL_HIDDEN_DATASOURCES.has(ds._name))
 }
 
 export function listWarehouseTables(): ReadonlyArray<TableSummary> {

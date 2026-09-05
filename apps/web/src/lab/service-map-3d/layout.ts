@@ -1,4 +1,5 @@
-import type { Edge3D, Node3D, Topology3D } from "./fixture"
+import { computeTiers } from "@/components/service-map/three/graph"
+import type { Node3D, Topology3D } from "@/components/service-map/three/types"
 import { SERVICE_MAP_3D_TUNING, type Layout3DTuning } from "./tuning"
 
 /**
@@ -23,42 +24,6 @@ export interface Layout3D {
 	/** Centre of the laid-out graph, and the radius of the sphere enclosing it. */
 	center: Vec3
 	extent: number
-}
-
-/**
- * Longest-path depth from every entry node (in-degree 0), which is what makes
- * a request read top-to-bottom. Cycles can't extend a node past `nodes.length`,
- * so the relaxation loop is bounded rather than trusting the graph to be a DAG.
- */
-export function computeTiers(
-	nodes: ReadonlyArray<Node3D>,
-	edges: ReadonlyArray<Edge3D>,
-): Map<string, number> {
-	const ids = new Set(nodes.map((node) => node.id))
-	const real = edges.filter((e) => ids.has(e.source) && ids.has(e.target))
-	const indegree = new Map<string, number>(nodes.map((node) => [node.id, 0]))
-	for (const e of real) indegree.set(e.target, (indegree.get(e.target) ?? 0) + 1)
-
-	const tiers = new Map<string, number>(nodes.map((node) => [node.id, 0]))
-	const roots = nodes.filter((node) => (indegree.get(node.id) ?? 0) === 0).map((node) => node.id)
-	// Every node starts at 0; roots stay there and the rest get pushed down.
-	let frontier = roots.length > 0 ? roots : [nodes[0]?.id].filter((id): id is string => id !== undefined)
-
-	for (let pass = 0; pass < nodes.length && frontier.length > 0; pass++) {
-		const next: string[] = []
-		for (const id of frontier) {
-			const depth = tiers.get(id) ?? 0
-			for (const e of real) {
-				if (e.source !== id) continue
-				if ((tiers.get(e.target) ?? 0) >= depth + 1) continue
-				tiers.set(e.target, depth + 1)
-				next.push(e.target)
-			}
-		}
-		frontier = next
-	}
-
-	return tiers
 }
 
 const namespaceOrder = (nodes: ReadonlyArray<Node3D>, tiers: ReadonlyMap<string, number>): string[] => {
@@ -212,86 +177,3 @@ export const pipeRadius = (callsPerSecond: number, peak: number): number =>
 /** Node radius from throughput, on the same sqrt scale. */
 export const nodeScale = (throughput: number, peak: number): number =>
 	0.75 + 0.95 * Math.sqrt(Math.min(1, throughput / Math.max(peak, 1)))
-
-export interface CameraFit {
-	/** Point the camera should orbit around. */
-	target: Vec3
-	/** Distance from `target` along the view direction. */
-	distance: number
-}
-
-/**
- * Closed-form camera fit: the smallest orbit distance that keeps every node
- * inside the frustum, plus the target that centres them.
- *
- * Done in the camera's own basis rather than by projecting through the camera:
- * at mount the canvas has not been measured yet, so `camera.aspect` and the
- * projection matrix are not yet trustworthy — but the DOM element's size is.
- * Bounding-sphere framing is not enough either, since a tilted view of a tall
- * storey stack projects taller than the sphere implies.
- */
-export function fitCamera(
-	points: ReadonlyArray<Vec3>,
-	options: {
-		direction: Vec3
-		fovDegrees: number
-		aspect: number
-		/** Share of the frustum the graph should fill; 1 means touching the edges. */
-		fill?: number
-	},
-): CameraFit {
-	const { direction, fovDegrees, aspect, fill = 0.95 } = options
-	if (points.length === 0) return { target: [0, 0, 0], distance: 10 }
-
-	const dir = normalize(direction)
-	// `dir` is never vertical for our view angles, so world-up is a safe reference.
-	const right = normalize(cross([0, 1, 0], dir))
-	const up = cross(dir, right)
-
-	const axes = [right, up, dir] as const
-	const min: [number, number, number] = [Infinity, Infinity, Infinity]
-	const max: [number, number, number] = [-Infinity, -Infinity, -Infinity]
-	for (const point of points) {
-		for (let axis = 0; axis < 3; axis++) {
-			const projected = dot(point, axes[axis]!)
-			min[axis] = Math.min(min[axis]!, projected)
-			max[axis] = Math.max(max[axis]!, projected)
-		}
-	}
-
-	const mid = [0, 1, 2].map((axis) => (min[axis]! + max[axis]!) / 2)
-	const target: Vec3 = [
-		right[0] * mid[0]! + up[0] * mid[1]! + dir[0] * mid[2]!,
-		right[1] * mid[0]! + up[1] * mid[1]! + dir[1] * mid[2]!,
-		right[2] * mid[0]! + up[2] * mid[1]! + dir[2] * mid[2]!,
-	]
-
-	const tanVertical = Math.tan(((fovDegrees / 2) * Math.PI) / 180) * fill
-	const tanHorizontal = tanVertical * Math.max(aspect, 0.2)
-
-	// Solve per point rather than padding by half the depth range: a point at
-	// lateral offset `a` and depth offset `c` needs `distance >= a / tan + c`,
-	// and the binding point is usually a near one, not the deepest.
-	let distance = 1
-	for (const point of points) {
-		const a = Math.abs(dot(point, right) - mid[0]!)
-		const b = Math.abs(dot(point, up) - mid[1]!)
-		const c = dot(point, dir) - mid[2]!
-		distance = Math.max(distance, Math.max(a / tanHorizontal, b / tanVertical) + c)
-	}
-
-	return { target, distance: Math.max(distance, 1) }
-}
-
-const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-
-const cross = (a: Vec3, b: Vec3): Vec3 => [
-	a[1] * b[2] - a[2] * b[1],
-	a[2] * b[0] - a[0] * b[2],
-	a[0] * b[1] - a[1] * b[0],
-]
-
-const normalize = (v: Vec3): Vec3 => {
-	const length = Math.hypot(v[0], v[1], v[2]) || 1
-	return [v[0] / length, v[1] / length, v[2] / length]
-}

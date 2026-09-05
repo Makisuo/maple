@@ -233,20 +233,19 @@ bun --filter=@maple/ingest dev    # alone, raw port
 Default port: `3473` (`INGEST_PORT` / `PORT` override). `.env.example` uses `3474`; pick one
 port and keep `VITE_*` / `MAPLE_INGEST_PUBLIC_URL` consistent.
 
-| Variable                           | Required       | Notes                                                                    |
-| ---------------------------------- | -------------- | ------------------------------------------------------------------------ |
-| `INGEST_FORWARD_OTLP_ENDPOINT`     | yes            | `http://127.0.0.1:4318` for local collector                              |
-| `INGEST_WRITE_MODE`                | recommended    | `forward` for ClickHouse stack (default `tinybird`)                      |
-| `MAPLE_INTERNAL_ORG_ID`            | yes            | Org the gateway files its OWN telemetry under; no default                |
-| `MAPLE_INGEST_KEY_ENCRYPTION_KEY`  | yes\*          | \*Required for postgres key store / ClickHouse direct path               |
-| `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY` | yes            | Same value as API                                                        |
-| `MAPLE_SELF_HOSTED_MODE`           | recommended    | `single_tenant` → static key store (no DB)                               |
-| `MAPLE_ORG_ID_OVERRIDE`            | with static    | Must match `MAPLE_DEFAULT_ORG_ID`                                        |
-| `MAPLE_PG_URL`                     | postgres store | `postgres://maple:maple@localhost:5499/maple` if not using static store  |
-| `TINYBIRD_HOST` / `TINYBIRD_TOKEN` | tinybird mode  | When `INGEST_WRITE_MODE=tinybird` or `dual`                              |
-| `TINYBIRD_MIRROR_HOST` / `_TOKEN`  | migration only | Mirrors writes into a second workspace; best-effort, set both or neither |
-| `INGEST_PORT`                      | optional       | Default from port / env                                                  |
-| `INGEST_REQUIRE_TLS`               | optional       | `false` locally                                                          |
+| Variable                           | Required       | Notes                                                                   |
+| ---------------------------------- | -------------- | ----------------------------------------------------------------------- |
+| `INGEST_FORWARD_OTLP_ENDPOINT`     | yes            | `http://127.0.0.1:4318` for local collector                             |
+| `INGEST_WRITE_MODE`                | recommended    | `forward` for ClickHouse stack (default `tinybird`)                     |
+| `MAPLE_INTERNAL_ORG_ID`            | yes            | Org the gateway files its OWN telemetry under; no default               |
+| `MAPLE_INGEST_KEY_ENCRYPTION_KEY`  | yes\*          | \*Required for postgres key store / ClickHouse direct path              |
+| `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY` | yes            | Same value as API                                                       |
+| `MAPLE_SELF_HOSTED_MODE`           | recommended    | `single_tenant` → static key store (no DB)                              |
+| `MAPLE_ORG_ID_OVERRIDE`            | with static    | Must match `MAPLE_DEFAULT_ORG_ID`                                       |
+| `MAPLE_PG_URL`                     | postgres store | `postgres://maple:maple@localhost:5499/maple` if not using static store |
+| `TINYBIRD_HOST` / `TINYBIRD_TOKEN` | tinybird mode  | When `INGEST_WRITE_MODE=tinybird` or `dual`                             |
+| `INGEST_PORT`                      | optional       | Default from port / env                                                 |
+| `INGEST_REQUIRE_TLS`               | optional       | `false` locally                                                         |
 
 Sources `../../.env.local` automatically. Requires Rust toolchain.
 

@@ -7,15 +7,15 @@ This is the flow both humans and agents are meant to follow. If you are changing
 
 ## The pieces
 
-| Thing                      | Where it lives                        | What it is                                                    |
-| -------------------------- | ------------------------------------- | ------------------------------------------------------------- |
-| Occurrence                 | ClickHouse / Tinybird                 | One exception, one row. Never mutated.                        |
-| Fingerprint                | `cityHash64(org, service, type, frame)` | The identity of an error *class*.                            |
-| Candidate                  | `error_fingerprint_candidates`        | A fingerprint seen, but not yet worth a row of its own.       |
-| **Issue**                  | `error_issues`                        | The durable, assignable record. One per fingerprint.          |
-| Incident                   | `error_incidents`                     | A time-bounded flare-up *under* an issue.                     |
-| Investigation              | `investigations`                      | One AI diagnostic run. Zero or more per issue.                |
-| Verification               | `error_issue_verifications`           | One post-merge "did that actually work?" check.               |
+| Thing         | Where it lives                          | What it is                                              |
+| ------------- | --------------------------------------- | ------------------------------------------------------- |
+| Occurrence    | ClickHouse / Tinybird                   | One exception, one row. Never mutated.                  |
+| Fingerprint   | `cityHash64(org, service, type, frame)` | The identity of an error _class_.                       |
+| Candidate     | `error_fingerprint_candidates`          | A fingerprint seen, but not yet worth a row of its own. |
+| **Issue**     | `error_issues`                          | The durable, assignable record. One per fingerprint.    |
+| Incident      | `error_incidents`                       | A time-bounded flare-up _under_ an issue.               |
+| Investigation | `investigations`                        | One AI diagnostic run. Zero or more per issue.          |
+| Verification  | `error_issue_verifications`             | One post-merge "did that actually work?" check.         |
 
 The exception an occurrence records comes from the span's first OTel `exception` event; a span
 without one (Cloudflare's native Workers tracing cannot record events) is read from its
@@ -84,16 +84,16 @@ and wakes back into `triage` when it expires.
 
 Three actors move issues, and the split is the whole design:
 
-- **Humans and agents** move an issue through the states that record an *intention*: `triage`,
+- **Humans and agents** move an issue through the states that record an _intention_: `triage`,
   `todo`, `in_progress`, `in_review`, `done`, `cancelled`, `wontfix`.
-- **The errors tick** (every minute) owns `regressed`. It records an *observation* — this error
+- **The errors tick** (every minute) owns `regressed`. It records an _observation_ — this error
   fired from a build that was not running when it was resolved — and it would overwrite any
   human claim to the contrary on its next pass.
 - **The verification tick** (every minute) owns `verifying` and the exit from it.
 
 `regressed` and `verifying` are therefore in `MACHINE_OWNED_WORKFLOW_STATES`: legal edges in
 `WORKFLOW_TRANSITIONS` because the ticks travel them, but filtered out of every surface that lets
-somebody *choose* a state — the web state picker, the bulk bar, and the `transition_error_issue`
+somebody _choose_ a state — the web state picker, the bulk bar, and the `transition_error_issue`
 MCP tool, which rejects them with an explanation.
 
 The single source of truth for all of this is `WORKFLOW_TRANSITIONS` in
@@ -109,12 +109,12 @@ There are exactly **three** places, and they do different jobs:
 
 Off by default; an admin opts in per org (`ai_triage_settings`). When an incident opens — first-seen
 or regression — `maybeEnqueueTriage` starts an investigation, subject to a daily budget counted in
-*model passes*, not runs (`maxPassesPerDay`, default 90; one fanned-out incident is about six
+_model passes_, not runs (`maxPassesPerDay`, default 90; one fanned-out incident is about six
 passes).
 
 The run either takes the single-pass path or fans out: a **planner** writes hypotheses for this
 specific incident, each is dispatched to its own **lens** agent, and a **validator** ranks them and
-promotes one cause. Everything it decided — including the hypotheses it chose *not* to test — is
+promotes one cause. Everything it decided — including the hypotheses it chose _not_ to test — is
 persisted on the investigation, which is what makes a conclusion readable a week later.
 
 The result lands back on the issue as an `ai_triage` timeline event plus an applied severity.
@@ -129,7 +129,7 @@ the issue closes.
 
 **The claim is taken by the work, not by a ceremony before it.** `propose_fix` and a transition to
 `in_progress` both acquire the lease. This is not a convenience — it is the fix to the flow's worst
-failure. For as long as claiming was a separate step an agent was merely *told* to take, it was
+failure. For as long as claiming was a separate step an agent was merely _told_ to take, it was
 never taken once: across 50 live issues in the internal org every `lease_holder` was null, and the
 most common MCP error in the org was `Illegal transition from 'triage' to 'in_review'`, which is
 `propose_fix` being rejected on an issue nobody had claimed. Agents responded by hand-walking
@@ -152,10 +152,10 @@ issue had been seen from at merge time. An occurrence from a build already in th
 client still in the wild; one from a build absent from it is the fix demonstrably not working, and
 that alone refutes the fix without asking an agent anything.
 
-Only a *clean* window goes to an agent, and it is asked the inverted question: not "what is wrong"
+Only a _clean_ window goes to an agent, and it is asked the inverted question: not "what is wrong"
 but "find anything that contradicts this fix holding". Hence the mapping in
 `verdictFromInvestigationStatus`, which reads backwards until you hold that question — an agent that
-*establishes* a cause means `not_fixed`, and an agent that finds nothing means `verified`.
+_establishes_ a cause means `not_fixed`, and an agent that finds nothing means `verified`.
 
 An inconclusive verdict re-arms exactly one longer window and then gives up, so an issue can never
 loop in verification without a human ever seeing it.
@@ -177,15 +177,15 @@ loop in verification without a human ever seeing it.
 
 ## The files
 
-| Concern                                | File                                                            |
-| -------------------------------------- | --------------------------------------------------------------- |
-| State machine, transitions, labels     | `packages/domain/src/http/errors.ts`                            |
-| Verification windows, verdicts         | `packages/domain/src/http/fix-verification.ts`                  |
-| Transitions, leases, timeline events   | `apps/api/src/services/errors/ErrorIssueWorkflowService.ts`     |
-| The errors tick (incidents, regression)| `apps/api/src/services/errors/error-tick-persistence.ts`        |
-| Starting an investigation              | `apps/api/src/services/errors/ai-triage-enqueue.ts`             |
-| Planner / lenses / validator           | `apps/api/src/workflows/`                                       |
-| Writing a diagnosis back               | `apps/api/src/services/errors/apply-diagnosis.ts`               |
-| PR links and verification windows      | `apps/api/src/services/errors/IssueFixVerificationService.ts`   |
-| The verification tick                  | `apps/api/src/services/errors/FixVerificationTickService.ts`    |
-| What agents are told                   | `apps/api/src/mcp/resources/instructions.ts`                    |
+| Concern                                 | File                                                          |
+| --------------------------------------- | ------------------------------------------------------------- |
+| State machine, transitions, labels      | `packages/domain/src/http/errors.ts`                          |
+| Verification windows, verdicts          | `packages/domain/src/http/fix-verification.ts`                |
+| Transitions, leases, timeline events    | `apps/api/src/services/errors/ErrorIssueWorkflowService.ts`   |
+| The errors tick (incidents, regression) | `apps/api/src/services/errors/error-tick-persistence.ts`      |
+| Starting an investigation               | `apps/api/src/services/errors/ai-triage-enqueue.ts`           |
+| Planner / lenses / validator            | `apps/api/src/workflows/`                                     |
+| Writing a diagnosis back                | `apps/api/src/services/errors/apply-diagnosis.ts`             |
+| PR links and verification windows       | `apps/api/src/services/errors/IssueFixVerificationService.ts` |
+| The verification tick                   | `apps/api/src/services/errors/FixVerificationTickService.ts`  |
+| What agents are told                    | `apps/api/src/mcp/resources/instructions.ts`                  |

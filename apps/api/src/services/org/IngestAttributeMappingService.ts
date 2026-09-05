@@ -18,6 +18,7 @@ import { orgIngestAttributeMappings } from "@maple/db"
 import { and, desc, eq } from "drizzle-orm"
 import { Array, Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { Database, DatabaseError } from "@/platform/DatabaseLive"
+import { msToDate } from "@/platform/time"
 
 type MappingRow = typeof orgIngestAttributeMappings.$inferSelect
 
@@ -243,10 +244,9 @@ export class IngestAttributeMappingService extends Context.Service<
 			yield* validateRule(merged)
 
 			const now = yield* Clock.currentTimeMillis
-			const updates: Record<string, unknown> = { updatedAt: new Date(now) } satisfies Record<
-				string,
-				unknown
-			>
+			const updates: Partial<typeof orgIngestAttributeMappings.$inferInsert> = {
+				updatedAt: msToDate(now),
+			}
 			if (request.name !== undefined) updates.name = request.name.trim()
 			if (request.sourceContext !== undefined) updates.sourceContext = request.sourceContext
 			if (request.sourceKey !== undefined) updates.sourceKey = request.sourceKey.trim()

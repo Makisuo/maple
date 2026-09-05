@@ -17,7 +17,7 @@
 		"./registry": "./src/registry/index.ts",
 		"./observability": "./src/observability/index.ts",
 		"./local": "./src/local.ts",
-		"./sql-catalog": "./src/sql-catalog.ts",
+		"./benchmark": "./src/benchmark/index.ts",
 		"./ch/tables": "./src/ch/tables.ts",
 		"./ch/schema": "./src/ch/schema.ts",
 		"./ch/format": "./src/ch/queries/format.ts",

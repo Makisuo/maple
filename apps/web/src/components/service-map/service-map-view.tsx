@@ -3,6 +3,8 @@ import { LatencyLineChart, QueryBuilderBarChart } from "@maple/ui/components/cha
 import { ChartTooltipSuppressionProvider } from "@maple/ui/components/plot"
 import { LinkedCursorOverlay, linkedCursorChartProps, useLinkedCursor } from "@/hooks/use-linked-cursor"
 import {
+	lazy,
+	Suspense,
 	useCallback,
 	useDeferredValue,
 	useEffect,
@@ -121,6 +123,8 @@ import {
 import type { HyperdriveConfigInput, HyperdriveNodeInfo } from "./service-map-hyperdrive"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { useMapleOrganizationId } from "@/hooks/use-maple-organization"
+
+const LiveServiceMap3D = lazy(() => import("./three/live-view"))
 
 const nodeTypes = {
 	serviceNode: ServiceMapNode,
@@ -1494,6 +1498,7 @@ function DatabaseDetailPanel({
 }
 
 interface ServiceMapViewProps {
+	viewMode?: "2d" | "3d"
 	startTime: string
 	endTime: string
 	/** Deployment environment to scope the map to; `undefined` = all environments. */
@@ -1694,6 +1699,7 @@ function useElkLayout(
 }
 
 export function ServiceMapCanvas({
+	viewMode = "2d",
 	edges: serviceEdges,
 	dbEdges,
 	cloudflareServices,
@@ -1714,6 +1720,7 @@ export function ServiceMapCanvas({
 	onFocusChange,
 	minTrafficPctOverride,
 }: {
+	viewMode?: "2d" | "3d"
 	edges: ServiceEdge[]
 	dbEdges: ServiceDbEdge[]
 	cloudflareServices: CloudflareService[]
@@ -2316,7 +2323,7 @@ export function ServiceMapCanvas({
 		return <ServiceMapEmptyState />
 	}
 
-	if (!layoutRevealed) {
+	if (!layoutRevealed && viewMode === "2d") {
 		return <ServiceMapLoading />
 	}
 
@@ -2334,6 +2341,7 @@ export function ServiceMapCanvas({
 				<ResizablePanel defaultSize={selectedServiceId ? 65 : 100} minSize={40}>
 					<div className="flex flex-col h-full">
 						<ServiceMapToolbar
+							showPresentationControls={viewMode === "2d"}
 							colorMode={colorMode}
 							onColorModeChange={setColorMode}
 							onResort={handleResort}
@@ -2348,141 +2356,187 @@ export function ServiceMapCanvas({
 							hiddenEdgeCount={declutter.hiddenEdgeCount}
 						/>
 						<div className="flex-1 min-h-0 relative">
-							{/* Dev-only: the sliders write `layoutConfig`, which is part of
+							{viewMode === "3d" ? (
+								<Suspense fallback={<ServiceMapLoading />}>
+									<LiveServiceMap3D
+										nodes={effectiveNodes}
+										edges={effectiveEdges}
+										dimmedNodeIds={declutter.dimmedNodeIds}
+										dimmedEdgeIds={declutter.dimmedEdgeIds}
+										selectedId={selectedServiceId}
+										onSelect={(id) => {
+											if (id && isNsAggregateId(id)) {
+												const ns = decodeURIComponent(
+													id.slice(NS_AGGREGATE_PREFIX.length),
+												)
+												setViewPrefs((prev) => ({
+													...prev,
+													collapsedNamespaces: prev.collapsedNamespaces.filter(
+														(n) => n !== ns,
+													),
+												}))
+											} else setSelectedServiceId(id)
+										}}
+									/>
+								</Suspense>
+							) : (
+								<>
+									{/* Dev-only: the sliders write `layoutConfig`, which is part of
 							    `layoutSignature`, so every tick re-runs ELK. Compiled out of
 							    production builds. */}
-							{import.meta.env.DEV && (
-								<LayoutDebugPanel config={layoutConfig} onChange={setLayoutConfig} />
+									{import.meta.env.DEV && (
+										<LayoutDebugPanel config={layoutConfig} onChange={setLayoutConfig} />
+									)}
+									<ParticleRegistryProvider value={registry}>
+										<ReactFlow
+											nodes={renderedNodes}
+											edges={renderedEdges}
+											onNodesChange={onNodesChange}
+											onNodeClick={handleNodeClick}
+											onPaneClick={handlePaneClick}
+											onMoveEnd={onMoveEnd}
+											defaultViewport={savedViewport ?? undefined}
+											onInit={(instance) => {
+												// SAFETY: this ref intentionally erases the node/edge generics after ReactFlow initialization.
+												rfInstance.current = instance as unknown as ReactFlowInstance
+											}}
+											nodeTypes={nodeTypes}
+											edgeTypes={edgeTypes}
+											nodesDraggable
+											nodesConnectable={false}
+											connectOnClick={false}
+											elementsSelectable={false}
+											// 0.05 lets fitView frame very large graphs (hundreds of
+											// services) instead of clipping at the zoom floor.
+											minZoom={0.05}
+											maxZoom={2}
+											proOptions={{ hideAttribution: true }}
+										>
+											<ServiceMapParticleCanvas />
+											<ServiceMapControls />
+											<ServiceMapMiniMap key={colorMode} colorMode={colorMode} />
+											<ServiceMapBackground />
+										</ReactFlow>
+									</ParticleRegistryProvider>
+								</>
 							)}
-							<ParticleRegistryProvider value={registry}>
-								<ReactFlow
-									nodes={renderedNodes}
-									edges={renderedEdges}
-									onNodesChange={onNodesChange}
-									onNodeClick={handleNodeClick}
-									onPaneClick={handlePaneClick}
-									onMoveEnd={onMoveEnd}
-									defaultViewport={savedViewport ?? undefined}
-									onInit={(instance) => {
-										// SAFETY: this ref intentionally erases the node/edge generics after ReactFlow initialization.
-										rfInstance.current = instance as unknown as ReactFlowInstance
-									}}
-									nodeTypes={nodeTypes}
-									edgeTypes={edgeTypes}
-									nodesDraggable
-									nodesConnectable={false}
-									connectOnClick={false}
-									elementsSelectable={false}
-									// 0.05 lets fitView frame very large graphs (hundreds of
-									// services) instead of clipping at the zoom floor.
-									minZoom={0.05}
-									maxZoom={2}
-									proOptions={{ hideAttribution: true }}
-								>
-									<ServiceMapParticleCanvas />
-									<ServiceMapControls />
-									<ServiceMapMiniMap key={colorMode} colorMode={colorMode} />
-									<ServiceMapBackground />
-								</ReactFlow>
-							</ParticleRegistryProvider>
 						</div>
 
-						{/* Legend */}
-						<div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t bg-muted/30 px-3 py-2.5 text-[11px] text-muted-foreground shrink-0">
-							{/* Pointer hints only: on touch the gestures are different, and the
+						{viewMode === "2d" && (
+							<>
+								{/* Legend */}
+								<div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t bg-muted/30 px-3 py-2.5 text-[11px] text-muted-foreground shrink-0">
+									{/* Pointer hints only: on touch the gestures are different, and the
 							    two lines they cost are the whole legend's height on a phone. */}
-							<span className="font-medium max-sm:hidden">Drag nodes to arrange</span>
-							<span className="text-foreground/30 max-sm:hidden">|</span>
-							<span className="font-medium max-sm:hidden">Scroll to zoom</span>
-							{colorMode === "service" && services.length > 0 && (
-								<>
+									<span className="font-medium max-sm:hidden">Drag nodes to arrange</span>
 									<span className="text-foreground/30 max-sm:hidden">|</span>
-									{services.slice(0, 3).map((service) => (
-										<div key={service} className="flex items-center gap-1.5">
-											<div
-												className="size-2.5 rounded-sm shrink-0"
-												style={{
-													backgroundColor: getServiceMapNodeColor(
-														{ label: service, kind: "service", errorRate: 0 },
-														"service",
-													),
-												}}
-											/>
-											<span className="font-medium">{service}</span>
-										</div>
-									))}
-									{services.length > 3 && (
-										<Popover>
-											<PopoverTrigger className="font-medium hover:text-foreground transition-colors cursor-pointer">
-												+{services.length - 3} more
-											</PopoverTrigger>
-											<PopoverContent align="start" className="w-64 p-3" side="top">
-												<div className="grid grid-cols-2 gap-2 text-[11px]">
-													{services.map((service) => (
-														<div
-															key={service}
-															className="flex items-center gap-1.5 min-w-0"
-														>
-															<div
-																className="size-2.5 rounded-sm shrink-0"
-																style={{
-																	backgroundColor: getServiceMapNodeColor(
-																		{
-																			label: service,
-																			kind: "service",
-																			errorRate: 0,
-																		},
-																		"service",
-																	),
-																}}
-															/>
-															<span className="truncate font-medium">
-																{service}
-															</span>
-														</div>
-													))}
+									<span className="font-medium max-sm:hidden">Scroll to zoom</span>
+									{colorMode === "service" && services.length > 0 && (
+										<>
+											<span className="text-foreground/30 max-sm:hidden">|</span>
+											{services.slice(0, 3).map((service) => (
+												<div key={service} className="flex items-center gap-1.5">
+													<div
+														className="size-2.5 rounded-sm shrink-0"
+														style={{
+															backgroundColor: getServiceMapNodeColor(
+																{
+																	label: service,
+																	kind: "service",
+																	errorRate: 0,
+																},
+																"service",
+															),
+														}}
+													/>
+													<span className="font-medium">{service}</span>
 												</div>
-											</PopoverContent>
-										</Popover>
+											))}
+											{services.length > 3 && (
+												<Popover>
+													<PopoverTrigger className="font-medium hover:text-foreground transition-colors cursor-pointer">
+														+{services.length - 3} more
+													</PopoverTrigger>
+													<PopoverContent
+														align="start"
+														className="w-64 p-3"
+														side="top"
+													>
+														<div className="grid grid-cols-2 gap-2 text-[11px]">
+															{services.map((service) => (
+																<div
+																	key={service}
+																	className="flex items-center gap-1.5 min-w-0"
+																>
+																	<div
+																		className="size-2.5 rounded-sm shrink-0"
+																		style={{
+																			backgroundColor:
+																				getServiceMapNodeColor(
+																					{
+																						label: service,
+																						kind: "service",
+																						errorRate: 0,
+																					},
+																					"service",
+																				),
+																		}}
+																	/>
+																	<span className="truncate font-medium">
+																		{service}
+																	</span>
+																</div>
+															))}
+														</div>
+													</PopoverContent>
+												</Popover>
+											)}
+										</>
 									)}
-								</>
-							)}
-							{colorMode === "platform" && (
-								<>
-									<span className="text-foreground/30">|</span>
-									{(["kubernetes", "cloudflare", "lambda", "web", "unknown"] as const).map(
-										(p) => (
-											<div key={p} className="flex items-center gap-1.5">
-												<div
-													className="size-2.5 rounded-sm shrink-0"
-													style={{
-														backgroundColor: getPlatformColor(
-															p === "unknown" ? undefined : p,
-														),
-													}}
-												/>
-												<span className="font-medium capitalize">{p}</span>
-											</div>
-										),
+									{colorMode === "platform" && (
+										<>
+											<span className="text-foreground/30">|</span>
+											{(
+												[
+													"kubernetes",
+													"cloudflare",
+													"lambda",
+													"web",
+													"unknown",
+												] as const
+											).map((p) => (
+												<div key={p} className="flex items-center gap-1.5">
+													<div
+														className="size-2.5 rounded-sm shrink-0"
+														style={{
+															backgroundColor: getPlatformColor(
+																p === "unknown" ? undefined : p,
+															),
+														}}
+													/>
+													<span className="font-medium capitalize">{p}</span>
+												</div>
+											))}
+										</>
 									)}
-								</>
-							)}
-							<span className="flex-1" />
-							<div className="flex items-center gap-3">
-								<div className="flex items-center gap-1.5">
-									<div className="size-2 rounded-full bg-severity-info" />
-									<span>Healthy</span>
+									<span className="flex-1" />
+									<div className="flex items-center gap-3">
+										<div className="flex items-center gap-1.5">
+											<div className="size-2 rounded-full bg-severity-info" />
+											<span>Healthy</span>
+										</div>
+										<div className="flex items-center gap-1.5">
+											<div className="size-2 rounded-full bg-severity-warn" />
+											<span>Degraded</span>
+										</div>
+										<div className="flex items-center gap-1.5">
+											<div className="size-2 rounded-full bg-severity-error" />
+											<span>Error</span>
+										</div>
+									</div>
 								</div>
-								<div className="flex items-center gap-1.5">
-									<div className="size-2 rounded-full bg-severity-warn" />
-									<span>Degraded</span>
-								</div>
-								<div className="flex items-center gap-1.5">
-									<div className="size-2 rounded-full bg-severity-error" />
-									<span>Error</span>
-								</div>
-							</div>
-						</div>
+							</>
+						)}
 					</div>
 				</ResizablePanel>
 
@@ -2531,6 +2585,7 @@ export function ServiceMapCanvas({
 }
 
 export function ServiceMapView({
+	viewMode = "2d",
 	startTime,
 	endTime,
 	deploymentEnv,
@@ -2709,6 +2764,7 @@ export function ServiceMapView({
 		})
 		.onSuccess((mapResponse) => (
 			<ServiceMapCanvas
+				viewMode={viewMode}
 				edges={
 					memberServices === null
 						? mapResponse.edges

@@ -114,9 +114,7 @@ describe("buildSessionFindings", () => {
 			]),
 		)
 
-		expect(failed.findings[0]!.detail).toBe(
-			"prompt grew 1.0K → 190.0K tokens across the session",
-		)
+		expect(failed.findings[0]!.detail).toBe("prompt grew 1.0K → 190.0K tokens across the session")
 	})
 
 	it("groups a tool's failures into one finding, counted, with the error text", () => {
@@ -206,8 +204,7 @@ describe("buildSessionFindings", () => {
 						conversationId: "t2",
 						errorType: "tool_error",
 						toolCallResult: {
-							result:
-								'Tool failed: Invalid parameters: SchemaError(Expected a number, or omit the parameter (an empty string is not a number)\n  at ["apdex_threshold_ms"])',
+							result: 'Tool failed: Invalid parameters: SchemaError(Expected a number, or omit the parameter (an empty string is not a number)\n  at ["apdex_threshold_ms"])',
 						},
 					},
 				}),
@@ -231,7 +228,10 @@ describe("buildSessionFindings", () => {
 					genAi: {
 						conversationId: "t2",
 						errorType: "tool_error",
-						toolCallResult: { isError: true, content: [{ type: "text", text: "shard 3 is locked" }] },
+						toolCallResult: {
+							isError: true,
+							content: [{ type: "text", text: "shard 3 is locked" }],
+						},
 					},
 				}),
 			]),

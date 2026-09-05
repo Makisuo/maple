@@ -190,6 +190,21 @@ export const facetAttrExpr = (
 export const soleValue = <A>(values: readonly A[]): A | undefined =>
 	values.length === 1 ? values[0] : undefined
 
+/**
+ * Every spelling a severity *level* reaches the warehouse as. Effect's logger writes Title Case
+ * (`Error`), the OTel SDKs upper-case (`ERROR`), pino-style shims lower-case — so `severity: "ERROR"`
+ * matched none of Maple's own services. Exact values (kept as `IN`) preserve the sorting-key prefix
+ * on `logs_aggregates_hourly`, which `upper(SeverityText)` would not.
+ */
+export function severitySpellings(level: string): readonly string[] {
+	const trimmed = level.trim()
+	if (trimmed === "") return []
+	const upper = trimmed.toUpperCase()
+	const lower = trimmed.toLowerCase()
+	const title = upper.charAt(0) + lower.slice(1)
+	return [...new Set([upper, title, lower])]
+}
+
 export function inclusionCondition(col: CH.Expr<string>, values: readonly string[]): CH.Condition {
 	const only = soleValue(values)
 	return only === undefined ? CH.inList(col, values) : col.eq(only)

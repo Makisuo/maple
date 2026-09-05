@@ -21,6 +21,7 @@ import type {
 	V2InvestigationSubject,
 } from "@maple/domain/http/v2"
 import { Effect, Match, Schema } from "effect"
+import { recordHttpAudit } from "@/services/audit/AuditLogService"
 import { InvestigationService } from "@/services/errors/InvestigationService"
 
 const toWireSubject = Effect.fn("HttpV2Investigations.toWireSubject")(function* (
@@ -265,6 +266,10 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 								: undefined),
 						}),
 					)
+					yield* recordHttpAudit("investigation.created", {
+						resourceId: doc.id,
+						metadata: { subject_type: payload.subject.type },
+					})
 
 					return yield* serializeInvestigation(doc)
 				}),
@@ -273,6 +278,7 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const doc = yield* service.restartInvestigation(tenant.orgId, params.id)
+					yield* recordHttpAudit("investigation.restarted", { resourceId: doc.id })
 
 					return yield* serializeInvestigation(doc)
 				}),
@@ -281,6 +287,10 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const doc = yield* service.updateStatus(tenant.orgId, params.id, payload.status)
+					yield* recordHttpAudit("investigation.status_changed", {
+						resourceId: doc.id,
+						metadata: { to_status: payload.status },
+					})
 
 					return yield* serializeInvestigation(doc)
 				}),

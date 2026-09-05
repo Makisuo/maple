@@ -164,7 +164,8 @@ export function QueryBuilderFunnelChart({
 							name: group,
 							color: colors.get(group) ?? "",
 							value,
-							widthPct: groupMax > 0 ? Math.max(value > 0 ? BAR_MIN_PCT : 0, value / groupMax) : 0,
+							widthPct:
+								groupMax > 0 ? Math.max(value > 0 ? BAR_MIN_PCT : 0, value / groupMax) : 0,
 							pctOfFirst: groupFirst > 0 ? value / groupFirst : 0,
 						}
 					}),
@@ -314,7 +315,9 @@ export function QueryBuilderFunnelChart({
 									</>
 								) : (
 									<>
-										<span className="text-foreground/90">{fmtValue(stage.value, unit)}</span>
+										<span className="text-foreground/90">
+											{fmtValue(stage.value, unit)}
+										</span>
 										{showShareOfFirst && (
 											<>
 												<span className="px-1 text-muted-foreground/50">·</span>
@@ -348,8 +351,9 @@ export function QueryBuilderFunnelChart({
 												width: `${group.widthPct * 100}%`,
 												backgroundColor: group.color,
 												opacity:
-													(hoverGroup !== null && hoverGroup !== group.name ? 0.35 : 1) *
-													fade,
+													(hoverGroup !== null && hoverGroup !== group.name
+														? 0.35
+														: 1) * fade,
 												transition: "opacity 140ms ease, width 220ms ease",
 											}}
 										/>

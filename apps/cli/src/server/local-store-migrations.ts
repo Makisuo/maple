@@ -52,7 +52,8 @@ import { v12ToV13ServiceOperationsDiscriminatorsModule } from "./local-store-mig
 import { v13ToV14AiTraceIndexModule } from "./local-store-migrations/v13-to-v14-ai-trace-index"
 import { v14ToV15CommitShaVcsRevisionModule } from "./local-store-migrations/v14-to-v15-commit-sha-vcs-revision"
 import { v15ToV16AiTraceIndexFilterColumnsModule } from "./local-store-migrations/v15-to-v16-ai-trace-index-filter-columns"
-import { v16ToV17ErrorEventsAttributeFallbackModule } from "./local-store-migrations/v16-to-v17-error-events-attribute-fallback"
+import { v16ToV17AuditLogModule } from "./local-store-migrations/v16-to-v17-audit-log"
+import { v17ToV18ErrorEventsAttributeFallbackModule } from "./local-store-migrations/v17-to-v18-error-events-attribute-fallback"
 import type {
 	AnyLocalStoreMigrationModule,
 	LocalStoreMigration,
@@ -126,7 +127,8 @@ export const localStoreMigrations: ReadonlyArray<AnyLocalStoreMigrationModule> =
 	v13ToV14AiTraceIndexModule,
 	v14ToV15CommitShaVcsRevisionModule,
 	v15ToV16AiTraceIndexFilterColumnsModule,
-	v16ToV17ErrorEventsAttributeFallbackModule,
+	v16ToV17AuditLogModule,
+	v17ToV18ErrorEventsAttributeFallbackModule,
 ]
 
 export const validateMigrationRegistry = (

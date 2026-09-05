@@ -1,4 +1,4 @@
-import { formatWarehouseDateTime, snapAlertWindowEndMs } from "@maple/query-engine"
+import { formatWarehouseDateTime, snapAlertWindowEndMs, warehouseDateTime64 } from "@maple/query-engine"
 import {
 	AlertComparator as AlertComparatorSchema,
 	AlertDeliveryError,
@@ -92,7 +92,7 @@ import { makeDbExecute } from "@/platform/db-execute"
 import { dateToMs, msToDate, msToSqlTimestamp } from "@/platform/time"
 import { makePersistenceError } from "./alert-persistence"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
-import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
+import { withAlertEvaluationScope, type GroupedAlertObservation } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { chartImageUrl, chartWindow, loadChartSeries } from "./alert-chart-series"
 import { systemTenant } from "./system-tenant"
@@ -283,13 +283,7 @@ export const interleaveAlertRulesByOrg = <T extends { readonly orgId: string }>(
 	return fair
 }
 
-// Tinybird DateTime64(3) wire format for alert_checks ingest:
-// "YYYY-MM-DD HH:MM:SS.SSS" (UTC, no timezone).
-const toIngestDateTime64 = (epochMs: number) => {
-	const d = new Date(epochMs)
-	const pad = (n: number, w = 2) => n.toString().padStart(w, "0")
-	return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`
-}
+const toIngestDateTime64 = warehouseDateTime64
 
 const compareThreshold = (
 	value: number,
@@ -3400,7 +3394,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					evaluationFailureCount: yield* Ref.get(evaluationFailureCount),
 					deliveryFailureCount: deliveryResult.failureCount,
 				}
-			})
+			}, withAlertEvaluationScope)
 
 			// `AlertsService.of(...)` can't be used here — referencing the class inside
 			// its own `make` is a TS2506 circular base-expression error.

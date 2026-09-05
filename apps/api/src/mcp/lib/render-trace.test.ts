@@ -98,3 +98,25 @@ describe("renderTraceOverview", () => {
 		expect(text).toContain("span:deadbeef") // short span ref for the error log
 	})
 })
+
+describe("renderTraceOverview errorsOnly", () => {
+	it("says which policy pruned the tree", () => {
+		const spans = [
+			span("root", {
+				children: [span("ok"), span("bad", { statusCode: "Error", statusMessage: "boom" })],
+			}),
+		]
+		const { lines, overview } = renderTraceOverview({
+			...base,
+			spanCount: 3,
+			spans,
+			budget: 100,
+			options: { errorsOnly: true },
+		})
+		const text = lines.join("\n")
+		expect(overview.renderedCount).toBe(2)
+		expect(text).toContain("error spans and their ancestors only")
+		expect(text).toContain("bad")
+		expect(text).not.toContain("ok —")
+	})
+})

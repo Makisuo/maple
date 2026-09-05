@@ -89,6 +89,22 @@ no `castRows` — a cast that looked type-safe hid wire-format drift.
   a failure the route already returns.
 - `packages/domain/src/tinybird/endpoints.ts` is **type-only** — no `defineEndpoint()` calls.
 
+## Query benchmarking
+
+Use `bun run bench:queries` for query optimization evidence; see
+[`docs/query-benchmarking.md`](docs/query-benchmarking.md). `catalog` compiles the real core and
+integration fixtures, or a custom `--suite` TypeScript module using
+`@maple/query-engine/benchmark`'s `caseFromCompiled`. Export a baseline before changing the builder,
+then re-export the candidate with the same case IDs, inputs, and populated dataset. `run` saves
+individual measurements and collects query logs after timing; `inspect` accepts the saved run to
+explain the SQL/settings actually measured; `compare --fail-on-regression` gates regressions and
+incomplete evidence. Catalog fixtures use synthetic inputs, so empty-table timings are not
+optimization evidence. Benchmark artifacts belong in the gitignored `apps/api/scripts/.bench/`.
+The benchmark package owns the former SQL catalog fixtures and coverage checks. The CLI and
+`query-benchmark.clickhouse.e2e.test.ts` share `apps/api/scripts/query-bench/catalog.ts`; add cases
+under the owning package's `src/benchmark/`, not a separate catalog. The live test also seeds an
+isolated database and exercises run/compare/inspect against real Maple builders.
+
 ## Application database (PlanetScale Postgres)
 
 Relational state (issues, alert rules, dashboards, org config, keys) is Drizzle/`pgTable` in

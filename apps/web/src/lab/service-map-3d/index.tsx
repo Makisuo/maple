@@ -1,200 +1,253 @@
-import { useMemo, useState } from "react"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
-import { Separator } from "@maple/ui/components/ui/separator"
-import { Toggle } from "@maple/ui/components/ui/toggle"
+import { useState } from "react"
+import { Button } from "@maple/ui/components/ui/button"
+import { Input } from "@maple/ui/components/ui/input"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-
-import { LabDials } from "@/lab/dials"
-
-import { healthColor, nodeColor, type ColorMode3D } from "./color"
-import { useServiceMap3DTuning } from "./dials"
 import { SERVICE_MAP_3D_TOPOLOGY } from "./fixture"
-import { computeTiers, type Layout3DMode } from "./layout"
-import { ServiceMap3D } from "./scene"
+import type { Node3D } from "@/components/service-map/three/types"
+import { resolveMachineBadge } from "@/components/service-map/three/factory-badge"
+import { ServiceMap3DViewport } from "@/components/service-map/three/viewport"
+import {
+	formatError,
+	formatLatency,
+	formatRate,
+	health,
+	HEALTH_COLOR,
+} from "@/components/service-map/three/spatial-layout"
 
 /**
- * `/lab/service-map-3d` — the 3D service-map experiment.
- *
- * The 2D map flattens a request path into a mess of crossing edges as soon as a
- * graph has both breadth and depth. This tries the other axis: tiers become
- * storeys, calls become pipes between them, and traffic becomes packets moving
- * through those pipes at the edge's own rate and latency. Fixture-driven and
- * DEV-only — it is a look at whether depth buys legibility, not a replacement.
+ * THESIS: A service map should be a readable instrument. Two spatial models
+ * expose ownership (Atlas) and dependency depth (Cascade) over the same graph.
+ * OWN-WORLD: Maple's warm surfaces and Geist Mono, mineral green infrastructure,
+ * amber elevated errors, clay degraded errors. Maple-branded enamel machinery in
+ * a square cartoon meadow cutaway, painted foliage, flanged pipes and working conveyors.
+ * STORY: Survey the system, select a service, follow an actual inbound/outbound call.
+ * FIRST VIEWPORT: A large orthographic map with a compact service inventory at
+ * right. The two view controls lead; the inspector never covers the map.
+ * FORM: Extend the lab with namespace districts and solid dependency terraces. Request volume drives Atlas height; Cascade height encodes graph depth.
  */
+const topology = SERVICE_MAP_3D_TOPOLOGY
+const nodesById = new Map(topology.nodes.map((node) => [node.id, node]))
+function HealthDot({ node }: { node: Node3D }) {
+	return (
+		<span
+			className="inline-block size-1.5 shrink-0 rounded-full"
+			style={{ backgroundColor: HEALTH_COLOR[health(node.errorRate)] }}
+		/>
+	)
+}
 
-const formatRate = (value: number): string =>
-	value >= 100 ? `${Math.round(value)}/s` : `${value.toFixed(1)}/s`
-
-const formatMs = (value: number): string =>
-	value >= 100 ? `${Math.round(value)}ms` : `${value.toFixed(1)}ms`
-
-const formatPct = (value: number): string => `${(value * 100).toFixed(value < 0.01 ? 2 : 1)}%`
+function ServiceInventory({
+	selectedId,
+	onSelect,
+}: {
+	selectedId: string | null
+	onSelect: (id: string | null) => void
+}) {
+	const [query, setQuery] = useState("")
+	const selected = selectedId ? nodesById.get(selectedId) : undefined
+	const selectedBadge = selected && resolveMachineBadge(selected)
+	const filtered = topology.nodes.filter((node) =>
+		`${node.label} ${node.namespace} ${node.kind}`.includes(query.trim().toLowerCase()),
+	)
+	const sorted = [...filtered].sort((a, b) => b.errorRate - a.errorRate)
+	const degraded = topology.nodes.filter((node) => health(node.errorRate) === "degraded").length
+	if (selected)
+		return (
+			<aside
+				className="flex max-h-120 min-h-80 flex-col overflow-y-auto border-t bg-background xl:max-h-none xl:min-h-0 xl:border-t-0 xl:border-l"
+				aria-label="Service inspector"
+			>
+				<div className="border-b p-4">
+					<Button
+						variant="ghost"
+						size="xs"
+						className="-ml-2 mb-4 text-muted-foreground"
+						onClick={() => onSelect(null)}
+					>
+						← All services
+					</Button>
+					<div className="mb-1 flex items-center gap-2">
+						<HealthDot node={selected} />
+						<h2 className="min-w-0 break-all text-sm font-semibold">{selected.label}</h2>
+					</div>
+					<p className="text-xs text-muted-foreground">
+						{selected.namespace}
+						{selectedBadge && ` / ${selectedBadge.label}`}
+					</p>
+					<div
+						className="mt-4 inline-flex items-center gap-1.5 text-xs capitalize"
+						style={{
+							color: `var(--severity-${health(selected.errorRate) === "healthy" ? "info" : health(selected.errorRate) === "elevated" ? "warn" : "error"})`,
+						}}
+					>
+						{health(selected.errorRate)}
+						<span className="text-muted-foreground">
+							· {formatError(selected.errorRate)} errors
+						</span>
+					</div>
+				</div>
+				<dl className="grid grid-cols-2 gap-4 border-b p-4 text-xs">
+					<div>
+						<dt className="mb-1.5 text-muted-foreground">Throughput</dt>
+						<dd className="text-base tabular-nums">{formatRate(selected.throughput)}</dd>
+					</div>
+					<div>
+						<dt className="mb-1.5 text-muted-foreground">p95 latency</dt>
+						<dd className="text-base tabular-nums">{formatLatency(selected.p95LatencyMs)}</dd>
+					</div>
+				</dl>
+				{(["Inbound", "Outbound"] as const).map((direction) => {
+					const edges = topology.edges.filter((edge) =>
+						direction === "Inbound" ? edge.target === selected.id : edge.source === selected.id,
+					)
+					return (
+						<section key={direction} className="border-b py-4">
+							<h3 className="mb-2 flex justify-between px-4 text-xs text-muted-foreground">
+								<span>{direction} calls</span>
+								<span>{edges.length}</span>
+							</h3>
+							{edges.length === 0 && (
+								<p className="px-4 py-2 text-xs text-muted-foreground">
+									No {direction.toLowerCase()} calls in this sample.
+								</p>
+							)}
+							{edges.map((edge) => {
+								const node = nodesById.get(
+									direction === "Inbound" ? edge.source : edge.target,
+								)
+								return (
+									node && (
+										<button
+											key={`${edge.source}:${edge.target}`}
+											type="button"
+											className="flex w-full flex-col gap-1.5 px-4 py-2.5 text-left text-xs hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
+											onClick={() => onSelect(node.id)}
+										>
+											<span className="flex w-full items-center gap-2">
+												<HealthDot node={node} />
+												<span className="truncate">{node.label}</span>
+												<span className="ml-auto text-muted-foreground">→</span>
+											</span>
+											<span className="pl-3.5 text-muted-foreground">
+												{formatRate(edge.callsPerSecond)} ·{" "}
+												{formatLatency(edge.p95LatencyMs)} p95
+											</span>
+										</button>
+									)
+								)
+							})}
+						</section>
+					)
+				})}
+				<p className="mt-auto p-4 text-[11px] leading-relaxed text-muted-foreground">
+					Select a connected service to follow the request path.
+				</p>
+			</aside>
+		)
+	return (
+		<aside
+			className="flex h-96 min-h-0 flex-col overflow-hidden border-t bg-background xl:h-auto xl:border-t-0 xl:border-l"
+			aria-label="Service inventory"
+		>
+			<div className="border-b p-4">
+				<div className="flex items-center justify-between">
+					<h2 className="text-xs font-semibold">Services & dependencies</h2>
+					<span className="text-xs text-muted-foreground">{topology.nodes.length}</span>
+				</div>
+				<p className="mt-2 text-[11px] text-muted-foreground">Select a node to inspect its calls.</p>
+				<Input
+					aria-label="Find a service"
+					placeholder="Find a service…"
+					value={query}
+					onChange={(event) => setQuery(event.target.value)}
+					className="mt-4 h-8 text-xs"
+				/>
+			</div>
+			<div className="flex items-center justify-between border-b px-4 py-2.5 text-[11px] text-muted-foreground">
+				<span>Sorted by error rate</span>
+				<span className="text-severity-error">{degraded} degraded</span>
+			</div>
+			<div className="min-h-0 flex-1 overflow-y-auto py-1">
+				{sorted.length === 0 && (
+					<p className="p-4 text-xs text-muted-foreground">No services match “{query}”.</p>
+				)}
+				{sorted.map((node) => (
+					<button
+						key={node.id}
+						type="button"
+						onClick={() => onSelect(node.id)}
+						className="group flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
+						aria-label={`Inspect ${node.label}`}
+					>
+						<HealthDot node={node} />
+						<span className="min-w-0 flex-1">
+							<span className="block truncate text-xs">{node.label}</span>
+							<span className="mt-0.5 block text-[10px] text-muted-foreground">
+								{node.kind === "service" ? node.namespace : node.kind}
+							</span>
+						</span>
+						<span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+							{formatError(node.errorRate)}
+						</span>
+					</button>
+				))}
+			</div>
+			<p className="border-t px-4 py-3 text-[10px] leading-relaxed text-muted-foreground">
+				Sample health thresholds
+				<br />
+				Elevated &gt; 1% · Degraded &gt; 5% errors
+			</p>
+		</aside>
+	)
+}
 
 export function ServiceMap3DLab() {
-	const [layoutMode, setLayoutMode] = useState<Layout3DMode>("floors")
-	const [colorMode, setColorMode] = useState<ColorMode3D>("service")
-	const [flowing, setFlowing] = useState(true)
-	const [autoRotate, setAutoRotate] = useState(false)
 	const [selectedId, setSelectedId] = useState<string | null>(null)
-	const [hoveredId, setHoveredId] = useState<string | null>(null)
-	// Storey spacing, lens and traffic speed: the numbers this experiment exists
-	// to argue about, so they live on a dial rather than in a rebuild.
-	const tuning = useServiceMap3DTuning()
-
-	const topology = SERVICE_MAP_3D_TOPOLOGY
-	const tiers = useMemo(() => computeTiers(topology.nodes, topology.edges), [topology])
-
-	const activeId = hoveredId ?? selectedId
-	const active = useMemo(
-		() => topology.nodes.find((node) => node.id === activeId) ?? null,
-		[topology, activeId],
-	)
-	const activeEdges = useMemo(() => {
-		if (!activeId) return { upstream: [], downstream: [] }
-		return {
-			upstream: topology.edges.filter((edge) => edge.target === activeId),
-			downstream: topology.edges.filter((edge) => edge.source === activeId),
-		}
-	}, [topology, activeId])
-
 	return (
 		<DashboardLayout.Root>
-			<DashboardLayout.Breadcrumbs items={[{ label: "Lab" }, { label: "Service map 3D" }]} />
+			<DashboardLayout.Breadcrumbs
+				items={[{ label: "Lab", href: "/lab" }, { label: "Service map 3D" }]}
+			/>
 			<DashboardLayout.Body>
 				<DashboardLayout.Content>
-					<div className="flex h-full min-h-0 flex-col">
-						<div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2">
-							<Select
-								items={[
-									{ value: "floors", label: "Storeys" },
-									{ value: "rings", label: "Rings" },
-								]}
-								value={layoutMode}
-								onValueChange={(value) => setLayoutMode(value as Layout3DMode)}
-							>
-								<SelectTrigger size="sm" className="min-w-0" aria-label="Layout">
-									<SelectValue />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="floors">Storeys</SelectItem>
-									<SelectItem value="rings">Rings</SelectItem>
-								</SelectContent>
-							</Select>
-							<Select
-								items={[
-									{ value: "service", label: "Color: service" },
-									{ value: "health", label: "Color: health" },
-									{ value: "platform", label: "Color: platform" },
-								]}
-								value={colorMode}
-								onValueChange={(value) => setColorMode(value as ColorMode3D)}
-							>
-								<SelectTrigger size="sm" className="min-w-0" aria-label="Color by">
-									<SelectValue />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="service">Color: service</SelectItem>
-									<SelectItem value="health">Color: health</SelectItem>
-									<SelectItem value="platform">Color: platform</SelectItem>
-								</SelectContent>
-							</Select>
-							<Separator orientation="vertical" className="mx-1 h-5" />
-							<Toggle
-								variant="outline"
-								size="sm"
-								className="px-2.5"
-								pressed={flowing}
-								onPressedChange={setFlowing}
-							>
-								Traffic
-							</Toggle>
-							<Toggle
-								variant="outline"
-								size="sm"
-								className="px-2.5"
-								pressed={autoRotate}
-								onPressedChange={setAutoRotate}
-							>
-								Auto-orbit
-							</Toggle>
-							<span className="ml-auto text-xs text-muted-foreground">
-								Drag to orbit · scroll to zoom · click a node to isolate its calls
-							</span>
+					<div className="flex h-full min-h-0 flex-col overflow-y-auto xl:overflow-hidden">
+						<div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
+							<div>
+								<div className="flex items-center gap-3">
+									<h1 className="font-display text-lg font-semibold tracking-tight">
+										Service map
+									</h1>
+									<span className="rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground">
+										3D lab
+									</span>
+								</div>
+								<p className="mt-1 text-xs text-muted-foreground">
+									One system. Two working landscapes.
+								</p>
+							</div>
+							<div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+								<span className="size-1.5 rounded-full bg-muted-foreground" />
+								Sample topology
+								<span className="ml-2 border-l pl-3">
+									{topology.nodes.length} nodes · {topology.edges.length} connections
+								</span>
+							</div>
 						</div>
 
-						<LabDials theme="dark" />
-
-						<div className="relative min-h-0 flex-1">
-							<ServiceMap3D
-								topology={topology}
-								layoutMode={layoutMode}
-								colorMode={colorMode}
-								flowing={flowing}
-								autoRotate={autoRotate}
-								tuning={tuning}
-								selectedId={selectedId}
-								onSelect={setSelectedId}
-								onHover={setHoveredId}
-							/>
-
-							{active && (
-								<div className="pointer-events-none absolute top-3 left-3 w-72 rounded-xl border border-white/10 bg-black/70 p-3 text-xs text-white/90 backdrop-blur-sm">
-									<div className="flex items-center gap-2">
-										<span
-											className="size-2.5 shrink-0 rounded-full"
-											style={{ background: nodeColor(active, colorMode) }}
-										/>
-										<span className="truncate font-semibold text-sm">{active.label}</span>
-										<span className="ml-auto shrink-0 text-[10px] text-white/50 uppercase">
-											{active.kind}
-										</span>
-									</div>
-									<div className="mt-2 grid grid-cols-3 gap-2 font-mono">
-										<Stat label="rate" value={formatRate(active.throughput)} />
-										<Stat
-											label="errors"
-											value={formatPct(active.errorRate)}
-											color={healthColor(active.errorRate)}
-										/>
-										<Stat label="p95" value={formatMs(active.p95LatencyMs)} />
-									</div>
-									<div className="mt-2 space-y-0.5 text-white/60">
-										<div>
-											tier {tiers.get(active.id) ?? 0} · {active.namespace}
-											{active.system ? ` · ${active.system}` : ""}
-										</div>
-										<div>
-											{activeEdges.upstream.length} inbound ·{" "}
-											{activeEdges.downstream.length} outbound
-										</div>
-									</div>
-									{activeEdges.downstream.length > 0 && (
-										<ul className="mt-2 space-y-0.5 border-t border-white/10 pt-2 font-mono text-[10px] text-white/70">
-											{activeEdges.downstream.slice(0, 6).map((edge) => (
-												<li key={edge.target} className="flex items-center gap-2">
-													<span className="truncate">→ {edge.target}</span>
-													<span className="ml-auto shrink-0 text-white/45">
-														{formatRate(edge.callsPerSecond)}
-													</span>
-												</li>
-											))}
-										</ul>
-									)}
-								</div>
-							)}
+						<div className="grid flex-1 grid-cols-1 xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_256px]">
+							<div className="h-[600px] min-h-0 xl:h-auto">
+								<ServiceMap3DViewport
+									topology={topology}
+									selectedId={selectedId}
+									onSelect={setSelectedId}
+									sample
+								/>
+							</div>
+							<ServiceInventory selectedId={selectedId} onSelect={setSelectedId} />
 						</div>
 					</div>
 				</DashboardLayout.Content>
 			</DashboardLayout.Body>
 		</DashboardLayout.Root>
-	)
-}
-
-function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
-	return (
-		<div>
-			<div className="text-[10px] text-white/45 uppercase">{label}</div>
-			<div style={color ? { color } : undefined}>{value}</div>
-		</div>
 	)
 }

@@ -93,11 +93,11 @@ receivers / processors plus this exporter.
 
 ## What writes where
 
-| OTLP signal | Maple base table                                                                        | Materialized views fan-out into                                                                                                                                                |
-| ----------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| OTLP signal | Maple base table                                                                        | Materialized views fan-out into                                                                                                                                 |
+| ----------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Traces      | `traces`                                                                                | `error_events`, `service_overview_spans`, `service_map_*`, `trace_list_mv`, `trace_detail_spans`, `traces_aggregates_hourly`, `service_usage`, attribute facets |
-| Logs        | `logs`                                                                                  | `logs_aggregates_hourly`, `service_usage`, log attribute facets                                                                                                                |
-| Metrics     | `metrics_sum` / `metrics_gauge` / `metrics_histogram` / `metrics_exponential_histogram` | `service_usage`, metric attribute facets                                                                                                                                       |
+| Logs        | `logs`                                                                                  | `logs_aggregates_hourly`, `service_usage`, log attribute facets                                                                                                 |
+| Metrics     | `metrics_sum` / `metrics_gauge` / `metrics_histogram` / `metrics_exponential_histogram` | `service_usage`, metric attribute facets                                                                                                                        |
 
 The exporter only ever writes to the **base** tables. ClickHouse handles the
 fan-out via `MATERIALIZED VIEW … TO …` definitions in migration `0001_initial`.

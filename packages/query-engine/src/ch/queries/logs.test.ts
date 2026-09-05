@@ -117,7 +117,14 @@ describe("logsTimeseriesQuery", () => {
 	it("applies severity filter", () => {
 		const q = logsTimeseriesQuery({ severity: "ERROR" })
 		const { sql } = compileUnsafe(q, baseParams)
-		expect(sql).toContain("SeverityText = 'ERROR'")
+		expect(sql).toContain("SeverityText IN ('ERROR', 'Error', 'error')")
+	})
+
+	it("matches a severity level across SDK spellings, but exact facet values as given", () => {
+		const level = logsTimeseriesQuery({ severity: "error" })
+		expect(compileUnsafe(level, baseParams).sql).toContain("SeverityText IN ('ERROR', 'Error', 'error')")
+		const exact = logsTimeseriesQuery({ severities: ["Error"] })
+		expect(compileUnsafe(exact, baseParams).sql).toContain("SeverityText = 'Error'")
 	})
 
 	it("uses text-index candidates for multi-token body search and retains exact semantics", () => {
@@ -323,7 +330,7 @@ describe("logsBreakdownQuery", () => {
 		const q = logsBreakdownQuery({ groupBy: "service", serviceName: "api", severity: "ERROR" })
 		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("ServiceName = 'api'")
-		expect(sql).toContain("SeverityText = 'ERROR'")
+		expect(sql).toContain("SeverityText IN ('ERROR', 'Error', 'error')")
 	})
 
 	it("falls back to raw logs for contains-mode environment match", () => {
@@ -432,7 +439,7 @@ describe("logsCountQuery", () => {
 		expect(sql).toContain("FROM logs")
 		expect(sql).not.toContain("logs_aggregates_hourly")
 		expect(sql).toContain("ServiceName = 'api'")
-		expect(sql).toContain("SeverityText = 'ERROR'")
+		expect(sql).toContain("SeverityText IN ('ERROR', 'Error', 'error')")
 		expect(sql).toContain("Body ILIKE '%timeout%'")
 	})
 })
@@ -507,7 +514,7 @@ describe("logsListQuery", () => {
 		})
 		const { sql } = compileUnsafe(q, baseParams)
 		expect(sql).toContain("ServiceName = 'api'")
-		expect(sql).toContain("SeverityText = 'ERROR'")
+		expect(sql).toContain("SeverityText IN ('ERROR', 'Error', 'error')")
 		expect(sql).toContain("TraceId = 'trace123'")
 		expect(sql).toContain("SpanId = 'span456'")
 		expect(sql).toContain("Body ILIKE '%timeout%'")
@@ -546,7 +553,7 @@ describe("logsListQuery", () => {
 		const { sql } = compileUnsafe(q, baseParams)
 		// Each filter appears twice — once per stage.
 		expect(sql.match(/ServiceName = 'api'/g)).toHaveLength(2)
-		expect(sql.match(/SeverityText = 'ERROR'/g)).toHaveLength(2)
+		expect(sql.match(/SeverityText IN \('ERROR', 'Error', 'error'\)/g)).toHaveLength(2)
 		expect(sql.match(/OrgId = 'org_1'/g)).toHaveLength(2)
 	})
 })
@@ -655,7 +662,7 @@ describe("logsFacetsQuery", () => {
 		const q = logsFacetsQuery({ serviceName: "api", severity: "ERROR" })
 		const { sql } = compileUnionUnsafe(q, baseParams)
 		expect(sql).toContain("ServiceName = 'api'")
-		expect(sql).toContain("SeverityText = 'ERROR'")
+		expect(sql).toContain("SeverityText IN ('ERROR', 'Error', 'error')")
 	})
 
 	it("falls back to raw `logs` for `contains`-mode environment match", () => {

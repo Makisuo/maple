@@ -1,46 +1,7 @@
 import type { ServicePlatform } from "@/api/warehouse/service-map"
+import type { Node3D, Node3DKind, Edge3D, Topology3D } from "@/components/service-map/three/types"
 
-/**
- * Hand-shaped topology for the 3D service-map experiment.
- *
- * Deliberately not the production `ServiceEdge`/`ServiceOverview` shape: the lab
- * only needs what the renderer draws (identity, tier hints, traffic, health), and
- * a flat literal is far easier to reshape while playing with the visuals than the
- * warehouse bundle is. ~25 nodes is the size where the plumbing is the point —
- * the 2D bench already covers "does it survive 120 services".
- */
-
-export type Node3DKind = "edge" | "service" | "database" | "queue" | "external"
-
-export interface Node3D {
-	id: string
-	label: string
-	kind: Node3DKind
-	/** OTel `service.namespace`; drives the vertical column a node sits in. */
-	namespace: string
-	platform: ServicePlatform
-	/** Requests per second handled by the node. */
-	throughput: number
-	errorRate: number
-	p95LatencyMs: number
-	/** `db.system` / messaging system, for database and queue nodes. */
-	system?: string
-}
-
-export interface Edge3D {
-	source: string
-	target: string
-	callsPerSecond: number
-	errorRate: number
-	avgLatencyMs: number
-	p95LatencyMs: number
-}
-
-export interface Topology3D {
-	nodes: ReadonlyArray<Node3D>
-	edges: ReadonlyArray<Edge3D>
-}
-
+/** Example topology used only by the 3D lab and tests. */
 const service = (
 	id: string,
 	namespace: string,
@@ -48,7 +9,18 @@ const service = (
 	throughput: number,
 	errorRate: number,
 	p95LatencyMs: number,
-): Node3D => ({ id, label: id, kind: "service", namespace, platform, throughput, errorRate, p95LatencyMs })
+	runtime: string,
+): Node3D => ({
+	id,
+	label: id,
+	kind: "service",
+	namespace,
+	platform,
+	runtime,
+	throughput,
+	errorRate,
+	p95LatencyMs,
+})
 
 const store = (
 	id: string,
@@ -82,24 +54,24 @@ const NODES: ReadonlyArray<Node3D> = [
 		errorRate: 0.004,
 		p95LatencyMs: 620,
 	},
-	service("cdn-edge", "edge", "cloudflare", 1810, 0.002, 18),
-	service("api-gateway", "edge", "cloudflare", 1240, 0.006, 34),
+	service("cdn-edge", "edge", "cloudflare", 1810, 0.002, 18, "workerd"),
+	service("api-gateway", "edge", "cloudflare", 1240, 0.006, 34, "workerd"),
 
-	service("storefront-bff", "storefront", "kubernetes", 720, 0.008, 148),
-	service("catalog-api", "storefront", "kubernetes", 610, 0.003, 62),
-	service("search-api", "storefront", "kubernetes", 260, 0.011, 210),
-	service("media-resizer", "storefront", "lambda", 95, 0.021, 480),
+	service("storefront-bff", "storefront", "kubernetes", 720, 0.008, 148, "nodejs"),
+	service("catalog-api", "storefront", "kubernetes", 610, 0.003, 62, "go"),
+	service("search-api", "storefront", "kubernetes", 260, 0.011, 210, "OpenJDK Runtime Environment"),
+	service("media-resizer", "storefront", "lambda", 95, 0.021, 480, "python"),
 
-	service("checkout-api", "checkout", "kubernetes", 180, 0.017, 240),
-	service("payments-api", "checkout", "kubernetes", 165, 0.032, 390),
-	service("orders-worker", "checkout", "kubernetes", 150, 0.009, 175),
-	service("inventory-api", "checkout", "kubernetes", 205, 0.005, 88),
+	service("checkout-api", "checkout", "kubernetes", 180, 0.017, 240, "bun"),
+	service("payments-api", "checkout", "kubernetes", 165, 0.032, 390, ".NET Core"),
+	service("orders-worker", "checkout", "kubernetes", 150, 0.009, 175, "nodejs"),
+	service("inventory-api", "checkout", "kubernetes", 205, 0.005, 88, "rust"),
 
-	service("identity-api", "identity", "kubernetes", 430, 0.002, 54),
-	service("session-edge", "identity", "cloudflare", 980, 0.001, 9),
+	service("identity-api", "identity", "kubernetes", 430, 0.002, 54, "deno"),
+	service("session-edge", "identity", "cloudflare", 980, 0.001, 9, "workerd"),
 
-	service("notifications-worker", "platform", "kubernetes", 70, 0.014, 320),
-	service("ingest-collector", "platform", "kubernetes", 2400, 0.0007, 12),
+	service("notifications-worker", "platform", "kubernetes", 70, 0.014, 320, "ruby"),
+	service("ingest-collector", "platform", "kubernetes", 2400, 0.0007, 12, "rust"),
 
 	store("db:postgresql/orders", "orders", "postgresql", "data", 320, 0.001, 24),
 	store("db:postgresql/catalog", "catalog", "postgresql", "data", 640, 0.0004, 11),

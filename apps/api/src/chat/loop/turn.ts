@@ -341,6 +341,9 @@ const runStep = (
 							? annotateModelCallEnd(collected)
 							: Effect.void,
 					),
+					// Mapped before the span closes so it records `@maple/llm/LlmCallError`
+					// with a reason, not the package's own `AI.Error` tag.
+					Stream.mapError((error) => toLlmCallError("chat.turn", error)),
 					// One span per model call — an attempt, not a logical step, because a
 					// retry costs the same money and wall clock and deserves its own record.
 					// The catch below sits outside, so a failed call ends this span with the
@@ -368,9 +371,8 @@ const runStep = (
 			// A model failure either retries the step or ends the turn as a recorded event. Either
 			// way it does not kill the stream: the session log is durable, so a client reconnecting
 			// after the failure must still be able to read what happened.
-			Stream.catch((error) => {
+			Stream.catch((called) => {
 				failed = true
-				const called = toLlmCallError("chat.turn", error)
 
 				// Aborted mid-stream. The DO already recorded the terminal event when it cleared the
 				// claim, so emitting anything here would be a second one.

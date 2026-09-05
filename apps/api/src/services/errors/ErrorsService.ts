@@ -57,18 +57,12 @@ import {
 	isOrgWarehouseQuarantined,
 	quarantineOnConfigClassCause,
 } from "@/services/warehouse/warehouse-org-quarantine"
-import { actorRowToDocument, ErrorActorsService, type ErrorActorsPublicApi } from "./ErrorActorsService"
-import {
-	ErrorIssueReadModelsService,
-	type ErrorIssueReadModelsPublicApi,
-} from "./ErrorIssueReadModelsService"
-import { ErrorIssueWorkflowService, type ErrorIssueWorkflowPublicApi } from "./ErrorIssueWorkflowService"
+import { actorRowToDocument, ErrorActorsService } from "./ErrorActorsService"
+import { ErrorIssueWorkflowService } from "./ErrorIssueWorkflowService"
 import { IssueFixVerificationService } from "./IssueFixVerificationService"
-import { ErrorPolicyService, type ErrorPolicyPublicApi } from "./ErrorPolicyService"
+import { ErrorPolicyService } from "./ErrorPolicyService"
 import { makeErrorDatabaseExecute, makePersistenceError } from "./error-persistence"
 import { summarizeCause } from "@/platform/describe-cause"
-
-export { describeCause, makePersistenceError } from "./error-persistence"
 
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.id)
 const decodeErrorIncidentIdSync = Schema.decodeUnknownSync(ErrorIncidentDocument.fields.id)
@@ -145,12 +139,7 @@ const RETENTION_PHASE_EVERY_N_TICKS = 60
 const DAY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_LEASE_DURATION_MS = 30 * 60_000
 const SYSTEM_AGENT_NAME = SYSTEM_ERRORS_AGENT_NAME
-export interface ErrorsServiceApi
-	extends
-		ErrorActorsPublicApi,
-		ErrorIssueWorkflowPublicApi,
-		ErrorIssueReadModelsPublicApi,
-		ErrorPolicyPublicApi {
+export interface ErrorsServiceApi {
 	readonly transitionIssue: (
 		orgId: OrgId,
 		actorId: ActorId,
@@ -230,13 +219,11 @@ const make: Effect.Effect<
 	| NotificationDispatcher
 	| ErrorActorsService
 	| ErrorIssueWorkflowService
-	| ErrorIssueReadModelsService
 	| ErrorPolicyService
 > = Effect.gen(function* () {
 	const database = yield* Database
 	const actorService = yield* ErrorActorsService
 	const workflow = yield* ErrorIssueWorkflowService
-	const readModels = yield* ErrorIssueReadModelsService
 	const policies = yield* ErrorPolicyService
 	// Optional on purpose. `propose_fix` works exactly as before without it — the
 	// `prUrl` still lands on the event payload — and gains a durable, watchable
@@ -372,21 +359,9 @@ const make: Effect.Effect<
 	})
 
 	// Actors
-	const { registerAgent, listAgents, lookupActor, ensureUserActor, ensureSystemActor, touchActor } =
-		actorService
+	const { ensureSystemActor, touchActor } = actorService
 	const rowToActor = actorRowToDocument
-	const {
-		requireIssue,
-		hydrateIssue,
-		recordEvent,
-		applyTransition,
-		heartbeatIssue,
-		releaseIssue,
-		assignIssue,
-		setSeverity,
-		commentOnIssue,
-		listIssueEvents,
-	} = workflow
+	const { requireIssue, hydrateIssue, recordEvent, applyTransition } = workflow
 	// Events / audit log
 
 	const recordAnomalyLinkEvent: ErrorsServiceApi["recordAnomalyLinkEvent"] = Effect.fn(
@@ -562,26 +537,16 @@ const make: Effect.Effect<
 					timestamp,
 				})
 			} else {
+				// Record one pickup or renewal using ownership before acquireLease updated it.
 				yield* recordEvent(orgId, issueId, actorId, "claim", {
 					payload: {
 						leaseExpiresAt,
 						leaseDurationMs: leaseMs,
+						renewed: current.leaseHolderActorId === actorId,
 					},
 					timestamp,
 				})
 				yield* touchActor(orgId, actorId, timestamp)
-			}
-
-			if (row.workflowState === "in_progress") {
-				// Emit a claim event even on renewal so the audit log shows the pickup.
-				yield* recordEvent(orgId, issueId, actorId, "claim", {
-					payload: {
-						leaseExpiresAt,
-						leaseDurationMs: leaseMs,
-						renewed: row.leaseHolderActorId === actorId,
-					},
-					timestamp,
-				})
 			}
 
 			yield* maybeNotifyClaim(orgId, actorId, next)
@@ -1629,32 +1594,10 @@ const make: Effect.Effect<
 	})
 
 	return ErrorsService.of({
-		listIssues: readModels.listIssues,
-		countOpenIssuesByService: readModels.countOpenIssuesByService,
-		getIssue: readModels.getIssue,
 		transitionIssue,
 		claimIssue,
-		heartbeatIssue,
-		releaseIssue,
-		assignIssue,
-		setSeverity,
-		commentOnIssue,
 		proposeFix,
-		listIssueEvents,
 		recordAnomalyLinkEvent,
-		registerAgent,
-		listAgents,
-		lookupActor,
-		ensureUserActor,
-		listIssueIncidents: readModels.listIssueIncidents,
-		listOpenIncidents: readModels.listOpenIncidents,
-		getNotificationPolicy: policies.getNotificationPolicy,
-		upsertNotificationPolicy: policies.upsertNotificationPolicy,
-		getEscalationPolicy: policies.getEscalationPolicy,
-		upsertEscalationPolicy: policies.upsertEscalationPolicy,
-		evaluateEscalationPolicy: policies.evaluateEscalationPolicy,
-		listIssueEscalations: policies.listIssueEscalations,
-		listRecentEscalations: policies.listRecentEscalations,
 		runTick,
 	})
 })

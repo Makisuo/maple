@@ -80,7 +80,9 @@ const bustRuntimeConfigCache = (orgId: OrgId): Promise<void> =>
  * the thin shell in `ClickHouseSchemaApplyWorkflow.ts`, off the startup-CPU path.
  */
 const schemaApplyTelemetry = MapleCloudflareSDK.make({
-	serviceName: "maple-api",
+	// Deliberately not `maple-api`: background work sharing the request-facing
+	// service's name skewed its percentiles (p99 32s, 2026-09-04).
+	serviceName: "maple-schema-apply",
 	serviceNamespace: "core",
 	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],

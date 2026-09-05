@@ -12,6 +12,7 @@ import {
 	AlertRuntime,
 	AlertRulesService,
 	AlertsService,
+	AuditLogService,
 	AnomalyDetectionService,
 	BucketCacheService,
 	CacheBackendLive,
@@ -22,7 +23,6 @@ import {
 	EmailService,
 	Env,
 	ErrorActorsService,
-	ErrorIssueReadModelsService,
 	ErrorIssueWorkflowService,
 	ErrorPolicyService,
 	ErrorsService,
@@ -148,12 +148,15 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 
 	const ErrorActorsServiceLive = ErrorActorsService.layer.pipe(Layer.provide(BaseLive))
 	const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
-		Layer.provide(Layer.mergeAll(BaseLive, ErrorActorsServiceLive)),
+		Layer.provide(
+			Layer.mergeAll(
+				BaseLive,
+				ErrorActorsServiceLive,
+				AuditLogService.layer.pipe(Layer.provide(WarehouseQueryServiceLive)),
+			),
+		),
 	)
 	const ErrorPolicyServiceLive = ErrorPolicyService.layer.pipe(Layer.provide(BaseLive))
-	const ErrorIssueReadModelsServiceLive = ErrorIssueReadModelsService.layer.pipe(
-		Layer.provide(Layer.mergeAll(DatabaseLive, WarehouseQueryServiceLive, ErrorIssueWorkflowServiceLive)),
-	)
 
 	// Only reachable from here through an investigation agent's `propose_fix`, but
 	// wired all the same: which worker served the call should not decide whether a
@@ -182,7 +185,6 @@ export const buildLayer = (env: AlertingWorkerEnv) => {
 				EdgeCacheServiceLive,
 				NotificationDispatcherLive,
 				ErrorActorsServiceLive,
-				ErrorIssueReadModelsServiceLive,
 				ErrorIssueWorkflowServiceLive,
 				ErrorPolicyServiceLive,
 				IssueFixVerificationServiceLive,

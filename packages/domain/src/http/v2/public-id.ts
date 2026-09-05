@@ -28,6 +28,7 @@ export const PublicIdPrefixes = {
 	alertDestination: "dest",
 	alertIncident: "inc",
 	actor: "actor",
+	auditLogEntry: "alog",
 	errorIssue: "iss",
 	errorIncident: "einc",
 	investigation: "inv",

@@ -182,18 +182,31 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 	Object.freeze({
-		// v17 rebuilds error_events_mv / error_events_by_time_mv so a span with
-		// no `exception` event is labelled from its exception.* / error.* span
-		// attributes (ClickHouse migration 0027). No part is rewritten and no row
-		// moves; rows already materialized keep their 'Unknown Error' label.
+		// TODO(v17): what changed, whether any part is rewritten or any row
+		// moves, and what this edge does NOT backfill.
 		//
 		// projectRevision is carried forward deliberately — it is a hardcoded
 		// constant that no longer tracks the generator's header, and the identity
 		// this gate compares is the fingerprint/digest pair.
 		version: 17,
-		fingerprint: "9135b2a26d977584",
-		digest: "9135b2a26d977584d621f4d3ba8cce1def47d98d55a3bf53dac493f93d2e0118",
-		manifestDigest: "2ef489448e313a603e842824c5918df76ced5fb509163f101a6288194dbbc552",
+		fingerprint: "b3800f55258f0ae3",
+		digest: "b3800f55258f0ae37a52bec6e4fe38be8fa9daebe3c912db2aa6885a4d73fa20",
+		manifestDigest: "f19b88567770ee1b67f77d5734de61adbfd3ba907ce8ae28ce65a4da4e544533",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
+	Object.freeze({
+		// v18 rebuilds error_events_mv / error_events_by_time_mv so a span with
+		// no `exception` event is labelled from its exception.* / error.* span
+		// attributes (ClickHouse migration 0028). No part is rewritten and no row
+		// moves; rows already materialized keep their 'Unknown Error' label.
+		//
+		// projectRevision is carried forward deliberately — it is a hardcoded
+		// constant that no longer tracks the generator's header, and the identity
+		// this gate compares is the fingerprint/digest pair.
+		version: 18,
+		fingerprint: "ce91b6b5e6eb89ed",
+		digest: "ce91b6b5e6eb89edd4386f21b3d82db233a9879f946bdc348b471fdb77ae0a6a",
+		manifestDigest: "25407ce7434d5ac185c3b98ae2e0328dc17ba31583f8afdaa4b846929ebba804",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 ] as const)

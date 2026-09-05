@@ -352,15 +352,12 @@ const make: Effect.Effect<
 					})
 				: Effect.succeed([])
 
-			const samplesCompiled = CH.compile(
-				CH.errorIssueSampleTracesQuery({ limit: sampleLimit }),
-				{
-					orgId,
-					fingerprintHash: issueRow.fingerprintHash,
-					startTime: formatWarehouseDateTime(startMs),
-					endTime: formatWarehouseDateTime(endMs),
-				},
-			)
+			const samplesCompiled = CH.compile(CH.errorIssueSampleTracesQuery({ limit: sampleLimit }), {
+				orgId,
+				fingerprintHash: issueRow.fingerprintHash,
+				startTime: formatWarehouseDateTime(startMs),
+				endTime: formatWarehouseDateTime(endMs),
+			})
 			const samplesEffect = isErrorKind
 				? warehouse.compiledQuery(tenant, samplesCompiled, {
 						context: "errorIssueSampleTraces",

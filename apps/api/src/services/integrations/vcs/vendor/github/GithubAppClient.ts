@@ -655,8 +655,7 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 				const json = yield* parseJson(response, "List pull requests")
 				return yield* decodePullRequestList(json).pipe(
 					Effect.mapError(
-						(cause) =>
-							new GithubAppError({ message: "Unexpected pull requests payload", cause }),
+						(cause) => new GithubAppError({ message: "Unexpected pull requests payload", cause }),
 					),
 				)
 			})
@@ -682,8 +681,7 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 				const json = yield* parseJson(response, "Get pull request")
 				return yield* decodePullRequest(json).pipe(
 					Effect.mapError(
-						(cause) =>
-							new GithubAppError({ message: "Unexpected pull request payload", cause }),
+						(cause) => new GithubAppError({ message: "Unexpected pull request payload", cause }),
 					),
 				)
 			})

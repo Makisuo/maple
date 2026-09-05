@@ -159,6 +159,34 @@ export const WarehouseDateTime = Schema.String.pipe(
 export type WarehouseDateTime = Schema.Schema.Type<typeof WarehouseDateTime>
 
 /**
+ * A warehouse `DateTime64(3)` literal: `YYYY-MM-DD HH:mm:ss.SSS`, UTC, no zone.
+ *
+ * The millisecond sibling of {@link WarehouseDateTime}, and branded for the same
+ * reason: the shapes a hand-built string reaches for — whole seconds, or ISO
+ * with `T`/`Z` — are both wrong here. Seconds collapse the sub-second ordering
+ * that a `DateTime64(3)` sort key exists to keep, and the Events API's JSONPath
+ * parser rejects `T`/`Z` outright, so an ingest row carrying one is dropped by
+ * the warehouse rather than by any check in front of it.
+ */
+export const WarehouseDateTime64 = Schema.String.pipe(
+	Schema.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/)),
+	Schema.brand("@maple/WarehouseDateTime64"),
+).annotate({
+	title: "WarehouseDateTime64",
+	description:
+		"UTC warehouse DateTime64(3) literal, `YYYY-MM-DD HH:mm:ss.SSS` (e.g. `2026-08-25 08:47:52.041`).",
+})
+export type WarehouseDateTime64 = Schema.Schema.Type<typeof WarehouseDateTime64>
+
+/**
+ * Format epoch milliseconds as a {@link WarehouseDateTime64} — the one
+ * sanctioned way to mint the brand, mirroring {@link warehouseDateTime}.
+ */
+export function warehouseDateTime64(epochMs: number): WarehouseDateTime64 {
+	return WarehouseDateTime64.make(formatWarehouseDateTimeMs(epochMs))
+}
+
+/**
  * Decodes any accepted timestamp input — ISO-8601 with `Z` or an offset, the
  * warehouse shape with or without fractional seconds, a bare date — into a
  * canonical {@link WarehouseDateTime}.

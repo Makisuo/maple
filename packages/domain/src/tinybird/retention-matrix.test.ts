@@ -7,6 +7,8 @@ const RETENTION_DAYS = {
 	// it past the source's own retention would store rows detection can no
 	// longer cross-check against a raw trace.
 	ai_trace_index: 30,
+	// Six years — HIPAA's documentation retention floor. Never rebuildable.
+	audit_log: 2190,
 	attribute_keys_hourly: 90,
 	attribute_values_hourly: 90,
 	error_events: 90,

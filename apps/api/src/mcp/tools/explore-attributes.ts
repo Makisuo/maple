@@ -2,11 +2,7 @@ import { optionalNumberParam, optionalStringParam, optionalTimeParam, type McpTo
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { queryWarehouse } from "@/mcp/lib/query-warehouse"
-import {
-	resolveTimeRange,
-	rangeExceededResult,
-	MCP_DISCOVERY_MAX_HOURS,
-} from "@/mcp/lib/time"
+import { resolveTimeRange, rangeExceededResult, MCP_DISCOVERY_MAX_HOURS } from "@/mcp/lib/time"
 import { clampLimit } from "@/mcp/lib/limits"
 import { formatNumber, formatTable } from "@/mcp/lib/format"
 import { Array as Arr, Effect, Schema } from "effect"

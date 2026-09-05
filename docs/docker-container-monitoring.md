@@ -52,7 +52,7 @@ re-derived differently. The k8s sibling of this lifecycle is
   two hosts' independent cumulative counters would fabricate a delta from their offset; the
   query differences per `host.name`, then sums.
 - **Compose labels are promoted from datapoint to resource.** `container_labels_to_metric_labels`
-  lands `compose.project`/`compose.service` as *datapoint* attributes, but every container query
+  lands `compose.project`/`compose.service` as _datapoint_ attributes, but every container query
   reads them from `ResourceAttributes` — so `transform/compose` in the agent config moves them.
   docker_stats emits one Resource per container, so a plain transform is safe here; the Fargate
   prometheus path in the k8s chart needs `groupbyattrs` first because one Resource covers many
@@ -67,7 +67,7 @@ re-derived differently. The k8s sibling of this lifecycle is
 Docker has no k8sattributes/operator analog to inject identity into app telemetry:
 
 - The reliable path is documented in the guide: `OTEL_RESOURCE_ATTRIBUTES` with `container.id`
-  and `container.name` (Docker's default hostname *is* the short id).
+  and `container.name` (Docker's default hostname _is_ the short id).
 - `@maple/effect-sdk` auto-detects `container.id`/`container.runtime` (mountinfo → cgroup →
   short-id hostname, via `process.getBuiltinModule` so edge bundles stay safe) — but not
   `container.name`, so auto-detection alone does not light the Infrastructure tab.
@@ -92,7 +92,7 @@ once by hand, so a freshly published image is not pullable by users until someon
 Before announcing: confirm the package is public with an anonymous pull, then smoke one live agent
 — `container.cpu.utilization` rows arriving through the hosted gateway, and the compose
 project/service facets populating (the query tests assert SQL strings only, so they cannot prove
-that path). The BYO-ClickHouse `renderCollectorYaml()` tracks the latest *published* tag.
+that path). The BYO-ClickHouse `renderCollectorYaml()` tracks the latest _published_ tag.
 
 ## Not built yet, and why
 

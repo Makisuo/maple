@@ -86,10 +86,10 @@ To find the ID manually, post a message in the chat and open
 and channel IDs are negative (`-1001234567890`); a one-to-one chat is positive. Public channels can
 use `@channelusername` instead.
 
-| Field         | Notes                                                                       |
-| ------------- | --------------------------------------------------------------------------- |
-| **Bot token** | From @BotFather. Write-only — never returned after saving.                   |
-| **Chat ID**   | `-1001234567890`, or `@channelusername` for a public channel.                 |
+| Field         | Notes                                                         |
+| ------------- | ------------------------------------------------------------- |
+| **Bot token** | From @BotFather. Write-only — never returned after saving.    |
+| **Chat ID**   | `-1001234567890`, or `@channelusername` for a public channel. |
 
 When you save, Maple verifies the token and checks that the bot can actually reach that chat, so the
 usual mistake — a valid token pointed at a group the bot was never added to — is caught immediately
