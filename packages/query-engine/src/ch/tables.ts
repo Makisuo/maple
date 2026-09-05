@@ -805,6 +805,13 @@ export const ProductEvents = table("product_events", {
 	ServiceName: T.string,
 	// track() props.
 	Attributes: T.map(T.string, T.string),
+	// The trace this event was derived from — non-empty only on Source='trace'
+	// rows, i.e. spans the customer annotated with `maple.product_event.name`.
+	// The link in both directions: trace view → its product events, funnel row →
+	// the trace that performed the step.
+	TraceId: T.string,
+	// The annotated span within TraceId. '' on every other source.
+	SpanId: T.string,
 })
 
 // (VisitorId, UserId) pairs observed together on a session_replays row.

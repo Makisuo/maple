@@ -43,6 +43,22 @@ const BucketSeconds = Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0
 	}),
 )
 
+/**
+ * A `LIMIT` a client may ask for. The builder INLINES it into the SQL text, so
+ * `-1` or `1e21` would be a syntax error (a 500) and `1e9` an unbounded scan;
+ * the ceiling lives here because the internal API is reachable by any client.
+ */
+const RowLimit = Schema.Number.check(
+	Schema.isInt(),
+	Schema.isGreaterThan(0),
+	Schema.isLessThanOrEqualTo(1000),
+).pipe(
+	Schema.annotate({
+		identifier: "RowLimit",
+		description: "Maximum rows to return: a whole number between 1 and 1000.",
+	}),
+)
+
 // Dedicated endpoint schemas
 
 /** Shared primitives for filtered list/facet endpoints. */
@@ -1753,6 +1769,66 @@ export class ProductEventNamesResponse extends Schema.Class<ProductEventNamesRes
 	),
 }) {}
 
+/**
+ * The product events one trace produced. `traceId` is the branded `TraceId`:
+ * it rejects `""`, which would otherwise match every non-trace row in the window.
+ */
+export class ProductEventsForTraceRequest extends Schema.Class<ProductEventsForTraceRequest>(
+	"ProductEventsForTraceRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	traceId: TraceId,
+	/** Default 50, max 1000. */
+	limit: Schema.optional(RowLimit),
+}) {}
+
+export class ProductEventsForTraceResponse extends Schema.Class<ProductEventsForTraceResponse>(
+	"ProductEventsForTraceResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			timestamp: Schema.String,
+			eventName: Schema.String,
+			/** The annotated span within the trace. */
+			spanId: Schema.String,
+			serviceName: Schema.String,
+			userId: Schema.String,
+			groupId: Schema.String,
+			visitorId: Schema.String,
+			sessionId: Schema.String,
+			/** The span's attributes as projected by `maple.product_event.include` / `prop.*`. */
+			attributes: Schema.Record(Schema.String, Schema.String),
+		}),
+	),
+}) {}
+
+/** Recent traces behind one event name — the analytics side of the same link. */
+export class ProductEventTraceSamplesRequest extends Schema.Class<ProductEventTraceSamplesRequest>(
+	"ProductEventTraceSamplesRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	eventName: Schema.String,
+	/** Default 20, max 1000. */
+	limit: Schema.optional(RowLimit),
+}) {}
+
+export class ProductEventTraceSamplesResponse extends Schema.Class<ProductEventTraceSamplesResponse>(
+	"ProductEventTraceSamplesResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			traceId: Schema.String,
+			spanId: Schema.String,
+			timestamp: Schema.String,
+			serviceName: Schema.String,
+			userId: Schema.String,
+			visitorId: Schema.String,
+		}),
+	),
+}) {}
+
 export class PodFacetsRequest extends Schema.Class<PodFacetsRequest>("PodFacetsRequest")({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
@@ -2707,6 +2783,20 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("productEventNames", "/product-event-names", {
 			payload: ProductEventNamesRequest,
 			success: ProductEventNamesResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("productEventsForTrace", "/product-events-for-trace", {
+			payload: ProductEventsForTraceRequest,
+			success: ProductEventsForTraceResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("productEventTraceSamples", "/product-event-trace-samples", {
+			payload: ProductEventTraceSamplesRequest,
+			success: ProductEventTraceSamplesResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

@@ -32,6 +32,7 @@ import {
 	LOCAL_SCHEMA_V15,
 	LOCAL_SCHEMA_V16,
 	LOCAL_SCHEMA_V17,
+	LOCAL_SCHEMA_V18,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -79,16 +80,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v17 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("b3800f55258f0ae3")
-		expect(SCHEMA_DIGEST).toBe("b3800f55258f0ae37a52bec6e4fe38be8fa9daebe3c912db2aa6885a4d73fa20")
+	it("matches the generated v18 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("09ee43045937c44e")
+		expect(SCHEMA_DIGEST).toBe("09ee43045937c44e89cf65001569497fb2e2d5b3356a8ddc2d81e0a8551bf1b2")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(17)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V17)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(18)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V18)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -174,6 +175,7 @@ describe("current local schema identity", () => {
 			"identity_links_mv",
 			"product_events",
 			"product_events_mv",
+			"product_events_traces_mv",
 		])
 		const errorEventsView = LOCAL_SCHEMA_MANIFEST.objects.find(
 			(object) => object.name === "error_events_mv",
@@ -200,7 +202,7 @@ describe("current local schema identity", () => {
 		expect(productEvents?.engine).toBe("MergeTree")
 		expect(productEvents?.orderBy).toBe("(OrgId, Timestamp, VisitorId, SessionId, Seq)")
 		expect(productEvents?.ttl).toContain("365 DAY")
-		expect(productEvents?.indexes).toEqual(["idx_event_name", "idx_user_id"])
+		expect(productEvents?.indexes).toEqual(["idx_event_name", "idx_user_id", "idx_trace_id"])
 		expect(productEvents?.columns.map((column) => column.name)).toEqual([
 			"OrgId",
 			"Timestamp",
@@ -217,6 +219,10 @@ describe("current local schema identity", () => {
 			"Url",
 			"ServiceName",
 			"Attributes",
+			// Appended, not inserted: `ALTER TABLE … ADD COLUMN` puts them last, and
+			// every projection into this table has to match that order.
+			"TraceId",
+			"SpanId",
 		])
 		const productEventsView = LOCAL_SCHEMA_MANIFEST.objects.find(
 			(object) => object.name === "product_events_mv",
@@ -270,6 +276,7 @@ describe("current local schema identity", () => {
 			"ai_trace_index",
 			"ai_trace_index_mv",
 			"audit_log",
+			"product_events_traces_mv",
 		])
 		expect([...v13Names].filter((name) => !currentSchemaNames.has(name))).toEqual([])
 		const aiTraceIndex = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "ai_trace_index")
@@ -318,6 +325,7 @@ describe("local migration registry", () => {
 			"local-0014-to-0015-commit-sha-vcs-revision",
 			"local-0015-to-0016-ai-trace-index-filter-columns",
 			"local-0016-to-0017-audit-log",
+			"local-0017-to-0018-product-events-from-traces",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
@@ -364,7 +372,7 @@ describe("local migration registry", () => {
 				// One past the current tip — bump alongside LOCAL_SCHEMA_VERSION, or this
 				// stops testing the future-store guard and starts testing the
 				// unknown-fingerprint one.
-				{ ...CURRENT_LOCAL_SCHEMA, version: 18, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 19, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)
@@ -1370,6 +1378,7 @@ describe("v10 -> v11 product events module", () => {
 			"local-0014-to-0015-commit-sha-vcs-revision",
 			"local-0015-to-0016-ai-trace-index-filter-columns",
 			"local-0016-to-0017-audit-log",
+			"local-0017-to-0018-product-events-from-traces",
 		])
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V11)
 		// The dropped table is declared, and the backfilled ones say what they

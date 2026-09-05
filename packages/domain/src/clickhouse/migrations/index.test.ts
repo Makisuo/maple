@@ -33,6 +33,7 @@ import { migration_0024_ai_trace_index } from "./0024_ai_trace_index"
 import { migration_0025_commit_sha_vcs_revision } from "./0025_commit_sha_vcs_revision"
 import { migration_0026_ai_trace_index_filter_columns } from "./0026_ai_trace_index_filter_columns"
 import { migration_0027_audit_log } from "./0027_audit_log"
+import { migration_0028_product_events_from_traces } from "./0028_product_events_from_traces"
 import { migration_0021_product_events } from "./0021_product_events"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
@@ -50,10 +51,10 @@ describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
 		expect(migrations.map((m) => m.version)).toEqual([
 			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
-			27,
+			27, 28,
 		])
-		expect(migrations.at(-1)).toBe(migration_0027_audit_log)
-		expect(latestMigrationVersion).toBe(27)
+		expect(migrations.at(-1)).toBe(migration_0028_product_events_from_traces)
+		expect(latestMigrationVersion).toBe(28)
 		// 0010 and 0014-0020 are read-path only and skipped by the ingest-gating
 		// version; 0021 is not — the gateway writes `session_events`' new identity
 		// columns and `product_events` directly, so a BYO-CH org must apply it
@@ -80,6 +81,7 @@ describe("ClickHouse migrations", () => {
 		// 0026 widens the same MV-populated ai_trace_index and rebuilds its view.
 		expect(migration_0026_ai_trace_index_filter_columns.requiredForIngest).toBe(false)
 		expect(migration_0027_audit_log.requiredForIngest).toBe(false)
+		expect(migration_0028_product_events_from_traces.requiredForIngest).toBe(false)
 	})
 
 	it("recreates both error-events MVs with the 4xx guard and the widened frame redaction", () => {

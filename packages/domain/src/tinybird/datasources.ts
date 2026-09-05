@@ -2331,7 +2331,33 @@ export const productEvents = defineDatasource("product_events", {
 		Attributes: column(t.map(t.string(), t.string()).defaultExpr("map()"), {
 			jsonPath: "$.attributes",
 		}),
+		/**
+		 * The trace this event was derived from — set on `Source = 'trace'` rows,
+		 * `''` otherwise. A real column because both link directions filter on it
+		 * and a `Map` lookup reads the whole map per row. Last because
+		 * `ALTER TABLE … ADD COLUMN` appends.
+		 *
+		 * NO `jsonPath`, deliberately: only `product_events_traces_mv` and its
+		 * backfill write these. The insert-mapping generator skips path-less
+		 * columns, so the gateway's INSERT never names them and migration 0028 can
+		 * stay `requiredForIngest: false`. Give them a path and every `/v1/events`
+		 * batch for a BYO cluster stamped below 28 is rejected.
+		 */
+		TraceId: t.string().default(""),
+		/** The annotated span within {@link TraceId}. `''` on non-trace rows. */
+		SpanId: t.string().default(""),
 	},
+	// REQUIRED, proven against a real deploy: without it Tinybird REBUILDS this
+	// table from its 30-day sources to satisfy the new columns, dropping history
+	// past 30 days and every `/v1/events` row at any age (they have no source).
+	// `DEPLOYMENT_METHOD alter` on the view does not substitute — tested. Do not
+	// follow Tinybird's later suggestion to drop it in favour of ALTER TABLE.
+	// Every column must be listed; the two new ones take their type default.
+	forwardQuery: `SELECT
+		OrgId, Timestamp, Source, SessionId, Seq, VisitorId, UserId, GroupId, Kind, EventName,
+		Host, PagePath, Url, ServiceName, Attributes,
+		defaultValueOfTypeName('String') AS TraceId,
+		defaultValueOfTypeName('String') AS SpanId`,
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",
 		sortingKey: ["OrgId", "Timestamp", "VisitorId", "SessionId", "Seq"],
@@ -2353,6 +2379,14 @@ export const productEvents = defineDatasource("product_events", {
 			// UserId-keyed funnel branch. Near-unique values, so a bloom filter.
 			name: "idx_user_id",
 			expr: "UserId",
+			type: "bloom_filter",
+			granularity: 4,
+		},
+		{
+			// The trace view looks up by id alone; near-unique values and `''` on
+			// most rows make a bloom filter prune hard and stay cheap.
+			name: "idx_trace_id",
+			expr: "TraceId",
 			type: "bloom_filter",
 			granularity: 4,
 		},
