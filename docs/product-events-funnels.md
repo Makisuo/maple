@@ -427,12 +427,13 @@ lookup.
    readiness gate still says 21, so unmigrated BYO orgs keep routing to their own cluster, where
    the INSERT fails on the unknown column, retries, trips the breaker and drops the batch.
    Backfills the trace half from `traces` itself.
-3. **Local CLI**: local schema v13 → v14, same backfill.
+3. **Local CLI**: local schema v17 → v18, same backfill.
 
 Both BYO and local scope their idempotency `DELETE` to `Timestamp >= (SELECT min(Timestamp) FROM
 traces)` rather than deleting all trace rows. `product_events` keeps 365 days and `traces` 30, so an
 unbounded delete on a *late* re-apply would clear a year of funnel history and rebuild only a month
-of it.
+of it. The delete is also guarded by `(SELECT count() FROM traces) > 0`: `min()` over an empty table
+is 1970, which would turn the bound back into "everything".
 
 ### Not in this cut
 

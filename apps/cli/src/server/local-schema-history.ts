@@ -182,8 +182,8 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 	Object.freeze({
-		// TODO(v17): what changed, whether any part is rewritten or any row
-		// moves, and what this edge does NOT backfill.
+		// v17: `audit_log` table added (ClickHouse migration 0027). Purely
+		// additive — nothing is rewritten, no row moves, nothing is backfilled.
 		//
 		// projectRevision is carried forward deliberately — it is a hardcoded
 		// constant that no longer tracks the generator's header, and the identity
@@ -195,8 +195,11 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 	Object.freeze({
-		// TODO(v18): what changed, whether any part is rewritten or any row
-		// moves, and what this edge does NOT backfill.
+		// v18: `product_events` gains `TraceId`/`SpanId` plus a bloom filter, and
+		// `product_events_traces_mv` projects annotated spans in (ClickHouse
+		// migration 0028). Metadata-only ALTERs plus a view swap — no part is
+		// rewritten and no row moves. The trace half IS backfilled from whatever
+		// `traces` still retains; annotated spans older than that are not.
 		//
 		// projectRevision is carried forward deliberately — it is a hardcoded
 		// constant that no longer tracks the generator's header, and the identity

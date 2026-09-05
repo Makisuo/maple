@@ -66,16 +66,9 @@ const getProductEventNamesEffect = Effect.fn("QueryEngine.getProductEventNames")
 	return { data: result.data satisfies ReadonlyArray<ProductEventName> }
 })
 
-// Trace ↔ product event.
-//
-// A span annotated in the customer's own code with `maple.product_event.name`
-// becomes a `product_events` row carrying its `TraceId`, and these two read that
-// column from either end: the trace view lists what a request accomplished, and
-// an event name lists the requests that accomplished it.
-
-// `TraceId`, not a plain string: `decodeInput` is the boundary that turns a
-// malformed id in the URL into a decode failure here rather than a warehouse
-// error four hops later.
+// Trace ↔ product event: an annotated span becomes a `product_events` row carrying
+// its `TraceId`, and these two read that column from either end. `TraceId`, not a
+// plain string, so a malformed id fails at `decodeInput` rather than the warehouse.
 const ProductEventsForTraceInputSchema = Schema.Struct({
 	...TimeWindowFields,
 	traceId: TraceId,
@@ -94,7 +87,7 @@ export interface TraceProductEvent {
 	groupId: string
 	visitorId: string
 	sessionId: string
-	/** `maple.product_event.prop.*` attributes, prefix stripped. */
+	/** The span's attributes as projected by `maple.product_event.include` / `prop.*`. */
 	attributes: Record<string, string>
 }
 
@@ -142,26 +135,24 @@ export function getProductEventTraceSamples({ data }: { data: GetProductEventTra
 	return getProductEventTraceSamplesEffect({ data })
 }
 
-const getProductEventTraceSamplesEffect = Effect.fn("QueryEngine.getProductEventTraceSamples")(
-	function* ({ data }: { data: GetProductEventTraceSamplesInput }) {
-		const input = yield* decodeInput(
-			ProductEventTraceSamplesInputSchema,
-			data,
-			"getProductEventTraceSamples",
-		)
+const getProductEventTraceSamplesEffect = Effect.fn("QueryEngine.getProductEventTraceSamples")(function* ({
+	data,
+}: {
+	data: GetProductEventTraceSamplesInput
+}) {
+	const input = yield* decodeInput(ProductEventTraceSamplesInputSchema, data, "getProductEventTraceSamples")
 
-		const result = yield* runWarehouseQuery("productEventTraceSamples", () =>
-			Effect.gen(function* () {
-				const client = yield* MapleInternalAtomClient
-				return yield* client.queryEngine.productEventTraceSamples({
-					payload: new ProductEventTraceSamplesRequest(input),
-				})
-			}),
-		)
+	const result = yield* runWarehouseQuery("productEventTraceSamples", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleInternalAtomClient
+			return yield* client.queryEngine.productEventTraceSamples({
+				payload: new ProductEventTraceSamplesRequest(input),
+			})
+		}),
+	)
 
-		return { data: result.data satisfies ReadonlyArray<ProductEventTraceSample> }
-	},
-)
+	return { data: result.data satisfies ReadonlyArray<ProductEventTraceSample> }
+})
 
 // Dashboard funnel widget (route data source `product_events_funnel`).
 //

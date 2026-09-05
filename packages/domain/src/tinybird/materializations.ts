@@ -47,10 +47,7 @@ import {
 	DB_SYSTEM_ATTR_SQL,
 } from "./db-query-shape-sql"
 import { MAPLE_AI_SESSION_ID_ATTR, MAPLE_AI_VENDOR_ID_ATTR } from "../gen-ai"
-import {
-	PRODUCT_EVENTS_TRACE_FILTER,
-	PRODUCT_EVENTS_TRACE_PROJECTION_SQL,
-} from "./product-event-attributes"
+import { PRODUCT_EVENTS_TRACE_FILTER, PRODUCT_EVENTS_TRACE_PROJECTION_SQL } from "./product-event-attributes"
 import { DEPLOYMENT_ENV_SQL, MESSAGING_DESTINATION_SQL } from "./semconv-renames"
 import {
 	GENAI_AGENT_NAME_SQL,
@@ -1668,26 +1665,15 @@ export const productEventsMv = defineMaterializedView("product_events_mv", {
 })
 
 /**
- * Populates `product_events` from spans the customer annotated in their own
- * code — `maple.product_event.name` on any span they already emit.
- *
- * This is the third feed into the table (browser via the MV above, server and
- * mobile via `POST /v1/events`), and the only one that carries `TraceId`, which
- * is what makes a product event and the trace that produced it navigable from
- * either side.
- *
- * The predicate is one map lookup per incoming span, on the same block every
- * other `traces` MV already fires on. It buys no skip-index help — an MV sees
- * the insert block, not the table — so it is a real per-span cost at ingest, and
- * a deliberately small one: a single `Map` value read on a map the block has
- * just materialized anyway.
- *
- * Column order must match the `product_events` SCHEMA order — enforced by
+ * Populates `product_events` from spans carrying `maple.product_event.name` —
+ * the only feed that carries `TraceId`. The predicate is one map lookup per
+ * incoming span (an MV sees the insert block, so no skip index helps). Column
+ * order must match the `product_events` SCHEMA order, enforced by
  * `materialized-projection-order.test.ts`.
  */
 export const productEventsTracesMv = defineMaterializedView("product_events_traces_mv", {
 	description:
-		"Populates product_events from spans carrying the maple.product_event.name attribute, projecting the span's identity, prop.* attributes, service and TraceId/SpanId so the event links back to the trace that produced it.",
+		"Populates product_events from spans carrying the maple.product_event.name attribute, projecting the span's identity, attributes (narrowed by maple.product_event.include, merged with maple.product_event.prop.*), service and TraceId/SpanId so the event links back to the trace that produced it.",
 	datasource: productEvents,
 	nodes: [
 		node({

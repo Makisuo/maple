@@ -246,9 +246,7 @@ function TraceDetailContent({
 		[search.spanId, navigate],
 	)
 
-	// The product-events panel knows a span ID, not a `SpanNode` — its rows come
-	// from `product_events`, not the hierarchy. Selecting by id keeps the two
-	// sources from having to agree on a node shape.
+	// The product-events panel knows a span id, not a `SpanNode`.
 	const handleSelectSpanId = React.useCallback(
 		(spanId: string) => {
 			if (search.spanId === spanId) return

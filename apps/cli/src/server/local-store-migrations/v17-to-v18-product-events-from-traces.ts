@@ -23,12 +23,6 @@ const RAW_TABLES = RAW_TELEMETRY_TTL_COLUMNS.map(([table]) => table)
 
 const MODULE_ID = "local-0017-to-0018-product-events-from-traces" as const
 
-/**
- * Frozen copy of ClickHouse migration 0028's trace projection. Frozen for the
- * reason every edge in this directory freezes its SQL: this module describes one
- * step in history, and importing the live projection would silently rewrite what
- * v17 -> v18 did the next time it changes.
- */
 const PRODUCT_EVENTS_TRACE_COLUMNS = [
 	"OrgId",
 	"Timestamp",
@@ -49,6 +43,8 @@ const PRODUCT_EVENTS_TRACE_COLUMNS = [
 	"SpanId",
 ].join(", ")
 
+// Frozen copy of ClickHouse migration 0028's trace projection, byte-for-byte:
+// the backfill and the v18 view must project a span identically.
 const PRODUCT_EVENTS_TRACE_PROJECTION_SQL = `OrgId,
   Timestamp,
   'trace' AS Source,
@@ -63,37 +59,41 @@ const PRODUCT_EVENTS_TRACE_PROJECTION_SQL = `OrgId,
   path(SpanAttributes['maple.product_event.url']) AS PagePath,
   SpanAttributes['maple.product_event.url'] AS Url,
   ServiceName,
-  CAST(SpanAttributes, 'Map(String, String)') AS Attributes,
+  mapUpdate(
+    CAST(
+      mapFilter(
+        (k, v) -> NOT startsWith(k, 'maple.product_event.')
+          AND (
+            NOT has(mapKeys(SpanAttributes), 'maple.product_event.include')
+            OR has(
+              arrayMap(
+                key -> trimBoth(key),
+                splitByChar(',', SpanAttributes['maple.product_event.include'])
+              ),
+              k
+            )
+          ),
+        SpanAttributes
+      ),
+      'Map(String, String)'
+    ),
+    mapApply(
+      (k, v) -> (substring(k, 26), v),
+      mapFilter((k, v) -> startsWith(k, 'maple.product_event.prop.'), SpanAttributes)
+    )
+  ) AS Attributes,
   TraceId,
   SpanId`
 
 const PRODUCT_EVENTS_TRACE_FILTER = "SpanAttributes['maple.product_event.name'] != ''"
 
 /**
- * The local mirror of ClickHouse migration 0028.
- *
- * `product_events` gains `TraceId`/`SpanId` (`DEFAULT ''`) and a bloom filter on
- * `TraceId`, and a second view — `product_events_traces_mv` — starts projecting
- * spans the user annotated in their own code (`maple.product_event.name`) into
- * the table. The trace id is what makes a product event and the trace that
- * produced it navigable from either side.
- *
- * THE TRACE HALF IS BACKFILLED. Every annotated span still inside the local
- * store's raw `traces` retention is re-projected, so an `EventName` a user just
- * added to their code has history the moment they upgrade rather than only going
- * forward — bounded by that retention (30 days by default) against
- * `product_events`' own 365, so the older part of the window stays empty and
- * accrues from here.
- *
- * `product_events_mv` — the browser feed — is dropped and recreated too. Its
- * SELECT was frozen at 15 columns and the table now has 17; the two new ones
- * default to `''`, which is the right value for a browser row, so recreating it
- * repairs nothing and instead keeps the view's text and the table's schema
- * describing the same thing.
- *
- * Every statement is idempotent — `ADD COLUMN IF NOT EXISTS`, `ADD INDEX IF NOT
- * EXISTS`, and a `DELETE` scoped to the backfill's own source window — so a
- * resume after a crash between them lands in the same place.
+ * The local mirror of ClickHouse migration 0028: `product_events` gains
+ * `TraceId`/`SpanId` plus a bloom filter, `product_events_traces_mv` starts
+ * projecting annotated spans, and the trace half is backfilled from whatever
+ * `traces` still retains. `product_events_mv` is recreated so its SELECT names
+ * the two new columns. Every statement is idempotent, so a resume lands in the
+ * same place.
  */
 
 interface V17ToV18State {
@@ -104,18 +104,8 @@ interface V17ToV18State {
 	readonly retentionDays?: number
 }
 
-/**
- * What `product_events` held before the edge, and what the backfill is expected
- * to add.
- *
- * `existing` is every row already in the table — at v17 none of them can be a
- * trace row, because the source did not exist — and is re-checked as an
- * EQUALITY: the backfill must add rows, never disturb one. `expectedTrace` is
- * counted from `traces` under the very filter the backfill uses, so verify
- * compares against the exact number rather than a lower bound, and an
- * `INSERT … SELECT` that half-completed shows up as a mismatch instead of
- * passing as "some rows arrived".
- */
+/** Row counts verify re-checks as equalities: `existing` (non-trace rows) must be
+ *  undisturbed, `expectedTrace` (spans matching the backfill filter) must all arrive. */
 interface ProductEventRowCounts {
 	readonly existing: string
 	readonly expectedTrace: string
@@ -252,21 +242,10 @@ const prepareTarget = async (
 	return state
 }
 
-/**
- * The columns, the index AND both view drops happen before the v18 bootstrap, in
- * the v17-schema block. The ordering is load-bearing in both directions:
- *
- *   - `CREATE TABLE IF NOT EXISTS` is a no-op against the cloned store, so the
- *     v17 snapshot alone leaves `product_events` without its two new columns.
- *   - `CREATE MATERIALIZED VIEW IF NOT EXISTS` is equally a no-op while the old
- *     view still exists, and a view's SELECT is frozen at creation. Dropping the
- *     views AFTER the bootstrap would delete them outright — the bootstrap has
- *     already skipped them and nothing recreates them.
- *
- * The backfill then runs in the v18 block, after the bootstrap has created both
- * views. It writes `product_events` directly and the views read `session_events`
- * and `traces`, so nothing double-fires.
- */
+// Columns, index and both view drops run in the v17 block: the v18 bootstrap is
+// all `IF NOT EXISTS`, so it neither adds columns to an existing table nor
+// replaces a view that is still there. The backfill runs after the bootstrap
+// and writes `product_events` directly, so no view double-fires.
 const apply = async (context: MigrationModuleContext): Promise<V17ToV18Progress> => {
 	await context.openTarget(
 		(db) => {
@@ -283,13 +262,11 @@ const apply = async (context: MigrationModuleContext): Promise<V17ToV18Progress>
 	return context.openTarget(
 		(db) => {
 			// Scoped to the backfill's own source window, matching migration 0028:
-			// `traces` keeps 30 days and `product_events` 365, so an unbounded
-			// delete would destroy trace rows a late re-run can no longer rebuild.
-			// A v17 store has no trace rows at all — the source did not exist — so
-			// this is a no-op on the edge it actually runs on, and correct on any
-			// resume or re-apply that finds some.
+			// `product_events` keeps 365 days and `traces` 30, so an unbounded delete
+			// on a re-run would destroy rows the backfill cannot rebuild. The count
+			// guard keeps an empty `traces` (min() = 1970) from doing the same.
 			db.exec(
-				"DELETE FROM product_events WHERE Source = 'trace' AND Timestamp >= (SELECT min(Timestamp) FROM traces)",
+				"DELETE FROM product_events WHERE Source = 'trace' AND (SELECT count() FROM traces) > 0 AND Timestamp >= (SELECT min(Timestamp) FROM traces)",
 			)
 			db.exec(
 				`INSERT INTO product_events (${PRODUCT_EVENTS_TRACE_COLUMNS}) SELECT ${PRODUCT_EVENTS_TRACE_PROJECTION_SQL} FROM traces WHERE ${PRODUCT_EVENTS_TRACE_FILTER}`,
@@ -313,10 +290,8 @@ const verify = async (
 				if (targetRows[table] !== state.rawRows[table])
 					throw new Error(`v17 -> v18 raw telemetry verification failed for ${table}`)
 			}
-			// Split rather than a single total: an equality on the pre-existing rows
-			// is what proves the backfill only ADDED, and an equality on the trace
-			// rows is what proves it added all of them. A total would let one error
-			// cancel the other out.
+			// Two equalities, not a total: one proves nothing was disturbed, the
+			// other that every annotated span arrived.
 			const existing = scalarCount(
 				db,
 				"SELECT toString(count()) AS count FROM product_events WHERE Source != 'trace'",
@@ -397,18 +372,16 @@ const dispositions: ReadonlyArray<StateDispositionEntry> = [
 			"Two columns are added as metadata-only defaults, no part is rewritten, and the count of rows whose Source is not 'trace' is verified unchanged after the backfill. Counts, not contents: the byte-level claim rests on ADD COLUMN being metadata-only, which this edge does not independently verify.",
 	},
 	{
-		// Fully rebuilt within the raw window, then accrued: unlike the service
-		// operations edges there IS a source to re-project from, so the shorter
-		// retention is the only bound.
+		// Rebuilt within the raw window, then accrued: `traces` is the source, so
+		// its shorter retention is the only bound.
 		name: "product_events (trace rows)",
 		classification: "derived",
 		disposition: "rebuild-within-retention-horizon",
 		guarantee:
 			"Every annotated span still inside raw traces retention is re-projected, and the resulting row count is verified to equal the count of matching spans. Annotated spans older than that window are gone from traces and cannot be rebuilt; the table accrues them from the migration forward.",
 		preservationInterval: "the raw traces retention window",
-		// The schema default. A store running a custom raw-telemetry floor (see
-		// `readRawTelemetryRetentionDays`) keeps more or less than this, and the
-		// backfill follows the store rather than this number.
+		// Schema default; a custom raw-telemetry floor (`readRawTelemetryRetentionDays`)
+		// overrides it and the backfill follows the store.
 		sourceRetentionDays: 30,
 		targetRetentionDays: 365,
 	},

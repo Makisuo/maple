@@ -2089,9 +2089,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								groupId: String(row.groupId),
 								visitorId: String(row.visitorId),
 								sessionId: String(row.sessionId),
-								// Already decoded as Record<string, string> by the derived row
-								// schema — a non-string value fails that decode long before it
-								// reaches here, so there is nothing left to coerce.
+								// Already decoded as Record<string, string> by the derived row schema.
 								attributes: row.attributes,
 							})),
 						})
@@ -2140,7 +2138,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								context: "rawSql",
 							}).pipe(
 								// Every statement is audited, however it ended: a refused one as `denied`.
-								Effect.tap((executed) => audit({ _tag: "rows", rowCount: executed.rowCount })),
+								Effect.tap((executed) =>
+									audit({ _tag: "rows", rowCount: executed.rowCount }),
+								),
 								Effect.tapError((error) =>
 									audit(
 										error._tag === "@maple/http/errors/RawSqlValidationError"

@@ -6,21 +6,9 @@ import { useTimezonePreference } from "@/hooks/use-timezone-preference"
 import { ChartBarTrendUpIcon } from "@/components/icons"
 
 /**
- * Recent traces behind one product event — the other half of the link a
- * `maple.product_event.name` span attribute creates.
- *
- * Only events annotated on a span can answer this. A `track()` call from the
- * browser and a `POST /v1/events` row carry no trace, so for those the list is
- * empty and this renders nothing rather than an empty state: "no traces" is not
- * a finding about the event, it just means the event was not emitted from a
- * span, and saying so on every browser event would be noise on the majority of
- * them.
- *
- * A FAILURE is not silent, though, unlike the trace-page panel. This one mounts
- * because the user explicitly filtered to an event and asked for it, and empty
- * is a meaningful answer here — so swallowing an error would answer their
- * question wrongly ("this event has no traces") with no way to tell and no way
- * to retry.
+ * Recent traces behind one product event. Renders nothing when empty (browser
+ * and `/v1/events` rows carry no trace, so "none" is not a finding), but a
+ * failure is shown: the user filtered to this event and asked.
  */
 export function ProductEventTraceSamples({
 	eventName,

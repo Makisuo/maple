@@ -589,11 +589,8 @@ function AnalyticsContent({
 						{ id: "events", dimensions: eventDimensions, wide: true },
 					]
 
-					// The reverse of the trace view's product-events panel, shown at the
-					// one moment it is asked for: the user has filtered to a single event
-					// and now wants to see requests that fired it. Renders nothing unless
-					// the event came from an annotated span, so browser `track()` events
-					// simply do not grow a section.
+					// Traces behind the filtered event; renders nothing unless the event
+					// came from an annotated span.
 					const eventName = filters.eventName
 
 					return (

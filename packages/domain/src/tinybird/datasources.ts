@@ -2333,54 +2333,26 @@ export const productEvents = defineDatasource("product_events", {
 		}),
 		/**
 		 * The trace this event was derived from — set on `Source = 'trace'` rows,
-		 * `''` on every other source. This column IS the link, in both directions:
-		 * the trace view lists the product events a trace produced, and a funnel
-		 * row hands back the exact trace that performed the step.
+		 * `''` otherwise. A real column because both link directions filter on it
+		 * and a `Map` lookup reads the whole map per row. Last because
+		 * `ALTER TABLE … ADD COLUMN` appends.
 		 *
-		 * A real column rather than an `Attributes` key because both directions
-		 * filter on it, and a `Map` lookup on this table reads the whole map per
-		 * row — the cost `product_events` was split out of `session_events` to
-		 * avoid. Last in the schema because `ALTER TABLE … ADD COLUMN` appends.
-		 *
-		 * NO `jsonPath`, deliberately, and load-bearing: these two are written
-		 * only by `product_events_traces_mv` and its backfill, never by an
-		 * ingested NDJSON line. `scripts/generate-clickhouse-insert-mappings.ts`
-		 * skips columns whose path is null, so the Rust gateway's
-		 * `INSERT INTO product_events (…)` does not name them — which is what lets
-		 * migration 0024 stay `requiredForIngest: false`. Give them a path and the
-		 * gateway starts naming columns that a BYO cluster stamped below 24 does
-		 * not have, and every `/v1/events` batch for those orgs is rejected and
-		 * dropped. Same shape as `service_usage`, whose columns are MV-only too.
+		 * NO `jsonPath`, deliberately: only `product_events_traces_mv` and its
+		 * backfill write these. The insert-mapping generator skips path-less
+		 * columns, so the gateway's INSERT never names them and migration 0028 can
+		 * stay `requiredForIngest: false`. Give them a path and every `/v1/events`
+		 * batch for a BYO cluster stamped below 28 is rejected.
 		 */
 		TraceId: t.string().default(""),
 		/** The annotated span within {@link TraceId}. `''` on non-trace rows. */
 		SpanId: t.string().default(""),
 	},
-	// REQUIRED, and proven so against a real deploy rather than assumed.
-	//
-	// Without it Tinybird satisfies the two added columns by REBUILDING this
-	// table from the datasources that feed it, and both of them keep 30 days
-	// against this table's 365: "it is going to be backfilled using the
-	// following datasources which would lead to a deleting historical data —
-	// 'session_events' … 'traces'". It says that as a WARNING and proceeds.
-	//
-	// Worse than the warning states, because `product_events` is DUAL-FED: the
-	// server and mobile rows arrive by `POST /v1/events` and have no source
-	// datasource at all, so a rebuild drops them at every age, not just past 30
-	// days. A forward query reads EXISTING rows through this SELECT instead —
-	// no source replay, nothing lost — until the next deploy compacts them.
-	//
-	// `DEPLOYMENT_METHOD alter` on `product_events_mv` does NOT substitute for
-	// this. Tested: with alter and no forward query the same data-loss warning
-	// comes back, because it is the DATASOURCE schema change that triggers the
-	// source backfill, not the view's. Tinybird also suggests the inverse once
-	// the forward query is present ("could be applied with ALTER TABLE … if you
-	// remove the FORWARD_QUERY") — following that suggestion reintroduces the
-	// loss, so do not.
-	//
-	// Every column must be listed; that is the format. The two new ones take
-	// their type default, matching what the BYO `ALTER TABLE … ADD COLUMN` and
-	// the local v16->v17 edge give existing rows.
+	// REQUIRED, proven against a real deploy: without it Tinybird REBUILDS this
+	// table from its 30-day sources to satisfy the new columns, dropping history
+	// past 30 days and every `/v1/events` row at any age (they have no source).
+	// `DEPLOYMENT_METHOD alter` on the view does not substitute — tested. Do not
+	// follow Tinybird's later suggestion to drop it in favour of ALTER TABLE.
+	// Every column must be listed; the two new ones take their type default.
 	forwardQuery: `SELECT
 		OrgId, Timestamp, Source, SessionId, Seq, VisitorId, UserId, GroupId, Kind, EventName,
 		Host, PagePath, Url, ServiceName, Attributes,
@@ -2411,11 +2383,8 @@ export const productEvents = defineDatasource("product_events", {
 			granularity: 4,
 		},
 		{
-			// "Which product events did this trace produce?" — the trace view asks
-			// it by id with no other predicate, so without this the lookup scans
-			// every partition in the retained window. Near-unique values, and the
-			// column is `''` on the overwhelming majority of rows, so a bloom
-			// filter both prunes hard and stays cheap.
+			// The trace view looks up by id alone; near-unique values and `''` on
+			// most rows make a bloom filter prune hard and stay cheap.
 			name: "idx_trace_id",
 			expr: "TraceId",
 			type: "bloom_filter",

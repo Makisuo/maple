@@ -30,10 +30,8 @@ describe("product event span attributes", () => {
 	})
 
 	it("switches the allow-list on key PRESENCE, not on a non-empty value", () => {
-		// The whole overwrite idiom rests on this. `include: ''` has to mean "no
-		// span attributes", so the test must be `mapKeys` containment — a `!= ''`
-		// here would silently turn the documented overwrite into the default
-		// copy-everything, which is the exact opposite of what the caller asked for.
+		// `include: ''` must mean "no span attributes"; a `!= ''` would silently
+		// turn the documented overwrite into copy-everything.
 		expect(PRODUCT_EVENTS_TRACE_PROJECTION_SQL).toContain(
 			`has(mapKeys(SpanAttributes), '${PRODUCT_EVENT_INCLUDE_KEY}')`,
 		)
@@ -52,11 +50,8 @@ describe("product event span attributes", () => {
 	})
 
 	it("strips exactly the prop prefix and nothing more", () => {
-		// ClickHouse `substring` is 1-indexed, so the offset is length + 1. Off by
-		// one in either direction is silent: one short leaves a leading `.` on
-		// every prop key, one long eats the first character of every prop NAME —
-		// `plan` becomes `lan` — and both produce a valid map no breakdown can
-		// group on.
+		// ClickHouse `substring` is 1-indexed, so the offset is length + 1; off by
+		// one either way silently yields a valid map with wrong keys.
 		const offset = /substring\(k, (\d+)\)/.exec(PRODUCT_EVENTS_TRACE_PROJECTION_SQL)?.[1]
 		expect(offset).toBe(String(PRODUCT_EVENT_PROP_PREFIX.length + 1))
 	})

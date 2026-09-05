@@ -1,18 +1,9 @@
 import type { BackfillSpec } from "../backfill"
 
-/**
- * Frozen copy of the trace→product-event projection as of this migration.
- *
- * NOT imported from `tinybird/product-event-attributes.ts`, deliberately, and
- * for the reason migration 0019 spells out: a delta migration describes one step
- * in history. A shared constant would silently rewrite what this migration did
- * the next time the live projection changes, and a BYO cluster replaying the
- * chain would land somewhere the chain never says it goes.
- *
- * Shared *within* this file between the materialized view and the backfill,
- * which is the 0021 pattern — two copies of one SELECT is two chances for a
- * backfilled span and a live span to disagree.
- */
+// Frozen copy of the trace→product-event projection as of this migration (the
+// live one is `tinybird/product-event-attributes.ts`). Deliberately not imported:
+// a delta migration describes one step in history. Shared within this file so
+// the backfill and the view project a span identically.
 const PRODUCT_EVENTS_TRACE_PROJECTION_SQL = `OrgId,
   Timestamp,
   'trace' AS Source,
@@ -56,16 +47,8 @@ const PRODUCT_EVENTS_TRACE_PROJECTION_SQL = `OrgId,
 const PRODUCT_EVENTS_TRACE_FILTER = "SpanAttributes['maple.product_event.name'] != ''"
 
 /**
- * Backfill of the trace half of {@link migration_0028_product_events_from_traces}.
- *
- * Row-wise, so any chunk boundary is safe. Idempotent by `DELETE WHERE Source =
- * 'trace'` before it runs — same shape as 0021's browser half, and safe for the
- * same reason: it clears only rows this projection owns, never a browser row
- * from the other view or a directly ingested one that has no source to come back
- * from.
- *
- * Bounded by `traces`' own 30-day TTL, which is all there is to rebuild from.
- * `product_events` keeps 365 days, so an org that annotates spans today sees
+ * Backfill of the trace half. Row-wise, so any chunk boundary is safe, and
+ * bounded by `traces`' 30-day TTL against `product_events`' 365: an org sees
  * ~30 days of history immediately and accrues the rest going forward.
  */
 export const productEventsTracesBackfill: BackfillSpec = {
@@ -97,62 +80,27 @@ export const productEventsTracesBackfill: BackfillSpec = {
 }
 
 /**
- * Migration 0028 — product events annotated in code.
+ * Migration 0028 — product events annotated in code. A span carrying
+ * `maple.product_event.name` becomes a `product_events` row with its `TraceId`,
+ * so it steps in a funnel and links back to the trace that produced it.
  *
- * A customer marks a span they already emit:
+ * 1. `product_events` gains `TraceId`/`SpanId` (`DEFAULT ''`, appended) plus a
+ *    bloom filter on `TraceId`.
+ * 2. `product_events_traces_mv` projects annotated spans in; the trace half is
+ *    backfilled from `traces`' 30-day window.
  *
- * ```
- * span.setAttributes({ "maple.product_event.name": "checkout_completed" })
- * ```
+ * `product_events_mv` is recreated so its SELECT names all 17 columns.
+ * Re-runnable: `IF NOT EXISTS` throughout and a `DELETE` scoped to the
+ * backfill's own window.
  *
- * and it becomes a row in `product_events` that a funnel steps on, carrying the
- * `TraceId` it came from. The annotation is instrumentation, not a UI action and
- * not a second store: the span remains the record and the product event is its
- * projection, so it applies to every trace the annotated code path produces
- * rather than to the one trace someone happened to be looking at.
+ * **BYO ClickHouse only.** Managed orgs get the view via `tinybird deploy`, with
+ * the populate as an explicit `tb` step (see 0014 and 0021).
  *
- * Two things, in order:
- *
- * 1. `product_events` gains `TraceId`/`SpanId` (`DEFAULT ''`) plus a bloom
- *    filter on `TraceId`. Metadata-only `ADD COLUMN`s, appended, which is why
- *    they sit last in the schema and last in every projection.
- * 2. `product_events_traces_mv` projects annotated spans in, and the trace half
- *    is backfilled from `traces`' 30-day window.
- *
- * `product_events_mv` is dropped and re-created rather than left alone: an MV's
- * SELECT is fixed at creation, so the pre-0028 body writes 15 columns into a
- * 17-column table and every browser row inserted between the ALTER and the
- * re-create would take defaults for the two new columns. They default to `''`,
- * which is the correct value for a browser row — so this is ordering hygiene
- * rather than a repair, and the re-create is what keeps the view's text and the
- * table's schema describing the same thing.
- *
- * Re-runnable by construction: `ADD COLUMN IF NOT EXISTS`, `ADD INDEX IF NOT
- * EXISTS`, and a `DELETE` scoped to the backfill's own source window so it
- * clears exactly and only what the following backfill re-inserts — at any point
- * in the table's life, not just on first apply.
- *
- * **BYO ClickHouse only.** Managed orgs get the same view via `tinybird deploy`
- * from `materializations.ts`, with the populate as an explicit `tb` step at
- * deploy time (see 0014 and 0021 — the SDK has no populate option).
- *
- * `requiredForIngest: false`, and that rests on ONE fact worth stating plainly
- * because it is not local to this file: `TraceId`/`SpanId` are declared in
- * `datasources.ts` WITHOUT a `jsonPath`, so
- * `scripts/generate-clickhouse-insert-mappings.ts` omits them and the Rust
- * gateway's `INSERT INTO product_events (…)` never names them. A cluster stamped
- * below 24 therefore still accepts every row the gateway sends.
- *
- * Give those columns a `jsonPath` and this flag becomes a data-loss bug: the
- * readiness gate compares `stamped >= clickHouseSchemaVersion`, which stays at
- * 21, so a BYO org that has not applied 0028 is still routed to its own cluster
- * — where the INSERT fails on the unknown column, retries, trips the breaker and
- * drops the batch. The gate's safety argument is "an older binary writing into a
- * newer schema", and that would be the inverse.
- *
- * Bumping `clickHouseSchemaVersion` instead would un-ready ingest routing for
- * every BYO-CH org over a feature none of their existing writers touch, which is
- * why the column declaration is the right place to solve it.
+ * `requiredForIngest: false` rests on `TraceId`/`SpanId` having NO `jsonPath` in
+ * `datasources.ts`: the insert-mapping generator omits them, so the gateway's
+ * `INSERT INTO product_events (…)` never names them and a cluster stamped below
+ * 28 still accepts every row. Give them a path and unmigrated BYO orgs drop every
+ * `/v1/events` batch on the unknown column.
  */
 export const migration_0028_product_events_from_traces = {
 	version: 28,
@@ -163,20 +111,11 @@ export const migration_0028_product_events_from_traces = {
 		"ALTER TABLE product_events ADD COLUMN IF NOT EXISTS TraceId String DEFAULT ''",
 		"ALTER TABLE product_events ADD COLUMN IF NOT EXISTS SpanId String DEFAULT ''",
 		"ALTER TABLE product_events ADD INDEX IF NOT EXISTS idx_trace_id TraceId TYPE bloom_filter GRANULARITY 4",
-		// The browser view is dropped and IMMEDIATELY recreated, before anything
-		// slow runs. 0021 bracketed its backfill with the drop because there the
-		// backfill WAS the browser feed and two writers of the same rows had to be
-		// impossible. Here the backfill reads `traces` and the browser view reads
-		// `session_events`, so the bracket buys nothing and costs everything: the
-		// backfill is chunked across up to 400 durable workflow steps over 30 days
-		// of spans, and every `session_events` navigation row ingested while the
-		// view is gone is never projected at all. That is a permanent hole in page
-		// views, not the "ordering hygiene" an earlier draft of this comment
-		// called it. Recreated here, the outage is one statement wide.
+		// Dropped and IMMEDIATELY recreated: every `session_events` row ingested
+		// while the browser view is gone is never projected, so the gap must not
+		// span the chunked backfill below.
 		"DROP VIEW IF EXISTS product_events_mv",
-		// Frozen copy of the browser projection as of 0021, plus the two new
-		// columns explicitly at `''`. Same freezing rule as above: this is what
-		// the view's body was at this point in history.
+		// Frozen copy of the browser projection as of 0021, plus the two new columns.
 		`CREATE MATERIALIZED VIEW IF NOT EXISTS product_events_mv TO product_events AS
 SELECT
   OrgId,
@@ -199,19 +138,11 @@ SELECT
 FROM session_events
 WHERE Type IN ('navigation', 'custom')`,
 		"DROP VIEW IF EXISTS product_events_traces_mv",
-		// Idempotency for the trace half only — never a browser row, never a
-		// directly ingested one.
-		//
-		// BOUNDED BY THE BACKFILL'S OWN WINDOW, which is what makes the claim
-		// above true on a LATE re-run rather than only on first apply. `traces`
-		// keeps 30 days and `product_events` keeps 365, so by day 100 the table
-		// holds trace rows the backfill can no longer rebuild. An unbounded
-		// `DELETE WHERE Source = 'trace'` would clear all 100 days and re-insert
-		// 30 — silently destroying 70 days of a customer's funnel history on a
-		// re-apply after a lost bookkeeping row. Scoping the delete to
-		// `min(Timestamp)` of the source means it removes exactly the rows the
-		// following backfill is about to write, and nothing older.
-		"DELETE FROM product_events WHERE Source = 'trace' AND Timestamp >= (SELECT min(Timestamp) FROM traces)",
+		// Idempotency for the trace half only, bounded by the backfill's own window:
+		// `traces` keeps 30 days and `product_events` 365, so an unbounded delete on
+		// a late re-run would destroy rows the backfill cannot rebuild. The count
+		// guard keeps an empty `traces` (min() = 1970) from doing the same.
+		"DELETE FROM product_events WHERE Source = 'trace' AND (SELECT count() FROM traces) > 0 AND Timestamp >= (SELECT min(Timestamp) FROM traces)",
 		productEventsTracesBackfill,
 		`CREATE MATERIALIZED VIEW IF NOT EXISTS product_events_traces_mv TO product_events AS
 SELECT

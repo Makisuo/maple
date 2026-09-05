@@ -84,17 +84,9 @@ export const productEventNames = defineQuery({
 		),
 })
 
-// The trace ↔ product-event link, both directions. `list` rather than
-// `aggregation`: each reads a handful of rows off a single equality predicate,
-// and paying the aggregation profile's settings for a bloom-filter point lookup
-// is the wrong trade.
-//
-// A flat 60s rather than `timeRangeCache`, whose TTL and key-snap widen with the
-// range: both of these are point lookups whose answer does not change with how
-// much time the caller asked about, and a completed trace's events never change
-// at all. 60s covers the burst of re-reads a panel does while someone clicks
-// around one trace, and is short enough that an event annotated a minute ago
-// shows up in the samples list.
+// The trace ↔ product-event link, both directions. `list` profile because each is
+// a bloom-filter point lookup, and a flat 60s rather than `timeRangeCache`
+// because the answer does not widen with the range asked about.
 
 export const productEventsForTrace = defineQuery({
 	id: "productEventsForTrace",

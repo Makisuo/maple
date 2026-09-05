@@ -44,18 +44,9 @@ const BucketSeconds = Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0
 )
 
 /**
- * A `LIMIT` a client is allowed to ask for.
- *
- * The builder INLINES a limit into the SQL text (`raw(String(Math.round(v)))`)
- * rather than binding it, so an unchecked `Schema.Number` here is the
- * `bucket_seconds: 1.5` mistake in a second costume: `limit: -1` and
- * `limit: 1e21` (which stringifies as `1e+21`) both reach ClickHouse as a
- * syntax error and surface as a 500, and `limit: 1e9` is an unbounded scan
- * bounded only by the profile's own settings.
- *
- * The ceiling is the part that has to be here rather than in the caller: the
- * web client's own input schema checks positivity but has no upper bound, and
- * the internal API is reachable by any authenticated client regardless.
+ * A `LIMIT` a client may ask for. The builder INLINES it into the SQL text, so
+ * `-1` or `1e21` would be a syntax error (a 500) and `1e9` an unbounded scan;
+ * the ceiling lives here because the internal API is reachable by any client.
  */
 const RowLimit = Schema.Number.check(
 	Schema.isInt(),
@@ -1779,14 +1770,8 @@ export class ProductEventNamesResponse extends Schema.Class<ProductEventNamesRes
 }) {}
 
 /**
- * The product events one trace produced — the trace view's side of the link a
- * `maple.product_event.name` span attribute creates.
- *
- * `traceId` is the branded `TraceId`, not a bare string. The brand checks
- * non-empty-and-trimmed rather than 32 hex chars, so it does not reject every
- * malformed id — but it does reject the one that matters: `traceId: ""` would
- * otherwise match every row in the table whose `TraceId` is empty, i.e. every
- * browser and `/v1/events` product event in the window.
+ * The product events one trace produced. `traceId` is the branded `TraceId`:
+ * it rejects `""`, which would otherwise match every non-trace row in the window.
  */
 export class ProductEventsForTraceRequest extends Schema.Class<ProductEventsForTraceRequest>(
 	"ProductEventsForTraceRequest",
@@ -1812,7 +1797,7 @@ export class ProductEventsForTraceResponse extends Schema.Class<ProductEventsFor
 			groupId: Schema.String,
 			visitorId: Schema.String,
 			sessionId: Schema.String,
-			/** The event's `maple.product_event.prop.*` attributes, prefix stripped. */
+			/** The span's attributes as projected by `maple.product_event.include` / `prop.*`. */
 			attributes: Schema.Record(Schema.String, Schema.String),
 		}),
 	),

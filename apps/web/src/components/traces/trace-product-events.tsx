@@ -5,23 +5,14 @@ import { ChartBarTrendUpIcon } from "@/components/icons"
 import { Badge } from "@maple/ui/components/ui/badge"
 import type { TraceProductEvent } from "@/api/warehouse/product-events"
 
-/** Same margin and reasoning as `TraceLogsLink`: clock skew between services can
- *  stamp an annotated span slightly outside the root span's own window, and the
- *  bound is also what keeps the lookup off every retained partition. */
+/** Same margin as `TraceLogsLink`: clock skew can stamp an annotated span just
+ *  outside the root span's window, and the bound keeps the lookup partition-pruned. */
 const WINDOW_MARGIN_MS = 5 * 60 * 1000
 
 /**
- * The product events this trace produced — spans the team annotated in their own
- * code with `maple.product_event.name`.
- *
- * Renders nothing while loading, on failure, and when the trace produced none,
- * which is the overwhelming majority of traces. That silence is the whole design
- * of the panel: it sits unconditionally in the trace body and only appears on
- * the traces where a request actually accomplished something the business
- * counts, so it reads as a finding rather than as another empty section.
- *
- * Clicking an event selects its span in the waterfall, which is the point of the
- * link — "the conversion happened, and here is the code path that did it."
+ * The product events this trace produced. Renders nothing while loading, on
+ * failure, and when there are none (most traces), so it reads as a finding
+ * rather than another empty section. Clicking an event selects its span.
  */
 export function TraceProductEvents({
 	traceId,
@@ -46,16 +37,9 @@ export function TraceProductEvents({
 	)
 }
 
-/**
- * Split out so the unparseable-timestamp case never constructs an atom key at
- * all. Folding the guard in after the `useAtomValue` — passing `?? ""` to
- * satisfy the required time fields — mounts the atom, fails `decodeInput`
- * against `TinybirdDateTime`, and exports a `QueryEngine.getProductEventsForTrace`
- * failure span on every render, for a query nobody wanted. It happened not to
- * reach the network only because that schema rejects `""`; a later change making
- * the window optional-with-fallback (which the logs client already does) would
- * have turned it into a real full-window warehouse read.
- */
+// Split out so an unparseable timestamp never mounts the atom: folding the guard
+// in after `useAtomValue` would fail `decodeInput` and export a failure span on
+// every render for a query nobody wanted.
 function LoadedTraceProductEvents({
 	traceId,
 	startTime,
@@ -80,11 +64,8 @@ function LoadedTraceProductEvents({
 						<span className="text-xs text-muted-foreground">{response.data.length}</span>
 					</header>
 					<ul className="divide-y">
-						{/* Index, not spanId+eventName: `SpanId` is '' on any row that
-						    reached the table without a span, so two same-named events in
-						    one trace collide on that key — and at-least-once ingest can
-						    duplicate a row outright. The list is ordered by the server
-						    and never reordered client-side, so the index is stable. */}
+						{/* Index included: at-least-once ingest can duplicate a row, and the
+						    server-ordered list is never reordered client-side. */}
 						{response.data.map((event, index) => (
 							<ProductEventRow
 								key={`${index}:${event.spanId}:${event.eventName}`}
@@ -107,9 +88,8 @@ function ProductEventRow({
 	event: TraceProductEvent
 	onSelectSpan: (spanId: string) => void
 }) {
-	// UserId first, then GroupId, then VisitorId — the same precedence the funnel
-	// person key uses, so the identity shown here is the one the event will be
-	// counted under rather than whichever field happened to be set.
+	// Same precedence as the funnel person key, so this is the identity the event
+	// is counted under.
 	const person = event.userId || event.groupId || event.visitorId
 	const props = Object.entries(event.attributes)
 
@@ -129,12 +109,8 @@ function ProductEventRow({
 	)
 	const rowClassName = "flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-left text-xs"
 
-	// A row with no span to select is a plain row, not a disabled button. As a
-	// disabled button its whole content — event name, identity, props — leaves
-	// the tab order and is unreachable by keyboard, while a mouse user gets no
-	// cue at all: there is no dimming, only a hover highlight that silently
-	// doesn't appear. The information is worth reading either way; only the
-	// navigation is unavailable.
+	// A row with no span to select is a plain row, not a disabled button: a
+	// disabled button drops its content out of the tab order.
 	if (event.spanId === "") {
 		return <li className={rowClassName}>{content}</li>
 	}
