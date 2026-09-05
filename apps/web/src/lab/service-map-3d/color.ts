@@ -1,6 +1,6 @@
 import { getServiceHueFromName } from "@maple/ui/lib/colors"
 import type { ServicePlatform } from "@/api/warehouse/service-map"
-import type { Node3D } from "./fixture"
+import type { Node3D } from "@/components/service-map/three/types"
 
 /**
  * Colors for the 3D lab, resolved to plain sRGB hex.

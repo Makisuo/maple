@@ -1,46 +1,7 @@
 import type { ServicePlatform } from "@/api/warehouse/service-map"
+import type { Node3D, Node3DKind, Edge3D, Topology3D } from "@/components/service-map/three/types"
 
-/**
- * Hand-shaped topology for the 3D service-map experiment.
- *
- * Deliberately not the production `ServiceEdge`/`ServiceOverview` shape: the lab
- * only needs what the renderer draws (identity, tier hints, traffic, health), and
- * a flat literal is far easier to reshape while playing with the visuals than the
- * warehouse bundle is. ~25 nodes is the size where the plumbing is the point —
- * the 2D bench already covers "does it survive 120 services".
- */
-
-export type Node3DKind = "edge" | "service" | "database" | "queue" | "external"
-
-export interface Node3D {
-	id: string
-	label: string
-	kind: Node3DKind
-	/** OTel `service.namespace`; drives the vertical column a node sits in. */
-	namespace: string
-	platform: ServicePlatform
-	/** Requests per second handled by the node. */
-	throughput: number
-	errorRate: number
-	p95LatencyMs: number
-	/** `db.system` / messaging system, for database and queue nodes. */
-	system?: string
-}
-
-export interface Edge3D {
-	source: string
-	target: string
-	callsPerSecond: number
-	errorRate: number
-	avgLatencyMs: number
-	p95LatencyMs: number
-}
-
-export interface Topology3D {
-	nodes: ReadonlyArray<Node3D>
-	edges: ReadonlyArray<Edge3D>
-}
-
+/** Example topology used only by the 3D lab and tests. */
 const service = (
 	id: string,
 	namespace: string,

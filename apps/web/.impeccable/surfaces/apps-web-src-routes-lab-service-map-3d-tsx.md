@@ -1,0 +1,24 @@
+---
+version: 1
+slug: "apps-web-src-routes-lab-service-map-3d-tsx"
+primary_target: "apps/web/src/routes/lab/service-map-3d.tsx"
+related_targets: ["apps/web/src/lab/service-map-3d/index.tsx", "apps/web/src/components/service-map/three/viewport.tsx", "apps/web/src/routes/service-map.tsx"]
+---
+
+# Service map 3D lab
+
+Scope: shared factory renderer, with fixture-driven previews at `/lab/service-map-3d` and live telemetry through the 2D/3D toggle at `/service-map`. Operate mode for engineers comparing ownership and dependency structure.
+
+Atlas uses industrial machinery on namespace districts. Height encodes logarithmic request volume. Cascade uses the same machines on solid descending terraces, arranged by longest-path dependency depth. A call may skip shelves; cyclic dependencies stay on one shelf. The lab uses a 25-node, 29-connection sample. Live layouts pack the actual namespaces and services without fixture coordinates.
+
+Keep the map dominant, with a separate service inspector. Labels remain HTML for crisp text and keyboard access, and selected/connected nodes win screen-space collisions. Static arrows preserve direction when packet animation is paused. Search and the inventory expose every service even when map labels collide.
+
+Ground both layouts on a square terrain slice with crisp corners and open air beyond its perimeter. Give the deeper soil cutaway actual relief: protruding clay chunks, small occasional mineral chips, branching exposed roots, and an uneven sod lip over a closed terrain shell. Avoid large or densely repeated rocks on the sides. Keep the square silhouette legible and frame the entire cutaway in both views. Broad, simple grass blades grow in irregular patches with lime highlights, soft meadow greens, cool green shadows, and root-to-tip shading, leaving clear aprons around machinery; every plant stays within the terrain boundary. Balance soft daylight and lifted fill with dimensional shadows, avoiding both washed-out highlights and heavy saturated greens. Health belongs on small status strips and LEDs. Selection mutes solid materials rather than making nodes transparent. Cache static shadow maps between layout changes.
+
+User direction: preserve the working factory while moving the art toward the supplied cartoon game reference and Maple's pixel-art identity. Use broad painted-looking foliage, fresh green grass, cream wildflowers, green and golden maple trees, and palmate fallen leaves. Keep color and brightness in a softer middle ground: lively, moderately saturated, and easy to read. Trees and their crowns keep clear of machinery and transport routes. Batch plants and soil details into instanced geometry. Apply the actual shared Maple tree mark to cream enamel machine badges, with warm orange paint, matte shading, and small bevels that preserve blocky silhouettes. Keep data overlays legible over the landscape.
+
+Take cues from miniature factory simulation: processors with fans and vents, storage tanks with bands and ladders, queue loading gantries, gateways, and external pumps. Calls travel through supported, flanged pipes with elbows, valves, and inspection windows. Queue links use guarded conveyor belts carrying batches of cargo that unload at the receiving machine. Cream metal throughput signs expose calls per second and open the receiving service. Animate cargo and treads on the GPU; pause freezes fans, pumps, loaders, belts, and flow together. Keep the throughput numbers accurate to the fixture, while clearly identifying traffic as illustrative sample data.
+
+Honor Maple's existing themes and components. No ambient orbit, glow, or tuning overlay. Reduced motion disables all factory motion. In the lab, mobile places a scrollable inventory below the map; desktop uses a fixed side rail. The live page retains its existing service/database detail panels, focus, environment, time range, and traffic filters. The renderer choice is URL-backed. Live edge signs use sample-weighted rates with an estimate marker and label edge latency as average/max, never as p95. Structural integration links carry no animated traffic.
+
+The default Atlas camera looks straight across the square from a higher angle, with closer framing matching the user's screenshot. Preserve manual camera and pause state during metric refresh; refit when graph structure changes. Prioritize selected, connected, then high-throughput service labels over throughput signs and district labels, and keep text clear of the HUD and camera controls. The grass cap sits below the top surface to avoid coplanar edge flicker.

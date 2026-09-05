@@ -141,6 +141,21 @@ and the summary estimate are the same statistic.
 Storing a tDigest state in the edge rollups would give nodes a real p95 and is the remaining
 half of this; renaming was the cheap half.
 
+## 2D and 3D presentation
+
+`/service-map` stores its renderer choice in the `view=2d|3d` search parameter; 2D remains
+the default. The lazy-loaded factory renderer in `components/service-map/three` consumes
+the same resolved `buildFlowElements` graph after decluttering, including integration
+nodes and links. It adds no warehouse queries. Environment, time range, focus, traffic
+thresholds, namespace expansion, and service/database detail panels remain shared.
+
+The live adapter preserves sample-weighted node and edge rates and their estimate markers.
+Service p95 and edge average/max retain their original meanings. Structural Hyperdrive
+origin links stay idle. Atlas groups by the actual namespaces; Cascade condenses dependency
+cycles before assigning depth. Layout and route geometry depend on graph structure, so a
+metric refresh updates the factory without resetting the camera. The lab uses this same
+renderer with explicitly labeled fixture traffic.
+
 ## Known-unresolved
 
 - The DB summary and its own chart use different windows for ranges ≤24h: the chart reads raw
