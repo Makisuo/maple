@@ -244,6 +244,23 @@ export {
 	type ServicesFacetsOutput,
 } from "./queries/services"
 
+// Queries — Releases
+export {
+	releasesListQuery,
+	releasesListRowSchema,
+	releasesTimelineQuery,
+	releaseErrorFingerprintsQuery,
+	releaseErrorFingerprintsRowSchema,
+	RELEASES_LIST_CAP,
+	PLACEHOLDER_COMMIT_SHAS,
+	type ReleasesListOpts,
+	type ReleasesListOutput,
+	type ReleasesTimelineOpts,
+	type ReleasesTimelineOutput,
+	type ReleaseErrorFingerprintsOpts,
+	type ReleaseErrorFingerprintsOutput,
+} from "./queries/releases"
+
 // Queries — Errors
 export {
 	errorsByTypeQuery,

@@ -37,6 +37,8 @@ import type {
 	ServiceHealthBaselineRequest,
 	ServiceHealthSnapshotRequest,
 	ServiceOverviewRequest,
+	ReleasesListRequest,
+	ReleaseDetailRequest,
 	WorkloadDetailSummaryRequest,
 	WebAnalyticsSummaryRequest,
 	WebAnalyticsLiveRequest,
@@ -517,6 +519,104 @@ export const workloadDetailSummary = defineQuery({
 				namespace: payload.namespace,
 			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+		),
+})
+
+// Releases page. The list and the timeline share one payload so the bundle
+// handler forwards it to both; the detail reuses the list query scoped to one
+// service, which is the comparison table.
+export const releasesList = defineQuery({
+	id: "releasesList",
+	profile: "list",
+	cache: timeRangeCache,
+	compile: (payload: ReleasesListRequest, orgId: string) =>
+		CH.compile(
+			CH.releasesListQuery({
+				environments: payload.environments,
+				namespaces: payload.namespaces,
+				serviceNames: payload.services,
+				excludedEnvironments: payload.excludedEnvironments,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+			{ rowSchema: CH.releasesListRowSchema },
+		),
+})
+
+export const releasesTimeline = defineQuery({
+	id: "releasesTimeline",
+	profile: "list",
+	cache: timeRangeCache,
+	compile: (payload: ReleasesListRequest, orgId: string) =>
+		CH.compile(
+			CH.releasesTimelineQuery({
+				environments: payload.environments,
+				namespaces: payload.namespaces,
+				serviceNames: payload.services,
+				excludedEnvironments: payload.excludedEnvironments,
+				bucketSeconds: payload.bucketSeconds,
+			}),
+			{
+				orgId,
+				startTime: payload.startTime,
+				endTime: payload.endTime,
+				bucketSeconds: payload.bucketSeconds,
+			},
+		),
+})
+
+export const releaseVersions = defineQuery({
+	id: "releaseVersions",
+	profile: "list",
+	cache: timeRangeCache,
+	compile: (payload: ReleaseDetailRequest, orgId: string) =>
+		CH.compile(
+			CH.releasesListQuery({
+				serviceName: payload.serviceName,
+				environments: payload.environments,
+				limit: 100,
+			}),
+			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
+			{ rowSchema: CH.releasesListRowSchema },
+		),
+})
+
+export const releaseTimeline = defineQuery({
+	id: "releaseTimeline",
+	profile: "list",
+	cache: timeRangeCache,
+	compile: (payload: ReleaseDetailRequest, orgId: string) =>
+		CH.compile(
+			CH.releasesTimelineQuery({
+				serviceName: payload.serviceName,
+				environments: payload.environments,
+				bucketSeconds: payload.bucketSeconds,
+			}),
+			{
+				orgId,
+				startTime: payload.startTime,
+				endTime: payload.endTime,
+				bucketSeconds: payload.bucketSeconds,
+			},
+		),
+})
+
+export const releaseErrorFingerprints = defineQuery({
+	id: "releaseErrorFingerprints",
+	profile: "list",
+	cache: timeRangeCache,
+	compile: (payload: ReleaseDetailRequest, orgId: string) =>
+		CH.compile(
+			CH.releaseErrorFingerprintsQuery({
+				serviceName: payload.serviceName,
+				environments: payload.environments,
+			}),
+			{
+				orgId,
+				startTime: payload.startTime,
+				endTime: payload.endTime,
+				serviceVersion: payload.commitSha,
+			},
+			{ rowSchema: CH.releaseErrorFingerprintsRowSchema },
 		),
 })
 

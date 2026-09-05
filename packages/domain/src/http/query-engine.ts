@@ -740,6 +740,86 @@ export class ServiceDetailOverviewResponse extends Schema.Class<ServiceDetailOve
 	environments: Schema.Array(Schema.String),
 }) {}
 
+// Releases
+//
+// A release is a commit the moment it starts serving traffic: the
+// service-overview rollups key on `vcs.ref.head.revision`, and the first bucket
+// a commit appears in is its deploy time. Both endpoints read those rollups; the
+// detail additionally bridges to the errors tables through `service.version`.
+
+const ReleaseRow = Schema.Struct({
+	serviceName: ServiceName,
+	environment: Schema.String,
+	commitSha: CommitSha,
+	/** Warehouse datetime of the earliest span this version served in the window. */
+	firstSeen: Schema.String,
+	spanCount: Schema.Number,
+	errorCount: Schema.Number,
+	p50LatencyMs: Schema.Number,
+	p95LatencyMs: Schema.Number,
+	p99LatencyMs: Schema.Number,
+	apdexScore: Schema.Number,
+})
+export type ReleaseRow = Schema.Schema.Type<typeof ReleaseRow>
+
+const ReleaseTimelinePoint = Schema.Struct({
+	bucket: Schema.String,
+	serviceName: ServiceName,
+	commitSha: CommitSha,
+	count: Schema.Number,
+})
+export type ReleaseTimelinePoint = Schema.Schema.Type<typeof ReleaseTimelinePoint>
+
+export class ReleasesListRequest extends Schema.Class<ReleasesListRequest>("ReleasesListRequest")({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	environments: OptionalDeploymentEnvs,
+	namespaces: OptionalServiceNamespaces,
+	services: OptionalServiceNames,
+	excludedEnvironments: OptionalDeploymentEnvs,
+	// Bucket for the swimlane timeline. Whole minutes at least: the rollup tiers
+	// cannot place a row inside a minute, and the list is org-wide.
+	bucketSeconds: BucketSeconds,
+}) {}
+
+export class ReleasesListResponse extends Schema.Class<ReleasesListResponse>("ReleasesListResponse")({
+	/** One row per (service, environment, commit), newest first. */
+	releases: Schema.Array(ReleaseRow),
+	timeline: Schema.Array(ReleaseTimelinePoint),
+	/** True when the row cap cut older releases off the end. */
+	truncated: Schema.Boolean,
+}) {}
+
+export class ReleaseDetailRequest extends Schema.Class<ReleaseDetailRequest>("ReleaseDetailRequest")({
+	serviceName: ServiceName,
+	commitSha: CommitSha,
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	environments: OptionalDeploymentEnvs,
+	// Pre-built all-metrics timeseries for this version and for every other
+	// version of the service, forwarded verbatim to `queryEngine.execute` like
+	// the service-detail bundle does.
+	timeseries: QueryEngineExecuteRequest,
+	baselineTimeseries: QueryEngineExecuteRequest,
+	bucketSeconds: BucketSeconds,
+}) {}
+
+export class ReleaseDetailResponse extends Schema.Class<ReleaseDetailResponse>("ReleaseDetailResponse")({
+	/** Every version of this service in the window, this one included. */
+	versions: Schema.Array(ReleaseRow),
+	timeline: Schema.Array(ReleaseTimelinePoint),
+	timeseries: QueryEngineExecuteResponse,
+	baselineTimeseries: QueryEngineExecuteResponse,
+	/** Error fingerprints whose occurrences carried this version as `service.version`. */
+	errorFingerprints: Schema.Array(
+		Schema.Struct({
+			fingerprintHash: FingerprintHash,
+			count: Schema.Number,
+			firstSeen: Schema.String,
+		}),
+	),
+}) {}
+
 export class ServiceDependenciesBundleRequest extends Schema.Class<ServiceDependenciesBundleRequest>(
 	"ServiceDependenciesBundleRequest",
 )({
@@ -2473,6 +2553,21 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 			payload: ServiceDetailOverviewRequest,
 			success: ServiceDetailOverviewResponse,
 			// Embeds an `execute` sub-query, so it can also surface QueryEngineValidationError.
+			error: validatedQueryEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("releasesList", "/releases", {
+			payload: ReleasesListRequest,
+			success: ReleasesListResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("releaseDetail", "/release-detail", {
+			payload: ReleaseDetailRequest,
+			success: ReleaseDetailResponse,
+			// Embeds `execute` sub-queries, so it can also surface QueryEngineValidationError.
 			error: validatedQueryEndpointErrors,
 		}),
 	)

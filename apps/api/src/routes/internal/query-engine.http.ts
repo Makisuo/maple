@@ -31,6 +31,9 @@ import {
 	CloudflareInfraWorkersResponse,
 	ServiceDbQuerySummaryResponse,
 	ServiceDetailOverviewResponse,
+	ReleasesListResponse,
+	ReleaseDetailResponse,
+	type ReleaseRow,
 	ServiceDependenciesBundleResponse,
 	ServiceMapBundleResponse,
 	ServiceWorkloadsResponse,
@@ -249,6 +252,32 @@ const toServicePlatformRow = (row: CH.ServicePlatformsOutput) => {
 		processRuntimeName,
 	}
 }
+
+const toReleaseRow = (row: CH.ReleasesListOutput): ReleaseRow => {
+	const spanCount = Number(row.spanCount)
+	const satisfied = Number(row.apdexSatisfiedCount)
+	const tolerating = Number(row.apdexToleratingCount)
+	return {
+		serviceName: decodeServiceName(String(row.serviceName ?? "")),
+		environment: String(row.environment ?? ""),
+		commitSha: decodeCommitSha(row.commitSha),
+		firstSeen: String(row.firstSeen),
+		spanCount,
+		errorCount: Number(row.errorCount),
+		p50LatencyMs: Number(row.p50LatencyMs),
+		p95LatencyMs: Number(row.p95LatencyMs),
+		p99LatencyMs: Number(row.p99LatencyMs),
+		apdexScore:
+			spanCount > 0 ? Math.round(((satisfied + tolerating * 0.5) / spanCount) * 10_000) / 10_000 : 0,
+	}
+}
+
+const toReleaseTimelinePoint = (row: CH.ReleasesTimelineOutput) => ({
+	bucket: String(row.bucket),
+	serviceName: decodeServiceName(String(row.serviceName ?? "")),
+	commitSha: decodeCommitSha(row.commitSha),
+	count: Number(row.count),
+})
 
 const toServiceWorkloadRow = (row: CH.ServiceWorkloadsOutput) => ({
 	serviceName: decodeServiceName(String(row.serviceName ?? "")),
@@ -1033,6 +1062,54 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 							environments: environmentRows
 								.map((row) => String(row.environment ?? ""))
 								.filter((env) => env !== ""),
+						})
+					}),
+				)
+				.handle("releasesList", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						// One Worker invocation for the page: the per-commit rows and the
+						// swimlane timeline share a config resolution and run concurrently.
+						yield* warehouse.warmRoute(tenant)
+						const [rows, timelineRows] = yield* Effect.all(
+							[
+								runQuery(Queries.releasesList, tenant, payload),
+								runQuery(Queries.releasesTimeline, tenant, payload),
+							],
+							{ concurrency: 2 },
+						)
+						return new ReleasesListResponse({
+							releases: rows.map(toReleaseRow),
+							timeline: timelineRows.map(toReleaseTimelinePoint),
+							truncated: rows.length >= CH.RELEASES_LIST_CAP,
+						})
+					}),
+				)
+				.handle("releaseDetail", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* warehouse.warmRoute(tenant)
+						const [versionRows, timelineRows, timeseries, baselineTimeseries, fingerprintRows] =
+							yield* Effect.all(
+								[
+									runQuery(Queries.releaseVersions, tenant, payload),
+									runQuery(Queries.releaseTimeline, tenant, payload),
+									queryEngine.execute(tenant, payload.timeseries),
+									queryEngine.execute(tenant, payload.baselineTimeseries),
+									runQuery(Queries.releaseErrorFingerprints, tenant, payload),
+								],
+								{ concurrency: 5 },
+							)
+						return new ReleaseDetailResponse({
+							versions: versionRows.map(toReleaseRow),
+							timeline: timelineRows.map(toReleaseTimelinePoint),
+							timeseries,
+							baselineTimeseries,
+							errorFingerprints: fingerprintRows.map((row) => ({
+								fingerprintHash: decodeFingerprintHash(row.fingerprintHash),
+								count: Number(row.count),
+								firstSeen: String(row.firstSeen),
+							})),
 						})
 					}),
 				)

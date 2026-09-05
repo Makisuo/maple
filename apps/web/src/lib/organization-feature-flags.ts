@@ -21,10 +21,16 @@ export const OrganizationFeatureFlags = Schema.Struct({
 	aiAutoTriage: DisabledByDefaultFeatureFlag,
 	/** Gates the Agent Sessions page under Explore (AI agent trace sessions). */
 	agentTracing: DisabledByDefaultFeatureFlag,
+	/**
+	 * Gates the Releases row under Monitor. The `/releases` routes stay
+	 * reachable by URL for anyone; the flag only decides who is shown the door.
+	 */
+	releases: DisabledByDefaultFeatureFlag,
 }).pipe(
 	Schema.encodeKeys({
 		aiAutoTriage: "aiautotriage",
 		agentTracing: "agent_tracing",
+		releases: "releases",
 	}),
 )
 
@@ -36,6 +42,7 @@ const decodeOrganizationFeatureFlags = Schema.decodeUnknownOption(OrganizationFe
 export const DISABLED_ORGANIZATION_FEATURE_FLAGS: OrganizationFeatureFlags = {
 	aiAutoTriage: false,
 	agentTracing: false,
+	releases: false,
 }
 
 /**
@@ -47,6 +54,7 @@ export const DISABLED_ORGANIZATION_FEATURE_FLAGS: OrganizationFeatureFlags = {
 export const ENABLED_ORGANIZATION_FEATURE_FLAGS: OrganizationFeatureFlags = {
 	aiAutoTriage: true,
 	agentTracing: true,
+	releases: true,
 }
 
 /** Decode Clerk metadata, falling back to every rollout disabled for non-object input. */

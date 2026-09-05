@@ -38,6 +38,7 @@ import * as serviceMapQueries from "../ch/queries/service-map"
 import * as serviceEndpointQueries from "../ch/queries/service-endpoints"
 import * as serviceOperationQueries from "../ch/queries/service-operations"
 import * as serviceQueries from "../ch/queries/services"
+import * as releaseQueries from "../ch/queries/releases"
 import * as sessionEventQueries from "../ch/queries/session-events"
 import * as sessionReplayQueries from "../ch/queries/session-replays"
 import * as webAnalyticsQueries from "../ch/queries/web-analytics"
@@ -269,6 +270,7 @@ const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 	"service-endpoints": serviceEndpointQueries,
 	"service-operations": serviceOperationQueries,
 	services: serviceQueries,
+	releases: releaseQueries,
 	"session-events": sessionEventQueries,
 	"session-replays": sessionReplayQueries,
 	"top-operations": topOperationQueries,

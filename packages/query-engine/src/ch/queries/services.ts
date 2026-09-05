@@ -40,7 +40,7 @@ const SERVICE_ROLLUP_DURATION_STATE = "quantilesTDigestMergeState(0.5, 0.95, 0.9
  * row anyone decodes. Declaring it is what lets the queries carrying it derive
  * a row schema for their *other* columns.
  */
-const DURATION_STATE = T.aggregateState("quantilesTDigest(0.5, 0.95, 0.99)", "UInt64")
+export const DURATION_STATE = T.aggregateState("quantilesTDigest(0.5, 0.95, 0.99)", "UInt64")
 
 /** A commit tuple as JSON: `[sha, spanCount, errorCount, firstSeen]`. */
 const COMMIT_TUPLE = T.array(
@@ -50,7 +50,7 @@ const COMMIT_TUPLE = T.array(
 	),
 )
 
-interface ServiceWindowFilters {
+export interface ServiceWindowFilters {
 	readonly serviceName?: string
 	readonly environments?: readonly string[]
 	readonly namespaces?: readonly string[]
@@ -121,7 +121,7 @@ const SERVICE_WINDOW_GROUP_KEYS = [
  * `[11:00, 14:00)`. Disjoint, and their union is the window — the same argument
  * `serviceOperationsSummaryQuery` rests on, using the same two helpers.
  */
-function serviceOverviewWindows(filters: ServiceWindowFilters, tiers: ServiceWindowTiers = {}) {
+export function serviceOverviewWindows(filters: ServiceWindowFilters, tiers: ServiceWindowTiers = {}) {
 	const grain = tiers.grain ?? "hour"
 	const includeHourly = tiers.includeHourly ?? true
 	const rollupFilters = <

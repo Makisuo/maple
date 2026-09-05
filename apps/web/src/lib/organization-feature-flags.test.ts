@@ -9,7 +9,7 @@ describe("organizationFeatureFlagsFrom", () => {
 				agent_tracing: true,
 				unrelated_metadata: "preserved by Clerk, ignored here",
 			}),
-		).toEqual({ aiAutoTriage: true, agentTracing: true })
+		).toEqual({ aiAutoTriage: true, agentTracing: true, releases: false })
 	})
 
 	// `webanalytics` was a rollout flag until Web Analytics shipped to everyone.
@@ -20,16 +20,22 @@ describe("organizationFeatureFlagsFrom", () => {
 		expect(organizationFeatureFlagsFrom({ aiautotriage: true, webanalytics: true })).toEqual({
 			aiAutoTriage: true,
 			agentTracing: false,
+			releases: false,
 		})
 	})
 
 	it("disables a missing or malformed flag", () => {
-		expect(organizationFeatureFlagsFrom({})).toEqual({ aiAutoTriage: false, agentTracing: false })
+		expect(organizationFeatureFlagsFrom({})).toEqual({
+			aiAutoTriage: false,
+			agentTracing: false,
+			releases: false,
+		})
 		// The string "true" is the shape a hand-edited Clerk dashboard field
 		// produces, and it must not read as enabled.
 		expect(organizationFeatureFlagsFrom({ aiautotriage: "true", agent_tracing: "true" })).toEqual({
 			aiAutoTriage: false,
 			agentTracing: false,
+			releases: false,
 		})
 	})
 
@@ -37,6 +43,7 @@ describe("organizationFeatureFlagsFrom", () => {
 		expect(organizationFeatureFlagsFrom(undefined)).toEqual({
 			aiAutoTriage: false,
 			agentTracing: false,
+			releases: false,
 		})
 	})
 })
