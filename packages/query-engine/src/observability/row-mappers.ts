@@ -36,6 +36,7 @@ export const toLogEntry = (l: ListLogsOutput): LogEntry => ({
 export const toErrorSummary = (e: ErrorsByTypeOutput): ErrorSummary => ({
 	fingerprintHash: e.fingerprintHash,
 	label: e.errorLabel,
+	sampleMessage: e.sampleMessage ?? "",
 	count: e.count,
 	affectedServicesCount: e.affectedServicesCount,
 	lastSeen: e.lastSeen,

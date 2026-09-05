@@ -25,9 +25,8 @@
 		"apps/api": {
 			// src/worker.ts was auto-detected from wrangler.jsonc's `main` until the
 			// wrangler configs were deleted; the Worker entries are now named here.
-			// A bench suite is an entry point by construction: it is edited in place
-			// against a populated snapshot and run on two revisions, so nothing ever
-			// imports it and `tsconfig.bench.json` is its only other reference.
+			// bench-suites/*.ts are loaded by path from scripts/bench-queries.ts (a dynamic
+			// import off the CLI's --suite argument), so knip cannot see the edge.
 			"entry": [
 				"src/worker.ts",
 				"alchemy.run.ts",

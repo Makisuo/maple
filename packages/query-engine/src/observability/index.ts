@@ -23,7 +23,12 @@ export { searchTraces } from "./search-traces"
 export { inspectTrace } from "./inspect-trace"
 export { spanDetail, type SpanDetailInput, type SpanDetailResult } from "./span-detail"
 export { findErrors } from "./find-errors"
-export { errorDetail, type ErrorDetailTrace, type ErrorDetailOutput } from "./error-detail"
+export {
+	errorDetail,
+	type ErrorDetailSpan,
+	type ErrorDetailTrace,
+	type ErrorDetailOutput,
+} from "./error-detail"
 export { diagnoseService } from "./diagnose-service"
 export { searchLogs } from "./search-logs"
 export { mineLogPatterns, clusterLogPatterns, type ClusterableLogRow } from "./mine-log-patterns"
