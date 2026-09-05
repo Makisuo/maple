@@ -109,7 +109,7 @@ Two things made it survive: nothing forced the shared helper, and those queries 
 fixture in the SQL catalog at all, so neither the DESCRIBE sweep nor any structural gate ever
 looked at them.
 
-Both are closed now. `unsplicedTwoTierQueries` in `sql-catalog.ts` fails any query naming both
+Both are closed now. `unsplicedTwoTierQueries` in `benchmark/catalog.ts` fails any query naming both
 a rollup table and a raw table whose boundary is not a computed `firstFullBucket`, and
 `service-map-parity.clickhouse.e2e.test.ts` compares the spliced result against a flat scan
 with spans seeded exactly on each seam. **There is no allowlist on that gate.** A single-tier
@@ -124,7 +124,7 @@ an exemption is the gate finding something, not the gate needing a hole.
 325M-row per-span `service_overview_spans` — **165k scans per 3 days** — while the 2.2M-row
 minutely rollup built for exactly that shape sat unreachable.
 
-`sql-catalog.test.ts` already asserts every routing predicate is exercised both ways, and it
+`benchmark/catalog.test.ts` already asserts every routing predicate is exercised both ways, and it
 passed throughout. The gap was that the test guarding this route asserted
 `sql.toContain("FROM service_overview_spans")` — and the tiered union reads that table too,
 as its raw edge. The assertion could not tell the two routes apart. **Assert the tier that

@@ -154,7 +154,9 @@ const compactIfNeeded = (
 	usage: TurnUsage,
 ): Effect.Effect<void, never, LLMClientService> =>
 	Effect.gen(function* () {
-		const { contextLimitOf, outputLimitOf } = yield* Effect.promise(() => import("../platform/Llm"))
+		const { contextLimitOf, outputLimitOf, toLlmCallError } = yield* Effect.promise(
+			() => import("../platform/Llm"),
+		)
 		const {
 			addUsage,
 			isNearContextLimit,
@@ -190,6 +192,8 @@ const compactIfNeeded = (
 		})
 		const response = yield* LLM.generate(request).pipe(
 			Effect.tap((generated) => annotateModelResponse(generated)),
+			// Mapped inside the span so a failed compaction records Maple's tag, not `AI.Error`.
+			Effect.mapError((error) => toLlmCallError("chat.compaction", error)),
 			Effect.withSpan(modelCallSpanName(model), {
 				kind: "client",
 				// The whole request, so the span records what the model was actually

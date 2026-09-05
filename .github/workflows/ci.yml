@@ -578,7 +578,7 @@ jobs:
                   CLICKHOUSE_E2E_PASSWORD: maple
               run: >-
                   bun run --filter=@maple/api test --
-                  src/services/warehouse/sql-catalog.clickhouse.e2e.test.ts
+                  src/services/warehouse/query-benchmark.clickhouse.e2e.test.ts
 
             # The catalog sweep proves the rollup SQL parses; this proves it
             # AGREES with the raw path it replaced. A divergence here renders as a

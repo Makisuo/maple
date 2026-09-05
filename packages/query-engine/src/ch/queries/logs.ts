@@ -16,7 +16,7 @@ import { deploymentEnvExpr } from "@maple/domain/tinybird/semconv-renames"
 import { buildAttrFilterCondition } from "../../traces-shared"
 import type { AttributeIndexMode, LogBodySearchMode } from "../../capabilities"
 import { edgeCondition, interiorConditions } from "./rollup-splice"
-import { inclusionCondition, inclusionValues, soleValue } from "./query-helpers"
+import { inclusionCondition, inclusionValues, severitySpellings, soleValue } from "./query-helpers"
 
 // Shared options
 
@@ -151,7 +151,13 @@ function serviceSeverityConditions(
 	opts: LogsQueryOpts,
 ): Array<CH.Condition | undefined> {
 	const services = inclusionValues(opts.serviceName, opts.serviceNames)
-	const severities = inclusionValues(opts.severity, opts.severities)
+	// The scalar is a level ("ERROR") and matches every spelling; the array holds exact facet
+	// values the caller read back from the data, so it stays exact.
+	const severities = opts.severities?.length
+		? opts.severities
+		: opts.severity
+			? severitySpellings(opts.severity)
+			: undefined
 	return [
 		services ? inclusionCondition($.ServiceName, services) : undefined,
 		severities ? inclusionCondition($.SeverityText, severities) : undefined,
@@ -790,7 +796,7 @@ function logsFacetsQueryFromMv(
 		$.Hour.gte(param.dateTimeSeconds("startTime")),
 		$.Hour.lte(param.dateTimeSeconds("endTime")),
 		CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-		CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+		CH.when(opts.severity, (v: string) => inclusionCondition($.SeverityText, severitySpellings(v))),
 		opts.environments?.length ? CH.inList($.DeploymentEnv, opts.environments) : undefined,
 		mvNamespaceCondition($, opts),
 	]
@@ -867,7 +873,7 @@ function logsFacetsQueryFromRaw(
 		$.Timestamp.gte(param.dateTimeString("startTime")),
 		$.Timestamp.lte(param.dateTimeString("endTime")),
 		CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-		CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+		CH.when(opts.severity, (v: string) => inclusionCondition($.SeverityText, severitySpellings(v))),
 		environmentCondition($, opts),
 		namespaceCondition($, opts),
 	]

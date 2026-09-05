@@ -1,0 +1,9 @@
+{
+	"extends": "./tsconfig.json",
+	"include": [
+		"scripts/bench-queries.ts",
+		"scripts/bench-suites/*.ts",
+		"src/services/warehouse/query-benchmark.clickhouse.e2e.test.ts"
+	],
+	"exclude": []
+}

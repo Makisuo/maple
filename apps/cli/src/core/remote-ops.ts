@@ -522,6 +522,25 @@ export const tracesBreakdown = (
  * span count, participating services, the root span's name. It is bounded by
  * the caller's own `--limit`.
  */
+/** The same attribute allowlist the warehouse query projects for the failing span. */
+const ERROR_SPAN_ATTRIBUTE_KEYS = [
+	"gen_ai.request.model",
+	"gen_ai.tool.name",
+	"http.request.method",
+	"http.route",
+	"query.context",
+	"error.type",
+] as const
+
+const pickErrorSpanAttributes = (attributes: Record<string, unknown>): Record<string, string> => {
+	const picked: Record<string, string> = {}
+	for (const key of ERROR_SPAN_ATTRIBUTE_KEYS) {
+		const value = attributes[key]
+		if (typeof value === "string" && value !== "") picked[key] = value
+	}
+	return picked
+}
+
 export const errorDetail = (
 	client: MapleV2Client,
 	p: { fingerprintHash: string; range: Range; service?: string; limit?: number },
@@ -571,6 +590,7 @@ export const errorDetail = (
 								})
 							: undefined
 					const root = trace.spans.find((s) => s.parent_span_id === null)
+					const failing = trace.spans.find((s) => s.status_code === "Error")
 					return {
 						traceId: sample.trace_id,
 						rootSpanName: root?.name ?? "",
@@ -579,6 +599,15 @@ export const errorDetail = (
 						services: Array.from(new Set(trace.spans.map((s) => s.service_name))),
 						startTime: sample.timestamp,
 						errorMessage: sample.exception_message,
+						errorSpan: failing
+							? {
+									spanId: failing.id,
+									name: failing.name,
+									serviceName: failing.service_name,
+									statusMessage: failing.status_message ?? "",
+									attributes: pickErrorSpanAttributes(failing.attributes),
+								}
+							: undefined,
 						logs: (logs?.data ?? []).slice(0, 5).map((l) => ({
 							timestamp: l.timestamp,
 							severityText: l.severity_text || "INFO",

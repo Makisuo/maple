@@ -17,6 +17,15 @@ const traceRow = (traceId: string, startTime: string) => ({
 	services: ["api"],
 	rootSpanName: "GET /",
 	errorMessage: "boom",
+	errorSpanId: "span-err",
+	errorSpanName: "chat gpt-x",
+	errorServiceName: "api",
+	errorModel: "gpt-x",
+	errorToolName: "",
+	errorHttpMethod: "",
+	errorHttpRoute: "",
+	errorQueryContext: "",
+	errorType: "",
 })
 
 const makeMockExecutor = (
@@ -74,6 +83,22 @@ describe("errorDetail", () => {
 			assert.lengthOf(logs, 1)
 			assert.strictEqual(logs[0]!.params.start_time, timeRange.startTime)
 			assert.strictEqual(logs[0]!.params.end_time, timeRange.endTime)
+		}),
+	)
+
+	it.effect("surfaces the failing span with only the attributes it carries", () =>
+		Effect.gen(function* () {
+			const captured: CapturedCalls = { pipeCalls: [] }
+			const result = yield* errorDetail({ fingerprintHash: "123", timeRange }).pipe(
+				Effect.provide(
+					makeLayer(makeMockExecutor(captured, [traceRow("t1", "2026-04-03 12:00:00")])),
+				),
+			)
+			const span = result.traces[0]!.errorSpan
+			assert.isDefined(span)
+			assert.strictEqual(span!.name, "chat gpt-x")
+			assert.strictEqual(span!.statusMessage, "boom")
+			assert.deepStrictEqual(span!.attributes, { "gen_ai.request.model": "gpt-x" })
 		}),
 	)
 })

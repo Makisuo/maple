@@ -1,3 +1,4 @@
+import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Predicate from "effect/Predicate"
 import { warehouseQueries } from "@maple/domain"
@@ -5,7 +6,9 @@ import {
 	collectBuilderCatalog,
 	collectPipeCatalog,
 	collectQuerySpecCatalog,
-	collectSqlCatalog,
+	collectQueryCatalog,
+	mergeQueryCatalogs,
+	suiteFromCatalog,
 	dedupeByFingerprint,
 	pipeFixtures,
 	pipePathReachesAnnualRoute,
@@ -16,31 +19,31 @@ import {
 	undecodedColumns,
 	undecodedQueries,
 	unsplicedTwoTierQueries,
-} from "./sql-catalog"
-import { builderFixtures } from "./ch/builder-fixtures"
-import * as activityQueries from "./ch/queries/activity"
-import * as alertCheckQueries from "./ch/queries/alert-checks"
-import * as anomalyQueries from "./ch/queries/anomaly"
-import * as attributeKeyQueries from "./ch/queries/attribute-keys"
-import * as containerQueries from "./ch/queries/containers"
-import * as errorQueries from "./ch/queries/errors"
-import * as infraQueries from "./ch/queries/infra"
-import * as livenessQueries from "./ch/queries/liveness"
-import * as logQueries from "./ch/queries/logs"
-import * as metricQueries from "./ch/queries/metrics"
-import * as serviceInfraQueries from "./ch/queries/service-infra"
-import * as serviceMapRollupQueries from "./ch/queries/service-map-rollup"
-import * as serviceMapQueries from "./ch/queries/service-map"
-import * as serviceEndpointQueries from "./ch/queries/service-endpoints"
-import * as serviceOperationQueries from "./ch/queries/service-operations"
-import * as serviceQueries from "./ch/queries/services"
-import * as releaseQueries from "./ch/queries/releases"
-import * as sessionEventQueries from "./ch/queries/session-events"
-import * as sessionReplayQueries from "./ch/queries/session-replays"
-import * as webAnalyticsQueries from "./ch/queries/web-analytics"
-import * as productEventQueries from "./ch/queries/product-events"
-import * as topOperationQueries from "./ch/queries/top-operations"
-import * as traceQueries from "./ch/queries/traces"
+} from "./catalog"
+import { builderFixtures } from "./builders"
+import * as activityQueries from "../ch/queries/activity"
+import * as alertCheckQueries from "../ch/queries/alert-checks"
+import * as anomalyQueries from "../ch/queries/anomaly"
+import * as attributeKeyQueries from "../ch/queries/attribute-keys"
+import * as containerQueries from "../ch/queries/containers"
+import * as errorQueries from "../ch/queries/errors"
+import * as infraQueries from "../ch/queries/infra"
+import * as livenessQueries from "../ch/queries/liveness"
+import * as logQueries from "../ch/queries/logs"
+import * as metricQueries from "../ch/queries/metrics"
+import * as serviceInfraQueries from "../ch/queries/service-infra"
+import * as serviceMapRollupQueries from "../ch/queries/service-map-rollup"
+import * as serviceMapQueries from "../ch/queries/service-map"
+import * as serviceEndpointQueries from "../ch/queries/service-endpoints"
+import * as serviceOperationQueries from "../ch/queries/service-operations"
+import * as serviceQueries from "../ch/queries/services"
+import * as releaseQueries from "../ch/queries/releases"
+import * as sessionEventQueries from "../ch/queries/session-events"
+import * as sessionReplayQueries from "../ch/queries/session-replays"
+import * as webAnalyticsQueries from "../ch/queries/web-analytics"
+import * as productEventQueries from "../ch/queries/product-events"
+import * as topOperationQueries from "../ch/queries/top-operations"
+import * as traceQueries from "../ch/queries/traces"
 
 // These run on every PR with no ClickHouse. They guarantee the catalog the
 // DESCRIBE sweep consumes is complete and actually compiles; the sweep itself
@@ -48,7 +51,20 @@ import * as traceQueries from "./ch/queries/traces"
 describe("sql catalog", () => {
 	const pipeEntries = collectPipeCatalog()
 	const specEntries = collectQuerySpecCatalog()
-	const entries = collectSqlCatalog()
+	const entries = Effect.runSync(collectQueryCatalog())
+
+	it("exports the same compiled cases for replay without decoder internals", async () => {
+		const suite = await Effect.runPromise(suiteFromCatalog(entries))
+		expect(suite.samples.map((sample) => sample.id)).toEqual(entries.map((entry) => entry.id))
+		expect(suite.samples.map((sample) => sample.sampleSql)).toEqual(entries.map((entry) => entry.sql))
+		for (const sample of suite.samples) expect(sample).not.toHaveProperty("compiled")
+	})
+
+	it("rejects duplicate case IDs when combining catalogs", async () => {
+		await expect(Effect.runPromise(mergeQueryCatalogs(entries, entries))).rejects.toThrow(
+			"Duplicate query case ID",
+		)
+	})
 
 	it("compiles every fixture", () => {
 		expect(pipeEntries.length).toBeGreaterThan(0)
@@ -231,7 +247,7 @@ describe("sql catalog", () => {
 // Builder coverage — the third entry surface.
 //
 // Every `*Query`/`*SQL` export under ch/queries must be either fixtured in
-// ch/builder-fixtures.ts or explicitly exempted below. Adding a builder
+// benchmark/builders.ts or explicitly exempted below. Adding a builder
 // without either fails here — the same playbook as `uncoveredPipes`, extended
 // to the ~125 builders reached only through direct compiledQuery call sites.
 

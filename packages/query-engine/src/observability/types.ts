@@ -100,6 +100,8 @@ export interface ErrorSummary {
 	readonly fingerprintHash: string
 	/** Human-readable display label derived at ingest. */
 	readonly label: string
+	/** One occurrence's status message — what tells two fingerprints with the same label apart. */
+	readonly sampleMessage: string
 	readonly count: number
 	readonly affectedServicesCount: number
 	readonly lastSeen: string
@@ -109,6 +111,9 @@ export interface FindErrorsInput {
 	readonly timeRange: TimeRange
 	readonly service?: string
 	readonly environment?: string
+	/** "unexpected": only identities outside `namespacePrefix` plus the 5xx/unexpected-envelope markers. */
+	readonly identity?: "unexpected"
+	readonly namespacePrefix?: string
 	readonly limit?: number
 }
 
