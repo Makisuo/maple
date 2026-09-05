@@ -480,6 +480,32 @@ const METRICS_FILTERS = {
 } as const
 
 export const querySpecFixtures: ReadonlyArray<QuerySpecFixture> = [
+	...(
+		[
+			"count",
+			"error_rate",
+			"avg_duration",
+			"p50_duration",
+			"p95_duration",
+			"p99_duration",
+			"apdex",
+		] as const
+	).map(
+		(metric): QuerySpecFixture => ({
+			label: `traces-timeseries-annual-single-${metric}`,
+			route: "traces_timeseries:annual",
+			query: {
+				kind: "timeseries",
+				source: "traces",
+				metric,
+				bucketSeconds: 300,
+				groupBy: ["service"],
+				filters: { rootSpansOnly: true },
+			},
+			startTime: SHORT_START_TIME,
+			endTime: SHORT_END_TIME,
+		}),
+	),
 	{
 		label: "traces-timeseries-annual",
 		route: "traces_timeseries:annual",
@@ -542,7 +568,7 @@ export const querySpecFixtures: ReadonlyArray<QuerySpecFixture> = [
 	{
 		// `seriesLimit` was unreachable on this route until the groupBy predicate
 		// was relaxed — `hasRealGroupBy` was always false. This is the
-		// CTE-over-three-way-union that no fixture had ever executed.
+		// series-cap-over-rollup-union that no fixture had ever executed.
 		label: "traces-timeseries-annual-grouped-series-cap",
 		route: "traces_timeseries:annual",
 		query: {

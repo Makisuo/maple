@@ -1,6 +1,7 @@
 // BOUNDARY: Test doubles mirror intentionally untyped external callbacks.
 import { describe, it } from "@effect/vitest"
-import { Effect, Exit, Option, Schema } from "effect"
+import { TestClock } from "effect/testing"
+import { Deferred, Effect, Exit, Fiber, Option, Schema } from "effect"
 import { strict as nodeAssert } from "node:assert"
 import { MetricName, OrgId, ServiceName, UserId } from "@maple/domain"
 import { RawSqlValidationError, WarehouseUpstreamError } from "@maple/domain/http"
@@ -11,7 +12,11 @@ import {
 	type QueryEngineResult,
 	type TimeseriesPoint,
 } from "@maple/query-engine"
-import { makeQueryEngineEvaluate, makeQueryEngineExecute } from "@maple/query-engine/runtime"
+import {
+	makeQueryEngineEvaluate,
+	makeQueryEngineExecute,
+	withAlertEvaluationScope,
+} from "@maple/query-engine/runtime"
 import type { SqlQueryOptions } from "@maple/query-engine/profiles"
 import type { CompiledQuery } from "@maple/query-engine/ch"
 import type { TenantContext } from "@/services/auth/AuthService"
@@ -989,6 +994,247 @@ describe("makeQueryEngineExecute", () => {
 })
 
 describe("makeQueryEngineEvaluate", () => {
+	const countRequest: QueryEngineEvaluateRequest = {
+		startTime: "2026-01-01 00:00:00",
+		endTime: "2026-01-01 00:05:00",
+		reducer: "sum",
+		sampleCountStrategy: "trace_count",
+		source: {
+			kind: "spec",
+			query: { kind: "timeseries", source: "traces", metric: "count", bucketSeconds: 60 },
+		},
+	}
+	const countRows = [
+		makeTraceTimeseriesRow({ count: 10, spanCount: 1 }),
+		makeTraceTimeseriesRow({ bucket: "2026-01-01 00:01:00", count: 20, spanCount: 2 }),
+	]
+
+	it.effect(
+		"shares concurrent bucket reads across reducers while retaining their answers and actual sample counts",
+		() =>
+			Effect.gen(function* () {
+				let calls = 0
+				const evaluate = makeQueryEngineEvaluate(
+					makeTinybirdStub({
+						sqlQuery: () =>
+							Effect.gen(function* () {
+								calls++
+								yield* Effect.yieldNow
+								return countRows
+							}),
+					}),
+				)
+				const results = yield* withAlertEvaluationScope(
+					Effect.all(
+						[
+							evaluate(tenant, countRequest),
+							evaluate(
+								{ ...tenant },
+								{
+									...countRequest,
+									reducer: "max",
+									source: {
+										kind: "spec",
+										query: {
+											bucketSeconds: 60,
+											metric: "count",
+											source: "traces",
+											kind: "timeseries",
+										},
+									},
+								},
+							),
+						],
+						{ concurrency: "unbounded" },
+					),
+				)
+				assert.strictEqual(calls, 1)
+				assert.strictEqual(results[0][0].value, 30)
+				assert.strictEqual(results[1][0].value, 20)
+				assert.strictEqual(results[0][0].sampleCount, 3)
+				assert.strictEqual(results[1][0].sampleCount, 3)
+			}),
+	)
+
+	it.effect("isolates invocation caches and leaves ordinary evaluations uncached", () =>
+		Effect.gen(function* () {
+			let calls = 0
+			const evaluate = makeQueryEngineEvaluate(
+				makeTinybirdStub({
+					sqlQuery: () =>
+						Effect.sync(() => {
+							calls++
+							return countRows
+						}),
+				}),
+			)
+			const pair = Effect.all([evaluate(tenant, countRequest), evaluate(tenant, countRequest)], {
+				concurrency: "unbounded",
+			})
+			yield* Effect.all([withAlertEvaluationScope(pair), withAlertEvaluationScope(pair)], {
+				concurrency: "unbounded",
+			})
+			assert.strictEqual(calls, 2)
+			yield* pair
+			assert.strictEqual(calls, 4)
+		}),
+	)
+
+	it.effect("separates tenants, warehouse instances, windows, and query metrics", () =>
+		Effect.gen(function* () {
+			let calls = 0
+			const sqlQuery = () =>
+				Effect.sync(() => {
+					calls++
+					return countRows
+				})
+			const evaluate = makeQueryEngineEvaluate(makeTinybirdStub({ sqlQuery }))
+			const otherWarehouse = makeQueryEngineEvaluate(makeTinybirdStub({ sqlQuery }))
+			yield* withAlertEvaluationScope(
+				Effect.gen(function* () {
+					yield* evaluate(tenant, countRequest)
+					yield* evaluate({ ...tenant, orgId: asOrgId("org_other") }, countRequest)
+					yield* otherWarehouse(tenant, countRequest)
+					yield* evaluate(tenant, { ...countRequest, endTime: "2026-01-01 00:06:00" })
+					yield* evaluate(tenant, {
+						...countRequest,
+						source: {
+							kind: "spec",
+							query: {
+								kind: "timeseries",
+								source: "traces",
+								metric: "error_rate",
+								bucketSeconds: 60,
+							},
+						},
+					})
+				}),
+			)
+			assert.strictEqual(calls, 5)
+		}),
+	)
+
+	it.effect("does not retain a failed bucket lookup", () =>
+		Effect.gen(function* () {
+			let calls = 0
+			const failure = new WarehouseUpstreamError({
+				message: "temporarily unavailable",
+				pipeName: "tracesAlertEval",
+				upstreamStatus: 503,
+			})
+			const evaluate = makeQueryEngineEvaluate(
+				makeTinybirdStub({
+					sqlQuery: () =>
+						Effect.suspend(() =>
+							++calls === 1 ? Effect.fail(failure) : Effect.succeed(countRows),
+						),
+				}),
+			)
+			yield* withAlertEvaluationScope(
+				Effect.gen(function* () {
+					assert(Exit.isFailure(yield* Effect.exit(evaluate(tenant, countRequest))))
+					assert.strictEqual((yield* evaluate(tenant, countRequest))[0].value, 30)
+				}),
+			)
+			assert.strictEqual(calls, 2)
+		}),
+	)
+
+	it.effect("retries an interrupted lookup and expires successful results", () =>
+		Effect.gen(function* () {
+			let calls = 0
+			const started = yield* Deferred.make<void>()
+			const evaluate = makeQueryEngineEvaluate(
+				makeTinybirdStub({
+					sqlQuery: () =>
+						Effect.gen(function* () {
+							calls++
+							if (calls === 1) {
+								yield* Deferred.succeed(started, undefined)
+								return yield* Effect.never
+							}
+							return countRows
+						}),
+				}),
+			)
+			yield* withAlertEvaluationScope(
+				Effect.gen(function* () {
+					const running = yield* evaluate(tenant, countRequest).pipe(
+						Effect.forkChild({ startImmediately: true }),
+					)
+					yield* Deferred.await(started)
+					yield* Fiber.interrupt(running)
+					assert.strictEqual((yield* evaluate(tenant, countRequest))[0].value, 30)
+					assert.strictEqual(calls, 2)
+					yield* evaluate(tenant, countRequest)
+					assert.strictEqual(calls, 2)
+					yield* TestClock.adjust("91 seconds")
+					yield* evaluate(tenant, countRequest)
+					assert.strictEqual(calls, 3)
+				}),
+			)
+		}),
+	)
+
+	it.effect("bounds retained bucket results within a scheduler invocation", () =>
+		Effect.gen(function* () {
+			let calls = 0
+			const evaluate = makeQueryEngineEvaluate(
+				makeTinybirdStub({
+					sqlQuery: () =>
+						Effect.sync(() => {
+							calls++
+							return countRows
+						}),
+				}),
+			)
+			yield* withAlertEvaluationScope(
+				Effect.gen(function* () {
+					yield* evaluate(tenant, countRequest)
+					for (let second = 0; second < 32; second++) {
+						yield* evaluate(tenant, {
+							...countRequest,
+							endTime: `2026-01-01 00:06:${String(second).padStart(2, "0")}`,
+						})
+					}
+					yield* evaluate(tenant, countRequest)
+				}),
+			)
+			assert.strictEqual(calls, 34)
+		}),
+	)
+
+	it.effect("does not share potentially volatile raw SQL across reducers", () =>
+		Effect.gen(function* () {
+			let calls = 0
+			const evaluate = makeQueryEngineEvaluate(
+				makeTinybirdStub({
+					rawSqlQuery: () =>
+						Effect.sync(() => {
+							calls++
+							return [{ value: calls, samples: 1 }]
+						}),
+				}),
+			)
+			const request = {
+				...countRequest,
+				sampleCountStrategy: null,
+				source: {
+					kind: "raw_sql" as const,
+					sql: "SELECT rand() AS value FROM traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+					windowMinutes: 5,
+				},
+			}
+			yield* withAlertEvaluationScope(
+				Effect.gen(function* () {
+					yield* evaluate(tenant, request)
+					yield* evaluate(tenant, { ...request, reducer: "max" })
+				}),
+			)
+			assert.strictEqual(calls, 2)
+		}),
+	)
+
 	// The evaluate path now drives the same dashboard timeseries queries the
 	// widget renderer uses, so stub rows always carry `bucket` + `groupName`.
 	// Ungrouped alerts collapse to a single-element array with groupKey "all".
