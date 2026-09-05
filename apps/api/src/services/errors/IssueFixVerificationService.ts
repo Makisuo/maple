@@ -295,7 +295,7 @@ const make: Effect.Effect<
 	 *
 	 * Four signals, strongest first, first hit wins — and every one of them is a
 	 * Postgres read, deliberately. The exact answer would be to resolve the
-	 * service's recent `deployment.commit_sha` values against `vcs_commits`, but
+	 * service's recent `vcs.ref.head.revision` values against `vcs_commits`, but
 	 * that puts a warehouse query on the issue page to compute a *default* the user
 	 * can override with one click. Not worth it.
 	 *

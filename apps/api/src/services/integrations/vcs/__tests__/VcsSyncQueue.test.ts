@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { VcsQueueError, type VcsSyncJob } from "@maple/domain/http"
-import { WorkerEnvironment } from "@maple/effect-cloudflare"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { Effect, Exit, Layer, Tracer } from "effect"
 import {
 	MESSAGING_DESTINATION,

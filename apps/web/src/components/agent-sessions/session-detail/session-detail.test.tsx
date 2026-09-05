@@ -558,7 +558,6 @@ describe("SessionOverview", () => {
 		const name = screen.getByText("gpt-4o-mini")
 		expect(name.getAttribute("title")).toBe("openrouter/openai/gpt-4o-mini")
 	})
-
 })
 
 describe("SessionWaterfall", () => {

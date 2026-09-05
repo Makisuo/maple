@@ -1,14 +1,10 @@
 // BOUNDARY: Test doubles preserve opaque values so the consuming boundary can be exercised.
 import { randomUUID } from "node:crypto"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import {
-	errorIssueEvents,
-	errorIssues,
-	investigationLensRuns,
-	investigations,
-	runMigrations,
-} from "@maple/db"
-import { createMaplePgliteClient, type MaplePgClient } from "@maple/db/client"
+import { errorIssueEvents, errorIssues, investigationLensRuns, investigations } from "@maple/db"
+import { runMigrations } from "@maple/db/migrate"
+import type { MaplePgClient } from "@maple/db/client"
+import { createMaplePgliteClient } from "@maple/db/pglite"
 import type { AiTriageResult } from "@maple/domain/http"
 import { ErrorIssueId, InvestigationId, OrgId } from "@maple/domain/primitives"
 import { eq } from "drizzle-orm"

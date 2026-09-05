@@ -45,7 +45,7 @@ SELECT
         GROUP BY hostName) AS hosts
         FORMAT JSON
 
--- builder:containers:containerDetailSummaryQuery:default  [6063da9a]
+-- builder:containers:containerDetailSummaryQuery:default  [58383940]
 SELECT
           ResourceAttributes['container.name'] AS containerName,
           any(ResourceAttributes['host.name']) AS hostName,
@@ -53,7 +53,7 @@ SELECT
           any(ResourceAttributes['container.image.name']) AS imageName,
           any(ResourceAttributes['compose.project']) AS composeProject,
           any(ResourceAttributes['compose.service']) AS composeService,
-          any(ResourceAttributes['container.runtime']) AS runtime,
+          any(coalesce(nullIf(ResourceAttributes['container.runtime.name'], ''), ResourceAttributes['container.runtime'])) AS runtime,
           min(TimeUnix) AS firstSeen,
           max(TimeUnix) AS lastSeen,
           ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,
@@ -250,7 +250,7 @@ SELECT
         ORDER BY bucket ASC
         FORMAT JSON
 
--- builder:containers:listContainersQuery:default  [fe84ad79]
+-- builder:containers:listContainersQuery:default  [df58f91f]
 SELECT
           containerName AS containerName,
           hostName AS hostName,
@@ -275,7 +275,7 @@ SELECT
           any(ResourceAttributes['container.image.name']) AS imageName,
           any(ResourceAttributes['compose.project']) AS composeProject,
           any(ResourceAttributes['compose.service']) AS composeService,
-          any(ResourceAttributes['container.runtime']) AS runtime,
+          any(coalesce(nullIf(ResourceAttributes['container.runtime.name'], ''), ResourceAttributes['container.runtime'])) AS runtime,
           any(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment'])) AS environment,
           max(TimeUnix) AS lastSeen,
           ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,
@@ -298,7 +298,7 @@ SELECT
         OFFSET 0
         FORMAT JSON
 
--- builder:containers:listContainersQuery:filtered  [75408df7]
+-- builder:containers:listContainersQuery:filtered  [16c1f98d]
 SELECT
           containerName AS containerName,
           hostName AS hostName,
@@ -323,7 +323,7 @@ SELECT
           any(ResourceAttributes['container.image.name']) AS imageName,
           any(ResourceAttributes['compose.project']) AS composeProject,
           any(ResourceAttributes['compose.service']) AS composeService,
-          any(ResourceAttributes['container.runtime']) AS runtime,
+          any(coalesce(nullIf(ResourceAttributes['container.runtime.name'], ''), ResourceAttributes['container.runtime'])) AS runtime,
           any(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment'])) AS environment,
           max(TimeUnix) AS lastSeen,
           ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,
@@ -351,7 +351,7 @@ SELECT
         OFFSET 0
         FORMAT JSON
 
--- builder:containers:listContainersQuery:scoped  [41805227]
+-- builder:containers:listContainersQuery:scoped  [34d4c009]
 SELECT
           containerName AS containerName,
           hostName AS hostName,
@@ -376,7 +376,7 @@ SELECT
           any(ResourceAttributes['container.image.name']) AS imageName,
           any(ResourceAttributes['compose.project']) AS composeProject,
           any(ResourceAttributes['compose.service']) AS composeService,
-          any(ResourceAttributes['container.runtime']) AS runtime,
+          any(coalesce(nullIf(ResourceAttributes['container.runtime.name'], ''), ResourceAttributes['container.runtime'])) AS runtime,
           any(coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment'])) AS environment,
           max(TimeUnix) AS lastSeen,
           ifNotFinite(avgIf(Value, MetricName = 'container.cpu.utilization'), 0) / 100 AS cpuPct,
@@ -5557,7 +5557,7 @@ SELECT
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- pipe:error_detail_traces:default:baseline  [99fb32db]
+-- pipe:error_detail_traces:default:baseline  [ce04a4f1]
 SELECT
           TraceId AS traceId,
           min(Timestamp) AS startTime,
@@ -5565,7 +5565,16 @@ SELECT
           count() AS spanCount,
           groupUniqArray(ServiceName) AS services,
           anyIf(SpanName, ParentSpanId = '') AS rootSpanName,
-          any(StatusMessage) AS errorMessage
+          anyIf(StatusMessage, StatusCode = 'Error') AS errorMessage,
+          anyIf(SpanId, StatusCode = 'Error') AS errorSpanId,
+          anyIf(SpanName, StatusCode = 'Error') AS errorSpanName,
+          anyIf(ServiceName, StatusCode = 'Error') AS errorServiceName,
+          anyIf(SpanAttributes['gen_ai.request.model'], StatusCode = 'Error') AS errorModel,
+          anyIf(SpanAttributes['gen_ai.tool.name'], StatusCode = 'Error') AS errorToolName,
+          anyIf(SpanAttributes['http.request.method'], StatusCode = 'Error') AS errorHttpMethod,
+          anyIf(SpanAttributes['http.route'], StatusCode = 'Error') AS errorHttpRoute,
+          anyIf(SpanAttributes['query.context'], StatusCode = 'Error') AS errorQueryContext,
+          anyIf(SpanAttributes['error.type'], StatusCode = 'Error') AS errorType
         FROM trace_detail_spans
         WHERE OrgId = 'org_sql_catalog'
           AND TraceId IN (SELECT
@@ -5725,6 +5734,25 @@ SELECT
         GROUP BY fingerprintHash
         ORDER BY count DESC
         LIMIT 1
+        FORMAT JSON
+
+-- pipe:errors_by_type:unexpected-identity:baseline  [1457ff9b]
+SELECT
+          toString(FingerprintHash) AS fingerprintHash,
+          any(ErrorLabel) AS errorLabel,
+          any(StatusMessage) AS sampleMessage,
+          count() AS count,
+          uniq(ServiceName) AS affectedServicesCount,
+          min(Timestamp) AS firstSeen,
+          max(Timestamp) AS lastSeen
+        FROM error_events_by_time
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (ErrorLabel NOT LIKE '@maple/%' OR ErrorLabel IN ('@maple/api/http/Http5xxResponseError', '@maple/http/v2/UnexpectedError', '@maple/http/v1/V1UnexpectedError'))
+        GROUP BY fingerprintHash
+        ORDER BY count DESC
+        LIMIT 50
         FORMAT JSON
 
 -- pipe:errors_facets:default:baseline  [fe66f114]
@@ -6065,7 +6093,7 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- pipe:list_logs:searched:baseline  [f4e5cc5d]
+-- pipe:list_logs:searched:baseline  [af6a1e45]
 SELECT
           Timestamp AS timestamp,
           SeverityText AS severityText,
@@ -6084,7 +6112,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND SeverityText = 'ERROR'
+          AND SeverityText IN ('ERROR', 'Error', 'error')
           AND TraceId = '0af7651916cd43dd8448eb211c80319c'
           AND Body ILIKE '%connection refused%'
           AND Timestamp >= (SELECT min(ts) FROM (SELECT
@@ -6096,7 +6124,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND SeverityText = 'ERROR'
+          AND SeverityText IN ('ERROR', 'Error', 'error')
           AND TraceId = '0af7651916cd43dd8448eb211c80319c'
           AND Body ILIKE '%connection refused%'
         ORDER BY ts DESC
@@ -6105,7 +6133,7 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- pipe:list_logs:searched:bloom  [efc50db5]
+-- pipe:list_logs:searched:bloom  [d1878c6d]
 SELECT
           Timestamp AS timestamp,
           SeverityText AS severityText,
@@ -6124,7 +6152,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND SeverityText = 'ERROR'
+          AND SeverityText IN ('ERROR', 'Error', 'error')
           AND TraceId = '0af7651916cd43dd8448eb211c80319c'
           AND ((hasToken(lower(Body), 'connection') AND hasToken(lower(Body), 'refused')) AND Body ILIKE '%connection refused%')
           AND Timestamp >= (SELECT min(ts) FROM (SELECT
@@ -6136,7 +6164,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND SeverityText = 'ERROR'
+          AND SeverityText IN ('ERROR', 'Error', 'error')
           AND TraceId = '0af7651916cd43dd8448eb211c80319c'
           AND ((hasToken(lower(Body), 'connection') AND hasToken(lower(Body), 'refused')) AND Body ILIKE '%connection refused%')
         ORDER BY ts DESC
@@ -6145,7 +6173,7 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- pipe:list_logs:searched:text  [fad2e4f1]
+-- pipe:list_logs:searched:text  [7eef92d1]
 SELECT
           Timestamp AS timestamp,
           SeverityText AS severityText,
@@ -6164,7 +6192,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND SeverityText = 'ERROR'
+          AND SeverityText IN ('ERROR', 'Error', 'error')
           AND TraceId = '0af7651916cd43dd8448eb211c80319c'
           AND (hasAllTokens(lower(Body), 'connection refused') AND Body ILIKE '%connection refused%')
           AND Timestamp >= (SELECT min(ts) FROM (SELECT
@@ -6176,7 +6204,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND SeverityText = 'ERROR'
+          AND SeverityText IN ('ERROR', 'Error', 'error')
           AND TraceId = '0af7651916cd43dd8448eb211c80319c'
           AND (hasAllTokens(lower(Body), 'connection refused') AND Body ILIKE '%connection refused%')
         ORDER BY ts DESC
@@ -8103,7 +8131,7 @@ SELECT
           StatusCode AS statusCode,
           StatusMessage AS statusMessage,
           toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'url.full', SpanAttributes['url.full'], 'http.url', SpanAttributes['http.url'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'url.path', SpanAttributes['url.path'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'cache.system', SpanAttributes['cache.system'], 'cache.result', SpanAttributes['cache.result'], 'cache.name', SpanAttributes['cache.name'], 'cache.operation', SpanAttributes['cache.operation'], 'cache.lookup_performed', SpanAttributes['cache.lookup_performed'], 'db.system.name', SpanAttributes['db.system.name'], 'db.system', SpanAttributes['db.system'], 'cloud.platform', SpanAttributes['cloud.platform'], 'cloudflare.colo', SpanAttributes['cloudflare.colo'], 'faas.invoked_region', SpanAttributes['faas.invoked_region'], 'cloudflare.outcome', SpanAttributes['cloudflare.outcome'])) AS spanAttributes,
-          toJSONString(map('deployment.environment', ResourceAttributes['deployment.environment'], 'deployment.commit_sha', ResourceAttributes['deployment.commit_sha'])) AS resourceAttributes,
+          toJSONString(map('deployment.environment', ResourceAttributes['deployment.environment'], 'vcs.ref.head.revision', ResourceAttributes['vcs.ref.head.revision'])) AS resourceAttributes,
           'related' AS relationship
         FROM trace_detail_spans
         WHERE TraceId = '0af7651916cd43dd8448eb211c80319c'
@@ -8125,7 +8153,7 @@ SELECT
           StatusCode AS statusCode,
           StatusMessage AS statusMessage,
           toJSONString(map('http.method', SpanAttributes['http.method'], 'http.request.method', SpanAttributes['http.request.method'], 'http.route', SpanAttributes['http.route'], 'url.full', SpanAttributes['url.full'], 'http.url', SpanAttributes['http.url'], 'server.address', SpanAttributes['server.address'], 'net.peer.name', SpanAttributes['net.peer.name'], 'url.path', SpanAttributes['url.path'], 'http.target', SpanAttributes['http.target'], 'http.status_code', SpanAttributes['http.status_code'], 'http.response.status_code', SpanAttributes['http.response.status_code'], 'cache.system', SpanAttributes['cache.system'], 'cache.result', SpanAttributes['cache.result'], 'cache.name', SpanAttributes['cache.name'], 'cache.operation', SpanAttributes['cache.operation'], 'cache.lookup_performed', SpanAttributes['cache.lookup_performed'], 'db.system.name', SpanAttributes['db.system.name'], 'db.system', SpanAttributes['db.system'], 'cloud.platform', SpanAttributes['cloud.platform'], 'cloudflare.colo', SpanAttributes['cloudflare.colo'], 'faas.invoked_region', SpanAttributes['faas.invoked_region'], 'cloudflare.outcome', SpanAttributes['cloudflare.outcome'])) AS spanAttributes,
-          toJSONString(map('deployment.environment', ResourceAttributes['deployment.environment'], 'deployment.commit_sha', ResourceAttributes['deployment.commit_sha'])) AS resourceAttributes,
+          toJSONString(map('deployment.environment', ResourceAttributes['deployment.environment'], 'vcs.ref.head.revision', ResourceAttributes['vcs.ref.head.revision'])) AS resourceAttributes,
           if(SpanId = '00f067aa0ba902b7', 'target', 'related') AS relationship
         FROM trace_detail_spans
         WHERE TraceId = '0af7651916cd43dd8448eb211c80319c'
@@ -9553,9 +9581,22 @@ ORDER BY count DESC
 LIMIT 500
 FORMAT JSON
 
--- spec:logs-timeseries-grouped:baseline  [f594ac7f]
-WITH __series_base AS (
+-- spec:logs-timeseries-grouped:baseline  [3a5fc636]
 SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          count AS count
+        FROM (SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          count AS count,
+          dense_rank() OVER (ORDER BY __series_peak DESC, groupName ASC) AS __series_rank
+        FROM (SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          count AS count,
+          max(count) OVER (PARTITION BY groupName) AS __series_peak
+        FROM (SELECT
           toStartOfInterval(Timestamp, INTERVAL 60 SECOND) AS bucket,
           coalesce(nullIf(toString(SeverityText), ''), 'all') AS groupName,
           count() AS count
@@ -9565,23 +9606,8 @@ SELECT
           AND TimestampTime <= '2026-01-03 14:15:00'
           AND Timestamp >= '2026-01-03 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-        GROUP BY bucket, groupName
-        ORDER BY bucket ASC, groupName ASC
-)
-SELECT
-          bucket AS bucket,
-          groupName AS groupName,
-          count AS count
-        FROM __series_base
-        WHERE groupName IN (SELECT
-          groupName AS groupName
-        FROM (SELECT
-          groupName AS groupName,
-          max(count) AS rank
-        FROM __series_base
-        GROUP BY groupName
-        ORDER BY rank DESC
-        LIMIT 5) AS ranked)
+        GROUP BY bucket, groupName) AS __series_base) AS __series_peaks) AS __series_ranked
+        WHERE __series_rank <= 5
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
@@ -10996,9 +11022,52 @@ SELECT
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- spec:traces-timeseries-annual-grouped-series-cap:baseline  [a922eaa3]
-WITH __series_base AS (
+-- spec:traces-timeseries-annual-grouped-series-cap:baseline  [f959448e]
 SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          count AS count,
+          spanCount AS spanCount,
+          avgDuration AS avgDuration,
+          p50Duration AS p50Duration,
+          p95Duration AS p95Duration,
+          p99Duration AS p99Duration,
+          errorRate AS errorRate,
+          satisfiedCount AS satisfiedCount,
+          toleratingCount AS toleratingCount,
+          apdexScore AS apdexScore,
+          estimatedSpanCount AS estimatedSpanCount
+        FROM (SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          count AS count,
+          spanCount AS spanCount,
+          avgDuration AS avgDuration,
+          p50Duration AS p50Duration,
+          p95Duration AS p95Duration,
+          p99Duration AS p99Duration,
+          errorRate AS errorRate,
+          satisfiedCount AS satisfiedCount,
+          toleratingCount AS toleratingCount,
+          apdexScore AS apdexScore,
+          estimatedSpanCount AS estimatedSpanCount,
+          dense_rank() OVER (ORDER BY __series_peak DESC, groupName ASC) AS __series_rank
+        FROM (SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          count AS count,
+          spanCount AS spanCount,
+          avgDuration AS avgDuration,
+          p50Duration AS p50Duration,
+          p95Duration AS p95Duration,
+          p99Duration AS p99Duration,
+          errorRate AS errorRate,
+          satisfiedCount AS satisfiedCount,
+          toleratingCount AS toleratingCount,
+          apdexScore AS apdexScore,
+          estimatedSpanCount AS estimatedSpanCount,
+          max(count) OVER (PARTITION BY groupName) AS __series_peak
+        FROM (SELECT
           bucket AS bucket,
           groupName AS groupName,
           if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS count,
@@ -11046,33 +11115,8 @@ SELECT
           AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
         GROUP BY bucket, groupName
 ) AS service_metric_windows
-        GROUP BY bucket, groupName
-        ORDER BY bucket ASC, groupName ASC
-)
-SELECT
-          bucket AS bucket,
-          groupName AS groupName,
-          count AS count,
-          spanCount AS spanCount,
-          avgDuration AS avgDuration,
-          p50Duration AS p50Duration,
-          p95Duration AS p95Duration,
-          p99Duration AS p99Duration,
-          errorRate AS errorRate,
-          satisfiedCount AS satisfiedCount,
-          toleratingCount AS toleratingCount,
-          apdexScore AS apdexScore,
-          estimatedSpanCount AS estimatedSpanCount
-        FROM __series_base
-        WHERE groupName IN (SELECT
-          groupName AS groupName
-        FROM (SELECT
-          groupName AS groupName,
-          max(count) AS rank
-        FROM __series_base
-        GROUP BY groupName
-        ORDER BY rank DESC
-        LIMIT 10) AS ranked)
+        GROUP BY bucket, groupName) AS __series_base) AS __series_peaks) AS __series_ranked
+        WHERE __series_rank <= 10
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
@@ -11152,6 +11196,377 @@ SELECT
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
+        GROUP BY bucket, groupName
+        ORDER BY bucket ASC, groupName ASC
+        FORMAT JSON
+
+-- spec:traces-timeseries-annual-single-apdex:baseline  [2678aa93]
+SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS count,
+          sum(bCount) AS spanCount,
+          0 AS avgDuration,
+          0 AS p50Duration,
+          0 AS p95Duration,
+          0 AS p99Duration,
+          0 AS errorRate,
+          sum(bSatisfiedCount) AS satisfiedCount,
+          sum(bToleratingCount) AS toleratingCount,
+          if(sum(bCount) > 0, round(sum(bSatisfiedCount) / sum(bCount) + sum(bToleratingCount) * 0.5 / sum(bCount), 4), 0) AS apdexScore,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS estimatedSpanCount
+        FROM (
+SELECT
+          toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          count() AS bCount,
+          sum(SampleRate) AS bEstimatedSpanCount,
+          0 AS bErrorCount,
+          0 AS bDurationSum,
+          '' AS bDurationQuantiles,
+          countIf((StatusCode != 'Error' AND Duration < 500000000)) AS bSatisfiedCount,
+          countIf(((StatusCode != 'Error' AND Duration >= 500000000) AND Duration < 2000000000)) AS bToleratingCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-03 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (Timestamp < if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bucket, groupName
+UNION ALL
+SELECT
+          toStartOfInterval(Minute, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          sum(SpanCount) AS bCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          0 AS bErrorCount,
+          0 AS bDurationSum,
+          '' AS bDurationQuantiles,
+          sum(ApdexSatisfiedCount) AS bSatisfiedCount,
+          sum(ApdexToleratingCount) AS bToleratingCount
+        FROM service_overview_minutely
+        WHERE OrgId = 'org_sql_catalog'
+          AND Minute >= if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE)
+          AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bucket, groupName
+) AS service_metric_windows
+        GROUP BY bucket, groupName
+        ORDER BY bucket ASC, groupName ASC
+        FORMAT JSON
+
+-- spec:traces-timeseries-annual-single-avg_duration:baseline  [f9bb60d3]
+SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS count,
+          sum(bCount) AS spanCount,
+          if(sum(bCount) > 0, sum(bDurationSum) / sum(bCount) / 1000000, 0) AS avgDuration,
+          0 AS p50Duration,
+          0 AS p95Duration,
+          0 AS p99Duration,
+          0 AS errorRate,
+          0 AS satisfiedCount,
+          0 AS toleratingCount,
+          0 AS apdexScore,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS estimatedSpanCount
+        FROM (
+SELECT
+          toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          count() AS bCount,
+          sum(SampleRate) AS bEstimatedSpanCount,
+          0 AS bErrorCount,
+          sum(toFloat64(Duration)) AS bDurationSum,
+          '' AS bDurationQuantiles,
+          0 AS bSatisfiedCount,
+          0 AS bToleratingCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-03 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (Timestamp < if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bucket, groupName
+UNION ALL
+SELECT
+          toStartOfInterval(Minute, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          sum(SpanCount) AS bCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          0 AS bErrorCount,
+          sum(DurationSum) AS bDurationSum,
+          '' AS bDurationQuantiles,
+          0 AS bSatisfiedCount,
+          0 AS bToleratingCount
+        FROM service_overview_minutely
+        WHERE OrgId = 'org_sql_catalog'
+          AND Minute >= if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE)
+          AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bucket, groupName
+) AS service_metric_windows
+        GROUP BY bucket, groupName
+        ORDER BY bucket ASC, groupName ASC
+        FORMAT JSON
+
+-- spec:traces-timeseries-annual-single-count:baseline  [4df914fd]
+SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS count,
+          sum(bCount) AS spanCount,
+          0 AS avgDuration,
+          0 AS p50Duration,
+          0 AS p95Duration,
+          0 AS p99Duration,
+          0 AS errorRate,
+          0 AS satisfiedCount,
+          0 AS toleratingCount,
+          0 AS apdexScore,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS estimatedSpanCount
+        FROM (
+SELECT
+          toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          count() AS bCount,
+          sum(SampleRate) AS bEstimatedSpanCount,
+          0 AS bErrorCount,
+          0 AS bDurationSum,
+          '' AS bDurationQuantiles,
+          0 AS bSatisfiedCount,
+          0 AS bToleratingCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-03 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (Timestamp < if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bucket, groupName
+UNION ALL
+SELECT
+          toStartOfInterval(Minute, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          sum(SpanCount) AS bCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          0 AS bErrorCount,
+          0 AS bDurationSum,
+          '' AS bDurationQuantiles,
+          0 AS bSatisfiedCount,
+          0 AS bToleratingCount
+        FROM service_overview_minutely
+        WHERE OrgId = 'org_sql_catalog'
+          AND Minute >= if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE)
+          AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bucket, groupName
+) AS service_metric_windows
+        GROUP BY bucket, groupName
+        ORDER BY bucket ASC, groupName ASC
+        FORMAT JSON
+
+-- spec:traces-timeseries-annual-single-error_rate:baseline  [b4049ee7]
+SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS count,
+          sum(bCount) AS spanCount,
+          0 AS avgDuration,
+          0 AS p50Duration,
+          0 AS p95Duration,
+          0 AS p99Duration,
+          if(sum(bCount) > 0, sum(bErrorCount) / sum(bCount), 0) AS errorRate,
+          0 AS satisfiedCount,
+          0 AS toleratingCount,
+          0 AS apdexScore,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS estimatedSpanCount
+        FROM (
+SELECT
+          toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          count() AS bCount,
+          sum(SampleRate) AS bEstimatedSpanCount,
+          countIf(StatusCode = 'Error') AS bErrorCount,
+          0 AS bDurationSum,
+          '' AS bDurationQuantiles,
+          0 AS bSatisfiedCount,
+          0 AS bToleratingCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-03 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (Timestamp < if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bucket, groupName
+UNION ALL
+SELECT
+          toStartOfInterval(Minute, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          sum(SpanCount) AS bCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          sum(ErrorCount) AS bErrorCount,
+          0 AS bDurationSum,
+          '' AS bDurationQuantiles,
+          0 AS bSatisfiedCount,
+          0 AS bToleratingCount
+        FROM service_overview_minutely
+        WHERE OrgId = 'org_sql_catalog'
+          AND Minute >= if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE)
+          AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bucket, groupName
+) AS service_metric_windows
+        GROUP BY bucket, groupName
+        ORDER BY bucket ASC, groupName ASC
+        FORMAT JSON
+
+-- spec:traces-timeseries-annual-single-p50_duration:baseline  [35581d65]
+SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS count,
+          sum(bCount) AS spanCount,
+          0 AS avgDuration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000 AS p50Duration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000 AS p95Duration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99Duration,
+          0 AS errorRate,
+          0 AS satisfiedCount,
+          0 AS toleratingCount,
+          0 AS apdexScore,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS estimatedSpanCount
+        FROM (
+SELECT
+          toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          count() AS bCount,
+          sum(SampleRate) AS bEstimatedSpanCount,
+          0 AS bErrorCount,
+          0 AS bDurationSum,
+          quantilesTDigestState(0.5, 0.95, 0.99)(Duration) AS bDurationQuantiles,
+          0 AS bSatisfiedCount,
+          0 AS bToleratingCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-03 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (Timestamp < if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bucket, groupName
+UNION ALL
+SELECT
+          toStartOfInterval(Minute, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          sum(SpanCount) AS bCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          0 AS bErrorCount,
+          0 AS bDurationSum,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles) AS bDurationQuantiles,
+          0 AS bSatisfiedCount,
+          0 AS bToleratingCount
+        FROM service_overview_minutely
+        WHERE OrgId = 'org_sql_catalog'
+          AND Minute >= if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE)
+          AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bucket, groupName
+) AS service_metric_windows
+        GROUP BY bucket, groupName
+        ORDER BY bucket ASC, groupName ASC
+        FORMAT JSON
+
+-- spec:traces-timeseries-annual-single-p95_duration:baseline  [35581d65]
+SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS count,
+          sum(bCount) AS spanCount,
+          0 AS avgDuration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000 AS p50Duration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000 AS p95Duration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99Duration,
+          0 AS errorRate,
+          0 AS satisfiedCount,
+          0 AS toleratingCount,
+          0 AS apdexScore,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS estimatedSpanCount
+        FROM (
+SELECT
+          toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          count() AS bCount,
+          sum(SampleRate) AS bEstimatedSpanCount,
+          0 AS bErrorCount,
+          0 AS bDurationSum,
+          quantilesTDigestState(0.5, 0.95, 0.99)(Duration) AS bDurationQuantiles,
+          0 AS bSatisfiedCount,
+          0 AS bToleratingCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-03 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (Timestamp < if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bucket, groupName
+UNION ALL
+SELECT
+          toStartOfInterval(Minute, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          sum(SpanCount) AS bCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          0 AS bErrorCount,
+          0 AS bDurationSum,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles) AS bDurationQuantiles,
+          0 AS bSatisfiedCount,
+          0 AS bToleratingCount
+        FROM service_overview_minutely
+        WHERE OrgId = 'org_sql_catalog'
+          AND Minute >= if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE)
+          AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bucket, groupName
+) AS service_metric_windows
+        GROUP BY bucket, groupName
+        ORDER BY bucket ASC, groupName ASC
+        FORMAT JSON
+
+-- spec:traces-timeseries-annual-single-p99_duration:baseline  [35581d65]
+SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS count,
+          sum(bCount) AS spanCount,
+          0 AS avgDuration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000 AS p50Duration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000 AS p95Duration,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99Duration,
+          0 AS errorRate,
+          0 AS satisfiedCount,
+          0 AS toleratingCount,
+          0 AS apdexScore,
+          if(sum(bEstimatedSpanCount) > 0, sum(bEstimatedSpanCount), toFloat64(sum(bCount))) AS estimatedSpanCount
+        FROM (
+SELECT
+          toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          count() AS bCount,
+          sum(SampleRate) AS bEstimatedSpanCount,
+          0 AS bErrorCount,
+          0 AS bDurationSum,
+          quantilesTDigestState(0.5, 0.95, 0.99)(Duration) AS bDurationQuantiles,
+          0 AS bSatisfiedCount,
+          0 AS bToleratingCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-03 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND (Timestamp < if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bucket, groupName
+UNION ALL
+SELECT
+          toStartOfInterval(Minute, INTERVAL 300 SECOND) AS bucket,
+          coalesce(nullIf(toString(ServiceName), ''), 'all') AS groupName,
+          sum(SpanCount) AS bCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          0 AS bErrorCount,
+          0 AS bDurationSum,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles) AS bDurationQuantiles,
+          0 AS bSatisfiedCount,
+          0 AS bToleratingCount
+        FROM service_overview_minutely
+        WHERE OrgId = 'org_sql_catalog'
+          AND Minute >= if(toDateTime('2026-01-03 10:30:00') = toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')), toStartOfMinute(toDateTime('2026-01-03 10:30:00')) + INTERVAL 1 MINUTE)
+          AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bucket, groupName
+) AS service_metric_windows
         GROUP BY bucket, groupName
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
@@ -11410,9 +11825,52 @@ SELECT
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON
 
--- spec:traces-timeseries-series-cap:baseline  [3d39b07d]
-WITH __series_base AS (
+-- spec:traces-timeseries-series-cap:baseline  [d7788fb4]
 SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          count AS count,
+          spanCount AS spanCount,
+          avgDuration AS avgDuration,
+          p50Duration AS p50Duration,
+          p95Duration AS p95Duration,
+          p99Duration AS p99Duration,
+          errorRate AS errorRate,
+          satisfiedCount AS satisfiedCount,
+          toleratingCount AS toleratingCount,
+          apdexScore AS apdexScore,
+          estimatedSpanCount AS estimatedSpanCount
+        FROM (SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          count AS count,
+          spanCount AS spanCount,
+          avgDuration AS avgDuration,
+          p50Duration AS p50Duration,
+          p95Duration AS p95Duration,
+          p99Duration AS p99Duration,
+          errorRate AS errorRate,
+          satisfiedCount AS satisfiedCount,
+          toleratingCount AS toleratingCount,
+          apdexScore AS apdexScore,
+          estimatedSpanCount AS estimatedSpanCount,
+          dense_rank() OVER (ORDER BY __series_peak DESC, groupName ASC) AS __series_rank
+        FROM (SELECT
+          bucket AS bucket,
+          groupName AS groupName,
+          count AS count,
+          spanCount AS spanCount,
+          avgDuration AS avgDuration,
+          p50Duration AS p50Duration,
+          p95Duration AS p95Duration,
+          p99Duration AS p99Duration,
+          errorRate AS errorRate,
+          satisfiedCount AS satisfiedCount,
+          toleratingCount AS toleratingCount,
+          apdexScore AS apdexScore,
+          estimatedSpanCount AS estimatedSpanCount,
+          max(count) OVER (PARTITION BY groupName) AS __series_peak
+        FROM (SELECT
           toStartOfInterval(Timestamp, INTERVAL 300 SECOND) AS bucket,
           coalesce(nullIf(toString(SpanName), ''), 'all') AS groupName,
           sum(SampleRate) AS count,
@@ -11432,32 +11890,7 @@ SELECT
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
           AND coalesce(nullIf(ResourceAttributes['deployment.environment.name'], ''), ResourceAttributes['deployment.environment']) IN ('production')
-        GROUP BY bucket, groupName
-        ORDER BY bucket ASC, groupName ASC
-)
-SELECT
-          bucket AS bucket,
-          groupName AS groupName,
-          count AS count,
-          spanCount AS spanCount,
-          avgDuration AS avgDuration,
-          p50Duration AS p50Duration,
-          p95Duration AS p95Duration,
-          p99Duration AS p99Duration,
-          errorRate AS errorRate,
-          satisfiedCount AS satisfiedCount,
-          toleratingCount AS toleratingCount,
-          apdexScore AS apdexScore,
-          estimatedSpanCount AS estimatedSpanCount
-        FROM __series_base
-        WHERE groupName IN (SELECT
-          groupName AS groupName
-        FROM (SELECT
-          groupName AS groupName,
-          max(count) AS rank
-        FROM __series_base
-        GROUP BY groupName
-        ORDER BY rank DESC
-        LIMIT 10) AS ranked)
+        GROUP BY bucket, groupName) AS __series_base) AS __series_peaks) AS __series_ranked
+        WHERE __series_rank <= 10
         ORDER BY bucket ASC, groupName ASC
         FORMAT JSON

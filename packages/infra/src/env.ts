@@ -2,7 +2,7 @@ import * as Config from "effect/Config"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
-import { optionalString } from "@maple/effect-cloudflare/config-helpers"
+import { optionalString } from "./config-helpers.ts"
 import type { MapleStage } from "./cloudflare/stage.ts"
 import { resolveDeploymentEnvironment } from "./cloudflare/stage.ts"
 
@@ -50,7 +50,7 @@ export type WorkerEnv = Record<string, string | Redacted.Redacted<string>>
 /**
  * Present-and-non-blank, trimmed.
  *
- * Built on `@maple/effect-cloudflare/config-helpers`' `optionalString`, which
+ * Built on `./config-helpers.ts`' `optionalString`, which
  * already encodes "blank or whitespace-only counts as absent" for the runtime
  * worker env schemas. The trim on top is the one thing it does not do — it
  * returns the raw value — and the deploy path has always trimmed.
@@ -136,6 +136,8 @@ export const derived = (key: string, value: string): Config.Config<PlainEnv> =>
  */
 export const authEnv: Config.Config<WorkerEnv> = merge(
 	plainWithDefault("MAPLE_AUTH_MODE", "self_hosted"),
+	// Clerk's SDK phones home unless told not to, and says so at every boot.
+	derived("CLERK_TELEMETRY_DISABLED", "1"),
 	plainWithDefault("MAPLE_DEFAULT_ORG_ID", "default"),
 	optionalSecret("MAPLE_ROOT_PASSWORD"),
 	optionalSecret("CLERK_SECRET_KEY"),
@@ -182,8 +184,19 @@ export const appUrlsEnv: Config.Config<WorkerEnv> = merge(
  */
 export const selfObservabilityEnv = (stage: MapleStage): Config.Config<WorkerEnv> =>
 	merge(
-		// Bound under a different name than it is read from.
-		requiredSecret("MAPLE_OTEL_INGEST_KEY").pipe(Config.map((value) => ({ MAPLE_INGEST_KEY: value }))),
+		// Bound under a different name than it is read from. Optional on dev stages
+		// only: no developer has a real ingest key, and absent means self-observability off.
+		stage.kind === "dev"
+			? optionalSecret("MAPLE_OTEL_INGEST_KEY").pipe(
+					Config.map((record) =>
+						"MAPLE_OTEL_INGEST_KEY" in record
+							? { MAPLE_INGEST_KEY: record.MAPLE_OTEL_INGEST_KEY }
+							: {},
+					),
+				)
+			: requiredSecret("MAPLE_OTEL_INGEST_KEY").pipe(
+					Config.map((value) => ({ MAPLE_INGEST_KEY: value })),
+				),
 		optionalPlain("MAPLE_ENDPOINT"),
 		derived("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
 		// GITHUB_SHA is read as its own key and re-labelled, rather than passed to

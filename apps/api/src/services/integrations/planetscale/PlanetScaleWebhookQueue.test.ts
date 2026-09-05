@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { WorkerEnvironment } from "@maple/effect-cloudflare"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { Effect, Layer } from "effect"
 import { PlanetScaleWebhookQueue, type PlanetScaleWebhookJob } from "./PlanetScaleWebhookQueue"
 

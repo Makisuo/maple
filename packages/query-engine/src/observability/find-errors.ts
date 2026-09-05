@@ -14,6 +14,8 @@ export const findErrors = Effect.fn("Observability.findErrors")(function* (input
 			end_time: input.timeRange.endTime,
 			...(input.service && { services: input.service }),
 			...(input.environment && { deployment_envs: input.environment }),
+			...(input.identity && { identity: input.identity }),
+			...(input.namespacePrefix && { namespace_prefix: input.namespacePrefix }),
 			limit: input.limit ?? 20,
 		},
 		{ profile: "aggregation" },

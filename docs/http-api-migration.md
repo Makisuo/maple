@@ -41,10 +41,10 @@ Rebuilding the CLI's remote mode on v2 surfaced capabilities local mode has and 
 
 - **No attribute discovery.** Nothing in `/v2` returns the attribute keys or values observed in telemetry; `/v2/attribute_mappings` is mapping configuration. This blocks `maple attributes` entirely and is the largest gap.
 - **`/v2/traces/search` cannot sort.** It filters by `min_duration_ms` but has no order parameter, so "slowest N traces" is unexpressible.
-- **No span-level search.** Search returns root-based `V2TraceSummary`; there is no way to list spans matching a name.
+- **No span-level search.** Search returns root-based `V2TraceSummary`; there is no way to list spans matching a name, and its `span_name` filter matches exactly where the CLI matches a substring.
 - **Breakdown returns one aggregation per request.** A combined ranking (count + latency + error rate) needs N calls and cannot be ordered server-side by a composite.
-- **No fingerprint → issue lookup.** v2 keys errors by opaque `erris_…` ids, so a fingerprint hash cannot be resolved to an issue.
-- **No exception-type aggregate.** `/v2/error_issues` returns triage objects, not `(exception_type, service, count)` over a window.
+- ~~**No fingerprint → issue lookup.**~~ Closed: `/v2/error_issues` takes a `fingerprint_hash` filter, and the CLI's `maple error <fp>` runs on it remotely.
+- **No exception-type aggregate.** `/v2/error_issues` holds one triage object per fingerprint — it covers only fingerprints a sweep has turned into issues, and cannot say how many services an error spans, which `maple errors` prints.
 - **No window comparison.** Nothing corresponds to `service_overview_compare`.
 - **Offset pagination.** v2 lists seek by opaque cursor and cap at 100 rows, so `--offset` cannot be honoured.
 

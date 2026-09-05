@@ -90,8 +90,8 @@ export function serviceMapEdgesExistingHoursSQL(params: {
 		.select(($) => ({ hourTs: CH.toUnixTimestamp($.Hour) }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(param.dateTimeString("startTime")),
-			$.Hour.lt(param.dateTimeString("endTime")),
+			$.Hour.gte(param.dateTimeSeconds("startTime")),
+			$.Hour.lt(param.dateTimeSeconds("endTime")),
 		])
 		.groupBy("hourTs")
 		.format("JSON")
@@ -128,8 +128,8 @@ export function serviceMapResolutionsExistingHoursSQL(params: {
 		.select(($) => ({ hourTs: CH.toUnixTimestamp($.Hour) }))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.Hour.gte(param.dateTimeString("startTime")),
-			$.Hour.lt(param.dateTimeString("endTime")),
+			$.Hour.gte(param.dateTimeSeconds("startTime")),
+			$.Hour.lt(param.dateTimeSeconds("endTime")),
 		])
 		.groupBy("hourTs")
 		.format("JSON")

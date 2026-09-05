@@ -5,7 +5,14 @@ import type { AiSessionSpan } from "@maple/domain/http"
 import { buildAgentSessionFixture } from "@/lab/agent-session-fixture"
 
 import { buildSessionTurns } from "./session-turns"
-import { buildTranscript, payload, type TranscriptInput, type TranscriptRow } from "./session-transcript"
+import {
+	assembleTranscript,
+	buildTranscript,
+	payload,
+	prepareTranscript,
+	type TranscriptInput,
+	type TranscriptRow,
+} from "./session-transcript"
 import { sessionToolResults } from "./span-detail"
 import { agentSpan, llmSpan, makeSpan, toolSpan, T0 } from "./span-test-support"
 
@@ -1961,5 +1968,28 @@ describe("buildTranscript — investigation fan-out", () => {
 		expect(kinds(rows)).not.toContain("lane-open")
 		expect(kinds(rows)).not.toContain("parallel")
 		expect(findRows(rows, "turn")).toHaveLength(5)
+	})
+})
+
+describe("prepare / assemble", () => {
+	// The view memoizes the read of the session and re-runs only the assembly
+	// when a turn is collapsed, so the split has to be exact: one read, any
+	// set of collapsed turns, the same rows the one-shot build produces.
+	it("reads the session once for every collapse", () => {
+		const spans = buildAgentSessionFixture()
+		const turns = buildSessionTurns(spans)
+		const read = { turns, toolResults: sessionToolResults(spans), query: "", showThinking: true }
+		const prepared = prepareTranscript(read)
+
+		const open = new Set<string>()
+		const collapsed = new Set([turns[0]!.id, turns[4]!.id])
+		for (const collapsedTurns of [open, collapsed]) {
+			expect(assembleTranscript(prepared, { collapsedTurns, truncated: false })).toEqual(
+				buildTranscript({ ...read, collapsedTurns, truncated: false }),
+			)
+		}
+		expect(
+			assembleTranscript(prepared, { collapsedTurns: collapsed, truncated: false }).length,
+		).toBeLessThan(assembleTranscript(prepared, { collapsedTurns: open, truncated: false }).length)
 	})
 })

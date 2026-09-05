@@ -53,7 +53,7 @@ Over-long strings are truncated at the caps above; unknown fields are discarded.
 | `200`  | `{"accepted": <n>}` — rows durably queued. Malformed rows (bad `name`, `source`, `timestamp`) are dropped individually and not counted. |
 | `400`  | A line is not valid JSON, or not a JSON object. The whole batch is rejected.                                                            |
 | `401`  | Missing or invalid ingest key.                                                                                                          |
-| `402`  | The organization is out of quota for product events (`product_events` is metered per event, separately from browser sessions).                                          |
+| `402`  | The organization is out of quota for product events (`product_events` is metered per event, separately from browser sessions).          |
 | `503`  | Storage temporarily unavailable — retry with backoff.                                                                                   |
 
 Product events are not metered separately: they are covered by the browser-sessions entitlement.

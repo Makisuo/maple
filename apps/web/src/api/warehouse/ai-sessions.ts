@@ -1,5 +1,7 @@
 import { Clock, Effect, Schema } from "effect"
 import {
+	AiSessionSortDir,
+	AiSessionSortKey,
 	GetAiSessionSpansRequest,
 	ListAiSessionsFacetsRequest,
 	ListAiSessionsRequest,
@@ -13,8 +15,28 @@ const ListAiSessionsInput = Schema.Struct({
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
 	limit: Schema.optional(Schema.Number),
+	offset: Schema.optional(Schema.Number),
 	vendorIds: Schema.optional(Schema.Array(Schema.String)),
 	serviceNames: Schema.optional(Schema.Array(Schema.String)),
+	deploymentEnvs: Schema.optional(Schema.Array(Schema.String)),
+	models: Schema.optional(Schema.Array(Schema.String)),
+	agentNames: Schema.optional(Schema.Array(Schema.String)),
+	toolNames: Schema.optional(Schema.Array(Schema.String)),
+	search: Schema.optional(Schema.String),
+	hasErrors: Schema.optional(Schema.Boolean),
+	excludeTraceSessions: Schema.optional(Schema.Boolean),
+	durationMinMs: Schema.optional(Schema.Number),
+	durationMaxMs: Schema.optional(Schema.Number),
+	costMin: Schema.optional(Schema.Number),
+	costMax: Schema.optional(Schema.Number),
+	tokensMin: Schema.optional(Schema.Number),
+	tokensMax: Schema.optional(Schema.Number),
+	llmCallsMin: Schema.optional(Schema.Number),
+	llmCallsMax: Schema.optional(Schema.Number),
+	toolCallsMin: Schema.optional(Schema.Number),
+	toolCallsMax: Schema.optional(Schema.Number),
+	sortBy: Schema.optional(AiSessionSortKey),
+	sortDir: Schema.optional(AiSessionSortDir),
 })
 export type ListAiSessionsInput = Schema.Schema.Type<typeof ListAiSessionsInput>
 
@@ -36,12 +58,12 @@ export const listAiSessions = Effect.fn("AiSessions.listAiSessions")(function* (
 		Effect.gen(function* () {
 			const client = yield* MapleInternalAtomClient
 			return yield* client.aiSessionsInternal.list({
+				// Everything but the window passes through by name; the request
+				// schema is where each field's bounds live.
 				payload: new ListAiSessionsRequest({
+					...input,
 					startTime: input.startTime ?? fallback.startTime,
 					endTime: input.endTime ?? fallback.endTime,
-					limit: input.limit,
-					vendorIds: input.vendorIds,
-					serviceNames: input.serviceNames,
 				}),
 			})
 		}),
@@ -75,7 +97,14 @@ export const getAiSessionsFacets = Effect.fn("AiSessions.aiSessionsFacets")(func
 			})
 		}),
 	)
-	return { vendors: result.vendors, services: result.services }
+	return {
+		vendors: result.vendors,
+		services: result.services,
+		environments: result.environments,
+		models: result.models,
+		agents: result.agents,
+		tools: result.tools,
+	}
 })
 
 // Session spans (detail page)

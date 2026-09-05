@@ -27,7 +27,7 @@ import {
 	type ChatMessage,
 	type ChatTurnTenantEncoded,
 } from "@maple/domain/chat-session"
-import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/effect-cloudflare"
+import { layerFromEnvRecord, WorkerConfigProviderLayer } from "@maple/infra/worker-runtime"
 import { LLM, Message, type LanguageModel, type LLMClientService } from "@opencode-ai/ai"
 import { Cause, Effect, Layer, ManagedRuntime, Option, Schema, Stream } from "effect"
 import type { ChatSession } from "./ChatSession"
@@ -38,7 +38,9 @@ import { trackTokenUsage } from "@/services/billing/autumn-tracker"
 import { InvestigationId } from "@maple/domain/primitives"
 
 const telemetry = MapleCloudflareSDK.make({
-	serviceName: "maple-api",
+	// Deliberately not `maple-api`: background work sharing the request-facing
+	// service's name skewed its percentiles (p99 32s, 2026-09-04).
+	serviceName: "maple-chat",
 	serviceNamespace: "core",
 	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS, ...MCP_ANTICIPATED_ERROR_IDENTIFIERS],
@@ -152,7 +154,9 @@ const compactIfNeeded = (
 	usage: TurnUsage,
 ): Effect.Effect<void, never, LLMClientService> =>
 	Effect.gen(function* () {
-		const { contextLimitOf, outputLimitOf } = yield* Effect.promise(() => import("../platform/Llm"))
+		const { contextLimitOf, outputLimitOf, toLlmCallError } = yield* Effect.promise(
+			() => import("../platform/Llm"),
+		)
 		const {
 			addUsage,
 			isNearContextLimit,
@@ -188,6 +192,8 @@ const compactIfNeeded = (
 		})
 		const response = yield* LLM.generate(request).pipe(
 			Effect.tap((generated) => annotateModelResponse(generated)),
+			// Mapped inside the span so a failed compaction records Maple's tag, not `AI.Error`.
+			Effect.mapError((error) => toLlmCallError("chat.compaction", error)),
 			Effect.withSpan(modelCallSpanName(model), {
 				kind: "client",
 				// The whole request, so the span records what the model was actually

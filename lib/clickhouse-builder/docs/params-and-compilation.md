@@ -161,7 +161,7 @@ interface CompiledQuery<Output> {
 | `rowSchemaSource`               | Where the row schema came from, so a caller can tell real validation from a pass-through |
 | `rowSchema`                     | The codec itself, for a caller that needs a `Schema` rather than a call                  |
 | `untypedColumns`                | When `rowSchemaSource` is `"none"`, the selected aliases responsible                     |
-| `rowSchemaMismatch`             | How a *declared* schema disagrees with the SELECT by field name, when it does            |
+| `rowSchemaMismatch`             | How a _declared_ schema disagrees with the SELECT by field name, when it does            |
 | `rawSql`                        | Present only for `rawCompiledQuery`: the `reason` and `note` it was given                |
 | `route`                         | Set by `.route(tag)`; opaque metadata for your executor                                  |
 | `decodeRows` / `decodeFirstRow` | See [Decoding results](./decoding-results.md)                                            |

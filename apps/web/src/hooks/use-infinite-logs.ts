@@ -7,6 +7,7 @@ import { useGlobalNamespace } from "@/hooks/use-global-namespace"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { useTableRefreshTimeRange } from "@/hooks/use-table-refresh-time-range"
 import { mapleRuntime } from "@/lib/registry"
+import { logClientError } from "@/lib/services/common/telemetry"
 import type { LogsSearchParams } from "@/routes/logs"
 
 const PAGE_SIZE = 100
@@ -21,6 +22,15 @@ export interface UseInfiniteLogsReturn {
 	isCapped: boolean
 	fetchNextPage: () => void
 }
+
+const initialPagination = (filterKey: string, firstPage: LogsResponse | undefined) => ({
+	filterKey,
+	firstPage,
+	generation: Symbol(),
+	additionalPages: [] as LogsResponse[],
+	isFetchingNextPage: false,
+	stopped: false,
+})
 
 function buildQueryParams(
 	filters: LogsSearchParams | undefined,
@@ -70,17 +80,16 @@ export function useInfiniteLogs(filters: LogsSearchParams | undefined): UseInfin
 
 	const firstPageResult = useRefreshableAtomValue(listLogsResultAtom({ data: queryParams }))
 
-	const [additionalPages, setAdditionalPages] = React.useState<LogsResponse[]>([])
-	const [isFetchingNextPage, setIsFetchingNextPage] = React.useState(false)
-	const filterKeyRef = React.useRef(filterKey)
-	const isFetchingRef = React.useRef(false)
+	const firstPage = Result.isSuccess(firstPageResult) ? firstPageResult.value : undefined
+	const [pagination, setPagination] = React.useState(() => initialPagination(filterKey, firstPage))
+	const inFlightGeneration = React.useRef<symbol | null>(null)
 
-	React.useEffect(() => {
-		filterKeyRef.current = filterKey
-		setAdditionalPages([])
-		setIsFetchingNextPage(false)
-		isFetchingRef.current = false
-	}, [filterKey])
+	// A new filter or refreshed first page owns a fresh set of later pages. Reset
+	// during rendering so no committed render can paginate with an old cursor.
+	if (pagination.filterKey !== filterKey || pagination.firstPage !== firstPage) {
+		setPagination(initialPagination(filterKey, firstPage))
+	}
+	const { additionalPages, isFetchingNextPage, generation } = pagination
 
 	const lastCursor = React.useMemo(() => {
 		if (additionalPages.length > 0) {
@@ -99,31 +108,45 @@ export function useInfiniteLogs(filters: LogsSearchParams | undefined): UseInfin
 	}, [firstPageResult, additionalPages])
 
 	const isCapped = allData.length >= MAX_RETAINED_LOGS
-	const hasNextPage = !isCapped && lastCursor !== null
+	const hasNextPage = !isCapped && !pagination.stopped && lastCursor !== null
 
 	const fetchNextPage = React.useCallback(() => {
-		if (isFetchingRef.current || !hasNextPage || !lastCursor) return
-		isFetchingRef.current = true
-		setIsFetchingNextPage(true)
-
-		const currentKey = filterKeyRef.current
+		if (
+			inFlightGeneration.current === generation ||
+			firstPageResult.waiting ||
+			!hasNextPage ||
+			!lastCursor
+		)
+			return
+		inFlightGeneration.current = generation
+		setPagination((current) => ({ ...current, isFetchingNextPage: true }))
 
 		mapleRuntime
 			.runPromise(listLogs({ data: { ...queryParams, cursor: lastCursor, limit: PAGE_SIZE } }))
 			.then((result) => {
-				if (filterKeyRef.current !== currentKey) return
-				setAdditionalPages((prev) => [...prev, result])
+				setPagination((current) =>
+					current.generation === generation
+						? { ...current, additionalPages: [...current.additionalPages, result] }
+						: current,
+				)
 			})
-			.catch(() => {
-				// Silently handle errors for subsequent pages
+			.catch((error) => {
+				if (inFlightGeneration.current !== generation) return
+				// Stop the scroll sentinel retrying a failing cursor indefinitely.
+				// Refreshing the first page or changing filters permits another try.
+				setPagination((current) =>
+					current.generation === generation ? { ...current, stopped: true } : current,
+				)
+				logClientError("logs.pagination_failed", error)
 			})
 			.finally(() => {
-				if (filterKeyRef.current === currentKey) {
-					setIsFetchingNextPage(false)
-				}
-				isFetchingRef.current = false
+				if (inFlightGeneration.current !== generation) return
+				inFlightGeneration.current = null
+				setPagination((current) =>
+					current.generation === generation ? { ...current, isFetchingNextPage: false } : current,
+				)
 			})
-	}, [queryParams, lastCursor, hasNextPage])
+	}, [queryParams, lastCursor, hasNextPage, generation, firstPageResult.waiting])
 
 	return {
 		firstPageResult,

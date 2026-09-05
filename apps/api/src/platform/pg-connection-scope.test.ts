@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { createMaplePgSocket, type MaplePgSocketHandle, type MaplePgSocketOptions } from "@maple/db/client"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { Effect, Exit, Fiber, Tracer } from "effect"
 import type { DatabaseClient } from "./DatabaseLive"
 import {

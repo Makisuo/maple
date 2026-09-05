@@ -12,6 +12,8 @@ import { Schema } from "effect"
 import { ServiceName, SpanId, TraceId } from "@maple/domain"
 import { clusterLogPatterns } from "@maple/query-engine/observability"
 import type {
+	ErrorDetailOutput,
+	ErrorDetailTrace,
 	InspectTraceOutput,
 	LogEntry,
 	SearchLogsOutput,
@@ -21,8 +23,9 @@ import type {
 	SpanNode,
 	SpanResult,
 } from "@maple/query-engine/observability"
+import type { ListMetricsOutput } from "@maple/domain/tinybird"
 import type { Range } from "./time"
-import { type MapleV2Client, toV2Window, unsupportedInRemote } from "./v2-client"
+import { type MapleV2Client, remoteFailure, toV2Window, unsupportedInRemote } from "./v2-client"
 
 /**
  * v2 list endpoints cap `limit` at 100 (LIST_LIMIT_MAX) and paginate by opaque
@@ -105,12 +108,14 @@ export const searchTraces = (
 		offset?: number
 	},
 ): Effect.Effect<SearchTracesOutput, unknown> => {
-	// Local mode switches to a span-level scan whenever a span name is given
-	// without --root-only. v2 search only ever returns root-based summaries.
-	if (p.spanName && !p.rootOnly) {
+	// Local mode answers a span-name filter with a span-level scan, matching the
+	// name as a substring. /v2/traces/search only ever returns root-based
+	// summaries and matches the name exactly, so neither the rows nor the
+	// matching are what `--span-name` means here.
+	if (p.spanName) {
 		return unsupportedInRemote(
 			"span_search",
-			"filtering traces by span name searches individual spans, and /v2/traces/search only returns root spans.",
+			"filtering by span name searches individual spans by substring, and /v2/traces/search returns root spans matched on an exact name.",
 		)
 	}
 	if (p.offset !== undefined && p.offset > 0) {
@@ -333,10 +338,16 @@ export const mineLogPatterns = (
 		},
 	)
 
+/**
+ * v2 speaks snake_case resources; local mode returns the warehouse's
+ * `ListMetricsOutput` rows. `maple metrics` must print the same columns either
+ * way, so the resource is mapped back onto the local row shape rather than
+ * passed through — the pass-through renamed every column in remote mode.
+ */
 export const listMetrics = (
 	client: MapleV2Client,
 	p: { range: Range; service?: string; search?: string; limit?: number },
-) =>
+): Effect.Effect<ReadonlyArray<ListMetricsOutput>, unknown> =>
 	Effect.map(
 		client.metrics.list({
 			query: {
@@ -346,7 +357,20 @@ export const listMetrics = (
 				...(p.search ? { search: p.search } : undefined),
 			},
 		}),
-		(list) => list.data,
+		(list) =>
+			list.data.map(
+				(m): ListMetricsOutput => ({
+					metricName: m.name,
+					metricType: m.type,
+					serviceName: m.service_name,
+					metricDescription: m.description,
+					metricUnit: m.unit,
+					dataPointCount: m.data_point_count,
+					firstSeen: m.first_seen,
+					lastSeen: m.last_seen,
+					isMonotonic: m.is_monotonic,
+				}),
+			),
 	)
 
 /**
@@ -358,13 +382,18 @@ export const listMetrics = (
  * `apdex` is deliberately absent: v2 requires an explicit
  * `apdex_threshold_ms` and the command exposes no threshold flag, so any value
  * chosen here would be invented.
+ *
+ * The row keys are local mode's (`bucket`, `groupName`, `avgDuration`, …), not
+ * v2's: `maple timeseries`/`breakdown` print whatever keys the row carries, so
+ * naming them after the wire made the same command emit different columns per
+ * backend. The apdex columns local mode also returns are simply absent here.
  */
 const TRACE_AGGREGATIONS = [
 	["count", "count"],
-	["avgDurationMs", "avg_duration"],
-	["p50DurationMs", "p50_duration"],
-	["p95DurationMs", "p95_duration"],
-	["p99DurationMs", "p99_duration"],
+	["avgDuration", "avg_duration"],
+	["p50Duration", "p50_duration"],
+	["p95Duration", "p95_duration"],
+	["p99Duration", "p99_duration"],
 	["errorRate", "error_rate"],
 ] as const
 
@@ -425,15 +454,13 @@ export const tracesTimeseries = (
 			for (const series of result.series) {
 				for (const point of series.points) {
 					const key = `${point.timestamp}\0${series.group ?? ""}`
-					const row = rows.get(key) ?? { timestamp: point.timestamp, group: series.group }
+					const row = rows.get(key) ?? { bucket: point.timestamp, groupName: series.group ?? "" }
 					row[field] = point.value
 					rows.set(key, row)
 				}
 			}
 		})
-		return Array.from(rows.values()).sort((a, b) =>
-			String(a.timestamp).localeCompare(String(b.timestamp)),
-		)
+		return Array.from(rows.values()).sort((a, b) => String(a.bucket).localeCompare(String(b.bucket)))
 	})
 
 export const tracesBreakdown = (
@@ -476,4 +503,125 @@ export const tracesBreakdown = (
 			}
 		})
 		return Array.from(rows.values())
+	})
+
+/**
+ * `maple error <fingerprint-hash>` over v2.
+ *
+ * This used to be local-only on the grounds that v2 keyed errors by an opaque
+ * `erris_…` id with no way in from a fingerprint hash. `/v2/error_issues`
+ * gained a `fingerprint_hash` filter, so the hash resolves to an issue and the
+ * issue detail carries the timeseries and sample traces the command prints.
+ *
+ * One real difference from local mode: v2 answers from Maple's triage issues,
+ * so a fingerprint that was never swept into an issue has no detail to show
+ * and fails rather than returning an empty page. Local mode reads the raw
+ * error events and would show the traces regardless.
+ *
+ * The per-trace fan-out is what `V2ErrorIssueSampleTrace` does not carry —
+ * span count, participating services, the root span's name. It is bounded by
+ * the caller's own `--limit`.
+ */
+/** The same attribute allowlist the warehouse query projects for the failing span. */
+const ERROR_SPAN_ATTRIBUTE_KEYS = [
+	"gen_ai.request.model",
+	"gen_ai.tool.name",
+	"http.request.method",
+	"http.route",
+	"query.context",
+	"error.type",
+] as const
+
+const pickErrorSpanAttributes = (attributes: Record<string, unknown>): Record<string, string> => {
+	const picked: Record<string, string> = {}
+	for (const key of ERROR_SPAN_ATTRIBUTE_KEYS) {
+		const value = attributes[key]
+		if (typeof value === "string" && value !== "") picked[key] = value
+	}
+	return picked
+}
+
+export const errorDetail = (
+	client: MapleV2Client,
+	p: { fingerprintHash: string; range: Range; service?: string; limit?: number },
+): Effect.Effect<ErrorDetailOutput, unknown> =>
+	Effect.gen(function* () {
+		const sampleLimit = Math.min(Math.max(p.limit ?? 5, 1), V2_LIST_MAX)
+		// Deliberately unwindowed: a fingerprint is an identity, and the issue
+		// list's window filters on triage activity rather than on the events the
+		// command is about. Windowing the lookup would report "no such error" for
+		// a real fingerprint whose issue was last touched outside --since.
+		const issues = yield* client.errorIssues.list({
+			query: {
+				fingerprint_hash: p.fingerprintHash,
+				limit: 1,
+				...(p.service ? { service_name: p.service } : undefined),
+			},
+		})
+		const issue = issues.data[0]
+		if (!issue) {
+			return yield* remoteFailure(
+				"error_detail_traces",
+				`No error issue matches fingerprint ${p.fingerprintHash}. Remote mode reads Maple's triage issues; run with --local to read the raw error events.`,
+			)
+		}
+
+		const detail = yield* client.errorIssues.retrieve({
+			params: { id: issue.id },
+			query: { ...toV2Window(p.range), sample_limit: sampleLimit },
+		})
+
+		const traces = yield* Effect.forEach(
+			detail.sample_traces,
+			(sample, index) =>
+				Effect.gen(function* () {
+					const trace = yield* client.traces.retrieve({ params: { trace_id: sample.trace_id } })
+					// Logs for the first three only, matching local mode: they are a
+					// glance at context, not the point of the command.
+					const logs =
+						index < 3
+							? yield* client.logs.search({
+									payload: {
+										start_time: trace.start_time,
+										end_time: trace.end_time,
+										limit: 10,
+										filters: { trace_id: sample.trace_id },
+									},
+								})
+							: undefined
+					const root = trace.spans.find((s) => s.parent_span_id === null)
+					const failing = trace.spans.find((s) => s.status_code === "Error")
+					return {
+						traceId: sample.trace_id,
+						rootSpanName: root?.name ?? "",
+						durationMs: trace.duration_ms,
+						spanCount: trace.span_count,
+						services: Array.from(new Set(trace.spans.map((s) => s.service_name))),
+						startTime: sample.timestamp,
+						errorMessage: sample.exception_message,
+						errorSpan: failing
+							? {
+									spanId: failing.id,
+									name: failing.name,
+									serviceName: failing.service_name,
+									statusMessage: failing.status_message ?? "",
+									attributes: pickErrorSpanAttributes(failing.attributes),
+								}
+							: undefined,
+						logs: (logs?.data ?? []).slice(0, 5).map((l) => ({
+							timestamp: l.timestamp,
+							severityText: l.severity_text || "INFO",
+							body: l.body,
+						})),
+					} satisfies ErrorDetailTrace
+				}),
+			{ concurrency: 5 },
+		)
+
+		return {
+			fingerprintHash: p.fingerprintHash,
+			timeRange: p.range,
+			traces,
+			timeseries: detail.timeseries.map((point) => ({ bucket: point.bucket, count: point.count })),
+		} satisfies ErrorDetailOutput
 	})

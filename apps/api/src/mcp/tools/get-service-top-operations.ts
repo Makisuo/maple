@@ -7,11 +7,7 @@ import {
 	type McpToolRegistrar,
 } from "./types"
 import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
-import {
-	resolveTimeRange,
-	rangeExceededResult,
-	MCP_SEARCH_MAX_HOURS,
-} from "@/mcp/lib/time"
+import { resolveTimeRange, rangeExceededResult, MCP_SEARCH_MAX_HOURS } from "@/mcp/lib/time"
 import { clampLimit } from "@/mcp/lib/limits"
 import { formatTable } from "@/mcp/lib/format"
 import { formatMetricValue } from "@/mcp/lib/format-query-result"

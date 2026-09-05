@@ -441,7 +441,7 @@ function applyTracesClause(
 			...filters,
 			environments: splitCsv(clause.value),
 		})),
-		Match.when("deployment.commit_sha", () => ({
+		Match.when("vcs.ref.head.revision", () => ({
 			...filters,
 			commitShas: splitCsv(clause.value),
 		})),
@@ -1328,7 +1328,7 @@ export function formatFiltersAsWhereClause(params: Record<string, unknown>): str
 		const val = filters.commitShas.filter((item): item is string => typeof item === "string").join(",")
 
 		if (val) {
-			clauses.push(`deployment.commit_sha = "${val}"`)
+			clauses.push(`vcs.ref.head.revision = "${val}"`)
 		}
 	}
 

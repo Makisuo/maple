@@ -2,7 +2,6 @@ import { useMemo } from "react"
 
 import { d3Curve, defineChart, lineY } from "@tanstack/charts"
 import { scaleLinear } from "@tanstack/charts-scales/linear"
-import { scalePoint } from "@tanstack/charts-scales/point"
 import { curveMonotoneX } from "d3-shape"
 
 import {
@@ -26,7 +25,7 @@ import { resolveSeriesColors } from "@maple/ui/lib/semantic-series-colors"
 import type { CloudflareZoneTimeseriesRow } from "@/api/warehouse/cloudflare-infra"
 import { formatNumber } from "@maple/ui/lib/format"
 import { formatBytes, formatPercent } from "@maple/ui/lib/format"
-import { CHART_EMPTY_MESSAGE, makeBucketLabeler, transformRows, type TransformedPoint } from "../chart-utils"
+import { CHART_EMPTY_MESSAGE, makeBucketAxis, transformRows, type TransformedPoint } from "../chart-utils"
 import { CHART_HEIGHT, ChartCardMessage } from "../primitives/chart-card"
 import { OTHER_ZONES_COLOR, OTHER_ZONES_SERIES } from "./constants"
 
@@ -108,14 +107,18 @@ export function CloudflareZoneChart({
 				longForm.push({ bucket, attributeValue: zone, value: metricValue(agg, metric) })
 			}
 		}
-		const labeler = makeBucketLabeler([...byBucketZone.keys()])
-		const transformed = transformRows(longForm, labeler)
+		const transformed = transformRows(longForm)
 		// Draw order = legend order: hottest zone first, the pooled remainder last.
 		const present = new Set(transformed.series)
 		const ordered = [
 			...topZones.filter((z) => present.has(z)),
 			...(present.has(OTHER_ZONES_SERIES) ? [OTHER_ZONES_SERIES] : []),
 		]
+		// Cloudflare emits no row for a zone with no traffic in a bucket, so a hole
+		// is a zero reading — a null would break the line into fragments instead.
+		for (const point of transformed.data) {
+			for (const name of ordered) point[name] ??= 0
+		}
 		return { data: transformed.data, series: ordered }
 	}, [buckets, metric, topZones])
 
@@ -132,6 +135,10 @@ export function CloudflareZoneChart({
 	const chromeColors = usePlotChromeColors()
 	const colors = useResolvedSeriesColors(seriesColor, chromeColors.border)
 	const focusStore = useMemo(() => createTooltipFocusStore(), [])
+
+	// A time axis over the buckets' instants — see `makeBucketAxis` for why the
+	// label point scale this replaced folded a 24h window onto itself.
+	const axis = useMemo(() => makeBucketAxis(data.map((point) => point.bucket)), [data])
 
 	const yDomain = useMemo<[number, number]>(
 		() => niceLinearDomain(linearYDomain({ rows: data, keys: series })),
@@ -153,7 +160,7 @@ export function CloudflareZoneChart({
 	)
 
 	const definition = useMemo(() => {
-		const at = (point: TransformedPoint) => point.time
+		const at = (point: TransformedPoint) => point.date
 		const valueOf = (name: string) => (point: TransformedPoint) => {
 			const value = point[name]
 			return typeof value === "number" ? value : null
@@ -177,14 +184,7 @@ export function CloudflareZoneChart({
 				focusCrosshair(chromeColors),
 			],
 			scales: {
-				x: {
-					scale: scalePoint,
-					axis: {
-						line: false,
-						ticks: { size: 0, padding: 8 },
-						tickLabels: { thin: { minGap: 12 } },
-					},
-				},
+				x: axis.x,
 				y: {
 					scale: scaleLinear().domain(yDomain),
 					axis: {
@@ -193,12 +193,15 @@ export function CloudflareZoneChart({
 					},
 				},
 			},
-			margin: { top: 12, right: 12, bottom: 4, left: 52 },
+			// `left` pinned so the four zone charts share a plot edge, wide enough for
+			// the byte labels. `bottom` stays unset: a set side is a hard lock, and the
+			// frame only reserves the x tick labels' height when it measures the side.
+			margin: { top: 12, right: 12, left: 60 },
 			focus: "group-x",
 			focusRing: false,
 			tooltip: cursorTooltip(focusStore.anchor),
 		})
-	}, [data, series, colors, chromeColors, yDomain, metric, focusStore])
+	}, [data, series, axis, colors, chromeColors, yDomain, metric, focusStore])
 
 	return (
 		<div
@@ -224,7 +227,7 @@ export function CloudflareZoneChart({
 								points={points}
 								series={tooltipSeries}
 								focusStore={focusStore}
-								heading={(point: TransformedPoint) => point.time}
+								heading={(point: TransformedPoint) => axis.heading(point.bucket)}
 							/>
 						)}
 					/>

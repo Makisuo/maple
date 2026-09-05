@@ -75,10 +75,9 @@ function ServiceLensPage() {
 	return (
 		<ServiceLensShell
 			activeService={serviceName}
-			startTime={search.startTime ?? startTime}
-			endTime={search.endTime ?? endTime}
+			startTime={startTime}
+			endTime={endTime}
 			timeSearch={search}
-			timePreset={search.timePreset ?? (search.startTime ? undefined : "12h")}
 			onTimeChange={handleTimeChange}
 		>
 			<LensBody serviceName={serviceName} startTime={startTime} endTime={endTime} search={search} />

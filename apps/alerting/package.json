@@ -3,16 +3,12 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "portless",
-		"dev:app": "bun run ../../scripts/portless-wrangler.ts --env-file ../../.env.local --persist-to ../api/.wrangler/state --test-scheduled --port ${PORT:-8788} --inspector-port=$((${PORT:-8788} + 10000))",
-		"deploy": "wrangler deploy",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
 		"@maple-dev/effect-sdk": "workspace:*",
 		"@maple/api": "workspace:*",
-		"@maple/effect-cloudflare": "workspace:*",
 		"effect": "catalog:effect"
 	},
 	"devDependencies": {
@@ -22,11 +18,6 @@
 		"@maple/infra": "workspace:*",
 		"@types/node": "catalog:tooling",
 		"typescript": "catalog:tooling",
-		"vitest": "catalog:",
-		"wrangler": "^4.118.0"
-	},
-	"portless": {
-		"name": "alerting",
-		"script": "dev:app"
+		"vitest": "catalog:"
 	}
 }

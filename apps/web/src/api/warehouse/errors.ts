@@ -75,6 +75,14 @@ const getErrorsByTypeEffect = Effect.fn("QueryEngine.getErrorsByType")(function*
 	data: GetErrorsByTypeInput
 }) {
 	const input = yield* decodeInput(GetErrorsByTypeInputSchema, data ?? {}, "getErrorsByType")
+
+	// `undefined` is "rank the window"; an explicit empty list is "count these
+	// fingerprints", of which there are none. The errors list asks for the rows
+	// on screen by hash, and before its issues have loaded that is no rows.
+	if (input.fingerprintHashes !== undefined && input.fingerprintHashes.length === 0) {
+		return { data: coerceErrorsByTypeRows([]) }
+	}
+
 	const fallback = defaultErrorsTimeRange(yield* Clock.currentTimeMillis)
 	const startTime = input.startTime ?? fallback.startTime
 	const endTime = input.endTime ?? fallback.endTime

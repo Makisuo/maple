@@ -2,24 +2,21 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
-import {
-	InputGroup,
-	InputGroupAddon,
-	InputGroupButton,
-	InputGroupInput,
-} from "@maple/ui/components/ui/input-group"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { Button } from "@maple/ui/components/ui/button"
-
-import { OptionalStringArrayParam } from "@/lib/search-params"
-import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { QueryErrorState } from "@/components/common/query-error-state"
-import { FolderIcon, MagnifierIcon, XmarkIcon } from "@/components/icons"
-import { PageHero } from "@/components/infra/primitives/page-hero"
-import { PodTable, PodTableLoading } from "@/components/infra/pod-table"
-import { PodSummaryBand, PodSummaryBandLoading, type PodScope } from "@/components/infra/pod-summary-band"
-import { PodsFilterSidebarView, type PodFilters } from "@/components/infra/k8s-filter-sidebar"
 import { ActiveFilterChips } from "@maple/ui/components/filters/active-filter-chips"
+import { useDebouncedValue } from "@maple/ui/hooks/use-debounced-value"
+
+import type { PodSortKey, SortDirection } from "@/api/warehouse/infra"
+import { OptionalStringArrayParam } from "@/lib/search-params"
+import { QueryErrorState } from "@/components/common/query-error-state"
+import { FolderIcon, MagnifierIcon } from "@/components/icons"
+import { KubernetesShell } from "@/components/infra/kubernetes/kubernetes-shell"
+import { PodPeekSheet } from "@/components/infra/kubernetes/pod-peek-sheet"
+import { PodsFilterSidebarView, type PodFilters } from "@/components/infra/k8s-filter-sidebar"
+import { PodTable, PodTableLoading, podKey, type PodRow } from "@/components/infra/pod-table"
+import { FleetBand, FleetBandLoading, type FleetBandCell } from "@/components/infra/primitives/fleet-band"
+import { ListToolbar, countLabel } from "@/components/infra/primitives/list-toolbar"
 import { podFilterChips } from "@/lib/infra/pod-filter-chips"
 import {
 	listPodsResultAtom,
@@ -27,25 +24,36 @@ import {
 	podsSummaryResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
-import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
-import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
-import { useDebouncedValue } from "@maple/ui/hooks/use-debounced-value"
-import type { PodSortKey, SortDirection } from "@/api/warehouse/infra"
+import {
+	TimeRangeSearchFields,
+	applyTimeRangeSearch,
+	pickTimeRangeSearch,
+} from "@/components/time-range-picker/search"
 
 const PAGE_SIZE = 50
+const DEFAULT_PRESET = "12h"
+
+/**
+ * A one-click scope from the band. `undefined` means the live fleet, which is
+ * what the list shows by default — see `PodLifecycle` in the domain contract.
+ * `ended` is a lifecycle rather than a saturation bucket, but it rides in the
+ * same URL param so the band stays one uniform row of cells.
+ */
+type PodScope = "saturated" | "elevated" | "unbounded" | "ended"
 
 const PodSortKeyParam = Schema.optional(
 	Schema.Literals(["saturation", "cpuUsage", "cpuLimitPct", "memoryLimitPct", "podName", "lastSeen"]),
 )
 const SortDirParam = Schema.optional(Schema.Literals(["asc", "desc"]))
-const ScopeParam = Schema.optional(Schema.Literals(["saturated", "elevated", "unbounded", "stale"]))
+const ScopeParam = Schema.optional(Schema.Literals(["saturated", "elevated", "unbounded", "ended"]))
 
 const podsSearchSchema = Schema.Struct({
 	q: Schema.optional(Schema.String),
 	scope: ScopeParam,
 	sortBy: PodSortKeyParam,
 	sortDir: SortDirParam,
+	/** The row open in the peek sheet, as `namespace/pod`. In the URL so it survives a reload and a share. */
+	peek: Schema.optional(Schema.String),
 	podNames: OptionalStringArrayParam,
 	namespaces: OptionalStringArrayParam,
 	nodeNames: OptionalStringArrayParam,
@@ -80,7 +88,7 @@ const SCOPE_LABEL: Record<PodScope, string> = {
 	saturated: "at or above 90% of a limit",
 	elevated: "at or above 60% of a limit",
 	unbounded: "running with no limits set",
-	stale: "whose collector has gone quiet",
+	ended: "no longer running",
 } satisfies Record<PodScope, string>
 
 function PodsPage() {
@@ -90,8 +98,9 @@ function PodsPage() {
 	const { startTime, endTime } = useEffectiveTimeRange(
 		search.startTime,
 		search.endTime,
-		search.timePreset ?? "12h",
+		search.timePreset ?? DEFAULT_PRESET,
 	)
+	const timeSearch = pickTimeRangeSearch(search)
 
 	const filters: PodFilters = {
 		podNames: search.podNames,
@@ -123,6 +132,8 @@ function PodsPage() {
 	const searchText = search.q ?? ""
 	const debouncedSearch = useDebouncedValue(searchText, 300)
 
+	// "Ended" is the lifecycle dial, not a saturation bucket: the other three
+	// scopes narrow the live fleet, this one swaps which fleet is on screen.
 	const podsResult = useAtomValue(
 		listPodsResultAtom({
 			data: {
@@ -130,7 +141,8 @@ function PodsPage() {
 				endTime,
 				...filters,
 				search: debouncedSearch.trim() || undefined,
-				scope,
+				scope: scope === "ended" ? undefined : scope,
+				lifecycle: scope === "ended" ? "ended" : "live",
 				sortBy,
 				sortDir,
 				limit: PAGE_SIZE,
@@ -139,7 +151,7 @@ function PodsPage() {
 	)
 
 	// Scope-only: the band is what tells you how much of the fleet the filters
-	// above hid, so narrowing it by those same filters would defeat the point.
+	// hid, so narrowing it by those same filters would defeat the point.
 	const summaryResult = useAtomValue(
 		podsSummaryResultAtom({
 			data: {
@@ -152,37 +164,20 @@ function PodsPage() {
 		}),
 	)
 
-	const facetsResult = useAtomValue(
-		podFacetsResultAtom({
-			data: {
-				startTime,
-				endTime,
-			},
-		}),
-	)
+	const facetsResult = useAtomValue(podFacetsResultAtom({ data: { startTime, endTime } }))
 
-	const patchSearch = (patch: Partial<PodsSearchParams>) => {
-		void navigate({ search: (prev) => ({ ...prev, ...patch }) })
+	const patchSearch = (patch: Partial<PodsSearchParams>, options?: { replace?: boolean }) => {
+		void navigate({ replace: options?.replace, search: (prev) => ({ ...prev, ...patch }) })
 	}
 
 	const onFilterChange = <K extends keyof PodFilters>(key: K, value: PodFilters[K]) => {
-		void navigate({
-			search: (prev) => ({
-				...prev,
-				[key]:
-					value === undefined || (Array.isArray(value) && value.length === 0) ? undefined : value,
-			}),
+		patchSearch({
+			[key]: value === undefined || (Array.isArray(value) && value.length === 0) ? undefined : value,
 		})
 	}
 
 	const onClearFilters = () => {
-		void navigate({
-			search: {
-				startTime: search.startTime,
-				endTime: search.endTime,
-				timePreset: search.timePreset,
-			},
-		})
+		void navigate({ search: timeSearch })
 	}
 
 	// Clicking a header cycles desc → asc on the same key, and starts a new key at
@@ -195,191 +190,229 @@ function PodsPage() {
 		patchSearch({ sortBy: key, sortDir: key === "podName" ? "asc" : "desc" })
 	}
 
-	const handleTimeChange = (
-		range: { startTime?: string; endTime?: string; presetValue?: string },
-		options?: { replace?: boolean },
-	) => {
-		void navigate({
-			replace: options?.replace,
-			search: (prev) => ({ ...applyTimeRangeSearch(prev, range) }),
-		})
-	}
+	// An unfiltered page can come back empty because the fleet is entirely gone
+	// rather than never instrumented — a job that finished, an environment scaled
+	// to zero. The band already knows, so the empty state can stop guessing.
+	const endedPods = Result.builder(summaryResult)
+		.onSuccess((counts) => counts.endedPods)
+		.orElse(() => 0)
 
 	const hasStructuredFilter = Object.values(filters).some((v) => (v?.length ?? 0) > 0)
 	const hasAnyNarrowing = hasStructuredFilter || Boolean(searchText.trim()) || Boolean(scope)
 
+	// The peek resolves against the page that's on screen. A key that no longer
+	// matches a row (the filter changed under it) just means the sheet is closed.
+	const pods = Result.builder(podsResult)
+		.onSuccess((response) => response.data)
+		.orElse(() => [])
+	const peekIndex = search.peek ? pods.findIndex((pod) => podKey(pod) === search.peek) : -1
+	const peekPod = peekIndex >= 0 ? (pods[peekIndex] ?? null) : null
+	// The rows ↑/↓ would land on, fetched ahead so the step is instant.
+	const peekNeighbors = peekPod
+		? [pods[peekIndex - 1], pods[peekIndex + 1]].filter((row): row is PodRow => row !== undefined)
+		: []
+	// Stepping and closing replace history: walking fifty rows must not leave
+	// fifty entries behind the back button.
+	const stepPeek = (delta: 1 | -1) => {
+		const next = pods[peekIndex + delta]
+		if (next) patchSearch({ peek: podKey(next) }, { replace: true })
+	}
+
 	return (
-		<PageRefreshProvider timePreset={search.timePreset ?? "12h"}>
-			<DashboardLayout.Root>
-				<DashboardLayout.Breadcrumbs
-					items={[
-						{ label: "Infrastructure", href: "/infra" },
-						{ label: "Kubernetes" },
-						{ label: "Pods" },
-					]}
+		<KubernetesShell
+			view="pods"
+			timeSearch={search}
+			startTime={startTime}
+			endTime={endTime}
+			defaultPreset={DEFAULT_PRESET}
+			onTimeChange={(range, options) =>
+				void navigate({
+					replace: options?.replace,
+					search: (prev) => ({ ...applyTimeRangeSearch(prev, range) }),
+				})
+			}
+			filters={
+				<PodsFilterSidebarView
+					facetsResult={facetsResult}
+					filters={filters}
+					onFilterChange={onFilterChange}
+					onClearFilters={onClearFilters}
 				/>
-				<DashboardLayout.Body>
-					<DashboardLayout.Filters>
-						<PodsFilterSidebarView
-							facetsResult={facetsResult}
-							filters={filters}
-							onFilterChange={onFilterChange}
-							onClearFilters={onClearFilters}
-						/>
-					</DashboardLayout.Filters>
-					<DashboardLayout.Content>
-						<DashboardLayout.Sticky>
-							<DashboardLayout.Header>
-								<TimeRangeHeaderControls
-									startTime={search.startTime ?? startTime}
-									endTime={search.endTime ?? endTime}
-									presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
-									onTimeChange={handleTimeChange}
-								/>
-							</DashboardLayout.Header>
-						</DashboardLayout.Sticky>
-						<DashboardLayout.Scroll>
-							<div className="space-y-6">
-								<PageHero
-									title="Pods"
-									description="Sorted worst-first by peak utilization against the pod's own limits."
+			}
+		>
+			<div className="space-y-5">
+				{Result.builder(summaryResult)
+					.onInitial(() => <FleetBandLoading cells={4} />)
+					.onError(() => null)
+					.onSuccess((counts, result) => {
+						const cells: ReadonlyArray<FleetBandCell<PodScope>> = [
+							{
+								scope: "saturated",
+								label: "Saturated",
+								hint: "≥90%",
+								value: counts.saturatedPods,
+								tone: "crit",
+							},
+							{
+								scope: "elevated",
+								label: "Elevated",
+								hint: "≥60%",
+								value: counts.elevatedPods,
+								tone: "warn",
+							},
+							{
+								scope: "unbounded",
+								label: "No limits set",
+								hint: "unbounded",
+								value: counts.unboundedPods,
+								tone: "warn",
+							},
+							{
+								scope: "ended",
+								label: "Ended",
+								hint: "not running",
+								value: counts.endedPods,
+								tone: "neutral",
+							},
+						]
+						const healthy = Math.max(
+							counts.livePods - counts.saturatedPods - counts.elevatedPods,
+							0,
+						)
+						return (
+							<FleetBand
+								total={counts.livePods}
+								noun="live pod"
+								caption="share of the live fleet by peak utilization"
+								segments={[
+									{ key: "healthy", count: healthy, className: "bg-muted-foreground/35" },
+									{
+										key: "elevated",
+										count: counts.elevatedPods,
+										className: "bg-[var(--severity-warn)]",
+									},
+									{
+										key: "saturated",
+										count: counts.saturatedPods,
+										className: "bg-[var(--severity-error)]",
+									},
+								]}
+								cells={cells}
+								activeScope={scope}
+								onScopeChange={(next) => patchSearch({ scope: next, peek: undefined })}
+								waiting={result.waiting}
+							/>
+						)
+					})
+					.render()}
+
+				{Result.builder(podsResult)
+					.onInitial(() => <PodTableLoading />)
+					.onError((err) => <QueryErrorState error={err} />)
+					.onSuccess((response, result) => {
+						const page = response.data
+						const total = response.totalCount
+
+						if (page.length === 0 && !hasAnyNarrowing) {
+							return (
+								<Empty className="py-16">
+									<EmptyHeader>
+										<EmptyMedia variant="icon">
+											<FolderIcon size={16} />
+										</EmptyMedia>
+										<EmptyTitle>
+											{endedPods > 0
+												? "Nothing running right now"
+												: "No pods reporting yet"}
+										</EmptyTitle>
+										<EmptyDescription>
+											{endedPods > 0
+												? `Every pod that reported in this window has since ended. Open the Ended scope to see the ${endedPods.toLocaleString()} that ran.`
+												: "Install the Maple Kubernetes Helm chart so the kubelet stats receiver can start collecting per-pod CPU and memory metrics."}
+										</EmptyDescription>
+									</EmptyHeader>
+									{endedPods > 0 ? (
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => patchSearch({ scope: "ended" })}
+										>
+											Show ended pods
+										</Button>
+									) : null}
+								</Empty>
+							)
+						}
+
+						return (
+							<div
+								className={`space-y-3 transition-opacity ${result.waiting ? "opacity-60" : ""}`}
+							>
+								<ListToolbar
+									value={searchText}
+									onChange={(value) => patchSearch({ q: value || undefined })}
+									placeholder="Search all pods…"
+									trailing={countLabel(page.length, total, "pod")}
 								/>
 
 								<ActiveFilterChips
+									className="mb-0"
 									chips={podFilterChips(search).map((chip) => ({
 										id: chip.param,
 										label: chip.label,
 										values: chip.values,
 										negated: chip.negated,
-										onRemove: () =>
-											void navigate({
-												search: (prev) => ({ ...prev, [chip.param]: undefined }),
-											}),
+										onRemove: () => patchSearch({ [chip.param]: undefined }),
 									}))}
 								/>
 
-								{Result.builder(summaryResult)
-									.onInitial(() => <PodSummaryBandLoading />)
-									.onError(() => null)
-									.onSuccess((counts, result) => (
-										<PodSummaryBand
-											counts={counts}
-											activeScope={scope}
-											onScopeChange={(next) => patchSearch({ scope: next })}
-											waiting={result.waiting}
-										/>
-									))
-									.render()}
-
-								{Result.builder(podsResult)
-									.onInitial(() => <PodTableLoading />)
-									.onError((err) => <QueryErrorState error={err} />)
-									.onSuccess((response, result) => {
-										const pods = response.data
-										const total = response.totalCount
-
-										if (pods.length === 0 && !hasAnyNarrowing) {
-											return (
-												<Empty className="py-16">
-													<EmptyHeader>
-														<EmptyMedia variant="icon">
-															<FolderIcon size={16} />
-														</EmptyMedia>
-														<EmptyTitle>No pods reporting yet</EmptyTitle>
-														<EmptyDescription>
-															Install the Maple Kubernetes Helm chart so the
-															kubelet stats receiver can start collecting
-															per-pod CPU and memory metrics.
-														</EmptyDescription>
-													</EmptyHeader>
-												</Empty>
-											)
-										}
-
-										return (
-											<div
-												className={`space-y-4 transition-opacity ${
-													result.waiting ? "opacity-60" : ""
-												}`}
-											>
-												<div className="flex flex-wrap items-center justify-between gap-3">
-													<InputGroup className="w-64">
-														<InputGroupAddon>
-															<MagnifierIcon />
-														</InputGroupAddon>
-														<InputGroupInput
-															size="sm"
-															placeholder="Search all pods…"
-															value={searchText}
-															onChange={(e) =>
-																patchSearch({
-																	q: e.target.value || undefined,
-																})
-															}
-														/>
-														{searchText && (
-															<InputGroupAddon align="inline-end">
-																<InputGroupButton
-																	aria-label="Clear search"
-																	onClick={() =>
-																		patchSearch({ q: undefined })
-																	}
-																>
-																	<XmarkIcon />
-																</InputGroupButton>
-															</InputGroupAddon>
-														)}
-													</InputGroup>
-													{/* The count is the truth, not the page size. */}
-													<span className="text-xs text-muted-foreground tabular-nums">
-														{total > pods.length
-															? `Top ${pods.length} of ${total.toLocaleString()} pods`
-															: `${total.toLocaleString()} ${total === 1 ? "pod" : "pods"}`}
-													</span>
-												</div>
-
-												{pods.length === 0 ? (
-													<Empty className="py-12">
-														<EmptyHeader>
-															<EmptyMedia variant="icon">
-																<MagnifierIcon size={16} />
-															</EmptyMedia>
-															<EmptyTitle>
-																No pods match these filters
-															</EmptyTitle>
-															<EmptyDescription>
-																{scope
-																	? `Nothing is ${SCOPE_LABEL[scope]} in this window — which is good news.`
-																	: "Try a different name, or clear the filters to see the whole fleet."}
-															</EmptyDescription>
-														</EmptyHeader>
-														<Button
-															variant="outline"
-															size="sm"
-															onClick={onClearFilters}
-														>
-															Clear all filters
-														</Button>
-													</Empty>
-												) : (
-													<PodTable
-														pods={pods}
-														sortBy={sortBy}
-														sortDir={sortDir}
-														onSortChange={onSortChange}
-														waiting={result.waiting}
-														referenceTime={endTime}
-													/>
-												)}
-											</div>
-										)
-									})
-									.render()}
+								{page.length === 0 ? (
+									<Empty className="py-12">
+										<EmptyHeader>
+											<EmptyMedia variant="icon">
+												<MagnifierIcon size={16} />
+											</EmptyMedia>
+											<EmptyTitle>No pods match these filters</EmptyTitle>
+											<EmptyDescription>
+												{scope
+													? `Nothing is ${SCOPE_LABEL[scope]} in this window — which is good news.`
+													: "Try a different name, or clear the filters to see the whole fleet."}
+											</EmptyDescription>
+										</EmptyHeader>
+										<Button variant="outline" size="sm" onClick={onClearFilters}>
+											Clear all filters
+										</Button>
+									</Empty>
+								) : (
+									<PodTable
+										pods={page}
+										sortBy={sortBy}
+										sortDir={sortDir}
+										onSortChange={onSortChange}
+										onPeek={(pod) => patchSearch({ peek: podKey(pod) })}
+										activeKey={search.peek}
+										timeSearch={timeSearch}
+										waiting={result.waiting}
+										referenceTime={endTime}
+									/>
+								)}
 							</div>
-						</DashboardLayout.Scroll>
-					</DashboardLayout.Content>
-				</DashboardLayout.Body>
-			</DashboardLayout.Root>
-		</PageRefreshProvider>
+						)
+					})
+					.render()}
+			</div>
+
+			<PodPeekSheet
+				pod={peekPod}
+				position={peekPod ? { index: peekIndex, count: pods.length } : null}
+				neighbors={peekNeighbors}
+				onStep={stepPeek}
+				onClose={() => patchSearch({ peek: undefined }, { replace: true })}
+				startTime={startTime}
+				endTime={endTime}
+				timeSearch={timeSearch}
+				referenceTime={endTime}
+			/>
+		</KubernetesShell>
 	)
 }

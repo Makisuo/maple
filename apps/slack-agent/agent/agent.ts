@@ -34,7 +34,7 @@ if (missingModelEnv.length > 0 && !isEveBuildInvocation) {
  * always streams.
  */
 const modelId = process.env.OPENROUTER_MODEL ?? "z-ai/glm-5.3-flash:nitro"
-const contextWindowTokens = Number(process.env.OPENROUTER_CONTEXT_WINDOW ?? 130_000)
+const contextWindowTokens = Number(process.env.OPENROUTER_CONTEXT_WINDOW ?? 1_000_000)
 
 /**
  * Durable workflow state ("world").

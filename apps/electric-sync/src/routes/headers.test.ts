@@ -32,6 +32,32 @@ describe("shapeResponseHeaders", () => {
 		)
 	})
 
+	it("caps every freshness directive at a minute", () => {
+		// Electric's completed-chunk headers, verbatim: a week of freshness and a
+		// month of stale-while-revalidate, both keyed to a handle that dies with the
+		// ECS task. Neither may reach the browser at that length.
+		assert.strictEqual(
+			syncResponseHeaders({
+				"cache-control": "public, max-age=604800, stale-while-revalidate=2629746",
+			})["cache-control"],
+			"private, max-age=60, stale-while-revalidate=60",
+		)
+	})
+
+	it("leaves a value already under the cap alone", () => {
+		assert.strictEqual(
+			syncResponseHeaders({ "cache-control": "public, max-age=5, s-maxage=5" })["cache-control"],
+			"private, max-age=5, s-maxage=5",
+		)
+	})
+
+	it("drops immutable, which a capped max-age cannot undo", () => {
+		assert.strictEqual(
+			syncResponseHeaders({ "cache-control": "public, max-age=604800, immutable" })["cache-control"],
+			"private, max-age=60",
+		)
+	})
+
 	it("still strips content-encoding / content-length", () => {
 		const headers = syncResponseHeaders({
 			"content-encoding": "gzip",

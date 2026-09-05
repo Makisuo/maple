@@ -1,6 +1,6 @@
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
-import { WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-cloudflare"
+import { WorkerConfigProviderLayer, workerEnvironmentLayer } from "@maple/infra/worker-runtime"
 import { Effect, Layer } from "effect"
 import { layerPg } from "@/platform/DatabasePgLive"
 import { Env } from "@/platform/Env"
@@ -24,7 +24,9 @@ import { SlackIntegrationService } from "./services/integrations/SlackIntegratio
 // this wiring.
 
 const telemetry = MapleCloudflareSDK.make({
-	serviceName: "maple-api",
+	// Deliberately not `maple-api`: background work sharing the request-facing
+	// service's name skewed its percentiles (p99 32s, 2026-09-04).
+	serviceName: "maple-slack-reconcile",
 	serviceNamespace: "core",
 	repositoryUrl: "https://github.com/MapleTechLabs/maple",
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
@@ -33,8 +35,8 @@ const telemetry = MapleCloudflareSDK.make({
 export const buildSlackReconcileLayer = (_env: Record<string, unknown>) => {
 	const ConfigLive = WorkerConfigProviderLayer
 	const EnvLive = Env.layer.pipe(Layer.provide(ConfigLive))
-	const DatabaseLive = layerPg.pipe(Layer.provide(WorkerEnvironment.layer))
-	const Base = Layer.mergeAll(EnvLive, DatabaseLive, WorkerEnvironment.layer)
+	const DatabaseLive = layerPg.pipe(Layer.provide(workerEnvironmentLayer))
+	const Base = Layer.mergeAll(EnvLive, DatabaseLive, workerEnvironmentLayer)
 
 	const ApiKeysServiceLive = ApiKeysService.layer.pipe(Layer.provide(Base))
 	const OAuthStateRepositoryLive = OAuthStateRepository.layer.pipe(Layer.provide(Base))
@@ -43,7 +45,7 @@ export const buildSlackReconcileLayer = (_env: Record<string, unknown>) => {
 	)
 
 	return SlackIntegrationServiceLive.pipe(
-		Layer.provideMerge(WorkerEnvironment.layer),
+		Layer.provideMerge(workerEnvironmentLayer),
 		Layer.provideMerge(telemetry.layer),
 		Layer.provideMerge(ConfigLive),
 	)

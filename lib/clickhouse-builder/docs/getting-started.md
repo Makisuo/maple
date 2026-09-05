@@ -103,11 +103,11 @@ use, then hand the rows back for decoding:
 import { Effect, Schema } from "effect"
 
 const compiled = CH.compileUnsafe(query, params, {
-		rowSchema: Schema.Struct({
-			name: Schema.String,
-			count: Schema.Number,
-		}),
-	})
+	rowSchema: Schema.Struct({
+		name: Schema.String,
+		count: Schema.Number,
+	}),
+})
 
 const result = await client.query({ query: compiled.sql, format: "JSONEachRow" })
 const rows = await Effect.runPromise(compiled.decodeRows(await result.json()))

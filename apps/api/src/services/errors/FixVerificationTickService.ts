@@ -4,7 +4,7 @@ import { errorIssuePullRequests, errorIssues, type ErrorIssueVerificationRow } f
 import { and, eq } from "drizzle-orm"
 import { CH, formatWarehouseDateTime } from "@maple/query-engine"
 import { Cause, Clock, Context, Effect, Layer, Option, Schema } from "effect"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { Database } from "@/platform/DatabaseLive"
 import { summarizeCause } from "@/platform/describe-cause"

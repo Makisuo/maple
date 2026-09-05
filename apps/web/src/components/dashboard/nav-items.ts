@@ -19,6 +19,7 @@ import {
 	ServerIcon,
 	SquareSparkleIcon,
 } from "@/components/icons"
+import { KUBERNETES_ROOT, KUBERNETES_VIEWS } from "@/components/infra/kubernetes/views"
 import { PLANETSCALE_COLOR } from "@/components/infra/planetscale/metrics"
 import type { OrganizationFeatureFlags } from "@/lib/organization-feature-flags"
 
@@ -48,17 +49,17 @@ export interface NavSubItem {
 	 */
 	iconColor?: string
 	/**
-	 * Gate for this row. A child with no `surface` is unconditional. See
-	 * `partitionInfraSubItems` for what happens when the gate says no.
+	 * Gate for this row: it shows when the org reports ANY of these. A child
+	 * with no `surfaces` is unconditional. See `partitionInfraSubItems` for what
+	 * happens when the gate says no.
 	 */
-	surface?: NavSurface
+	surfaces?: ReadonlyArray<NavSurface>
 	/**
-	 * Whether this row can stand in `INFRA_FALLBACK` for an org reporting
-	 * nothing. Defaults to true; set false for a row that reads an existing
-	 * surface rather than being a collector target of its own, so the first-run
-	 * list stays an answer to "what would you plug in?".
+	 * Pages folded behind this row. They get no sidebar row of their own — that
+	 * is the point of folding — but each stays typeable in ⌘K, prefixed with the
+	 * row's title so "pods" still finds Kubernetes Pods.
 	 */
-	starter?: boolean
+	views?: ReadonlyArray<{ title: string; href: string }>
 }
 
 export interface NavItem {
@@ -99,14 +100,16 @@ const overviewItem: NavItem = {
  * Every child carries an icon for the same two reasons as Explore: the closed
  * row previews what's inside it (see `NavRow`), and the expanded sub-list stops
  * being ragged — before this only Cloudflare and PlanetScale had marks, so the
- * four host/k8s rows sat text-only beside two brand glyphs.
+ * host/k8s rows sat text-only beside two brand glyphs.
  *
- * The four k8s pages deliberately share one mark: their labels already
- * separate them, and the preview dedupes by icon. That keeps the section at
- * five unique glyphs — exactly `NavRow`'s all-or-nothing preview cap (each
- * glyph costs the label ~14px), so a sixth would drop the miniatures entirely.
- * The preview reads this whole list, not the org's pruned one: it advertises
- * what the section covers, which is the part `partitionInfraSubItems` hides.
+ * Kubernetes is one row. It used to be four (Pods, Nodes, Workloads, Services)
+ * and the section read as a Kubernetes menu with some other things in it; the
+ * four are views of one section now, switched by tabs on the page, and the
+ * palette keeps each one typeable through `views`. Five children means five
+ * unique glyphs — exactly `NavRow`'s all-or-nothing preview cap (each glyph
+ * costs the label ~14px), so a sixth would drop the miniatures entirely. The
+ * preview reads this whole list, not the org's pruned one: it advertises what
+ * the section covers, which is the part `partitionInfraSubItems` hides.
  */
 const infrastructureItem: NavItem = {
 	title: "Infrastructure",
@@ -114,96 +117,89 @@ const infrastructureItem: NavItem = {
 	icon: ComputerIcon,
 	discoverTo: "/infra/discover",
 	subItems: [
-		{ title: "Hosts", href: "/infra", icon: ServerIcon, surface: "hosts" },
-		{ title: "Containers", href: "/infra/containers", icon: DockerIcon, surface: "containers" },
-		{ title: "K8s Pods", href: "/infra/kubernetes/pods", icon: KubernetesIcon, surface: "k8sPods" },
+		{ title: "Hosts", href: "/infra", icon: ServerIcon, surfaces: ["hosts"] },
+		{ title: "Containers", href: "/infra/containers", icon: DockerIcon, surfaces: ["containers"] },
 		{
-			title: "K8s Nodes",
-			href: "/infra/kubernetes/nodes",
+			title: "Kubernetes",
+			href: KUBERNETES_ROOT,
 			icon: KubernetesIcon,
-			surface: "k8sNodes",
+			// Any of the three: a cluster that only ships node metrics is still a
+			// cluster, and the section's tabs handle the views that are empty.
+			surfaces: ["k8sPods", "k8sNodes", "k8sWorkloads"],
+			views: KUBERNETES_VIEWS,
 		},
-		{
-			title: "K8s Workloads",
-			href: "/infra/kubernetes/workloads",
-			icon: KubernetesIcon,
-			surface: "k8sWorkloads",
-		},
-		{
-			title: "K8s Services",
-			href: "/infra/kubernetes/services",
-			icon: KubernetesIcon,
-			// Gated on pod presence, not a surface of its own: the lens reads the
-			// same kubeletstats gauges, so an org with pods can always open it —
-			// and one without has nothing for it to correlate against.
-			surface: "k8sPods",
-			// ...but it is not something you install, so it stays out of the
-			// first-run fallback that "K8s Pods" already covers.
-			starter: false,
-		},
-		{ title: "Cloudflare", href: "/infra/cloudflare", icon: CloudflareIcon, surface: "cloudflare" },
+		{ title: "Cloudflare", href: "/infra/cloudflare", icon: CloudflareIcon, surfaces: ["cloudflare"] },
 		{
 			title: "PlanetScale",
 			href: "/infra/planetscale",
 			icon: PlanetScaleIcon,
 			iconColor: PLANETSCALE_COLOR,
-			surface: "planetscale",
+			surfaces: ["planetscale"],
 		},
 	],
 }
 
 /**
- * Shown when the org reports none of the seven. Not a ranking of the section —
- * a first-run answer to "what would you plug in?", so it's the three broadest
- * collector targets rather than the two that need an OAuth handshake first.
+ * The section never renders fewer rows than this. An org reporting one source
+ * gets its row plus three suggestions; the padding is what turns "you have
+ * hosts" into "you have hosts, and here is what else you could plug in".
  */
-const INFRA_FALLBACK: ReadonlyArray<NavSurface> = ["hosts", "containers", "k8sPods"]
+export const INFRA_MIN_ROWS = 4
 
 export interface InfraSubItemSplit {
-	/** Rendered directly under the section. */
+	/** What the org has — rendered directly under the section. */
 	readonly shown: NavSubItem[]
+	/**
+	 * Padding up to `INFRA_MIN_ROWS`: sources the org doesn't report yet, offered
+	 * as rows to explore. Rendered after `shown`, muted, so they read as an
+	 * invitation rather than a claim.
+	 */
+	readonly suggested: NavSubItem[]
 	/** Behind the section's reveal — reachable, just not by default. */
 	readonly hidden: NavSubItem[]
 }
 
 /**
- * Splits Infrastructure's children into what an org has and what it doesn't.
+ * Splits Infrastructure's children into what an org has, what it's offered,
+ * and what it isn't shown.
  *
- * Seven rows is the whole section, and almost nobody runs all seven — a Docker
- * shop scrolls past three Kubernetes pages every time. So the ones reporting
- * telemetry (or connected, for the two integration pages) render, and the rest
- * wait behind the reveal.
+ * Five rows is the whole section, and almost nobody runs all five — a Docker
+ * shop scrolls past Kubernetes every time. So the ones reporting telemetry (or
+ * connected, for the two integration pages) render first, and the rest wait
+ * behind the reveal.
  *
- * Three rules keep that from ever costing someone a page:
+ * But a section with one row under it looks like a product with one feature.
+ * So the list is padded to `INFRA_MIN_ROWS` with `suggested` rows — the
+ * sources the org doesn't have, in the order they appear in the section, which
+ * runs from the broadest collector targets to the two that need an OAuth
+ * handshake first. Suggestions are still real links: each lands on the page's
+ * own empty state, which is where the install instructions live.
+ *
+ * Two rules keep that from ever costing someone a page:
  *
  *  - `present: null` means the probe hasn't answered or has failed. Everything
  *    shows. A nav that hides rows because a query 500'd is worse than one
  *    listing a page you don't use.
  *  - The route you're on always shows, gate or no gate. Otherwise you land on
  *    /infra/kubernetes/pods and the section has no row for where you are.
- *  - An org reporting nothing gets `INFRA_FALLBACK` rather than an empty
- *    section — "you have no infrastructure" is not a useful thing for a nav to
- *    say, and the reveal still holds the other four.
  */
 export function partitionInfraSubItems(
 	subItems: ReadonlyArray<NavSubItem>,
 	present: ReadonlySet<NavSurface> | null,
 	currentPath: string,
 ): InfraSubItemSplit {
-	if (present === null) return { shown: [...subItems], hidden: [] }
+	if (present === null) return { shown: [...subItems], suggested: [], hidden: [] }
 
-	const anyPresent = subItems.some((sub) => sub.surface && present.has(sub.surface))
-	const keep = (sub: NavSubItem): boolean => {
-		if (isPathActive(currentPath, sub.href)) return true
-		if (!sub.surface) return true
-		if (anyPresent) return present.has(sub.surface)
-		return sub.starter !== false && INFRA_FALLBACK.includes(sub.surface)
-	}
+	const reports = (sub: NavSubItem) => sub.surfaces?.some((surface) => present.has(surface)) ?? false
+	const keep = (sub: NavSubItem): boolean =>
+		isPathActive(currentPath, sub.href) || !sub.surfaces || reports(sub)
 
 	const shown: NavSubItem[] = []
-	const hidden: NavSubItem[] = []
-	for (const sub of subItems) (keep(sub) ? shown : hidden).push(sub)
-	return { shown, hidden }
+	const rest: NavSubItem[] = []
+	for (const sub of subItems) (keep(sub) ? shown : rest).push(sub)
+
+	const room = Math.max(0, INFRA_MIN_ROWS - shown.length)
+	return { shown, suggested: rest.slice(0, room), hidden: rest.slice(room) }
 }
 
 /**
@@ -303,10 +299,10 @@ export interface PaletteNavEntry {
 }
 
 /**
- * Flattened nav for ⌘K: every section *and* every child. Collapsing four rows
- * into Explore must not cost a user the ability to type "logs" — the children
- * are the entries that keep muscle memory working, and they were never in the
- * palette before this.
+ * Flattened nav for ⌘K: every section, every child, and every view a child
+ * folds. Collapsing four rows into Explore must not cost a user the ability to
+ * type "logs", and collapsing four Kubernetes rows into one must not cost them
+ * "pods" — the entries here are what keep muscle memory working.
  */
 export function paletteNavItems(flags?: OrganizationFeatureFlags): PaletteNavEntry[] {
 	const entries: PaletteNavEntry[] = []
@@ -328,6 +324,14 @@ export function paletteNavItems(flags?: OrganizationFeatureFlags): PaletteNavEnt
 					href: sub.href,
 					icon: sub.icon ?? item.icon,
 				})
+				for (const view of sub.views ?? []) {
+					push({
+						id: `nav:${item.title}:${sub.title}:${view.title}`,
+						title: `${sub.title} ${view.title}`,
+						href: view.href,
+						icon: sub.icon ?? item.icon,
+					})
+				}
 			}
 		}
 	}

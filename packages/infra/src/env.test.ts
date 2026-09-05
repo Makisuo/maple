@@ -158,6 +158,22 @@ describe("selfObservabilityEnv", () => {
 
 	it("fails when the ingest key is missing", () => {
 		expect(runExit(selfObservabilityEnv({ kind: "prd" }), {})._tag).toBe("Failure")
+		expect(runExit(selfObservabilityEnv({ kind: "stg" }), {})._tag).toBe("Failure")
+		expect(runExit(selfObservabilityEnv({ kind: "pr", prNumber: 7 }), {})._tag).toBe("Failure")
+	})
+
+	it("omits the ingest key on a dev stage rather than failing", () => {
+		// `alchemy dev` resolves this contract on the developer's machine, where
+		// there is no ingest key — a required one refuses to start the stack.
+		const env = run(selfObservabilityEnv({ kind: "dev", name: "x" }), {})
+		expect("MAPLE_INGEST_KEY" in env).toBe(false)
+		expect(env.MAPLE_ENVIRONMENT).toBe("development")
+	})
+
+	it("still binds the ingest key on a dev stage when one is set", () => {
+		const env = run(selfObservabilityEnv({ kind: "dev", name: "x" }), base)
+		expect(Redacted.value(env.MAPLE_INGEST_KEY as Redacted.Redacted<string>)).toBe("maple_ak_test")
+		expect("MAPLE_OTEL_INGEST_KEY" in env).toBe(false)
 	})
 })
 
@@ -224,6 +240,7 @@ describe("parity with the pre-refactor per-worker expressions", () => {
 				const old = {
 					MAPLE_AUTH_MODE: env.MAPLE_AUTH_MODE?.trim() || "self_hosted",
 					MAPLE_DEFAULT_ORG_ID: env.MAPLE_DEFAULT_ORG_ID?.trim() || "default",
+					CLERK_TELEMETRY_DISABLED: "1",
 					...oldOptionalSecret(env, "MAPLE_ROOT_PASSWORD"),
 					...oldOptionalSecret(env, "CLERK_SECRET_KEY"),
 					...oldOptionalPlain(env, "CLERK_PUBLISHABLE_KEY"),

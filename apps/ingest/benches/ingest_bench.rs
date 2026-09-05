@@ -105,7 +105,6 @@ impl BenchFixture {
             TinybirdConfig {
                 endpoint: format!("http://{addr}"),
                 token: "bench-token".to_owned(),
-                mirror: None,
                 queue_dir: queue_dir.clone(),
                 // Effectively uncapped: this benchmark measures accept latency
                 // (encode + WAL append + ack), not back-pressure. A single org

@@ -6,7 +6,7 @@
 	"workspaces": {
 		".": {
 			"entry": ["alchemy.run.ts", "scripts/**/*.ts", "scripts/oxlint-plugins/*.mjs"],
-			"ignoreBinaries": ["wrangler", "tb", "pscale"]
+			"ignoreBinaries": ["tb", "pscale"]
 		},
 		"apps/web": {
 			"entry": [
@@ -19,18 +19,34 @@
 			]
 		},
 		"apps/landing": {
-			"entry": ["src/worker.ts", "alchemy.run.ts", "tools/**/*.ts", "tools/**/*.js"],
+			"entry": ["src/worker.ts", "tools/**/*.ts", "tools/**/*.js"],
 			"ignoreDependencies": ["@paper-design/shaders"]
 		},
 		"apps/api": {
-			"entry": ["alchemy.run.ts", "autumn.config.ts", "scripts/cold-path/*.mjs"],
+			// src/worker.ts was auto-detected from wrangler.jsonc's `main` until the
+			// wrangler configs were deleted; the Worker entries are now named here.
+			// bench-suites/*.ts are loaded by path from scripts/bench-queries.ts (a dynamic
+			// import off the CLI's --suite argument), so knip cannot see the edge.
+			"entry": [
+				"src/worker.ts",
+				"alchemy.run.ts",
+				"autumn.config.ts",
+				"scripts/cold-path/*.mjs",
+				"scripts/bench-suites/*.ts"
+			],
+			// Shelled out to by scripts/bench-startup-cpu.ts, never imported.
 			"ignoreDependencies": ["cloudflare"]
 		},
+		// Single-module Workers: the root alchemy.run.ts imports src/worker.ts, and
+		// alchemy bundles it, so it is the app's one entry.
 		"apps/alerting": {
-			"entry": ["alchemy.run.ts"]
+			"entry": ["src/worker.ts"]
+		},
+		"apps/electric-sync": {
+			"entry": ["src/worker.ts"]
 		},
 		"apps/local-ui": {
-			"entry": ["src/worker.ts", "alchemy.run.ts"]
+			"entry": ["src/worker.ts"]
 		},
 		"apps/cli": {
 			"entry": [
@@ -51,8 +67,13 @@
 			"ignore": ["src/generated/**"],
 			"ignoreDependencies": ["tailwindcss"]
 		},
-		"lib/effect-cloudflare": {
+		"packages/infra": {
+			// `cloudflare:workers` is a Workers runtime module, not a package.
 			"ignoreDependencies": ["cloudflare"]
+		},
+		"lib/alchemy-portless": {
+			// The dev-sidecar entry alchemy loads by URL, not by import.
+			"entry": ["src/Local.ts"]
 		},
 		"packages/query-engine": {
 			"entry": ["src/drain/index.ts"]

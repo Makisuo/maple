@@ -1,15 +1,8 @@
 import { Effect } from "effect"
-import type { ActorId } from "@maple/domain/http"
 import { isReservedAgentName } from "@maple/domain/system-agents"
 import type { TenantContext } from "@/services/auth/tenant-context"
 import { ErrorActorsService } from "@/services/errors/ErrorActorsService"
 import { McpQueryError } from "@/mcp/tools/types"
-
-export interface ResolvedActor {
-	readonly actorId: ActorId
-	/** True when the write is attributed to an agent identity rather than the human. */
-	readonly isAgent: boolean
-}
 
 /**
  * Agent-actor name derived from an MCP client's `initialize` clientInfo.name.

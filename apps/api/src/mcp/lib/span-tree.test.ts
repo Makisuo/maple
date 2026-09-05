@@ -119,3 +119,20 @@ describe("selectOverviewSpans", () => {
 		result.roots.forEach(checkConnected)
 	})
 })
+
+describe("selectOverviewSpans errorsOnly", () => {
+	it("keeps only errors, their ancestors and the roots, even when the trace fits the budget", () => {
+		const roots = bigTree()
+		const result = selectOverviewSpans(roots, 100, { errorsOnly: true })
+		const kept = ids(result.roots)
+		expect(kept.has("root")).toBe(true)
+		expect(kept.has("a")).toBe(true)
+		expect(kept.has("a2")).toBe(true)
+		expect(kept.has("a1")).toBe(false)
+		expect(kept.has("b")).toBe(false)
+		expect(kept.has("c")).toBe(false)
+		expect(result.renderedCount).toBe(3)
+		expect(result.truncated).toBe(true)
+		expect(result.omittedByParent.get("root")?.count).toBe(12)
+	})
+})

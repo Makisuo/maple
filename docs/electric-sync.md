@@ -13,22 +13,17 @@ sync worker or its upstream unreachable they show `SyncUnavailable` and a retry.
 So an Electric outage is visible, and a deploy of the singleton service is a
 short one.
 
-The reusable machinery lives in the **`@maple/effect-db`** workspace package
-(source-only, consumed by `apps/web`'s Vite and, later, the mobile app):
+The reusable machinery lives in two workspace libraries:
 
-- `@maple/effect-db/electric` — `createEffectCollection` (an Effect-native wrapper
-  over `@tanstack/electric-db-collection`: Effect Schema rows + `Effect` write
-  handlers run on a `ManagedRuntime` + exponential backoff + typed `awaitTxIdEffect`),
-  and `optimisticAction` (declare collections → optimistic apply → `Effect` server
-  call returning a txid → automatic `awaitTxId` across all declared collections →
-  typed errors). The backoff `onError` also dispatches the `auth:session-expired`
-  (401) and `collection:schema-error` (post-deploy schema drift) window events.
-- `@maple/effect-db/atom` — `makeQuery`/`makeQueryUnsafe`/`makeCollectionAtom`,
-  bridging a TanStack DB live query to an effect-atom `Atom<AsyncResult<…>>`.
-
-Ported and adapted from the hazel repo's two libraries to effect `4.0.0-beta.93`
-(`Effect.catch` → `Effect.catchEager`; the electric collection utils slimmed to
-`{ awaitTxId, awaitMatch }`).
+- `@maple/effect-db/electric` — `createEffectCollection` wraps
+  `@tanstack/electric-db-collection` with Effect Schema rows, Effect write
+  handlers run on a `ManagedRuntime`, exponential backoff, and typed
+  `awaitTxIdEffect`. The backoff `onError` also dispatches the
+  `auth:session-expired` (401) and `collection:schema-error` (post-deploy schema
+  drift) window events.
+- `@maple/unitflow/db` — collection subscriptions feed model-scoped Stores used
+  by the dashboards and alerts lists. Mutations use the typed API write paths;
+  alert toggles run through `Mutation.make`.
 
 ## How it fits together
 
@@ -86,16 +81,17 @@ have since moved back to the typed `/v2` endpoints, and were pruned from both by
    If your Postgres volume predates the `wal_level` change, recreate it:
    `docker compose -f docker-compose.development.yml up -d --force-recreate postgres electric`.
 2. `bun db:migrate:local` applies migrations, including `0009_electric_publication`.
-3. `.env.local`: `ELECTRIC_URL=http://localhost:3473` and
-   `VITE_ELECTRIC_SYNC_URL=http://localhost:3476` (both already in `.env.example`).
-   `ELECTRIC_URL` is now read by the `apps/electric-sync` worker (default port 3476);
-   `VITE_ELECTRIC_SYNC_URL` points the web app's ShapeStreams at it.
-4. Run the app (`bun dev`) — it starts the `electric-sync` worker alongside the
-   others via portless. The dashboards/alerts/errors lists read exclusively from
-   the sync path, so steps 1–3 are required for them to load.
+3. `.env.local`: `ELECTRIC_URL=http://localhost:3473` (already in `.env.example`), read by
+   the `apps/electric-sync` worker. Under `bun dev` the web app finds that worker at
+   `https://electric-sync.localhost` on its own; `VITE_ELECTRIC_SYNC_URL` only matters when
+   running the web app on a raw port without the portless proxy.
+4. Run the app (`bun dev`) — the `electric-sync` worker comes up in the `alchemy dev`
+   stack with everything else (`bun dev api electric-sync web` for just the pieces that
+   matter here). The dashboards/alerts/errors lists read exclusively from the sync path, so
+   steps 1–3 are required for them to load.
 
 Smoke-test the proxy directly (through the standalone worker; needs a bearer):
-`curl -g 'http://localhost:3476/api/sync/shape?shape=dashboards&offset=-1' -H "authorization: Bearer <token>"`,
+`curl -g 'https://electric-sync.localhost/api/sync/shape?shape=dashboards&offset=-1' -H "authorization: Bearer <token>"`,
 or hit Electric with no proxy: `curl -g 'http://localhost:3473/v1/shape?table=dashboards&offset=-1'`.
 
 ### Troubleshooting
@@ -104,8 +100,8 @@ or hit Electric with no proxy: `curl -g 'http://localhost:3473/v1/shape?table=da
 no upstream `ELECTRIC_URL`. Two causes:
 
 1. `ELECTRIC_URL` isn't set in `.env.local`. Set `ELECTRIC_URL=http://localhost:3473`,
-   then **restart** the worker — `--env-file` is read once at wrangler startup, so a
-   hot source reload won't pick it up (`bun dev`, or just the `electric-sync` task).
+   then **restart** `bun dev` — `--env-file` is read once when `alchemy dev` starts, so
+   a hot source reload won't pick it up.
 2. The docker `electric` service isn't running on `:3473`. `bun db:up` starts it now;
    confirm with `docker compose ps` (expect `maple-electric-1`).
 
@@ -179,7 +175,7 @@ like local docker does.
 1. **PlanetScale cluster params:** `wal_level=logical`, `max_replication_slots>=10`,
    `max_wal_senders>=10`, `max_slot_wal_keep_size>=4096`, `sync_replication_slots=on`,
    `hot_standby_feedback=on`. Already set for Cloud; unchanged.
-2. **Dedicated role** with the `REPLICATION` *attribute* — never inherited through
+2. **Dedicated role** with the `REPLICATION` _attribute_ — never inherited through
    role membership, and Electric's database validation rejects a role without it
    with a message that does not say so — plus `SELECT` on the synced tables.
    Avoid the ephemeral pscale migration roles.
@@ -189,12 +185,11 @@ like local docker does.
    plaintext `env`.
 4. **Migrate,** then `alchemy deploy`. No new migration is needed — the service
    reads the publication `0009`/`0011`/`0014`/`0037` already maintain.
-5. **DNS.** The certificate lands `PENDING_VALIDATION` on the first deploy and the
-   443 listener fails; the deploy workflows recover on their own by creating the
-   validation CNAME and redeploying (`scripts/acm-cert-validate.sh`, which now
-   names the electric domains alongside ingest). The one manual record is a
-   **proxied CNAME for `electric.maple.dev` at the ALB** — the deploy output
-   carries the hostname.
+5. **DNS.** The stack publishes the ACM validation CNAME into the `maple.dev`
+   zone and waits for the certificate to reach `ISSUED` before attaching the 443
+   listener (`@maple/infra/acm`), so the first deploy needs no second pass. The
+   one manual record is a **proxied CNAME for `electric.maple.dev` at the ALB** —
+   the deploy output carries the hostname.
 6. **Verify** before pointing anything at it:
    `curl https://electric.maple.dev/v1/health`, then a shape through the proxy —
    `curl -g 'https://sync.maple.dev/api/sync/shape?shape=dashboards&offset=-1' -H "authorization: Bearer <token>"`.

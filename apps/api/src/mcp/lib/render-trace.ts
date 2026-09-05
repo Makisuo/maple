@@ -1,7 +1,7 @@
 import { Array as Arr, pipe } from "effect"
 import type { SpanNode } from "@maple/query-engine/observability"
 import { formatDurationFromMs, truncate } from "./format"
-import { selectOverviewSpans, type OverviewSelection } from "./span-tree"
+import { selectOverviewSpans, type OverviewOptions, type OverviewSelection } from "./span-tree"
 
 export interface TraceOverviewLog {
 	readonly timestamp: string
@@ -20,6 +20,7 @@ export interface TraceOverviewInput {
 	readonly logs: ReadonlyArray<TraceOverviewLog>
 	/** Max spans to render before collapsing the rest (see `selectOverviewSpans`). */
 	readonly budget: number
+	readonly options?: OverviewOptions
 }
 
 export interface RenderedTraceOverview {
@@ -33,7 +34,7 @@ export interface RenderedTraceOverview {
  * collapse markers — is unit-testable without a live warehouse.
  */
 export function renderTraceOverview(input: TraceOverviewInput): RenderedTraceOverview {
-	const overview = selectOverviewSpans(input.spans, input.budget)
+	const overview = selectOverviewSpans(input.spans, input.budget, input.options)
 
 	const lines: string[] = [
 		`## Trace ${input.traceId} (${input.serviceCount} services, ${input.spanCount} spans, ${formatDurationFromMs(input.rootDurationMs)})`,
@@ -41,8 +42,11 @@ export function renderTraceOverview(input: TraceOverviewInput): RenderedTraceOve
 	]
 
 	if (overview.truncated) {
+		const policy = input.options?.errorsOnly
+			? "error spans and their ancestors only"
+			: "errors and longest first"
 		lines.push(
-			`_Showing ${overview.renderedCount} of ${input.spanCount} spans (errors and longest first). Use \`inspect_span trace_id="${input.traceId}" span_id="…"\` for one span's full attributes, or \`search_traces\` to find more._`,
+			`_Showing ${overview.renderedCount} of ${input.spanCount} spans (${policy}). Use \`inspect_span trace_id="${input.traceId}" span_id="…"\` for one span's full attributes, or \`search_traces\` to find more._`,
 			``,
 		)
 	}

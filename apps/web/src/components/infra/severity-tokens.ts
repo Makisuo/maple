@@ -40,20 +40,20 @@ export const BAR_VALUE_TONE: Record<SeverityLevel, string> = {
 export const STATUS_DOT: Record<HostStatus, string> = {
 	active: "bg-[var(--severity-info)]",
 	idle: "bg-muted-foreground/60",
-	down: "bg-[var(--severity-error)]",
+	ended: "bg-muted-foreground/40",
 } satisfies Record<HostStatus, string>
 
 /** Status dot ring. */
 export const STATUS_RING: Record<HostStatus, string> = {
 	active: "ring-[color-mix(in_oklab,var(--severity-info)_45%,transparent)]",
 	idle: "ring-border",
-	down: "ring-[color-mix(in_oklab,var(--severity-error)_45%,transparent)]",
+	ended: "ring-border",
 } satisfies Record<HostStatus, string>
 
 const STATUS_LABEL: Record<HostStatus, string> = {
 	active: "Active",
 	idle: "Idle",
-	down: "Down",
+	ended: "Ended",
 } satisfies Record<HostStatus, string>
 
 /** Human-readable status word, paired with color so it is never the sole signal. */

@@ -1,5 +1,5 @@
 /**
- * TanStack DB adapter for unitflow — Maple addition, not part of upstream.
+ * TanStack DB adapter for unitflow.
  *
  * Bridges TanStack DB collections (framework-agnostic `@tanstack/db` layer)
  * into unitflow Stores: a collection becomes a read-only
@@ -10,8 +10,7 @@
  * emits no change events, only `loading → ready`).
  *
  * Mutations need no adapter: `Mutation.make` accepts any Effect handler, so a
- * model wraps its write (e.g. `@maple/effect-db`'s `optimisticAction`)
- * directly.
+ * model wraps its server write directly.
  */
 
 import {

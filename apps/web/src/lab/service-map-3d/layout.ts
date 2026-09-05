@@ -1,4 +1,5 @@
-import type { Edge3D, Node3D, Topology3D } from "./fixture"
+import { computeTiers } from "@/components/service-map/three/graph"
+import type { Node3D, Topology3D } from "@/components/service-map/three/types"
 import { SERVICE_MAP_3D_TUNING, type Layout3DTuning } from "./tuning"
 
 /**
@@ -23,42 +24,6 @@ export interface Layout3D {
 	/** Centre of the laid-out graph, and the radius of the sphere enclosing it. */
 	center: Vec3
 	extent: number
-}
-
-/**
- * Longest-path depth from every entry node (in-degree 0), which is what makes
- * a request read top-to-bottom. Cycles can't extend a node past `nodes.length`,
- * so the relaxation loop is bounded rather than trusting the graph to be a DAG.
- */
-export function computeTiers(
-	nodes: ReadonlyArray<Node3D>,
-	edges: ReadonlyArray<Edge3D>,
-): Map<string, number> {
-	const ids = new Set(nodes.map((node) => node.id))
-	const real = edges.filter((e) => ids.has(e.source) && ids.has(e.target))
-	const indegree = new Map<string, number>(nodes.map((node) => [node.id, 0]))
-	for (const e of real) indegree.set(e.target, (indegree.get(e.target) ?? 0) + 1)
-
-	const tiers = new Map<string, number>(nodes.map((node) => [node.id, 0]))
-	const roots = nodes.filter((node) => (indegree.get(node.id) ?? 0) === 0).map((node) => node.id)
-	// Every node starts at 0; roots stay there and the rest get pushed down.
-	let frontier = roots.length > 0 ? roots : [nodes[0]?.id].filter((id): id is string => id !== undefined)
-
-	for (let pass = 0; pass < nodes.length && frontier.length > 0; pass++) {
-		const next: string[] = []
-		for (const id of frontier) {
-			const depth = tiers.get(id) ?? 0
-			for (const e of real) {
-				if (e.source !== id) continue
-				if ((tiers.get(e.target) ?? 0) >= depth + 1) continue
-				tiers.set(e.target, depth + 1)
-				next.push(e.target)
-			}
-		}
-		frontier = next
-	}
-
-	return tiers
 }
 
 const namespaceOrder = (nodes: ReadonlyArray<Node3D>, tiers: ReadonlyMap<string, number>): string[] => {

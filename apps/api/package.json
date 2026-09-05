@@ -8,8 +8,6 @@
 	},
 	"scripts": {
 		"db:generate": "bun run --cwd ../../packages/db db:generate",
-		"dev": "portless",
-		"dev:app": "bun run ../../scripts/portless-wrangler.ts --env-file ../../.env.local --port ${PORT:-3472} --inspector-port=$((${PORT:-3472} + 10000))",
 		"test": "vitest run",
 		"test:integration": "vitest run --config vitest.integration.config.ts",
 		"eval": "vitest run --config vitest.eval.config.ts",
@@ -17,12 +15,14 @@
 		"measure-tokens": "bun run scripts/measure-token-cost.ts",
 		"mcp:docs": "bun run scripts/generate-dashboard-skill.ts",
 		"eval:widgets": "bun run scripts/grade-widget-eval.ts",
-		"typecheck": "tsc --noEmit",
+		"typecheck": "tsc --noEmit && bun run bench:typecheck",
 		"typecheck:test": "tsc --noEmit -p tsconfig.test.json",
 		"tinybird:dev": "tinybird dev",
 		"tinybird:build": "tinybird build",
 		"tinybird:deploy": "tinybird deploy",
 		"bench:fetch": "bun run scripts/bench-queries.ts fetch",
+		"bench:catalog": "bun run scripts/bench-queries.ts catalog",
+		"bench:typecheck": "tsc --noEmit -p tsconfig.bench.json",
 		"bench:run": "bun run scripts/bench-queries.ts run",
 		"bench:inspect": "bun run scripts/bench-queries.ts inspect",
 		"bench:compare": "bun run scripts/bench-queries.ts compare",
@@ -40,12 +40,12 @@
 		"@maple/cache": "workspace:*",
 		"@maple/db": "workspace:*",
 		"@maple/domain": "workspace:*",
-		"@maple/effect-cloudflare": "workspace:*",
 		"@maple/email": "workspace:*",
 		"@maple/infra": "workspace:*",
 		"@maple/query-engine": "workspace:*",
 		"@maple/query-engine-integrations": "workspace:*",
 		"@maple/query-model": "workspace:*",
+		"@maple/safe-fetch": "workspace:*",
 		"@maple/widgets": "workspace:*",
 		"@opencode-ai/ai": "0.0.0-beta-18050",
 		"@tinybirdco/sdk": "catalog:tinybird",
@@ -66,9 +66,5 @@
 		"vitest": "catalog:",
 		"vitest-evals": "^0.4.0",
 		"wrangler": "^4.118.0"
-	},
-	"portless": {
-		"name": "api",
-		"script": "dev:app"
 	}
 }

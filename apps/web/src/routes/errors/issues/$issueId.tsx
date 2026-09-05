@@ -23,6 +23,7 @@ import { ErrorState } from "@/components/common/error-state"
 import { AlertSourceCard } from "@/components/errors/alert-source-card"
 import { IssueCommentComposer } from "@/components/errors/issue-comment-composer"
 import { IssueCulpritPanel } from "@/components/errors/issue-culprit-panel"
+import { IssueDetailSkeleton } from "@/components/errors/issue-detail-skeleton"
 import { IssueFactStrip } from "@/components/errors/issue-fact-strip"
 import { IssueHeader } from "@/components/errors/issue-header"
 import { IssueIncidentsTable } from "@/components/errors/issue-incidents-table"
@@ -501,278 +502,285 @@ function IssueDetailContent() {
 		}
 	}
 
-	return Result.builder(detailResult)
-		.onInitial(() => (
-			<IssueShell breadcrumbs={[...ISSUE_LOADING_BREADCRUMBS]}>
-				<div className="space-y-4">
-					<Skeleton className="h-24 w-full" />
-					<Skeleton className="h-20 w-full" />
-					<Skeleton className="h-40 w-full" />
-				</div>
-			</IssueShell>
-		))
-		.onError((error) => (
-			<IssueShell breadcrumbs={[...ISSUE_LOADING_BREADCRUMBS]}>
-				<ErrorState error={error} title="Failed to load issue" onRetry={refreshDetail} />
-			</IssueShell>
-		))
-		.onSuccess((v2Detail) => {
-			const detail = errorIssueDetailFromV2(v2Detail)
-			const { issue, timeseries, sampleTraces, incidents, environments } = detail
-			const totalInWindow = timeseries.reduce((sum, b) => sum + b.count, 0)
-			const linkedInvestigation = Result.builder(investigationsResult)
-				.onSuccess((response) => response.data[0] ?? null)
-				.orElse(() => null)
-			const escalationAttempts = Result.builder(escalationResult)
-				.onSuccess((response) => response.attempts)
-				.orElse(() => [])
-			const pullRequests = Result.builder(pullRequestsResult)
-				.onSuccess((response) => response.pullRequests)
-				.orElse(() => [])
-			const suggestedRepository = Result.builder(pullRequestsResult)
-				.onSuccess((response) => response.suggestedRepository)
-				.orElse(() => null)
-			// Newest first from the API, so the head is the check that matters — an
-			// older settled verification is history the timeline already carries.
-			const latestVerification = Result.builder(verificationsResult)
-				.onSuccess((response) => response.verifications[0] ?? null)
-				.orElse(() => null)
-			const events = Result.builder(eventsResult)
-				.onSuccess((value) => value.events)
-				.orElse(() => [])
-			// Everyone who has spoken or acted on this issue, newest activity first,
-			// so the composer's participant strip leads with whoever is here now.
-			const participants = [
-				...(issue.leaseHolder ? [issue.leaseHolder] : []),
-				...(issue.assignedActor ? [issue.assignedActor] : []),
-				...[...events].reverse().flatMap((event) => (event.actor ? [event.actor] : [])),
-			]
-			const linkedEscalation = linkedInvestigation
-				? (escalationAttempts.find((attempt) => attempt.investigationId === linkedInvestigation.id) ??
-					null)
-				: null
-			const latestIncidentId =
-				issue.kind === "alert"
-					? typeof issue.sourceRef?.latestIncidentId === "string"
-						? issue.sourceRef.latestIncidentId
-						: null
-					: ((incidents.find((incident) => incident.status === "open") ?? incidents[0])?.id ?? null)
-			const investigate = () =>
-				void startInvestigation({
-					issue,
-					kind: issue.kind === "alert" ? "alert" : "error",
-					incidentId: latestIncidentId,
-				})
+	return (
+		Result.builder(detailResult)
+			// Not a page-shaped skeleton: the layout, tabs, window picker and rail
+			// labels are all knowable without the query, so the load draws the real
+			// page with ghosted values instead of blanking it.
+			.onInitial(() => (
+				<IssueDetailSkeleton
+					issueId={issueId}
+					tab={tab}
+					search={search}
+					onTimeChange={handleTimeChange}
+					windowLabel={windowLabel(search)}
+				/>
+			))
+			.onError((error) => (
+				<IssueShell breadcrumbs={[...ISSUE_LOADING_BREADCRUMBS]}>
+					<ErrorState error={error} title="Failed to load issue" onRetry={refreshDetail} />
+				</IssueShell>
+			))
+			.onSuccess((v2Detail) => {
+				const detail = errorIssueDetailFromV2(v2Detail)
+				const { issue, timeseries, sampleTraces, incidents, environments } = detail
+				const totalInWindow = timeseries.reduce((sum, b) => sum + b.count, 0)
+				const linkedInvestigation = Result.builder(investigationsResult)
+					.onSuccess((response) => response.data[0] ?? null)
+					.orElse(() => null)
+				const escalationAttempts = Result.builder(escalationResult)
+					.onSuccess((response) => response.attempts)
+					.orElse(() => [])
+				const pullRequests = Result.builder(pullRequestsResult)
+					.onSuccess((response) => response.pullRequests)
+					.orElse(() => [])
+				const suggestedRepository = Result.builder(pullRequestsResult)
+					.onSuccess((response) => response.suggestedRepository)
+					.orElse(() => null)
+				// Newest first from the API, so the head is the check that matters — an
+				// older settled verification is history the timeline already carries.
+				const latestVerification = Result.builder(verificationsResult)
+					.onSuccess((response) => response.verifications[0] ?? null)
+					.orElse(() => null)
+				const events = Result.builder(eventsResult)
+					.onSuccess((value) => value.events)
+					.orElse(() => [])
+				// Everyone who has spoken or acted on this issue, newest activity first,
+				// so the composer's participant strip leads with whoever is here now.
+				const participants = [
+					...(issue.leaseHolder ? [issue.leaseHolder] : []),
+					...(issue.assignedActor ? [issue.assignedActor] : []),
+					...[...events].reverse().flatMap((event) => (event.actor ? [event.actor] : [])),
+				]
+				const linkedEscalation = linkedInvestigation
+					? (escalationAttempts.find(
+							(attempt) => attempt.investigationId === linkedInvestigation.id,
+						) ?? null)
+					: null
+				const latestIncidentId =
+					issue.kind === "alert"
+						? typeof issue.sourceRef?.latestIncidentId === "string"
+							? issue.sourceRef.latestIncidentId
+							: null
+						: ((incidents.find((incident) => incident.status === "open") ?? incidents[0])?.id ??
+							null)
+				const investigate = () =>
+					void startInvestigation({
+						issue,
+						kind: issue.kind === "alert" ? "alert" : "error",
+						incidentId: latestIncidentId,
+					})
 
-			return (
-				<DashboardLayout.Root>
-					<DashboardLayout.Breadcrumbs
-						items={[
-							{ label: "Errors", href: "/errors" },
-							{ label: issue.exceptionType || issue.errorLabel || "Unlabelled error" },
-						]}
-					/>
-					<DashboardLayout.Body>
-						<DashboardLayout.Content>
-							<DashboardLayout.Sticky>
-								<IssueHeader
-									issue={issue}
-									issueId={issueId}
-									investigation={linkedInvestigation}
-									search={search}
-									onTimeChange={handleTimeChange}
-									onStartInvestigation={investigate}
-									startingInvestigation={busy === "investigation"}
-								/>
-								<IssueTabs
-									issueId={issueId}
-									active={tab}
-									occurrenceCount={sampleTraces.length}
-									activityCount={events.length + escalationAttempts.length}
-									showOccurrences={issue.kind === "error"}
-								/>
-							</DashboardLayout.Sticky>
-							<DashboardLayout.Scroll>
-								{tab === "overview" ? (
-									<div className="flex flex-col gap-7">
-										<IssueCulpritPanel issue={issue} />
-										<IssueFactStrip
-											issue={issue}
-											windowCount={totalInWindow}
-											windowLabel={windowLabel(search)}
-										/>
-										{issue.kind === "alert" ? (
-											<AlertSourceCard issue={issue} />
-										) : (
-											<IssueOccurrencePanel
-												data={timeseries}
-												severity={issue.severity}
-												window={chartWindow}
+				return (
+					<DashboardLayout.Root>
+						<DashboardLayout.Breadcrumbs
+							items={[
+								{ label: "Errors", href: "/errors" },
+								{ label: issue.exceptionType || issue.errorLabel || "Unlabelled error" },
+							]}
+						/>
+						<DashboardLayout.Body>
+							<DashboardLayout.Content>
+								<DashboardLayout.Sticky>
+									<IssueHeader
+										issue={issue}
+										issueId={issueId}
+										investigation={linkedInvestigation}
+										search={search}
+										onTimeChange={handleTimeChange}
+										onStartInvestigation={investigate}
+										startingInvestigation={busy === "investigation"}
+									/>
+									<IssueTabs
+										issueId={issueId}
+										active={tab}
+										occurrenceCount={sampleTraces.length}
+										activityCount={events.length + escalationAttempts.length}
+										showOccurrences={issue.kind === "error"}
+									/>
+								</DashboardLayout.Sticky>
+								<DashboardLayout.Scroll>
+									{tab === "overview" ? (
+										<div className="flex flex-col gap-7">
+											<IssueCulpritPanel issue={issue} />
+											<IssueFactStrip
+												issue={issue}
+												windowCount={totalInWindow}
+												windowLabel={windowLabel(search)}
 											/>
-										)}
-										<LinkedInvestigationPanel
-											investigation={linkedInvestigation}
-											escalation={linkedEscalation}
-											onStart={investigate}
-											starting={busy === "investigation"}
-										/>
-										{issue.kind === "error" ? (
-											<BodySection
-												id="incidents"
-												title="Incidents"
-												count={
-													incidents.length === 0
-														? undefined
-														: `${incidents.length} opened`
-												}
-											>
-												<IssueIncidentsTable incidents={incidents} />
-											</BodySection>
-										) : null}
-										<RelatedAnomaliesSection issueId={issueId} />
-									</div>
-								) : tab === "occurrences" ? (
-									<BodySection
-										id="occurrences"
-										title="Latest occurrences"
-										count={
-											sampleTraces.length === 0
-												? undefined
-												: `${sampleTraces.length} sampled in this window`
-										}
+											{issue.kind === "alert" ? (
+												<AlertSourceCard issue={issue} />
+											) : (
+												<IssueOccurrencePanel
+													data={timeseries}
+													severity={issue.severity}
+													window={chartWindow}
+												/>
+											)}
+											<LinkedInvestigationPanel
+												investigation={linkedInvestigation}
+												escalation={linkedEscalation}
+												onStart={investigate}
+												starting={busy === "investigation"}
+											/>
+											{issue.kind === "error" ? (
+												<BodySection
+													id="incidents"
+													title="Incidents"
+													count={
+														incidents.length === 0
+															? undefined
+															: `${incidents.length} opened`
+													}
+												>
+													<IssueIncidentsTable incidents={incidents} />
+												</BodySection>
+											) : null}
+											<RelatedAnomaliesSection issueId={issueId} />
+										</div>
+									) : tab === "occurrences" ? (
+										<BodySection
+											id="occurrences"
+											title="Latest occurrences"
+											count={
+												sampleTraces.length === 0
+													? undefined
+													: `${sampleTraces.length} sampled in this window`
+											}
+										>
+											<IssueOccurrencesTable traces={sampleTraces} />
+										</BodySection>
+									) : (
+										<BodySection id="activity" title="Activity">
+											{Result.builder(eventsResult)
+												.onError((error) => (
+													<ErrorState
+														error={error}
+														title="Failed to load the activity timeline"
+														onRetry={refreshEvents}
+														variant="inline"
+													/>
+												))
+												.onSuccess((value) => (
+													<IssueTimeline
+														events={value.events}
+														escalations={escalationAttempts}
+													/>
+												))
+												.orElse(() => (
+													<Skeleton className="h-20 w-full" />
+												))}
+											<IssueCommentComposer
+												className="mt-6"
+												disabled={busy === "comment"}
+												onChange={setCommentDraft}
+												onSubmit={submitComment}
+												participants={participants}
+												value={commentDraft}
+											/>
+										</BodySection>
+									)}
+									<AlertDialog
+										open={severityConfirmation !== null}
+										onOpenChange={(open) => {
+											if (!open) setSeverityConfirmation(null)
+										}}
 									>
-										<IssueOccurrencesTable traces={sampleTraces} />
-									</BodySection>
-								) : (
-									<BodySection id="activity" title="Activity">
-										{Result.builder(eventsResult)
-											.onError((error) => (
-												<ErrorState
-													error={error}
-													title="Failed to load the activity timeline"
-													onRetry={refreshEvents}
-													variant="inline"
-												/>
-											))
-											.onSuccess((value) => (
-												<IssueTimeline
-													events={value.events}
-													escalations={escalationAttempts}
-												/>
-											))
-											.orElse(() => (
-												<Skeleton className="h-20 w-full" />
-											))}
-										<IssueCommentComposer
-											className="mt-6"
-											disabled={busy === "comment"}
-											onChange={setCommentDraft}
-											onSubmit={submitComment}
-											participants={participants}
-											value={commentDraft}
-										/>
-									</BodySection>
-								)}
-								<AlertDialog
-									open={severityConfirmation !== null}
-									onOpenChange={(open) => {
-										if (!open) setSeverityConfirmation(null)
-									}}
-								>
-									<AlertDialogContent>
-										<AlertDialogHeader>
-											<AlertDialogTitle>
-												Notify escalation destinations?
-											</AlertDialogTitle>
-											<AlertDialogDescription>
-												Changing severity to {severityConfirmation?.severity} will
-												notify {severityConfirmation?.destinationNames.join(", ")}.
-												Manual severity changes represent explicit human intent and
-												bypass AI confidence gates.
-											</AlertDialogDescription>
-										</AlertDialogHeader>
-										<AlertDialogFooter>
-											<AlertDialogCancel>Cancel</AlertDialogCancel>
-											<AlertDialogAction
-												onClick={() => {
-													const pending = severityConfirmation
-													setSeverityConfirmation(null)
-													if (pending) void applySeverity(pending.severity)
-												}}
-											>
-												Change severity and notify
-											</AlertDialogAction>
-										</AlertDialogFooter>
-									</AlertDialogContent>
-								</AlertDialog>
-							</DashboardLayout.Scroll>
-						</DashboardLayout.Content>
-						<DashboardLayout.RightPanel>
-							<div className="flex flex-col gap-4">
-								<IssueSidebar
-									issue={issue}
-									environments={environments}
-									busy={busy}
-									onTransition={transitionTo}
-									onClaim={claim}
-									onHeartbeat={heartbeat}
-									onRelease={release}
-									onSetSeverity={changeSeverity}
-								/>
-								{/* Inset here, not on the outer column: `IssueSidebar` is
+										<AlertDialogContent>
+											<AlertDialogHeader>
+												<AlertDialogTitle>
+													Notify escalation destinations?
+												</AlertDialogTitle>
+												<AlertDialogDescription>
+													Changing severity to {severityConfirmation?.severity} will
+													notify {severityConfirmation?.destinationNames.join(", ")}
+													. Manual severity changes represent explicit human intent
+													and bypass AI confidence gates.
+												</AlertDialogDescription>
+											</AlertDialogHeader>
+											<AlertDialogFooter>
+												<AlertDialogCancel>Cancel</AlertDialogCancel>
+												<AlertDialogAction
+													onClick={() => {
+														const pending = severityConfirmation
+														setSeverityConfirmation(null)
+														if (pending) void applySeverity(pending.severity)
+													}}
+												>
+													Change severity and notify
+												</AlertDialogAction>
+											</AlertDialogFooter>
+										</AlertDialogContent>
+									</AlertDialog>
+								</DashboardLayout.Scroll>
+							</DashboardLayout.Content>
+							<DashboardLayout.RightPanel>
+								<div className="flex flex-col gap-4">
+									<IssueSidebar
+										issue={issue}
+										environments={environments}
+										busy={busy}
+										onTransition={transitionTo}
+										onClaim={claim}
+										onHeartbeat={heartbeat}
+										onRelease={release}
+										onSetSeverity={changeSeverity}
+									/>
+									{/* Inset here, not on the outer column: `IssueSidebar` is
 								    deliberately full-bleed against the rail's border, while these
 								    two are bordered cards — without the padding their own border
 								    doubles up against the rail's and runs into the viewport edge. */}
-								<div className="flex flex-col gap-4 px-4 pb-4">
-									{/* Above the PR list: while a check is running it is the most
+									<div className="flex flex-col gap-4 px-4 pb-4">
+										{/* Above the PR list: while a check is running it is the most
 									    load-bearing thing on the page — it explains why the issue is
 									    sitting in `verifying` and nobody needs to touch it. */}
-									{latestVerification ? (
-										<IssueVerificationCard
-											verification={latestVerification}
-											workflowState={issue.workflowState}
+										{latestVerification ? (
+											<IssueVerificationCard
+												verification={latestVerification}
+												workflowState={issue.workflowState}
+											/>
+										) : AWAITING_FIX_STATES.has(issue.workflowState) &&
+										  pullRequests.length === 0 ? (
+											// Somebody is working this issue but nothing is attached, so
+											// there is nothing for verification to trigger on. Said here,
+											// in the slot the verification card will occupy, rather than
+											// only on the panel below where the payoff is easy to miss.
+											<section className="rounded-xl border bg-card px-4 py-3">
+												<p className="text-xs text-muted-foreground">
+													No pull request attached. Maple can only confirm this
+													error stopped if it knows which fix to watch.
+												</p>
+												<Button
+													size="sm"
+													variant="outline"
+													// The rail is ~255px wide; the label does not fit
+													// on one line at its natural width and overflowed
+													// the card until it was allowed to wrap.
+													className="mt-2 h-auto w-full whitespace-normal py-1.5 text-xs"
+													onClick={() => setAttachDialogOpen(true)}
+												>
+													Attach the PR that fixes this
+												</Button>
+											</section>
+										) : null}
+										<IssuePullRequestsPanel
+											pullRequests={pullRequests}
+											suggestedRepository={suggestedRepository}
+											onLink={attachPullRequest}
+											onUnlink={detachPullRequest}
+											busy={busy === "pull-request"}
+											open={attachDialogOpen}
+											onOpenChange={setAttachDialogOpen}
 										/>
-									) : AWAITING_FIX_STATES.has(issue.workflowState) &&
-										pullRequests.length === 0 ? (
-										// Somebody is working this issue but nothing is attached, so
-										// there is nothing for verification to trigger on. Said here,
-										// in the slot the verification card will occupy, rather than
-										// only on the panel below where the payoff is easy to miss.
-										<section className="rounded-xl border bg-card px-4 py-3">
-											<p className="text-xs text-muted-foreground">
-												No pull request attached. Maple can only confirm this
-												error stopped if it knows which fix to watch.
-											</p>
-											<Button
-												size="sm"
-												variant="outline"
-												// The rail is ~255px wide; the label does not fit
-												// on one line at its natural width and overflowed
-												// the card until it was allowed to wrap.
-												className="mt-2 h-auto w-full whitespace-normal py-1.5 text-xs"
-												onClick={() => setAttachDialogOpen(true)}
-											>
-												Attach the PR that fixes this
-											</Button>
-										</section>
-									) : null}
-									<IssuePullRequestsPanel
-										pullRequests={pullRequests}
-										suggestedRepository={suggestedRepository}
-										onLink={attachPullRequest}
-										onUnlink={detachPullRequest}
-										busy={busy === "pull-request"}
-										open={attachDialogOpen}
-										onOpenChange={setAttachDialogOpen}
-									/>
+									</div>
 								</div>
-							</div>
-						</DashboardLayout.RightPanel>
-					</DashboardLayout.Body>
-				</DashboardLayout.Root>
-			)
-		})
-		.render()
+							</DashboardLayout.RightPanel>
+						</DashboardLayout.Body>
+					</DashboardLayout.Root>
+				)
+			})
+			.render()
+	)
 }
 
 /** Names the window the fact strip's "Events" lane is counting over. */

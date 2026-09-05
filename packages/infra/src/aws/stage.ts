@@ -1,3 +1,4 @@
+import type { RegionName } from "@distilled.cloud/aws/Region"
 import type { MapleStage } from "../cloudflare/stage.ts"
 
 /**
@@ -13,6 +14,13 @@ import type { MapleStage } from "../cloudflare/stage.ts"
  * nothing (a rename destroys and recreates every resource).
  */
 export type MapleRegion = "us" | "eu"
+
+/**
+ * The AWS regions Maple deploys into, as the literal union the AWS client
+ * types use. Narrower than `string` on purpose: it is what lets a region flow
+ * into an AWS `Region` override without a cast at the call site.
+ */
+export type AwsRegionName = Extract<RegionName, "us-east-1" | "eu-central-1">
 
 export const DEFAULT_MAPLE_REGION: MapleRegion = "us"
 
@@ -40,7 +48,7 @@ export function parseMapleRegion(value: string | undefined): MapleRegion {
  *
  * Verify the instance's TINYBIRD_HOST before changing a mapping.
  */
-export function resolveAwsRegion(region: MapleRegion): string {
+export function resolveAwsRegion(region: MapleRegion): AwsRegionName {
 	switch (region) {
 		case "us":
 			return "us-east-1"

@@ -29,7 +29,7 @@ jobs:
         environment: staging
         env:
             INFISICAL_ENV_SLUG: staging
-            # Stamped onto deployed telemetry as `deployment.commit_sha` (server SDK
+            # Stamped onto deployed telemetry as `vcs.ref.head.revision` (server SDK
             # reads COMMIT_SHA; web build reads VITE_COMMIT_SHA via Vite define).
             COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
             VITE_COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
@@ -103,37 +103,19 @@ jobs:
               run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:migrate
 
             # AWS_ACCOUNT_ID: see the note in deploy-prd.yml.
-            # continue-on-error so the certificate step below can finish the job;
-            # the last step turns an unrecovered failure back into a red run.
+            #
+            # One pass, no retry. A stage's first deploy used to fail here — its
+            # ACM certificates were created PENDING_VALIDATION and their 443
+            # listeners refused them — and was recovered by a second step that
+            # published the validation CNAMEs with `scripts/acm-cert-validate.sh`
+            # and deployed again. The stack now publishes those records itself and
+            # waits for ISSUED (`@maple/infra/acm`), so a first deploy completes
+            # like any other and a failure here is a real failure.
             - name: Deploy STG stack with Alchemy
               id: deploy
-              continue-on-error: true
               run: bun run alchemy:deploy:stg
               env:
                   AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
-
-            # First pass of a stage with the AWS half on: each service's ACM
-            # certificate is created PENDING_VALIDATION and its 443 listener fails.
-            # Finish the job here — create the validation CNAMEs in the Cloudflare
-            # zone with the token Infisical already provides, wait for ISSUED, deploy
-            # again. A deploy that failed for any other reason reaches this too: the
-            # script is a no-op on an ISSUED certificate and the retry fails the same
-            # way. EVERY certificate-bearing service must be listed, or its first
-            # deploy cannot complete without someone doing this by hand.
-            - name: Validate the service certificates and retry the deploy
-              id: retry
-              if: ${{ steps.deploy.outcome == 'failure' }}
-              env:
-                  AWS_ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
-              run: |
-                  bash scripts/acm-cert-validate.sh ingest-staging.maple.dev electric-staging.maple.dev
-                  bun run alchemy:deploy:stg
-
-            - name: Fail the run if the deploy did not succeed
-              if: ${{ steps.deploy.outcome == 'failure' && steps.retry.outcome != 'success' }}
-              run: |
-                  echo "::error::alchemy deploy failed and the certificate-validation retry did not recover it (retry outcome: ${{ steps.retry.outcome }})"
-                  exit 1
 
     # A skipped job does not fail its run, so with CI red this workflow reported
     # SUCCESS while nothing deployed — which is how a broken `main` looked like a

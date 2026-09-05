@@ -81,7 +81,7 @@ import { upsertAlertIssue } from "@/services/errors/issue-hub"
 import { probeLiveness } from "@/services/alerts/telemetry-liveness"
 import { simulateFiringSpans } from "./alert-firing-spans"
 import { foldObservation, type HysteresisConfig, type HysteresisRow } from "./incident-hysteresis"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { Database, type DatabaseClient } from "@/platform/DatabaseLive"
 import { formatComparator } from "./alert-formatting"
 import { makeIncidentPushBudget, type IncidentPushBudget } from "./alert-push-budget"
@@ -92,7 +92,7 @@ import { makeDbExecute } from "@/platform/db-execute"
 import { dateToMs, msToDate, msToSqlTimestamp } from "@/platform/time"
 import { makePersistenceError } from "./alert-persistence"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
-import type { GroupedAlertObservation } from "@maple/query-engine/runtime"
+import { withAlertEvaluationScope, type GroupedAlertObservation } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { chartImageUrl, chartWindow, loadChartSeries } from "./alert-chart-series"
 import { systemTenant } from "./system-tenant"
@@ -3400,7 +3400,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceA
 					evaluationFailureCount: yield* Ref.get(evaluationFailureCount),
 					deliveryFailureCount: deliveryResult.failureCount,
 				}
-			})
+			}, withAlertEvaluationScope)
 
 			// `AlertsService.of(...)` can't be used here — referencing the class inside
 			// its own `make` is a TS2506 circular base-expression error.

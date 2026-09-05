@@ -80,10 +80,7 @@ const clockFormatters = new Map<string, Intl.DateTimeFormat>()
 
 /** `14:21:58` — the transcript's clock gutter, where the millisecond
  *  `formatCompactTimeInTimezone` adds is noise down a thousand rows. */
-export function formatClockInTimezone(
-	input: TimezoneFormatInput,
-	options: { timeZone: string },
-): string {
+export function formatClockInTimezone(input: TimezoneFormatInput, options: { timeZone: string }): string {
 	const date = toValidDate(input)
 	if (!date) return "-"
 

@@ -1,9 +1,7 @@
-import { useDeferredValue, useEffect, useMemo, useRef, type ReactNode } from "react"
-import { Link } from "@tanstack/react-router"
+import { memo, useDeferredValue, useEffect, useMemo, useRef, type ReactNode } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
 import type { AiSessionSpan } from "@maple/domain/http"
-import { Button } from "@maple/ui/components/ui/button"
 import { CopyButton } from "@maple/ui/components/ui/copy-button"
 import { formatBytes, formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
@@ -19,7 +17,6 @@ import {
 	CompactLinesIcon,
 	CornerDownLeftIcon,
 	DotsIcon,
-	ExternalLinkIcon,
 	FaceRobotIcon,
 	GearIcon,
 	PixelSparkleIcon,
@@ -31,8 +28,9 @@ import { useTimezonePreference } from "@/hooks/use-timezone-preference"
 import { callMetaLine, callMetaParts } from "@/lib/agent-sessions/session-summary"
 import { spanModel, type SessionTurn } from "@/lib/agent-sessions/session-turns"
 import {
-	buildTranscript,
+	assembleTranscript,
 	type CaptureCoverage,
+	prepareTranscript,
 	type TranscriptPayload,
 	type TranscriptRow,
 } from "@/lib/agent-sessions/session-transcript"
@@ -99,7 +97,6 @@ export function SessionTranscript({
 	onToggleRow,
 	selectedSpanId,
 	onSelectSpan,
-	onOpenTraceView,
 }: {
 	turns: readonly SessionTurn[]
 	/** The session's captured tool results by call id (`sessionToolResults`). */
@@ -119,8 +116,6 @@ export function SessionTranscript({
 	onToggleRow: (key: string) => void
 	selectedSpanId: string | undefined
 	onSelectSpan: (spanId: string | undefined) => void
-	/** Switch to the Traces view with this span still selected. */
-	onOpenTraceView: () => void
 }) {
 	const { ref: listRef, getScrollElement, scrollMargin } = usePageScrollMargin()
 	const { effectiveTimezone } = useTimezonePreference()
@@ -128,17 +123,15 @@ export function SessionTranscript({
 	// The build parses every captured payload the query has to search, so it
 	// trails the input by a frame rather than running on the keystroke.
 	const deferredQuery = useDeferredValue(query)
+	// Two steps so a collapse re-runs only the cheap one: the read of every
+	// captured payload is per session and filter, the row list per collapse.
+	const prepared = useMemo(
+		() => prepareTranscript({ turns, toolResults, query: deferredQuery, showThinking }),
+		[turns, toolResults, deferredQuery, showThinking],
+	)
 	const rows = useMemo(
-		() =>
-			buildTranscript({
-				turns,
-				toolResults,
-				query: deferredQuery,
-				showThinking,
-				truncated,
-				collapsedTurns,
-			}),
-		[turns, toolResults, deferredQuery, showThinking, truncated, collapsedTurns],
+		() => assembleTranscript(prepared, { collapsedTurns, truncated }),
+		[prepared, collapsedTurns, truncated],
 	)
 
 	const virtualizer = useVirtualizer({
@@ -154,6 +147,11 @@ export function SessionTranscript({
 		// data swap re-fills mounted rows); without this the ResizeObserver path
 		// calls flushSync mid-lifecycle and React logs an error for every batch.
 		useAnimationFrameWithResizeObserver: true,
+		// Rows are positioned by writing their transform straight to the DOM, so
+		// the list re-renders only when the set of mounted rows changes — not on
+		// every measurement, which on a scroll is several times a frame, each
+		// one a synchronous re-render of every mounted block.
+		directDomUpdates: true,
 	})
 
 	// A pasted `?span=` link lands on the block it names. Once, on mount — after
@@ -185,7 +183,14 @@ export function SessionTranscript({
 		// every row by its height.
 		<div className="pt-2">
 			<div ref={listRef}>
-				<div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+				{/* The virtualizer writes each row's offset — `start` less the margin,
+				    back in this list's own coordinates — and this container's height
+				    itself, as rows are measured; React only mounts and unmounts. */}
+				<div
+					ref={virtualizer.containerRef}
+					className="relative w-full"
+					style={{ height: virtualizer.getTotalSize() }}
+				>
 					{virtualizer.getVirtualItems().map((item) => {
 						const row = rows[item.index]!
 						return (
@@ -193,10 +198,8 @@ export function SessionTranscript({
 								key={item.key}
 								ref={virtualizer.measureElement}
 								data-index={item.index}
+								data-slot="transcript-row"
 								className="absolute inset-x-0 top-0"
-								// `start` is in the page scroller's coordinates; the margin
-								// brings it back to this list's own.
-								style={{ transform: `translateY(${item.start - scrollMargin}px)` }}
 							>
 								<TranscriptBlock
 									row={row}
@@ -208,7 +211,6 @@ export function SessionTranscript({
 									onToggleRow={onToggleRow}
 									selected={"span" in row && row.span.spanId === selectedSpanId}
 									onSelectSpan={onSelectSpan}
-									onOpenTraceView={onOpenTraceView}
 								/>
 							</div>
 						)
@@ -229,10 +231,12 @@ interface BlockProps {
 	onToggleRow: (key: string) => void
 	selected: boolean
 	onSelectSpan: (spanId: string | undefined) => void
-	onOpenTraceView: () => void
 }
 
-function TranscriptBlock(props: BlockProps) {
+/** Memoized: the list re-renders whenever the mounted range moves, and a block
+ *  whose props have not changed — nearly all of them, on every scroll — has
+ *  nothing to redo. Every callback it takes is stable for the same reason. */
+const TranscriptBlock = memo(function TranscriptBlock(props: BlockProps) {
 	const { row } = props
 	switch (row.kind) {
 		case "turn":
@@ -266,7 +270,7 @@ function TranscriptBlock(props: BlockProps) {
 		case "divider":
 			return <DividerBlock {...props} row={row} />
 	}
-}
+})
 
 /* -------------------------------------------------------------------------- */
 /* Shell                                                                      */
@@ -498,7 +502,7 @@ function UserBlock({
 												part.kind === "text" ? part.text : `[${part.kind}]`,
 											)
 											.join("\n")}
-										clampClass="line-clamp-[6]"
+										clampLines={6}
 										expanded={disclosed(openRows, key, false)}
 										onToggleExpanded={() => onToggleRow(key)}
 									/>
@@ -587,7 +591,6 @@ function AssistantBlock({
 	onToggleRow,
 	selected,
 	onSelectSpan,
-	onOpenTraceView,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "assistant" }> }) {
 	const tone = row.failed ? "text-destructive" : "text-chart-2"
 	const Glyph = row.failed ? CircleWarningIcon : PixelSparkleIcon
@@ -636,7 +639,6 @@ function AssistantBlock({
 						onRawChange={(next) => next !== raw && onToggleRow(rawKey)}
 					/>
 				)}
-				{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
 			</div>
 			{row.text !== undefined && (
 				<div className="pt-2.5">
@@ -656,15 +658,15 @@ function AssistantBlock({
 							<div className="min-w-0 grow">
 								<ClampedText
 									text={errorRaw ? row.span.statusMessage : error.formatted}
-									html={errorRaw ? undefined : error.highlighted}
+									rendering={!errorRaw && error.isJson ? "json" : "text"}
 									mono
-									clampClass="line-clamp-[14]"
+									clampLines={14}
 									toneClass="text-[13px] text-destructive/90"
 									expanded={disclosed(openRows, `${row.key}:error-text`, false)}
 									onToggleExpanded={() => onToggleRow(`${row.key}:error-text`)}
 								/>
 							</div>
-							{error.highlighted !== undefined && (
+							{error.isJson && (
 								<ViewSwitch
 									rendered="json"
 									raw={errorRaw}
@@ -811,7 +813,6 @@ function ToolBlock({
 	onToggleRow,
 	selected,
 	onSelectSpan,
-	onOpenTraceView,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "tool" }> }) {
 	const payloadsKey = `${row.key}:payloads`
 	const open = disclosed(openRows, payloadsKey, showPayloads)
@@ -860,10 +861,9 @@ function ToolBlock({
 							error.type {row.span.genAi.errorType}
 						</Pill>
 					)}
-					{!row.failed && row.callId !== undefined && !selected && (
+					{!row.failed && row.callId !== undefined && (
 						<span className={cn(META, "shrink-0")}>{row.callId}</span>
 					)}
-					{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
 					{/* The one control that opens the pair, in the header where the reader
 					    already is — not a footer they have to scroll the payloads to reach. */}
 					<button
@@ -917,7 +917,7 @@ function PayloadSection({
 	onToggleRow: (key: string) => void
 	textKey: string
 }) {
-	const { formatted, highlighted } = useJsonPayload(payload.text)
+	const { formatted, isJson } = useJsonPayload(payload.text)
 	const rawKey = `${textKey}:raw`
 	const raw = disclosed(openRows, rawKey, false)
 
@@ -947,7 +947,7 @@ function PayloadSection({
 				    The switch only appears where the two differ. */}
 				{payload.text !== "" && (
 					<span className="-my-1 ml-auto flex items-center">
-						{highlighted !== undefined && (
+						{isJson && (
 							<ViewSwitch
 								rendered="json"
 								raw={raw}
@@ -964,9 +964,9 @@ function PayloadSection({
 			{payload.text !== "" && (
 				<ClampedText
 					text={raw ? payload.text : formatted}
-					html={raw ? undefined : highlighted}
+					rendering={!raw && isJson ? "json" : "text"}
 					mono
-					clampClass="line-clamp-[14]"
+					clampLines={14}
 					toneClass={tone}
 					expanded={disclosed(openRows, textKey, false)}
 					onToggleExpanded={() => onToggleRow(textKey)}
@@ -1175,7 +1175,6 @@ function StructureRow({
 	timeZone,
 	selected,
 	onSelectSpan,
-	onOpenTraceView,
 }: BlockProps & { row: Extract<TranscriptRow, { kind: "structure" }> }) {
 	const category = row.label.startsWith("tool ")
 		? "tool"
@@ -1228,7 +1227,6 @@ function StructureRow({
 					<span className="grow" />
 					<span className={cn(META, "shrink-0")}>{formatDuration(row.span.durationMs)}</span>
 				</button>
-				{selected && <OpenInTraces span={row.span} onOpenTraceView={onOpenTraceView} />}
 			</div>
 		</Row>
 	)
@@ -1335,39 +1333,6 @@ function InlineNote({ children, className }: { children: ReactNode; className?: 
 			<CircleQuestionIcon size={13} className="mt-0.5 shrink-0 text-muted-foreground" />
 			<p className="min-w-0 text-muted-foreground text-xs leading-relaxed">{children}</p>
 		</div>
-	)
-}
-
-function OpenInTraces({ span, onOpenTraceView }: { span: AiSessionSpan; onOpenTraceView: () => void }) {
-	return (
-		<span className="flex shrink-0 items-center gap-1.5">
-			<Button
-				variant="outline"
-				size="sm"
-				className="h-5 px-1.5 text-[11px]"
-				onClick={(event) => {
-					event.stopPropagation()
-					onOpenTraceView()
-				}}
-			>
-				Waterfall
-			</Button>
-			<Button
-				variant="outline"
-				size="sm"
-				className="h-5 gap-1 px-1.5 text-[11px]"
-				render={
-					<Link
-						to="/traces/$traceId"
-						params={{ traceId: span.traceId }}
-						search={{ t: span.timestamp, spanId: span.spanId }}
-					/>
-				}
-			>
-				Open in Traces
-				<ExternalLinkIcon size={10} />
-			</Button>
-		</span>
 	)
 }
 

@@ -35,6 +35,18 @@ const BAR_GAP = 1
 const BAR_WIDTH = 2
 const VIEW_HEIGHT = 20
 
+/**
+ * A bucket that saw nothing still draws this much, so the comb has a floor and
+ * the bars stand ON something. Without it a quiet window with two spikes drew
+ * two marks hovering in an empty box, with no baseline to read them against —
+ * the shape looked broken rather than sparse.
+ */
+const EMPTY_BAR_HEIGHT = 1
+
+/** A bucket that saw errors clears the floor, because the difference between
+ *  "one error" and "none" is the whole point of the shape. */
+const MIN_BAR_HEIGHT = 2.5
+
 export function SignalSpark({
 	values,
 	severity,
@@ -83,10 +95,16 @@ export function SignalSpark({
 				</linearGradient>
 			</defs>
 			{values.map((value, index) => {
-				// A bucket that saw errors always draws at least a hairline: the
-				// difference between "one error" and "none" is the whole point of the
-				// shape, and rounding it to zero height erases it.
-				const height = peak === 0 ? 0 : Math.max(value > 0 ? 1.5 : 0, (value / peak) * VIEW_HEIGHT)
+				// A window that saw nothing at all stays blank: a floor drawn under no
+				// data is a chart claiming to have some. The floor is the baseline of a
+				// shape that exists, not decoration on an empty cell.
+				if (peak === 0) return null
+
+				const empty = value === 0
+				const height = empty
+					? EMPTY_BAR_HEIGHT
+					: Math.max(MIN_BAR_HEIGHT, (value / peak) * VIEW_HEIGHT)
+				const recent = index >= tailStart
 				return (
 					<rect
 						key={index}
@@ -94,8 +112,10 @@ export function SignalSpark({
 						y={VIEW_HEIGHT - height}
 						width={BAR_WIDTH}
 						height={height}
-						fill={`url(#${gradientId})`}
-						opacity={index >= tailStart ? 1 : 0.5}
+						// Flat fill on the floor — a 1px tick has nothing to ramp, and
+						// running it through the gradient only muddies the baseline.
+						fill={empty ? "currentColor" : `url(#${gradientId})`}
+						opacity={empty ? (recent ? 0.3 : 0.2) : recent ? 1 : 0.5}
 					/>
 				)
 			})}

@@ -22,7 +22,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import type { TableDiffEntry } from "@maple/domain/clickhouse"
 import { Env } from "@/platform/Env"
 import { encryptAes256Gcm } from "@/platform/Crypto"
-import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { WorkerEnvironment } from "@maple/infra/worker-runtime"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "@/platform/test-pglite"
 import {
 	type ClickHouseExecConfig,
@@ -364,6 +364,52 @@ describe("resolveRuntimeConfig caching", () => {
 		expect(Option.isSome(o)).toBe(true)
 		return (o as Option.Some<A>).value
 	}
+
+	const buildLayerIgnoring = (testDb: TestDb, environment: string) => {
+		const ignoringConfig = ConfigProvider.layer(
+			ConfigProvider.fromUnknown({
+				PORT: "3472",
+				TINYBIRD_HOST: "https://maple-managed.tinybird.co",
+				TINYBIRD_TOKEN: "managed-token",
+				MAPLE_AUTH_MODE: "self_hosted",
+				MAPLE_ROOT_PASSWORD: "test-root-password",
+				MAPLE_DEFAULT_ORG_ID: "default",
+				MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 5).toString("base64"),
+				MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "lookup-key",
+				MAPLE_INGEST_PUBLIC_URL: "http://127.0.0.1:3474",
+				MAPLE_APP_BASE_URL: "http://127.0.0.1:3471",
+				MAPLE_ENVIRONMENT: environment,
+				MAPLE_IGNORE_ORG_CLICKHOUSE: "1",
+			}),
+		)
+		const envLive = Env.layer.pipe(Layer.provide(ignoringConfig))
+		const edgeCacheLive = Layer.succeed(EdgeCacheService)(makeEdgeCacheService(missOnlyBackend))
+		return OrgClickHouseSettingsService.layer.pipe(
+			Layer.provide(Layer.mergeAll(envLive, testDb.layer, edgeCacheLive)),
+		)
+	}
+
+	it.effect("MAPLE_IGNORE_ORG_CLICKHOUSE routes a BYO org to the managed warehouse in development", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_ignored_in_dev"
+		return Effect.gen(function* () {
+			const service = yield* OrgClickHouseSettingsService
+			yield* Effect.promise(() => seedRow(testDb, orgId, "https://byo.example"))
+			const resolved = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			expect(Option.isNone(resolved)).toBe(true)
+			expect(yield* service.isWarehouseWriteReady(asOrgId(orgId))).toBe(false)
+		}).pipe(Effect.provide(buildLayerIgnoring(testDb, "development")))
+	})
+
+	it.effect("MAPLE_IGNORE_ORG_CLICKHOUSE is ignored outside development", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_not_ignored_in_prod"
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedRow(testDb, orgId, "https://byo.example"))
+			const resolved = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
+			expect(expectSome(resolved).url).toBe("https://byo.example")
+		}).pipe(Effect.provide(buildLayerIgnoring(testDb, "production")))
+	})
 
 	it.effect("distinguishes invalid saved settings from invalid request input", () => {
 		const testDb = createTestDb(cacheTrackedDbs)

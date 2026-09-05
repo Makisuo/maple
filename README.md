@@ -48,28 +48,26 @@ update, and uninstall details.
 
 ## Develop
 
-Run every available `dev` task in the monorepo:
+Run the whole stack — the Cloudflare Workers under alchemy's local runtime,
+the rest as child processes of the same `alchemy dev` — behind
+`https://<app>.localhost`:
 
 ```bash
-bun run dev
+bun dev
 ```
 
-Run individual apps from the repo root with workspace filters:
+Or just some of it (`api`, `alerting`, `electric-sync`, `web`, `landing`,
+`ingest`, `local-ui`, `scraper`):
+
+```bash
+bun dev api web
+```
+
+A single non-Worker app can also run on its raw port, outside the stack:
 
 ```bash
 bun --filter=@maple/web dev
-bun --filter=@maple/api dev
-bun --filter=@maple/ingest dev
-bun --filter=@maple/landing dev
 ```
-
-There is also a dedicated root helper for alerting:
-
-```bash
-bun run dev:alerting
-```
-
-Turbo dev runs in TUI mode so interactive servers stay attached.
 
 ## Validate
 

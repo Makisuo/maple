@@ -15,7 +15,7 @@ observability tools. See [Multi-workspace architecture](#multi-workspace-archite
 | ---------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Framework  | eve `0.25.x` (durable agent runtime, Nitro HTTP host)                                                 | filesystem-first agents                                                                                                                                                                           |
 | Host       | **Railway** container running `eve start` (long-running Node)                                         | eve's supported self-host model; edge Workers is blocked today by a workflow-world protocol gap                                                                                                   |
-| Model      | **OpenRouter** via REST (`@openrouter/ai-sdk-provider`), `z-ai/glm-5.3-flash:nitro`                        | `createOpenRouter({ apiKey })` → an AI-SDK model; streams structured tool calls (see Notes)                                                                                                       |
+| Model      | **OpenRouter** via REST (`@openrouter/ai-sdk-provider`), `z-ai/glm-5.3-flash:nitro`                   | `createOpenRouter({ apiKey })` → an AI-SDK model; streams structured tool calls (see Notes)                                                                                                       |
 | Durability | **`@workflow/world-postgres`** (`5.0.0-beta.27`) + Railway Postgres                                   | protocol-compatible with eve's vendored `@workflow/*` 5.0.0-beta line                                                                                                                             |
 | Slack      | **self-managed, multi-workspace** (`slackChannel()` + custom `webhookVerifier` + per-team `botToken`) | one public app across many workspaces; static signing secret verifies inbound, per-team bot token resolved from the Maple API — see [Multi-workspace architecture](#multi-workspace-architecture) |
 | Maple      | **resolve endpoint** (`/internal/slack/workspaces/:teamId`) + **MCP** (`/mcp`)                        | per-team install lookup (TTL-cached) and observability tools scoped per org                                                                                                                       |
@@ -374,7 +374,7 @@ eve's native idiom:
   source of truth for both.
 - **Telemetry:** `agent/instrumentation.ts` exports AI SDK spans to Maple's ingest as service
   `maple-slack-agent` when `MAPLE_INGEST_KEY` is set (no-op otherwise), with `service.version` +
-  `deployment.commit_sha` from Railway's `RAILWAY_GIT_COMMIT_SHA` so releases show up in the
+  `vcs.ref.head.revision` from Railway's `RAILWAY_GIT_COMMIT_SHA` so releases show up in the
   commit-hover UI. Model inputs/outputs are never recorded; Slack team/channel/thread/user land as
   `maple.slack.*` span attributes (omitted rather than empty-string when absent).
   `agent/hooks/outcome-log.ts` logs turn outcomes + tool failures unconditionally, through

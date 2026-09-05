@@ -190,6 +190,21 @@ export const facetAttrExpr = (
 export const soleValue = <A>(values: readonly A[]): A | undefined =>
 	values.length === 1 ? values[0] : undefined
 
+/**
+ * Every spelling a severity *level* reaches the warehouse as. Effect's logger writes Title Case
+ * (`Error`), the OTel SDKs upper-case (`ERROR`), pino-style shims lower-case — so `severity: "ERROR"`
+ * matched none of Maple's own services. Exact values (kept as `IN`) preserve the sorting-key prefix
+ * on `logs_aggregates_hourly`, which `upper(SeverityText)` would not.
+ */
+export function severitySpellings(level: string): readonly string[] {
+	const trimmed = level.trim()
+	if (trimmed === "") return []
+	const upper = trimmed.toUpperCase()
+	const lower = trimmed.toLowerCase()
+	const title = upper.charAt(0) + lower.slice(1)
+	return [...new Set([upper, title, lower])]
+}
+
 export function inclusionCondition(col: CH.Expr<string>, values: readonly string[]): CH.Condition {
 	const only = soleValue(values)
 	return only === undefined ? CH.inList(col, values) : col.eq(only)
@@ -315,7 +330,7 @@ export function tracesBaseWhereConditions(
 		}
 	}
 	if (opts.commitShas?.length) {
-		conditions.push(CH.inList($.ResourceAttributes.get("deployment.commit_sha"), opts.commitShas))
+		conditions.push(CH.inList($.ResourceAttributes.get("vcs.ref.head.revision"), opts.commitShas))
 	}
 	if (opts.attributeFilters) {
 		for (const af of opts.attributeFilters) {
@@ -351,7 +366,7 @@ export function tracesBaseWhereConditions(
 	}
 	if (opts.excludedCommitShas?.length) {
 		conditions.push(
-			CH.notInList($.ResourceAttributes.get("deployment.commit_sha"), opts.excludedCommitShas),
+			CH.notInList($.ResourceAttributes.get("vcs.ref.head.revision"), opts.excludedCommitShas),
 		)
 	}
 
@@ -408,8 +423,8 @@ export function serviceOverviewWhereConditions(
 	const services = inclusionValues(opts.serviceName, opts.serviceNames)
 	const conditions: Array<CH.Condition | undefined> = [
 		$.OrgId.eq(param.string("orgId")),
-		$.Timestamp.gte(param.dateTimeString("startTime")),
-		$.Timestamp.lte(param.dateTimeString("endTime")),
+		$.Timestamp.gte(param.dateTimeSeconds("startTime")),
+		$.Timestamp.lte(param.dateTimeSeconds("endTime")),
 		CH.when(services, (v: readonly string[]) =>
 			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),
@@ -514,10 +529,10 @@ export function tracesAggregatesWhereConditions(
 		$.OrgId.eq(param.string("orgId")),
 		hourBounds
 			? $.Hour.gte(CH.rawExpr(hourBounds.gte, T.dateTimeString))
-			: $.Hour.gte(param.dateTimeString("startTime")),
+			: $.Hour.gte(param.dateTimeSeconds("startTime")),
 		hourBounds
 			? $.Hour.lt(CH.rawExpr(hourBounds.lt, T.dateTimeString))
-			: $.Hour.lte(param.dateTimeString("endTime")),
+			: $.Hour.lte(param.dateTimeSeconds("endTime")),
 		CH.when(services, (v: readonly string[]) =>
 			matchOrIn($.ServiceName, v, mm?.serviceName === "contains"),
 		),

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { Schema } from "effect"
 
@@ -11,15 +11,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 
-import {
-	CheckIcon,
-	ChevronDownIcon,
-	ChevronRightIcon,
-	CircleWarningIcon,
-	CopyIcon,
-	ExternalLinkIcon,
-} from "@/components/icons"
-import { MessageResponse } from "@/components/ai-elements/message-response"
+import { ChevronDownIcon, ChevronRightIcon, CircleWarningIcon, ExternalLinkIcon } from "@/components/icons"
 import {
 	AttributesSection,
 	CopyableValue,
@@ -44,7 +36,7 @@ import {
 import { classifyAiSpan, spanFailed, spanTtftMs } from "@/lib/agent-sessions/session-turns"
 import { callMetaLine, formatCost } from "@/lib/agent-sessions/session-summary"
 import { payload } from "@/lib/agent-sessions/session-transcript"
-import { ClampedText, firstLine } from "./clamped-text"
+import { ClampedText, type ClampLines, firstLine } from "./clamped-text"
 import { toggled, useJsonPayload, useMessageBody, ViewSwitch } from "./payload-view"
 import { Pill } from "./pill"
 import { ToolIo } from "./tool-io"
@@ -59,7 +51,7 @@ export type SpanDetailTab = "details" | "messages" | "tools" | "logs"
 
 /** The overlay is a reading surface, not a peek, so a payload gets twice the
  *  transcript's twelve lines before it asks to be expanded. */
-const PANEL_CLAMP = "line-clamp-[24]"
+const PANEL_CLAMP: ClampLines = 24
 
 export function SpanExpansion({
 	span,
@@ -179,24 +171,17 @@ function TabButton({
 }
 
 function CopySpanJsonButton({ span }: { span: AiSessionSpan }) {
-	const [copied, setCopied] = useState(false)
-	const timeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
-
 	return (
-		<Button
+		<CopyButton
+			value={() => JSON.stringify(span, null, 2)}
+			label="Span JSON"
+			idleLabel="Copy JSON"
+			iconSize={12}
+			timeout={1500}
 			variant="outline"
 			size="sm"
 			className="h-6.5 gap-1.5 text-xs"
-			onClick={() => {
-				void navigator.clipboard?.writeText(JSON.stringify(span, null, 2))
-				setCopied(true)
-				clearTimeout(timeoutRef.current)
-				timeoutRef.current = setTimeout(() => setCopied(false), 1500)
-			}}
-		>
-			{copied ? <CheckIcon size={12} /> : <CopyIcon size={12} />}
-			Copy JSON
-		</Button>
+		/>
 	)
 }
 
@@ -347,14 +332,10 @@ function SystemMessageRow({ message }: { message: SpanMessage }) {
 					<div className="min-w-0 grow">
 						<ClampedText
 							text={raw ? text : body.formatted}
-							html={raw ? undefined : body.highlighted}
+							rendering={raw ? "text" : body.rendered}
 							mono={!raw && body.rendered === "json"}
-							clampClass={PANEL_CLAMP}
-							body={
-								raw || body.rendered === "json" ? undefined : (
-									<MessageResponse className="text-sm">{text}</MessageResponse>
-								)
-							}
+							clampLines={PANEL_CLAMP}
+							proseClassName="text-sm"
 						/>
 					</div>
 					<ViewSwitch rendered={body.rendered} raw={raw} onRawChange={setRaw} />
@@ -427,14 +408,10 @@ function TextPart({ text, raw }: { text: string; raw: boolean }) {
 	return (
 		<ClampedText
 			text={raw ? text : body.formatted}
-			html={raw ? undefined : body.highlighted}
+			rendering={raw ? "text" : body.rendered}
 			mono={!raw && body.rendered === "json"}
-			clampClass={PANEL_CLAMP}
-			body={
-				raw || body.rendered === "json" ? undefined : (
-					<MessageResponse className="text-sm">{text}</MessageResponse>
-				)
-			}
+			clampLines={PANEL_CLAMP}
+			proseClassName="text-sm"
 		/>
 	)
 }
@@ -454,7 +431,7 @@ function ReasoningPart({ part }: { part: Extract<SpanMessagePart, { kind: "reaso
 						: "No reasoning text was captured."}
 				</p>
 			) : (
-				<ClampedText text={part.text} clampClass={PANEL_CLAMP} />
+				<ClampedText text={part.text} clampLines={PANEL_CLAMP} />
 			)}
 		</div>
 	)
@@ -464,13 +441,7 @@ function ReasoningPart({ part }: { part: Extract<SpanMessagePart, { kind: "reaso
 /* Tool calls                                                                 */
 /* -------------------------------------------------------------------------- */
 
-function ToolCallsSection({
-	span,
-	toolCalls,
-}: {
-	span: AiSessionSpan
-	toolCalls: readonly SpanToolCall[]
-}) {
+function ToolCallsSection({ span, toolCalls }: { span: AiSessionSpan; toolCalls: readonly SpanToolCall[] }) {
 	// The expansion does not virtualize, so one disclosure set for every card on
 	// the tab lives here — the same shape the transcript hands its rows.
 	const [openRows, setOpenRows] = useState<ReadonlySet<string>>(() => new Set())
@@ -609,7 +580,7 @@ function PayloadCard({
  * captured bytes stay one click away, and the copy takes what is displayed.
  */
 function PayloadBody({ text, copyLabel }: { text: string; copyLabel: string }) {
-	const { formatted, highlighted } = useJsonPayload(text)
+	const { formatted, isJson } = useJsonPayload(text)
 	const [raw, setRaw] = useState(false)
 
 	return (
@@ -617,14 +588,12 @@ function PayloadBody({ text, copyLabel }: { text: string; copyLabel: string }) {
 			<div className="min-w-0 grow">
 				<ClampedText
 					text={raw ? text : formatted}
-					html={raw ? undefined : highlighted}
-					clampClass={PANEL_CLAMP}
+					rendering={!raw && isJson ? "json" : "text"}
+					clampLines={PANEL_CLAMP}
 					mono
 				/>
 			</div>
-			{highlighted !== undefined && (
-				<ViewSwitch rendered="json" raw={raw} onRawChange={setRaw} className="self-start" />
-			)}
+			{isJson && <ViewSwitch rendered="json" raw={raw} onRawChange={setRaw} className="self-start" />}
 			<CopyButton value={raw ? text : formatted} label={copyLabel} className="-my-1 shrink-0" />
 		</div>
 	)
@@ -649,13 +618,7 @@ const toSpanId = Schema.decodeSync(SpanId)
  * was read from — Details is where a reader looks first, and a failed call
  * whose evidence is only on another tab reads as a call that did not fail.
  */
-function DetailsSection({
-	span,
-	toolCalls,
-}: {
-	span: AiSessionSpan
-	toolCalls: readonly SpanToolCall[]
-}) {
+function DetailsSection({ span, toolCalls }: { span: AiSessionSpan; toolCalls: readonly SpanToolCall[] }) {
 	const detailResult = useAtomValue(
 		span.traceId !== "" && span.spanId !== ""
 			? getSpanDetailResultAtom({
@@ -675,9 +638,7 @@ function DetailsSection({
 	// tab. The span's OWN call only — a model span's tool calls are its OUTPUT,
 	// and their results say nothing about why the model call itself failed.
 	const failedToolResult =
-		failed && classifyAiSpan(span) === "tool"
-			? toolCalls.find((call) => call.own)?.resultText
-			: undefined
+		failed && classifyAiSpan(span) === "tool" ? toolCalls.find((call) => call.own)?.resultText : undefined
 
 	return (
 		<div className="flex flex-col gap-3 pb-1">
@@ -855,4 +816,3 @@ function collapsedText(parts: readonly SpanMessagePart[]): string {
 		.join("\n")
 		.trim()
 }
-

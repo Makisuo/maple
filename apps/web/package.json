@@ -3,8 +3,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "portless",
-		"dev:app": "vite dev --port ${PORT:-3471} --host ${HOST:-127.0.0.1}",
+		"dev": "vite dev --port ${PORT:-3471} --host ${HOST:-127.0.0.1}",
 		"build": "vite build",
 		"preview": "vite preview",
 		"test": "vitest run --passWithNoTests",
@@ -55,7 +54,7 @@
 		"@tanstack/react-db": "0.3.5",
 		"@tanstack/react-hotkeys": "0.10.0",
 		"@tanstack/react-router": "^1.170.16",
-		"@tanstack/react-table": "^8.21.3",
+		"@tanstack/react-table": "^9.2.4",
 		"@tanstack/react-virtual": "^3.14.3",
 		"@xyflow/react": "catalog:ui",
 		"class-variance-authority": "catalog:ui",
@@ -98,9 +97,5 @@
 		"vite": "catalog:",
 		"vitest": "catalog:",
 		"woff2-encoder": "^2.0.0"
-	},
-	"portless": {
-		"name": "web",
-		"script": "dev:app"
 	}
 }

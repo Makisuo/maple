@@ -15,9 +15,16 @@ type WhereClauseAutocompleteContext = "key" | "operator" | "value" | "conjunctio
  * is a funnel step's attribute filter, whose keys are the customer's own and
  * are not suggested. Both take `=` only — the funnel query runs nothing else.
  */
-export type WhereClauseAutocompleteScope = "default" | "trace_search" | "product_events" | "product_event_attributes"
+export type WhereClauseAutocompleteScope =
+	| "default"
+	| "trace_search"
+	| "product_events"
+	| "product_event_attributes"
 
-const PRODUCT_EVENT_SCOPES: ReadonlyArray<WhereClauseAutocompleteScope> = ["product_events", "product_event_attributes"]
+const PRODUCT_EVENT_SCOPES: ReadonlyArray<WhereClauseAutocompleteScope> = [
+	"product_events",
+	"product_event_attributes",
+]
 
 export interface WhereClauseAutocompleteValues {
 	services?: string[]
@@ -104,8 +111,8 @@ const KEY_DEFINITIONS: Record<QueryBuilderDataSource, KeyDefinition[]> = {
 			description: "Filter by deployment environment",
 		},
 		{
-			label: "deployment.commit_sha",
-			insertText: "deployment.commit_sha",
+			label: "vcs.ref.head.revision",
+			insertText: "vcs.ref.head.revision",
 			description: "Filter by commit sha",
 		},
 		{
@@ -775,7 +782,7 @@ function buildValueSuggestions(
 		"service.name": uniqueValues(values?.services ?? []),
 		"span.name": uniqueValues(values?.spanNames ?? []),
 		"deployment.environment": uniqueValues(values?.environments ?? []),
-		"deployment.commit_sha": uniqueValues(values?.commitShas ?? []),
+		"vcs.ref.head.revision": uniqueValues(values?.commitShas ?? []),
 		severity: uniqueValues(values?.severities ?? []),
 		...(scope === "trace_search"
 			? {
@@ -904,79 +911,87 @@ function buildSuggestions(
 
 	if (parsed.context === "operator") {
 		const operatorSuggestions: WhereClauseAutocompleteSuggestion[] = PRODUCT_EVENT_SCOPES.includes(scope)
-			? [{ id: "operator:equal", kind: "operator", label: "=", insertText: "=", description: "Exact match" }]
+			? [
+					{
+						id: "operator:equal",
+						kind: "operator",
+						label: "=",
+						insertText: "=",
+						description: "Exact match",
+					},
+				]
 			: [
-			{
-				id: "operator:equal",
-				kind: "operator",
-				label: "=",
-				insertText: "=",
-				description: "Exact match",
-			},
-			{
-				id: "operator:not-equal",
-				kind: "operator",
-				label: "!=",
-				insertText: "!=",
-				description: "Not equal",
-			},
-			{
-				id: "operator:gt",
-				kind: "operator",
-				label: ">",
-				insertText: ">",
-				description: "Greater than",
-			},
-			{
-				id: "operator:lt",
-				kind: "operator",
-				label: "<",
-				insertText: "<",
-				description: "Less than",
-			},
-			{
-				id: "operator:gte",
-				kind: "operator",
-				label: ">=",
-				insertText: ">=",
-				description: "Greater than or equal",
-			},
-			{
-				id: "operator:lte",
-				kind: "operator",
-				label: "<=",
-				insertText: "<=",
-				description: "Less than or equal",
-			},
-			{
-				id: "operator:contains",
-				kind: "operator",
-				label: "contains",
-				insertText: "contains",
-				description: "Substring match",
-			},
-			{
-				id: "operator:not-contains",
-				kind: "operator",
-				label: "!contains",
-				insertText: "!contains",
-				description: "Substring does not match",
-			},
-			{
-				id: "operator:exists",
-				kind: "operator",
-				label: "exists",
-				insertText: "exists",
-				description: "Key exists",
-			},
-			{
-				id: "operator:not-exists",
-				kind: "operator",
-				label: "!exists",
-				insertText: "!exists",
-				description: "Key does not exist",
-			},
-		]
+					{
+						id: "operator:equal",
+						kind: "operator",
+						label: "=",
+						insertText: "=",
+						description: "Exact match",
+					},
+					{
+						id: "operator:not-equal",
+						kind: "operator",
+						label: "!=",
+						insertText: "!=",
+						description: "Not equal",
+					},
+					{
+						id: "operator:gt",
+						kind: "operator",
+						label: ">",
+						insertText: ">",
+						description: "Greater than",
+					},
+					{
+						id: "operator:lt",
+						kind: "operator",
+						label: "<",
+						insertText: "<",
+						description: "Less than",
+					},
+					{
+						id: "operator:gte",
+						kind: "operator",
+						label: ">=",
+						insertText: ">=",
+						description: "Greater than or equal",
+					},
+					{
+						id: "operator:lte",
+						kind: "operator",
+						label: "<=",
+						insertText: "<=",
+						description: "Less than or equal",
+					},
+					{
+						id: "operator:contains",
+						kind: "operator",
+						label: "contains",
+						insertText: "contains",
+						description: "Substring match",
+					},
+					{
+						id: "operator:not-contains",
+						kind: "operator",
+						label: "!contains",
+						insertText: "!contains",
+						description: "Substring does not match",
+					},
+					{
+						id: "operator:exists",
+						kind: "operator",
+						label: "exists",
+						insertText: "exists",
+						description: "Key exists",
+					},
+					{
+						id: "operator:not-exists",
+						kind: "operator",
+						label: "!exists",
+						insertText: "!exists",
+						description: "Key does not exist",
+					},
+				]
 
 		return filterAndRankSuggestions(operatorSuggestions, parsed.query, maxSuggestions)
 	}

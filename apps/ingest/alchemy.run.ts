@@ -20,6 +20,7 @@ import {
 	stageDeploysCollector,
 } from "@maple/infra/aws"
 import type { ReplayBlobCredentials } from "../api/alchemy.run.ts"
+import { issueCertificateViaCloudflare } from "@maple/infra/acm"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import { resolveDeploymentEnvironment } from "@maple/infra/cloudflare"
 // Only the primitives. The grouped helpers in that module return Worker-binding
@@ -82,10 +83,8 @@ const EPHEMERAL_STORAGE_GIB = 60
 /**
  * Pinned rather than derived. The gateway defaults to `num_cpus * 2`, which
  * makes on-disk layout and fd count a function of task size — so a cpu bump, or
- * a move to another capacity provider, would silently reshape the WAL. Three
- * lanes per shard (Tinybird + ClickHouse + Tinybird mirror) means this is 12
- * open WAL files; the mirror lane is present but idle unless
- * `TINYBIRD_MIRROR_HOST`/`TINYBIRD_MIRROR_TOKEN` are set.
+ * a move to another capacity provider, would silently reshape the WAL. Two
+ * lanes per shard (Tinybird + ClickHouse) means this is 8 open WAL files.
  */
 const WAL_SHARDS = 4
 
@@ -246,21 +245,6 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 		const autumnSecret = autumnKey ? yield* secret("autumn-secret-key", autumnKey) : undefined
 
 		// Second Tinybird workspace to mirror writes into during a workspace
-		// migration. Both halves must be set together; the gateway rejects a
-		// half-configured mirror at startup rather than 401-ing its lane forever.
-		//
-		// Resolved through `optionalPlain`, not `process.env`: alchemy reads
-		// `--env-file`/`.env` through its own ConfigProvider and never copies
-		// those values into `process.env`, so a bare read would see the var in
-		// CI and miss it locally. The host is plain (not a secret); the token is
-		// resolved here only to mint the Secrets Manager entry below, exactly as
-		// TINYBIRD_TOKEN is, and never reaches `env`.
-		const tinybirdMirrorHostEntry = yield* optionalPlain("TINYBIRD_MIRROR_HOST")
-		const tinybirdMirrorTokenValue = (yield* optionalPlain("TINYBIRD_MIRROR_TOKEN")).TINYBIRD_MIRROR_TOKEN
-		const tinybirdMirrorToken = tinybirdMirrorTokenValue
-			? yield* secret("tinybird-mirror-token", tinybirdMirrorTokenValue)
-			: undefined
-
 		// Both halves are stack-minted (`createReplayBlobStore`), so there is no
 		// half-set config left to guard against. The access key id is not secret,
 		// but it only exists once the token does and `env` takes plan-time strings
@@ -376,10 +360,11 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 		// ALB actually lands — CI must set AWS_REGION to the same value, since
 		// that is what `AWS.providers()` places every other resource with.
 		//
-		// Without `hostedZoneId` the provider does not block on issuance, so the
-		// first deploy of a new stage lands the certificate PENDING_VALIDATION;
-		// add the DNS validation record in Cloudflare, then re-run to attach the
-		// listener once ACM reports ISSUED.
+		// `hostedZoneId` is Route53-only and Maple's zone is on Cloudflare, so the
+		// provider does not block on issuance and the certificate lands
+		// PENDING_VALIDATION. `issueCertificateViaCloudflare` below closes that:
+		// it publishes the validation CNAME into the `maple.dev` zone and waits
+		// for ACM to mark the certificate ISSUED.
 		const certificate = domains.ingest
 			? yield* AWS.ACM.Certificate("ingest-cert", {
 					domainName: domains.ingest,
@@ -388,6 +373,20 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 					tags: { Service: "maple-ingest", Region: region },
 				})
 			: undefined
+
+		// The ARN of the ISSUED certificate. Deliberately NOT
+		// `certificate.certificateArn`: consuming this one is what orders the
+		// listener after validation, so the first deploy of a new domain no
+		// longer fails on a certificate ACM has not issued yet.
+		const issuedCertificateArn =
+			certificate && domains.ingest
+				? yield* issueCertificateViaCloudflare({
+						id: "ingest-cert",
+						certificateArn: certificate.certificateArn,
+						hostname: domains.ingest,
+						region: resolveAwsRegion(region),
+					})
+				: undefined
 
 		// The gateway marks its own task scale-in-protected while the WAL holds
 		// backlog (`apps/ingest/src/task_protection.rs`). The ECS agent endpoint it
@@ -541,7 +540,7 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 			// `/health` and the service would never stabilize.
 			port: INGEST_PORT,
 			healthCheckPath: "/health",
-			...(certificate ? { certificateArn: certificate.certificateArn } : undefined),
+			...(issuedCertificateArn ? { certificateArn: issuedCertificateArn } : undefined),
 
 			// `/health` returns a bare 200 with no dependency checks, so it detects a
 			// dead task but not a wedged export lane or a dead Postgres pool. The
@@ -557,9 +556,6 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 				MAPLE_INGEST_KEY_ENCRYPTION_KEY: keyEncryptionKey.secretArn,
 				MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: keyLookupHmacKey.secretArn,
 				...(autumnSecret ? { AUTUMN_SECRET_KEY: autumnSecret.secretArn } : undefined),
-				...(tinybirdMirrorToken
-					? { TINYBIRD_MIRROR_TOKEN: tinybirdMirrorToken.secretArn }
-					: undefined),
 				...(replayR2Secret && replayR2AccessKeyId
 					? {
 							INGEST_REPLAY_R2_SECRET_ACCESS_KEY: replayR2Secret.secretArn,
@@ -632,14 +628,6 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 				...(yield* optionalPlain("INGEST_MAX_REQUEST_BODY_BYTES")),
 				...(yield* optionalPlain("INGEST_EXPORT_MAX_ATTEMPTS")),
 				...(yield* optionalPlain("INGEST_TINYBIRD_CONCURRENCY_PER_SHARD")),
-				// Tinybird mirror. The host is plain (it is not a secret); the token
-				// goes through Secrets Manager above. Ramp with SAMPLE_PERCENT: start
-				// at 1, confirm rows land and `ingest_tinybird_mirror_dropped_total`
-				// stays flat, then climb to 100.
-				...tinybirdMirrorHostEntry,
-				...(yield* optionalPlain("INGEST_TINYBIRD_MIRROR_SAMPLE_PERCENT")),
-				...(yield* optionalPlain("INGEST_TINYBIRD_MIRROR_MAX_ATTEMPTS")),
-				...(yield* optionalPlain("INGEST_TINYBIRD_MIRROR_TIMEOUT_MS")),
 				...(yield* optionalPlain("INGEST_REPLAY_MAX_SESSION_BYTES")),
 				// The org Maple's own telemetry is filed under. Required here and in
 				// the gateway (`AppConfig::from_env`), with no fallback on either
@@ -687,13 +675,11 @@ export const createMapleIngest = ({ stage, domains, region, replayBlobs }: Creat
 			// VPC; surfaced so a preview's logs say where the gateway is pointing.
 			collectorEndpoint,
 			collectorServiceName: collector?.serviceName,
-			// One-time manual DNS, surfaced here so it is discoverable from the
-			// deploy output rather than the AWS console:
-			//   1. the ACM validation CNAME (below) — added once per domain, reused
-			//      for every renewal;
-			//   2. a CNAME for `domains.ingest` at `serviceUrl` (the ALB), proxied.
-			// Both live in the Cloudflare `maple.dev` zone, which this stack does
-			// not otherwise touch.
+			// The validation CNAME is published by the stack now
+			// (`issueCertificateViaCloudflare`); this stays as the record of what
+			// was published, and for diagnosing a certificate stuck short of
+			// ISSUED. The one record still added by hand is a proxied CNAME for
+			// `domains.ingest` at `serviceUrl` (the ALB).
 			certificateValidation: certificate?.domainValidationOptions,
 		}
 	})

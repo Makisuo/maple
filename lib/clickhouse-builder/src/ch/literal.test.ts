@@ -135,3 +135,57 @@ describe("param.of", () => {
 		expect(compileCHUnsafe(query, { level: "warn" }).sql).toContain("OrgId = 'warn'")
 	})
 })
+
+// A `DateTime` column and the `DateTime64` beside it in the same table cannot
+// share one rendering of one bound: the fraction is load-bearing on the 64-bit
+// column and a `TYPE_MISMATCH` on the other. Placeholders carry kind and name
+// independently, so both read the very same param and differ only in encoding.
+describe("param.dateTimeSeconds", () => {
+	const Spans = CH.table("spans", {
+		OrgId: T.string,
+		TimestampTime: T.dateTimeString,
+		Timestamp: T.dateTime64String,
+	})
+
+	const spansWhereSql = (
+		build: Parameters<ReturnType<typeof CH.from<"spans", typeof Spans.columns>>["where"]>[0],
+		params: Record<string, unknown>,
+	) =>
+		compileCHUnsafe(
+			CH.from(Spans)
+				.select(($) => ({ id: $.OrgId }))
+				.where(build),
+			params,
+		)
+			.sql.split("WHERE")[1]
+			?.trim()
+
+	it("floors a fractional bound to whole seconds", () => {
+		expect(
+			spansWhereSql(($) => [$.TimestampTime.gte(CH.param.dateTimeSeconds("startTime"))], {
+				startTime: "2026-01-01 12:30:00.123456789",
+			}),
+		).toBe("TimestampTime >= '2026-01-01 12:30:00'")
+	})
+
+	it("leaves a bound that is already second-precision alone", () => {
+		expect(
+			spansWhereSql(($) => [$.TimestampTime.gte(CH.param.dateTimeSeconds("startTime"))], {
+				startTime: "2026-01-01 12:30:00",
+			}),
+		).toBe("TimestampTime >= '2026-01-01 12:30:00'")
+	})
+
+	// The point of the kind: one param value, two encodings, in one WHERE.
+	it("renders the same param differently per column precision", () => {
+		expect(
+			spansWhereSql(
+				($) => [
+					$.TimestampTime.gte(CH.param.dateTimeSeconds("startTime")),
+					$.Timestamp.gte(CH.param.dateTimeString("startTime")),
+				],
+				{ startTime: "2026-01-01 12:30:00.500" },
+			)?.replace(/\s+/g, " "),
+		).toBe("TimestampTime >= '2026-01-01 12:30:00' AND Timestamp >= '2026-01-01 12:30:00.500'")
+	})
+})

@@ -1,9 +1,13 @@
+import { useCallback } from "react"
 import { Link } from "@tanstack/react-router"
 
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { formatRelativeTimeOrDate, toEpochMs } from "@maple/ui/lib/time-format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
+import { formatCount } from "@maple/ui/components/filters/range-filter-section"
 import { SquareSparkleIcon } from "@/components/icons"
+import { formatCost } from "@/lib/agent-sessions/session-summary"
+import { shortTarget } from "@/lib/agent-sessions/span-filters"
 import { vendorIcon } from "@/lib/agent-sessions/vendor-icon"
 import { sessionRowId } from "@/lib/agent-sessions/session-window"
 import { vendorLabel } from "@/lib/agent-sessions/vendor-label"
@@ -17,6 +21,12 @@ export interface AgentSessionRow {
 	readonly spanCount: number
 	readonly errorSpanCount: number
 	readonly serviceNames: ReadonlyArray<string>
+	readonly models: ReadonlyArray<string>
+	readonly agentNames: ReadonlyArray<string>
+	readonly llmCalls: number
+	readonly toolCalls: number
+	readonly totalTokens: number
+	readonly cost: number
 	readonly startTime: string
 	readonly endTime: string
 	readonly durationMs: number
@@ -27,13 +37,64 @@ function absoluteTs(startTime: string): string {
 	return Number.isNaN(parsed) ? startTime : new Date(parsed).toLocaleString()
 }
 
-interface AgentSessionsListProps {
-	sessions: ReadonlyArray<AgentSessionRow>
-	/** The request's limit — rows at the cap mean older sessions were cut off. */
-	limit: number
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`
+
+/** "claude-sonnet-5 +1": the first model short, the rest as a count — the full
+ *  list goes in the title. Gateways prefix models with a provider path that
+ *  would truncate two different models to the same string. */
+function modelsLabel(models: ReadonlyArray<string>): string {
+	const [first, ...rest] = models
+	if (first === undefined) return ""
+	return rest.length > 0 ? `${shortTarget(first)} +${rest.length}` : shortTarget(first)
 }
 
-export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
+interface AgentSessionsListProps {
+	sessions: ReadonlyArray<AgentSessionRow>
+	/** Fetch the next page — invoked when the bottom sentinel scrolls into view. */
+	onReachEnd?: () => void
+	/** Whether more pages remain (renders the sentinel + footer). */
+	hasMore?: boolean
+	/** Whether a next page is currently in flight. */
+	loadingMore?: boolean
+	/** The client retention guard stopped pagination before the backend ended. */
+	isCapped?: boolean
+}
+
+function observeReachEnd(element: HTMLDivElement, onReachEnd: () => void): () => void {
+	const observer = new IntersectionObserver(
+		(entries) => {
+			if (entries[0]?.isIntersecting) onReachEnd()
+		},
+		{ rootMargin: "400px 0px" },
+	)
+	observer.observe(element)
+	return () => observer.disconnect()
+}
+
+function SessionsSentinel({
+	onReachEnd,
+	loadingMore,
+}: Pick<AgentSessionsListProps, "onReachEnd" | "loadingMore">) {
+	const elementRef = useCallback(
+		(element: HTMLDivElement | null) => {
+			if (!element) return
+			return observeReachEnd(element, () => {
+				if (!loadingMore) onReachEnd?.()
+			})
+		},
+		[loadingMore, onReachEnd],
+	)
+
+	return <div ref={elementRef} aria-hidden className="h-px w-full" />
+}
+
+export function AgentSessionsList({
+	sessions,
+	onReachEnd,
+	hasMore = false,
+	loadingMore = false,
+	isCapped = false,
+}: AgentSessionsListProps) {
 	if (sessions.length === 0) {
 		return (
 			<Empty>
@@ -122,15 +183,48 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 							</span>
 						</div>
 
-						{/* Activity lane: duration + traces/spans */}
-						<div className="hidden w-[13.5rem] shrink-0 items-baseline gap-2 overflow-hidden whitespace-nowrap @3xl:flex">
+						{/* Model lane: what the session ran on — the first filter most
+						    readers reach for, so it is visible before they open the rail. */}
+						<div className="hidden w-[10rem] shrink-0 overflow-hidden @4xl:block">
+							<span
+								className="block truncate font-mono text-xs text-muted-foreground"
+								title={session.models.join(", ")}
+							>
+								{modelsLabel(session.models)}
+							</span>
+						</div>
+
+						{/* Activity lane: duration + the work done. Traces and spans move
+						    to the tooltip — they describe ingestion, calls and tools
+						    describe the agent. */}
+						<div
+							className="hidden w-[13.5rem] shrink-0 items-baseline gap-2 overflow-hidden whitespace-nowrap @3xl:flex"
+							title={`${plural(session.traceCount, "trace")} · ${plural(session.spanCount, "span")}`}
+						>
 							<span className="font-mono text-[13px] font-semibold tabular-nums">
 								{formatSessionDuration(session.durationMs)}
 							</span>
 							<span className="truncate text-xs text-muted-foreground">
-								{session.traceCount} trace{session.traceCount === 1 ? "" : "s"} ·{" "}
-								{session.spanCount} span{session.spanCount === 1 ? "" : "s"}
+								{plural(session.llmCalls, "call")} · {plural(session.toolCalls, "tool")}
 							</span>
+						</div>
+
+						{/* Usage lane: tokens and cost, blank where nothing was reported —
+						    a "0" here would read as "measured, and it was free". */}
+						<div className="hidden w-[8.5rem] shrink-0 items-baseline gap-2 overflow-hidden whitespace-nowrap @5xl:flex">
+							{session.totalTokens > 0 && (
+								<span
+									className="font-mono text-xs tabular-nums text-muted-foreground"
+									title={`${session.totalTokens.toLocaleString()} tokens`}
+								>
+									{formatCount(session.totalTokens)} tok
+								</span>
+							)}
+							{session.cost > 0 && (
+								<span className="font-mono text-xs tabular-nums text-muted-foreground">
+									{formatCost(session.cost)}
+								</span>
+							)}
 						</div>
 
 						{/* Signal lane: error chip */}
@@ -151,11 +245,20 @@ export function AgentSessionsList({ sessions, limit }: AgentSessionsListProps) {
 				)
 			})}
 
-			{sessions.length >= limit && (
+			{hasMore && <SessionsSentinel onReachEnd={onReachEnd} loadingMore={loadingMore} />}
+
+			{isCapped && (
 				<p className="py-3 text-sm text-muted-foreground">
-					Showing the {limit.toLocaleString()} most recent sessions — narrow the time range to see
-					older ones
+					Showing the {sessions.length.toLocaleString()} most recent sessions — narrow the time
+					range to see older ones
 				</p>
+			)}
+
+			{loadingMore && (
+				<div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+					<span className="size-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+					Loading more sessions…
+				</div>
 			)}
 		</div>
 	)

@@ -384,7 +384,7 @@ or `<key> !exists`. `exists` means present *and* non-empty, because attributes l
 ClickHouse `Map` columns where a missing key reads back as `''`.
 
 On `traces` any bare key outside the structured allowlist (`service.name`, `span.name`,
-`deployment.environment`, `deployment.commit_sha`, `root_only`, `has_error`) is treated as
+`deployment.environment`, `vcs.ref.head.revision`, `root_only`, `has_error`) is treated as
 a span attribute, so `db.system = "clickhouse"` works directly. Cap: 5 `attr.*` plus 5
 `resource.*` filters per query.
 

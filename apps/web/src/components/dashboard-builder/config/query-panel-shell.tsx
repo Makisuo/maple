@@ -61,7 +61,9 @@ export function QueryPanelShell({
 }: QueryPanelShellProps) {
 	const [collapsed, setCollapsed] = useState(false)
 	const badgeColor = queryBadgeColor(index)
-	const items = Object.fromEntries(sourceOptions.map((option) => [option, QUERY_PANEL_SOURCE_LABEL[option]]))
+	const items = Object.fromEntries(
+		sourceOptions.map((option) => [option, QUERY_PANEL_SOURCE_LABEL[option]]),
+	)
 
 	return (
 		<div className="border rounded-md">

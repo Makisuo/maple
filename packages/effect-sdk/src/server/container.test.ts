@@ -18,9 +18,9 @@ describe("deriveContainerAttributes", () => {
 		expect(deriveContainerAttributes(probe({}))).toEqual({})
 	})
 
-	it("stamps container.runtime from /.dockerenv even without an id", () => {
+	it("stamps container.runtime.name from /.dockerenv even without an id", () => {
 		expect(deriveContainerAttributes(probe({ exists: (p) => p === "/.dockerenv" }))).toEqual({
-			"container.runtime": "docker",
+			"container.runtime.name": "docker",
 		})
 	})
 
@@ -34,7 +34,7 @@ describe("deriveContainerAttributes", () => {
 						: "0::/",
 			}),
 		)
-		expect(attrs).toEqual({ "container.runtime": "docker", "container.id": FULL_ID })
+		expect(attrs).toEqual({ "container.runtime.name": "docker", "container.id": FULL_ID })
 	})
 
 	it("falls back to /proc/self/cgroup on cgroup v1", () => {
@@ -65,7 +65,7 @@ describe("deriveContainerAttributes", () => {
 		const attrs = deriveContainerAttributes(
 			probe({ exists: (p) => p === "/.dockerenv", hostname: () => "checkout-worker" }),
 		)
-		expect(attrs).toEqual({ "container.runtime": "docker" })
+		expect(attrs).toEqual({ "container.runtime.name": "docker" })
 	})
 
 	it("swallows probe failures instead of throwing", () => {

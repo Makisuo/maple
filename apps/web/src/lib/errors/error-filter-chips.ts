@@ -1,40 +1,40 @@
+import type { IssueKind } from "@maple/domain/http"
+
 import type { ErrorsSearchParams } from "@/routes/errors/index"
 
-/** One facet, in both polarities. `label` matches the sidebar section title exactly. */
-const FACETS = [
-	{ label: "Environment", include: "deploymentEnvs", exclude: "excludedDeploymentEnvs" },
-	{ label: "Service", include: "services", exclude: "excludedServices" },
-	{ label: "Error Type", include: "errorTypes", exclude: "excludedErrorTypes" },
-	{ label: "Version", include: "serviceVersions", exclude: "excludedServiceVersions" },
-] as const satisfies ReadonlyArray<{
-	label: string
-	include: keyof ErrorsSearchParams
-	exclude: keyof ErrorsSearchParams
-}>
+export const KIND_LABEL = {
+	error: "Exceptions",
+	alert: "Alert rules",
+	integration: "Integrations",
+} satisfies Record<IssueKind, string>
+
+/** The search params the sidebar owns. Everything else on the route (view,
+ *  sort, severity) lives in the toolbar and is not a "filter" in this sense. */
+export type ErrorFilterSearch = Pick<ErrorsSearchParams, "service" | "env" | "kind" | "regressed">
 
 export interface ErrorFilterChipDescriptor {
-	param: keyof ErrorsSearchParams
+	param: keyof ErrorFilterSearch
+	/** Matches the sidebar section title exactly. */
 	label: string
 	values: readonly string[]
-	negated: boolean
 }
 
-/** The applied facet filters, exclusions first — see `traceFilterChips` for why they lead. */
-export function errorFilterChips(
-	search: Pick<ErrorsSearchParams, (typeof FACETS)[number]["include" | "exclude"]>,
-): ErrorFilterChipDescriptor[] {
+/** The applied sidebar filters, in the sidebar's own order. */
+export function errorFilterChips(search: ErrorFilterSearch): ErrorFilterChipDescriptor[] {
 	const chips: ErrorFilterChipDescriptor[] = []
-	for (const facet of FACETS) {
-		const excluded = search[facet.exclude]
-		if (excluded?.length) {
-			chips.push({ param: facet.exclude, label: facet.label, values: excluded, negated: true })
-		}
-	}
-	for (const facet of FACETS) {
-		const included = search[facet.include]
-		if (included?.length) {
-			chips.push({ param: facet.include, label: facet.label, values: included, negated: false })
-		}
-	}
+	if (search.service) chips.push({ param: "service", label: "Service", values: [search.service] })
+	if (search.env) chips.push({ param: "env", label: "Environment", values: [search.env] })
+	if (search.kind) chips.push({ param: "kind", label: "Source", values: [KIND_LABEL[search.kind]] })
+	if (search.regressed) chips.push({ param: "regressed", label: "State", values: ["Regressed"] })
 	return chips
 }
+
+export const hasErrorFilters = (search: ErrorFilterSearch): boolean => errorFilterChips(search).length > 0
+
+/** Every sidebar param cleared, for "Clear filters" and the empty state. */
+export const CLEARED_ERROR_FILTERS = {
+	service: undefined,
+	env: undefined,
+	kind: undefined,
+	regressed: undefined,
+} satisfies Record<keyof ErrorFilterSearch, undefined>

@@ -41,13 +41,7 @@ export interface IdleGap {
 /** Wall-clock occupancy classes, in the order the breakdown legend lists them. */
 export type OccupancyKind = "idle" | "ttft" | "inference" | "tool" | "unaccounted"
 
-const OCCUPANCY_KIND_ORDER: readonly OccupancyKind[] = [
-	"idle",
-	"ttft",
-	"inference",
-	"tool",
-	"unaccounted",
-]
+const OCCUPANCY_KIND_ORDER: readonly OccupancyKind[] = ["idle", "ttft", "inference", "tool", "unaccounted"]
 
 export interface OccupancySegment {
 	readonly kind: OccupancyKind
@@ -349,7 +343,9 @@ export function computeOccupancyTimeline(
 	// above live inside spans — so all four sets are mutually disjoint and a
 	// plain sort yields the timeline. Holes between them are the residual.
 	const classified: OccupancyInterval[] = [
-		...idleGaps.map((gap): OccupancyInterval => ({ kind: "idle", startMs: gap.startMs, endMs: gap.endMs })),
+		...idleGaps.map(
+			(gap): OccupancyInterval => ({ kind: "idle", startMs: gap.startMs, endMs: gap.endMs }),
+		),
 		...ttft.map((i): OccupancyInterval => ({ kind: "ttft", ...i })),
 		...inference.map((i): OccupancyInterval => ({ kind: "inference", ...i })),
 		...tool.map((i): OccupancyInterval => ({ kind: "tool", ...i })),
@@ -506,8 +502,7 @@ export function spanTokenBuckets(span: AiSessionSpan): SessionTokenTotals | unde
 function tokenTotals(buckets: Omit<SessionTokenTotals, "total">): SessionTokenTotals {
 	return {
 		...buckets,
-		total:
-			buckets.input + buckets.cacheRead + buckets.cacheWrite + buckets.output + buckets.reasoning,
+		total: buckets.input + buckets.cacheRead + buckets.cacheWrite + buckets.output + buckets.reasoning,
 	}
 }
 
@@ -609,19 +604,6 @@ function sessionCost(
 ): number | undefined {
 	const bySpan = costBySpan(spans, byId)
 	return bySpan.size === 0 ? undefined : sumCosts(bySpan.values())
-}
-
-/**
- * One turn's reported spend, by the same rules `countTurnTokens` follows: the
- * deepest reporter counts, and a span reporting for more than this turn counts
- * for none of them.
- */
-export function countTurnCost(turn: SessionTurn, turns: readonly SessionTurn[]): number | undefined {
-	const byId = new Map(turn.spans.map((span) => [span.spanId, span]))
-	const bySpan = [...costBySpan(turn.spans, byId)].filter(
-		([spanId]) => !isSessionLevelReporter(byId.get(spanId)!, turns),
-	)
-	return bySpan.length === 0 ? undefined : sumCosts(bySpan.map(([, cost]) => cost))
 }
 
 /** Per bucket, what `reported` claims over `counted`. Never negative: a wrapper

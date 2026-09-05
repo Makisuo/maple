@@ -79,7 +79,7 @@ export const LAB_ENTRIES: ReadonlyArray<LabEntry> = [
 		path: "/lab/service-map-3d",
 		title: "Service map 3D",
 		description:
-			"The service graph as storeys and pipes \u2014 tiers stack vertically, calls flow as packets, WebGL over a fixture.",
+			"Two 3D perspectives over one sample topology: Atlas groups infrastructure by namespace; Cascade follows dependency depth.",
 		kind: "lab",
 		session: "none",
 	},
@@ -118,6 +118,14 @@ export const LAB_ENTRIES: ReadonlyArray<LabEntry> = [
 		path: "/lab/bench/infra",
 		title: "Infra charts",
 		description: "Host and k8s detail ChartViews on one page with synthetic rows; ?mode=recharts|cursor.",
+		kind: "bench",
+		session: "none",
+	},
+	{
+		path: "/lab/bench/agent-transcript",
+		title: "Agent transcript",
+		description:
+			"The session Transcript view over a synthetic session of `?turns=` turns (default 40) whose tool results run to hundreds of kilobytes — row mount cost and scroll perf, via window.__transcriptBench.",
 		kind: "bench",
 		session: "none",
 	},

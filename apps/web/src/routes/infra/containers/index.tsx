@@ -23,7 +23,10 @@ import {
 	ContainerSummaryBandLoading,
 	type ContainerScope,
 } from "@/components/infra/container-summary-band"
-import { ContainersFilterSidebarView, type ContainerFilters } from "@/components/infra/container-filter-sidebar"
+import {
+	ContainersFilterSidebarView,
+	type ContainerFilters,
+} from "@/components/infra/container-filter-sidebar"
 import { InstallHostModal } from "@/components/infra/install-modal"
 import { ActiveFilterChips } from "@maple/ui/components/filters/active-filter-chips"
 import { containerFilterChips } from "@/lib/infra/container-filter-chips"

@@ -103,6 +103,40 @@ export const TraceDetailSpans = table("trace_detail_spans", {
 	ResourceAttributes: T.map(T.string, T.string),
 })
 
+/**
+ * Filtered projection of GenAI agent spans (`maple_ai.vendor.id` stamped),
+ * pre-extracted to plain columns — the Agent Sessions detection/facet surface.
+ * `SessionId` is `''` on most rows: vendors stamp the session key only on the
+ * turn-owning spans, so session resolution stays per-trace at read time.
+ *
+ * Migration 0026 added the sidebar's other facet dimensions (`DeploymentEnv`,
+ * `Model`, `AgentName`, `ToolName`) and the per-span measures the page ranks
+ * and filters on (`IsError`, `IsLlmCall`, `IsToolCall`, `Tokens`, `Cost`, with
+ * `SpanId`/`ParentSpanId`/`Duration`), all coalesced and classified at insert
+ * by `@maple/domain/tinybird/gen-ai-columns`; `''`/0 where the span carries no
+ * such fact, and on every row materialized before 0026.
+ */
+export const AiTraceIndex = table("ai_trace_index", {
+	OrgId: orgId,
+	Timestamp: dateTime64,
+	TraceId: T.string,
+	SessionId: T.string,
+	VendorId: T.string,
+	ServiceName: T.string,
+	DeploymentEnv: T.string,
+	Model: T.string,
+	AgentName: T.string,
+	ToolName: T.string,
+	SpanId: T.string,
+	ParentSpanId: T.string,
+	Duration: T.uint64,
+	IsError: T.uint8,
+	IsLlmCall: T.uint8,
+	IsToolCall: T.uint8,
+	Tokens: T.float64,
+	Cost: T.float64,
+})
+
 export const TraceListMv = table("trace_list_mv", {
 	OrgId: orgId,
 	TraceId: T.string,

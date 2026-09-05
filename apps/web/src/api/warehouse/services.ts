@@ -166,7 +166,9 @@ const getServiceHealthSnapshotEffect = Effect.fn("QueryEngine.getServiceHealthSn
 
 	return {
 		data: response.data
-			.filter((row) => scope.memberServices === null || scope.memberServices.has(String(row.serviceName)))
+			.filter(
+				(row) => scope.memberServices === null || scope.memberServices.has(String(row.serviceName)),
+			)
 			.map(
 				(row): ServiceHealthSnapshot => ({
 					serviceName: String(row.serviceName),

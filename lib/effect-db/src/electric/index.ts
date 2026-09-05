@@ -15,26 +15,12 @@ export {
 export {
 	AwaitTxIdError,
 	DeleteError,
-	ElectricCollectionError,
 	InsertError,
 	InvalidTxIdError,
-	MaxRetriesExceededError,
 	MissingTxIdError,
-	OptimisticActionError,
-	SyncConfigError,
-	SyncError,
 	TxIdTimeoutError,
 	UpdateError,
 } from "./errors"
-// Optimistic Actions
-export {
-	type CollectionInput,
-	type MutationContext,
-	type MutationResultWithTxId,
-	type OptimisticActionConfig,
-	type OptimisticActionResult,
-	optimisticAction,
-} from "./optimistic-action"
 // Types
 export type {
 	BackoffConfig,

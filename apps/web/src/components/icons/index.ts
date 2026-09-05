@@ -33,6 +33,7 @@ export {
 	FireIcon,
 	FolderOpenIcon,
 	GlobeIcon,
+	GlobePointerIcon,
 	LineHeightIcon,
 	LinkIcon,
 	LoaderIcon,
@@ -138,6 +139,7 @@ export { NatsIcon } from "./nats"
 export { NodejsIcon, NodejsMonoIcon } from "./nodejs"
 export { OpenAiIcon } from "./openai"
 export { OpenjdkIcon, OpenjdkMonoIcon } from "./openjdk"
+export { OpenRouterIcon } from "./openrouter"
 export { OperaIcon } from "./opera"
 export { PaletteIcon } from "./palette"
 export { PaperPlaneIcon } from "./paper-plane"
