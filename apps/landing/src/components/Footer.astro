@@ -13,12 +13,14 @@ const stars = await getGitHubStars();
 ---
 
 <footer class="border-t border-border bg-bg-deep">
-    <!-- Manifesto line. Capped at 20ch so it breaks into three lines — one
-         refusal per line. That break is the whole gesture. -->
+    <!-- Manifesto line: one refusal per line. That break is the whole gesture,
+         so each sentence is its own block — a character cap only broke it
+         mid-sentence ("No per-seat fees. No / proprietary agents. No black /
+         boxes.") at the sizes that mattered. -->
     <div class="border-b border-border">
         <div class="shell py-16 md:py-24">
-            <p class="font-display text-3xl md:text-5xl font-medium text-foreground leading-[1.1] max-w-[20ch] tracking-[-0.02em]">
-                {m.footer_manifesto()}
+            <p class="font-display text-3xl md:text-5xl font-medium text-foreground leading-[1.1] tracking-[-0.02em]">
+                {m.footer_manifesto().split(/(?<=[.。])\s+/).map((line) => <span class="block">{line}</span>)}
             </p>
         </div>
     </div>

@@ -28,16 +28,16 @@ function RoofFan({ y, running, finish }: { y: number; running: boolean; finish: 
 			<group ref={rotor} position={[0, 0.1, 0]}>
 				{[0, 1, 2, 3].map((blade) => (
 					<group key={blade} rotation={[0, (blade * Math.PI) / 2, 0]}>
-						<mesh position={[0.25, 0, 0]}>
-							<boxGeometry args={[0.52, 0.035, 0.15]} />
-							<meshStandardMaterial color={finish.steel} roughness={0.55} metalness={0.5} />
+						<mesh position={[0.33, 0, 0]}>
+							<boxGeometry args={[0.4, 0.035, 0.15]} />
+							<meshStandardMaterial color={finish.steel} roughness={0.85} metalness={0.15} />
 						</mesh>
 					</group>
 				))}
 			</group>
 			<mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.12, 0]}>
-				<torusGeometry args={[0.57, 0.045, 8, 28]} />
-				<meshStandardMaterial color={finish.trim} roughness={0.65} />
+				<voxelGeometry args={["torus", 1.2, 1.2, 0.12, 0.06]} />
+				<meshStandardMaterial vertexColors color={finish.trim} roughness={0.65} />
 			</mesh>
 			<Axle position={[0, 0.12, 0]} radius={0.12} length={0.15} color={finish.trim} />
 		</group>
@@ -96,13 +96,18 @@ function StorageTank({ height, finish }: { height: number; finish: Finish }) {
 					position={[0, height * fraction + 0.23, 0]}
 					rotation={[-Math.PI / 2, 0, 0]}
 				>
-					<torusGeometry args={[0.87, 0.065, 8, 32]} />
-					<meshStandardMaterial color={finish.steel} metalness={0.45} roughness={0.5} />
+					<voxelGeometry args={["torus", 1.86, 1.86, 0.16, 0.09]} />
+					<meshStandardMaterial
+						vertexColors
+						color={finish.steel}
+						metalness={0.15}
+						roughness={0.85}
+					/>
 				</mesh>
 			))}
-			<mesh position={[0, height + 0.22, 0]} scale={[1, 0.35, 1]} castShadow receiveShadow>
-				<sphereGeometry args={[0.86, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
-				<meshStandardMaterial color={finish.trim} roughness={0.65} metalness={0.25} />
+			<mesh position={[0, height + 0.38, 0]} castShadow receiveShadow>
+				<voxelGeometry args={["dome", 1.72, 0.32, 1.72, 0.08]} />
+				<meshStandardMaterial vertexColors color={finish.trim} roughness={0.65} metalness={0.1} />
 			</mesh>
 			<Axle position={[0, height + 0.55, -0.48]} radius={0.12} length={0.26} color={finish.steel} />
 			<MachineBox
@@ -228,15 +233,22 @@ function PumpStation({ height, finish, running }: { height: number; finish: Fini
 			<group position={[0, height * 0.5 + 0.62, 0.64]}>
 				<group ref={wheel}>
 					<mesh>
-						<torusGeometry args={[0.39, 0.07, 8, 28]} />
-						<meshStandardMaterial color={finish.body} roughness={0.65} />
+						<voxelGeometry args={["torus", 0.92, 0.92, 0.16, 0.06]} />
+						<meshStandardMaterial vertexColors color={finish.body} roughness={0.65} />
 					</mesh>
-					{[0, 1, 2].map((i) => (
-						<mesh key={i} rotation={[0, 0, (i * Math.PI) / 3]}>
-							<boxGeometry args={[0.7, 0.05, 0.055]} />
-							<meshStandardMaterial color={finish.steel} metalness={0.4} roughness={0.5} />
-						</mesh>
+					{[0, 1, 2, 3, 4, 5].map((i) => (
+						<group key={i} rotation={[0, 0, (i * Math.PI) / 3]}>
+							<mesh position={[0.24, 0, 0]}>
+								<boxGeometry args={[0.22, 0.05, 0.055]} />
+								<meshStandardMaterial
+									color={finish.steel}
+									metalness={0.15}
+									roughness={0.85}
+								/>
+							</mesh>
+						</group>
 					))}
+					<Axle position={[0, 0, 0]} radius={0.14} length={0.1} color={finish.steel} axis="z" />
 				</group>
 			</group>
 			<StackLight y={height * 0.5 + 1.15} finish={finish} />
@@ -348,8 +360,8 @@ export const FactoryMachine = memo(function FactoryMachine({
 				/>
 			))}
 			{selected && (
-				<mesh position={[0, 0.12, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-					<ringGeometry args={[1.8, 1.84, 64]} />
+				<mesh position={[0, 0.12, 0]} rotation={[-Math.PI / 2, 0, Math.PI / 4]}>
+					<ringGeometry args={[1.85, 1.93, 4]} />
 					<meshBasicMaterial color="#d3ad69" side={THREE.DoubleSide} />
 				</mesh>
 			)}

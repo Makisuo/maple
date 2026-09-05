@@ -182,8 +182,8 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 	Object.freeze({
-		// TODO(v17): what changed, whether any part is rewritten or any row
-		// moves, and what this edge does NOT backfill.
+		// v17: `audit_log` table added (ClickHouse migration 0027). Purely
+		// additive — nothing is rewritten, no row moves, nothing is backfilled.
 		//
 		// projectRevision is carried forward deliberately — it is a hardcoded
 		// constant that no longer tracks the generator's header, and the identity
@@ -195,18 +195,34 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 	Object.freeze({
-		// v18 rebuilds error_events_mv / error_events_by_time_mv so a span with
-		// no `exception` event is labelled from its exception.* / error.* span
-		// attributes (ClickHouse migration 0028). No part is rewritten and no row
-		// moves; rows already materialized keep their 'Unknown Error' label.
+		// v18: `product_events` gains `TraceId`/`SpanId` plus a bloom filter, and
+		// `product_events_traces_mv` projects annotated spans in (ClickHouse
+		// migration 0028). Metadata-only ALTERs plus a view swap — no part is
+		// rewritten and no row moves. The trace half IS backfilled from whatever
+		// `traces` still retains; annotated spans older than that are not.
 		//
 		// projectRevision is carried forward deliberately — it is a hardcoded
 		// constant that no longer tracks the generator's header, and the identity
 		// this gate compares is the fingerprint/digest pair.
 		version: 18,
-		fingerprint: "ce91b6b5e6eb89ed",
-		digest: "ce91b6b5e6eb89edd4386f21b3d82db233a9879f946bdc348b471fdb77ae0a6a",
-		manifestDigest: "25407ce7434d5ac185c3b98ae2e0328dc17ba31583f8afdaa4b846929ebba804",
+		fingerprint: "09ee43045937c44e",
+		digest: "09ee43045937c44e89cf65001569497fb2e2d5b3356a8ddc2d81e0a8551bf1b2",
+		manifestDigest: "2a7d05f4fb19422404264521f06ea9ca2f2106cdce2165899f00433215aca8b0",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
+	Object.freeze({
+		// v19 rebuilds error_events_mv / error_events_by_time_mv so a span with
+		// no `exception` event is labelled from its exception.* / error.* span
+		// attributes (ClickHouse migration 0029). No part is rewritten and no row
+		// moves; rows already materialized keep their 'Unknown Error' label.
+		//
+		// projectRevision is carried forward deliberately — it is a hardcoded
+		// constant that no longer tracks the generator's header, and the identity
+		// this gate compares is the fingerprint/digest pair.
+		version: 19,
+		fingerprint: "de0230b6f51e34a6",
+		digest: "de0230b6f51e34a6a9ae3ae74c900aaa21f882b10edc24b91e146c7b5c11272e",
+		manifestDigest: "e7cc767b9971a1078514fda972c7b1608272a2cef76f29dd51bc5263912891bf",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 ] as const)

@@ -1,7 +1,9 @@
 import type {
 	ProductEventNamesRequest,
+	ProductEventsForTraceRequest,
 	ProductEventsFunnelBreakdownRequest,
 	ProductEventsFunnelRequest,
+	ProductEventTraceSamplesRequest,
 } from "@maple/domain/http"
 import * as CH from "../ch"
 import { timeRangeCache } from "../runtime/query-engine"
@@ -80,4 +82,34 @@ export const productEventNames = defineQuery({
 			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
 		),
+})
+
+// The trace ↔ product-event link, both directions. `list` profile because each is
+// a bloom-filter point lookup, and a flat 60s rather than `timeRangeCache`
+// because the answer does not widen with the range asked about.
+
+export const productEventsForTrace = defineQuery({
+	id: "productEventsForTrace",
+	profile: "list",
+	cache: 60,
+	compile: (payload: ProductEventsForTraceRequest, orgId: string) =>
+		CH.compile(CH.productEventsForTraceQuery({ limit: payload.limit ?? 50 }), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+			traceId: payload.traceId,
+		}),
+})
+
+export const productEventTraceSamples = defineQuery({
+	id: "productEventTraceSamples",
+	profile: "list",
+	cache: 60,
+	compile: (payload: ProductEventTraceSamplesRequest, orgId: string) =>
+		CH.compile(CH.productEventTraceSamplesQuery({ limit: payload.limit ?? 20 }), {
+			orgId,
+			startTime: payload.startTime,
+			endTime: payload.endTime,
+			eventName: payload.eventName,
+		}),
 })

@@ -47,6 +47,7 @@ import {
 	DB_SYSTEM_ATTR_SQL,
 } from "./db-query-shape-sql"
 import { MAPLE_AI_SESSION_ID_ATTR, MAPLE_AI_VENDOR_ID_ATTR } from "../gen-ai"
+import { PRODUCT_EVENTS_TRACE_FILTER, PRODUCT_EVENTS_TRACE_PROJECTION_SQL } from "./product-event-attributes"
 import { DEPLOYMENT_ENV_SQL, MESSAGING_DESTINATION_SQL } from "./semconv-renames"
 import {
 	GENAI_AGENT_NAME_SQL,
@@ -1697,9 +1698,35 @@ export const productEventsMv = defineMaterializedView("product_events_mv", {
           path(Url) AS PagePath,
           Url,
           '' AS ServiceName,
-          Attributes
+          Attributes,
+          '' AS TraceId,
+          '' AS SpanId
         FROM session_events
         WHERE Type IN ('navigation', 'custom')
+      `,
+		}),
+	],
+})
+
+/**
+ * Populates `product_events` from spans carrying `maple.product_event.name` —
+ * the only feed that carries `TraceId`. The predicate is one map lookup per
+ * incoming span (an MV sees the insert block, so no skip index helps). Column
+ * order must match the `product_events` SCHEMA order, enforced by
+ * `materialized-projection-order.test.ts`.
+ */
+export const productEventsTracesMv = defineMaterializedView("product_events_traces_mv", {
+	description:
+		"Populates product_events from spans carrying the maple.product_event.name attribute, projecting the span's identity, attributes (narrowed by maple.product_event.include, merged with maple.product_event.prop.*), service and TraceId/SpanId so the event links back to the trace that produced it.",
+	datasource: productEvents,
+	nodes: [
+		node({
+			name: "product_events_traces_mv_node",
+			sql: `
+        SELECT
+          ${PRODUCT_EVENTS_TRACE_PROJECTION_SQL}
+        FROM traces
+        WHERE ${PRODUCT_EVENTS_TRACE_FILTER}
       `,
 		}),
 	],

@@ -311,6 +311,29 @@ const productEventsFixtures: ReadonlyArray<BuilderFixture> = [
 				window,
 			),
 	},
+	// The two directions of the trace ↔ product-event link. Both are
+	// single-predicate lookups on `TraceId`, so what the sweep is watching for is
+	// that neither grows a `Map` read or loses its `OrgId`/time bounds.
+	{
+		module: "product-events",
+		name: "productEventsForTraceQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(CH.productEventsForTraceQuery({ limit: 50 }), {
+				...window,
+				traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+			}),
+	},
+	{
+		module: "product-events",
+		name: "productEventTraceSamplesQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(CH.productEventTraceSamplesQuery({ limit: 20 }), {
+				...window,
+				eventName: "checkout_completed",
+			}),
+	},
 ]
 
 export const builderFixtures: ReadonlyArray<BuilderFixture> = [

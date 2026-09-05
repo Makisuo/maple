@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest"
-import * as THREE from "three"
 import { SERVICE_MAP_3D_TOPOLOGY } from "@/lab/service-map-3d/fixture"
 import { spatialLayout } from "./spatial-layout"
-import { insideIsland, islandFootprint, islandGeometry } from "./terrain"
+import { insideIsland, islandColumn, islandFootprint } from "./terrain"
 
 describe.each(["atlas", "cascade"] as const)("%s cutaway terrain", (view) => {
 	const layout = spatialLayout(SERVICE_MAP_3D_TOPOLOGY, view)
@@ -25,40 +24,28 @@ describe.each(["atlas", "cascade"] as const)("%s cutaway terrain", (view) => {
 		expect(insideIsland(island, island.center.x, island.maxZ + 1)).toBe(false)
 		expect(insideIsland(island, island.minX, island.minZ, 0.1)).toBe(false)
 	})
-
-	it("forms a closed, outward-facing solid without cracks between soil layers", () => {
-		const terrain = islandGeometry(island, true)
-		const edges = new Map<string, number>()
-		let volume = 0
-		for (const geometry of [terrain.top, terrain.earth]) {
-			const positions = geometry.getAttribute("position")
-			const index = geometry.getIndex()
-			const count = index?.count ?? positions.count
-			expect([...positions.array].every(Number.isFinite)).toBe(true)
-			for (let i = 0; i < count; i += 3) {
-				const points = [0, 1, 2].map((offset) =>
-					new THREE.Vector3().fromBufferAttribute(
-						positions,
-						index ? index.getX(i + offset) : i + offset,
-					),
-				)
-				const [a, b, c] = points
-				if (!a || !b || !c) continue
-				volume += a.dot(b.clone().cross(c)) / 6
-				const keys = points.map((p) =>
-					p
-						.toArray()
-						.map((v) => v.toFixed(4))
-						.join(","),
-				)
-				for (let side = 0; side < 3; side++) {
-					const edge = [keys[side], keys[(side + 1) % 3]].sort().join("|")
-					edges.set(edge, (edges.get(edge) ?? 0) + 1)
+	it("cuts stepped shoreline corners while preserving the service platforms", () => {
+		const cell = 0.4
+		expect(islandColumn(island, island.minX + cell / 2, island.minZ + cell / 2, cell).present).toBe(false)
+		for (const district of layout.districts) {
+			for (const sx of [-1, 1])
+				for (const sz of [-1, 1]) {
+					expect(
+						islandColumn(
+							island,
+							district.position[0] + (sx * district.width) / 2,
+							district.position[2] + (sz * district.depth) / 2,
+							cell,
+						).present,
+					).toBe(true)
 				}
-			}
-			geometry.dispose()
 		}
-		expect([...edges.values()].every((count) => count === 2)).toBe(true)
-		expect(volume).toBeGreaterThan(0)
+	})
+
+	it("tapers the floating underside toward its rim", () => {
+		const center = islandColumn(island, island.center.x, island.center.y, 0.4)
+		const rim = islandColumn(island, island.maxX - 1.2, island.center.y, 0.4)
+		expect(center.depth).toBeGreaterThan(rim.depth * 1.5)
+		expect(center.depth / 0.4).toBeCloseTo(Math.round(center.depth / 0.4), 6)
 	})
 })
