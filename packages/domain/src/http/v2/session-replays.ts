@@ -1,6 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { SessionId, TraceId } from "../../primitives"
+import { AuditedRead } from "../audit-log"
 import { AuthorizationV2 } from "./auth"
 import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
 import { defineV2Error, V2ParameterInvalid } from "./errors"
@@ -578,6 +579,7 @@ export class V2SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays"
 	)
 	.prefix("/v2/session_replays")
 	.middleware(AuthorizationV2)
+	.annotate(AuditedRead, "session_replay.read")
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Session Replays",

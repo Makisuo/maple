@@ -1,10 +1,6 @@
 import { optionalNumberParam, optionalStringParam, optionalTimeParam, type McpToolRegistrar } from "./types"
 import { queryWarehouse, CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
-import {
-	resolveTimeRange,
-	rangeExceededResult,
-	MCP_DISCOVERY_MAX_HOURS,
-} from "@/mcp/lib/time"
+import { resolveTimeRange, rangeExceededResult, MCP_DISCOVERY_MAX_HOURS } from "@/mcp/lib/time"
 import { clampLimit, clampOffset } from "@/mcp/lib/limits"
 import { formatNumber, formatTable } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"

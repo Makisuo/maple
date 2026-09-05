@@ -27,7 +27,7 @@ So this isn't a "what is distributed tracing" post. It's about the ten lines per
 
 The auto-instrumentation pitch is real: install the SDK, get spans for every incoming request, outgoing call, and database query, for free. You should absolutely take the free spans. They are the skeleton of every trace, and the context propagation they do for you is genuinely hard to hand-roll.
 
-But look at what the free spans know. The HTTP library knows methods, routes, and status codes. The database driver knows that a query happened and how long it took; many drivers won't even record which query, and the ones that do record the SQL, not what it was *for*. Nothing in that stack knows what a cart is, what a subscription tier is, or that this particular request was the third retry of a payment that keeps declining.
+But look at what the free spans know. The HTTP library knows methods, routes, and status codes. The database driver knows that a query happened and how long it took; many drivers won't even record which query, and the ones that do record the SQL, not what it was _for_. Nothing in that stack knows what a cart is, what a subscription tier is, or that this particular request was the third retry of a payment that keeps declining.
 
 Auto-instrumentation is plumbing. It moves whatever you put into it, and by default you have put nothing into it. The two-span trace above isn't a tracing failure. The SDK did precisely what it was told. Nobody told it anything.
 
@@ -41,7 +41,7 @@ Eight terms, quickly. These get used loosely, and the loose usage is where bad i
 
 **Span:** one unit of work inside a trace: a name, a start time, a duration, an outcome, and a parent. Spans nest, which is what makes the waterfall a waterfall.
 
-**Span name:** the *class* of work a span represents. It is a grouping key, not a sentence, and we shipped both ways of getting that wrong.
+**Span name:** the _class_ of work a span represents. It is a grouping key, not a sentence, and we shipped both ways of getting that wrong.
 
 **Attribute:** a key/value pair on a span. An attribute is a column you will filter by during an incident. `app.user.id`, `db.query.fingerprint`, `app.payment.attempt`.
 
@@ -61,9 +61,9 @@ Here is the checkout request from the intro, twice. Once as auto-instrumentation
 
 The good version isn't clever. It's nine deliberate decisions about what deserves a span, and they follow one test: **a unit of work gets a span if it has a duration worth seeing on its own and a way to fail on its own.** Verifying a session. Loading the cart. Quoting prices. Charging the card. Persisting the order. Each of those can be slow independently and can fail independently, so each one gets a row in the waterfall.
 
-Notice what did *not* get a span: utility functions, serializers, the four private methods inside `PricingService.quote`. A span is not a stack frame. If it can't be slow on its own and can't fail on its own, its time belongs inside its parent, and its details, if they matter at all, belong in an attribute.
+Notice what did _not_ get a span: utility functions, serializers, the four private methods inside `PricingService.quote`. A span is not a stack frame. If it can't be slow on its own and can't fail on its own, its time belongs inside its parent, and its details, if they matter at all, belong in an attribute.
 
-Nesting is the other half. The Stripe call is a child of `PaymentService.charge`, which is a child of the request. That parentage is what turns "the request took 1.24s" into "60% of the request is Stripe" without anyone doing arithmetic. Auto-instrumented spans get parentage for free; your deliberate spans get it by being created inside the active context, which every OTel SDK does by default with `startActiveSpan` or its equivalent. If you take one implementation detail from this post: create spans *around* the work, with the work as a callback or a scope, and nesting takes care of itself.
+Nesting is the other half. The Stripe call is a child of `PaymentService.charge`, which is a child of the request. That parentage is what turns "the request took 1.24s" into "60% of the request is Stripe" without anyone doing arithmetic. Auto-instrumented spans get parentage for free; your deliberate spans get it by being created inside the active context, which every OTel SDK does by default with `startActiveSpan` or its equivalent. If you take one implementation detail from this post: create spans _around_ the work, with the work as a callback or a scope, and nesting takes care of itself.
 
 How many spans should a request have? Our healthy services run five to thirty spans for a typical request. Under five, you're probably hiding work inside opaque parents. Hundreds, and you've turned the waterfall into a log file.
 
@@ -99,17 +99,17 @@ In the same service, one code path used the semconv-recommended `{operation} {ta
 
 If your driver names every database span `query`, the first view is your operations list too. It looks tidy, in the way a room is tidy after you shove everything into one closet.
 
-The second failure is worth learning to spot in code review, because the code that produces it is *technically correct*: find every span name built by interpolation and ask what the interpolated part ranges over. A fixed set the code knows, like an HTTP method or a table name? Fine. Anything from a request, a user, a record id, or a model? Every distinct value splits the operation into a new one, and none of the fragments will ever aggregate, trend, or alert. IDs in URL paths are the classic case: the route template is the name, the id is an attribute.
+The second failure is worth learning to spot in code review, because the code that produces it is _technically correct_: find every span name built by interpolation and ask what the interpolated part ranges over. A fixed set the code knows, like an HTTP method or a table name? Fine. Anything from a request, a user, a record id, or a model? Every distinct value splits the operation into a new one, and none of the fragments will ever aggregate, trend, or alert. IDs in URL paths are the classic case: the route template is the name, the id is an attribute.
 
 The rules, in a table:
 
-| Kind | Name | Example |
-| --- | --- | --- |
-| Server (HTTP) | `{method} {route template}` | `GET /users/{id}` |
-| Client (HTTP) | `{method}`, host in `server.address` | `POST` |
-| Client (DB) | `{operation} {table}` | `SELECT users` |
-| Producer / Consumer | `{destination} {operation}` | `orders send` |
-| Internal | `{Component}.{method}` | `BillingService.createInvoice` |
+| Kind                | Name                                 | Example                        |
+| ------------------- | ------------------------------------ | ------------------------------ |
+| Server (HTTP)       | `{method} {route template}`          | `GET /users/{id}`              |
+| Client (HTTP)       | `{method}`, host in `server.address` | `POST`                         |
+| Client (DB)         | `{operation} {table}`                | `SELECT users`                 |
+| Producer / Consumer | `{destination} {operation}`          | `orders send`                  |
+| Internal            | `{Component}.{method}`               | `BillingService.createInvoice` |
 
 Three of these deserve a sentence. Client HTTP spans don't get a path: you rarely know the callee's route template, and guessing one from the path is the interpolation bug with extra steps; the host goes in `server.address`. Internal spans always get a component prefix (`BillingService.createInvoice`, never a bare `process` or `sync`), because a bare verb is the closet problem in miniature: six subsystems each have a `sync`. And pick one casing, forever: `BillingService.createInvoice` and `billing.create_invoice` are different rows in every dashboard until the end of time.
 
@@ -131,7 +131,7 @@ Two boundaries to respect. Don't record secrets or raw payloads: attributes are 
 
 The laziest error instrumentation is `catch (e) { span.recordException(e); throw e }`, and its sibling, marking every non-200 response as an error. Both feel diligent. Both quietly ruin your error views.
 
-Span status is a *verdict about the operation*, not a reflex about exceptions. Our ingest gateway rejects unauthenticated requests all day. Those are 401s, they're the system working as designed, and their spans are `Ok`. The OTel HTTP convention agrees: for server spans, only 5xx-class failures set `Error`. When we got this wrong, expected 401s and 429s flooded the error rate, and the dashboard's answer to "is the service healthy?" became "define healthy." A 4xx is the caller's problem; a 5xx is yours. Status tracks *yours*.
+Span status is a _verdict about the operation_, not a reflex about exceptions. Our ingest gateway rejects unauthenticated requests all day. Those are 401s, they're the system working as designed, and their spans are `Ok`. The OTel HTTP convention agrees: for server spans, only 5xx-class failures set `Error`. When we got this wrong, expected 401s and 429s flooded the error rate, and the dashboard's answer to "is the service healthy?" became "define healthy." A 4xx is the caller's problem; a 5xx is yours. Status tracks _yours_.
 
 When something genuinely fails, record it three ways, because each serves a different reader:
 
@@ -151,11 +151,11 @@ The classification attributes power the aggregate questions ("is the error spike
 
 ## Keep the trace connected
 
-Everything above assumes the trace is *whole*, that the checkout span and the Stripe span ended up in the same waterfall. Within one service, the SDK's context does this invisibly. The places it breaks are the places a request stops being one call stack:
+Everything above assumes the trace is _whole_, that the checkout span and the Stripe span ended up in the same waterfall. Within one service, the SDK's context does this invisibly. The places it breaks are the places a request stops being one call stack:
 
 **Across services**, the context travels in the `traceparent` header. Instrumented HTTP clients inject it and instrumented servers extract it. That's free, until the day a proxy strips the header, or one service in the chain isn't instrumented, and every request becomes two traces that don't know about each other. If your traces routinely start at service B, this is why.
 
-**Across queues and background jobs**, nothing is automatic: write the trace context into the message when you enqueue, read it when you consume. Whether the consumer *continues* the trace or starts a new one linked to it is a real choice: for work that runs seconds later, continue; for a batch job that processes 500 enqueued items an hour later, give the job its own trace and attach a span link per item, or the producer's traces grow hour-long tails.
+**Across queues and background jobs**, nothing is automatic: write the trace context into the message when you enqueue, read it when you consume. Whether the consumer _continues_ the trace or starts a new one linked to it is a real choice: for work that runs seconds later, continue; for a batch job that processes 500 enqueued items an hour later, give the job its own trace and attach a span link per item, or the producer's traces grow hour-long tails.
 
 **Across in-process async boundaries** (fire-and-forget promises, spawned workers, anything that outlives the request) the failure is subtler: work either escapes the trace entirely, or, worse, inherits the ambient span silently, so a 30ms handler appears to take nine minutes because a background loop kept parenting onto it. If a waterfall ever shows a span that makes no chronological sense, suspect context leaking into forked work.
 
@@ -165,7 +165,7 @@ The audit here is one query: what fraction of your traces have a root span that 
 
 The objection to everything above is cost: "if every request gets ten spans with fifteen attributes, the bill will be spectacular." The answer is that sampling exists, and that useless telemetry at 100% costs more than useful telemetry at 10%. You were already paying for the two-span traces that answered nothing.
 
-Head sampling decides at the trace's birth ("keep 10% of everything"). It's cheap, simple, and blind: it drops nine out of ten of the errors you'll wish you had. Tail sampling decides after the outcome is known, which lets you state a policy that matches how debugging actually works: keep every trace with an error, keep everything slower than your p99, keep flagged tenants and rollout cohorts, and keep a small random slice of the healthy fast majority as a baseline. You almost never scroll happy, fast, ordinary traces. You aggregate them. So keep enough of them to aggregate, and keep *all* of the ones you'd read one at a time.
+Head sampling decides at the trace's birth ("keep 10% of everything"). It's cheap, simple, and blind: it drops nine out of ten of the errors you'll wish you had. Tail sampling decides after the outcome is known, which lets you state a policy that matches how debugging actually works: keep every trace with an error, keep everything slower than your p99, keep flagged tenants and rollout cohorts, and keep a small random slice of the healthy fast majority as a baseline. You almost never scroll happy, fast, ordinary traces. You aggregate them. So keep enough of them to aggregate, and keep _all_ of the ones you'd read one at a time.
 
 Whatever you choose, decide it deliberately and write it down where the whole team can see it: an undocumented sampler is how "the trace doesn't exist" becomes a surprise mid-incident. We keep the longer version, rates and all, in our [sampling guide](/docs/concepts/sampling-throughput).
 
@@ -185,7 +185,7 @@ You don't need a migration project. You need an hour, two queries, and one uncom
 
 Then read the top: for each fat name, ask how many genuinely different things live under it. If one name is a third of your spans and covers three orders of magnitude of duration, you've found your closet. There's no magic number of names, but the ratio is diagnostic: our healthy services run from 22 names across 85M spans to about 600 across 3M. Thousands of spans per name is a grouping key doing its job.
 
-**Then pick one trace for your slowest endpoint and try to answer *why* from the trace alone.** No logs, no grep, no asking the person who wrote it. Which user? Which query? Which downstream call ate the time? Was it a retry? Every question you can't answer from the trace is a missing span or a missing attribute, and now you have the list. That list is your instrumentation backlog, already prioritized.
+**Then pick one trace for your slowest endpoint and try to answer _why_ from the trace alone.** No logs, no grep, no asking the person who wrote it. Which user? Which query? Which downstream call ate the time? Was it a retry? Every question you can't answer from the trace is a missing span or a missing attribute, and now you have the list. That list is your instrumentation backlog, already prioritized.
 
 Then put the audit on a calendar and run it again in a month, because one of the two bugs we confessed above was in code reviewed by people who were, at that moment, building a span-naming feature. This class of bug does not announce itself. It just quietly makes every number you look at slightly about nothing.
 
@@ -193,4 +193,4 @@ That's the whole trade. A few deliberate lines per handler, and debugging stops 
 
 ---
 
-*If you want somewhere to point the deliberate spans at, [Maple](https://maple.dev) is an OpenTelemetry-native tracing backend: the [instrumentation guides](/docs/guides/instrumentation-nodejs) get you from zero to a readable waterfall in one sitting, and everything in this post about names, attributes, and status is exactly what its operations views group by.*
+_If you want somewhere to point the deliberate spans at, [Maple](https://maple.dev) is an OpenTelemetry-native tracing backend: the [instrumentation guides](/docs/guides/instrumentation-nodejs) get you from zero to a readable waterfall in one sitting, and everything in this post about names, attributes, and status is exactly what its operations views group by._

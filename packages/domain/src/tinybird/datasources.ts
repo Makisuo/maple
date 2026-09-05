@@ -1584,6 +1584,64 @@ export const alertChecks = defineDatasource("alert_checks", {
 export type AlertChecksRow = InferRow<typeof alertChecks>
 
 /**
+ * The org-wide audit log: one row per allowed or denied action, and per read
+ * of telemetry or session replays, attributed to the user, API key, agent, or
+ * Maple itself that performed it. Written by the API through `ingest` (the
+ * audit events queue consumer, or the producer directly when no queue is
+ * bound) and read only by the admin-gated `GET /v2/audit_log`; never fed by a
+ * materialized view and never routed to a BYO ClickHouse — the log is Maple's
+ * record, not the customer warehouse's.
+ *
+ * Absent values are empty strings rather than NULL: `LowCardinality(Nullable)`
+ * is awkward in ClickHouse and every read maps `''` back to `null` on the wire.
+ * `Changes`/`Metadata` hold JSON documents (`''` when none); `ChangedFields`
+ * keeps the touched field names queryable without parsing `Changes`.
+ *
+ * Six-year retention: HIPAA §164.316(b)(2) keeps required documentation for six
+ * years, and the audit trail is the documentation of who accessed what.
+ */
+export const auditLog = defineDatasource("audit_log", {
+	description:
+		"Org-wide audit trail: allowed and denied actions plus telemetry/session-replay reads, attributed to the user, API key, or agent that performed them. Admin-only; read through GET /v2/audit_log.",
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		Id: t.string(),
+		OccurredAt: t.dateTime64(3),
+		RecordedAt: t.dateTime64(3),
+		ActorType: t.string().lowCardinality(),
+		UserId: t.string(),
+		ApiKeyId: t.string(),
+		ActorId: t.string(),
+		ActorLabel: t.string(),
+		AffectedUserId: t.string(),
+		Source: t.string().lowCardinality(),
+		Action: t.string().lowCardinality(),
+		Outcome: t.string().lowCardinality(),
+		DenialReason: t.string(),
+		ResourceType: t.string().lowCardinality(),
+		ResourceId: t.string(),
+		// `[:]` is what lets the Events API map a JSON array onto Array(String).
+		ChangedFields: column(t.array(t.string()), { jsonPath: "$.ChangedFields[:]" }),
+		Changes: t.string(),
+		Metadata: t.string(),
+		RequestId: t.string(),
+		OriginIp: t.string(),
+		OriginCountry: t.string().lowCardinality(),
+	},
+	// ReplacingMergeTree keyed on the entry id makes queue redelivery idempotent:
+	// a second delivery of the same event collapses at the next merge. Until
+	// then a page can carry both copies; `AuditLogService.list` drops the
+	// repeat by id.
+	engine: engine.replacingMergeTree({
+		partitionKey: "toYYYYMM(OccurredAt)",
+		sortingKey: ["OrgId", "OccurredAt", "Id"],
+		ttl: "toDate(OccurredAt) + INTERVAL 2190 DAY",
+	}),
+})
+
+export type AuditLogRow = InferRow<typeof auditLog>
+
+/**
  * Minute-grain operation metrics used by the service-detail Operations panel.
  * The operation name is normalized once by the write-side MV, while exact and
  * sampling-weighted counts are retained side-by-side. Duration aggregates are

@@ -8,6 +8,7 @@ import { BillingSection } from "@/components/settings/billing-section"
 import { MembersSection } from "@/components/settings/members-section"
 import { IngestionSection } from "@/components/settings/ingestion-section"
 import { ApiKeysSection } from "@/components/settings/api-keys-section"
+import { AuditLogSection } from "@/components/settings/audit-log-section"
 import { DeveloperSection } from "@/components/settings/developer-section"
 import { McpSection } from "@/components/settings/mcp-section"
 import { NotificationsSection } from "@/components/settings/notifications-section"
@@ -135,6 +136,7 @@ function SettingsPage() {
 					<DashboardLayout.Scroll>
 						{activeTab === "organization" && <OrganizationSection />}
 						{activeTab === "members" && <MembersSection />}
+						{activeTab === "audit-log" && <AuditLogSection />}
 						{activeTab === "setup-audit" && <SetupAuditSection />}
 						{activeTab === "ingestion" && <IngestionSection />}
 						{activeTab === "api-keys" && <ApiKeysSection />}

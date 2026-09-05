@@ -60,9 +60,7 @@ function readObjectPath(value: unknown, ...path: string[]): Record<string, unkno
 		if (current === null || typeof current !== "object") return undefined
 		current = (current as Record<string, unknown>)[key]
 	}
-	return current !== null && typeof current === "object"
-		? (current as Record<string, unknown>)
-		: undefined
+	return current !== null && typeof current === "object" ? (current as Record<string, unknown>) : undefined
 }
 
 function readFiniteNumber(value: unknown): number | undefined {

@@ -8,11 +8,7 @@ import {
 } from "./types"
 import { warehouseToMcpHandlers } from "@/mcp/lib/map-warehouse-error"
 import { withTenantExecutor, CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
-import {
-	resolveTimeRange,
-	rangeExceededResult,
-	MCP_DISCOVERY_MAX_HOURS,
-} from "@/mcp/lib/time"
+import { resolveTimeRange, rangeExceededResult, MCP_DISCOVERY_MAX_HOURS } from "@/mcp/lib/time"
 import { clampLimit } from "@/mcp/lib/limits"
 import { formatTable, formatNumber, formatPercent, truncate } from "@/mcp/lib/format"
 import { formatNextSteps } from "@/mcp/lib/next-steps"
@@ -77,9 +73,7 @@ export function registerQueryFunnelTool(server: McpToolRegistrar) {
 			breakdown_limit: optionalNumberParam(
 				`Groups to keep when breaking down (default 10, max ${BREAKDOWN_MAX_GROUPS}).`,
 			),
-			start_time: optionalTimeParam(
-				"Start of time range (YYYY-MM-DD HH:mm:ss). Default: last 7 days.",
-			),
+			start_time: optionalTimeParam("Start of time range (YYYY-MM-DD HH:mm:ss). Default: last 7 days."),
 			end_time: optionalTimeParam("End of time range (YYYY-MM-DD HH:mm:ss)."),
 			host: optionalStringParam("Only persons with a session on this site host."),
 			page_path: optionalStringParam("Only persons with a session that viewed this page path."),

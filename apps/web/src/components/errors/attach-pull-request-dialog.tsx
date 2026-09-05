@@ -47,10 +47,7 @@ export const PULL_REQUEST_STATE_TONE = {
 } satisfies Record<PullRequestSummary["state"], string>
 
 /** `#123`, `123`, or a full PR URL — the three things a person actually types. */
-const resolveTypedReference = (
-	input: string,
-	repository: string | null,
-): string | null => {
+const resolveTypedReference = (input: string, repository: string | null): string | null => {
 	const trimmed = input.trim()
 	if (trimmed.length === 0) return null
 
@@ -157,8 +154,8 @@ export function AttachPullRequestDialog({
 				<DialogHeader>
 					<DialogTitle>Attach a pull request</DialogTitle>
 					<DialogDescription>
-						Once it merges, Maple checks whether this error actually stopped before closing
-						the issue.
+						Once it merges, Maple checks whether this error actually stopped before closing the
+						issue.
 					</DialogDescription>
 				</DialogHeader>
 
@@ -264,9 +261,7 @@ export function AttachPullRequestDialog({
 															</div>
 															<span className="truncate text-[11px] text-muted-foreground">
 																{pr.headRef}
-																{pr.authorLogin
-																	? ` · ${pr.authorLogin}`
-																	: ""}
+																{pr.authorLogin ? ` · ${pr.authorLogin}` : ""}
 															</span>
 														</div>
 													</ComboboxItem>

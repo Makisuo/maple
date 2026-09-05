@@ -73,4 +73,3 @@ export const completedSteps = (steps: ReadonlyArray<FunnelStepType>): ReadonlyAr
 				return step.value.trim() !== ""
 		}
 	})
-

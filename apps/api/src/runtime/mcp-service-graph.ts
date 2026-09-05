@@ -2,6 +2,7 @@ import { EdgeCacheService } from "@maple/cache"
 import { BucketCacheService } from "@maple/query-engine/caching"
 import { Layer } from "effect"
 import { McpToolExecutor } from "@/mcp/dispatcher"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { CacheBackendLive } from "@/platform/CacheBackendLive"
 import { EmailService } from "@/platform/EmailService"
 import { Env } from "@/platform/Env"
@@ -49,6 +50,8 @@ const HazelOAuthServiceLive = HazelOAuthService.layer.pipe(Layer.provide(InfraLi
 const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(
 	Layer.provide(Layer.mergeAll(InfraLive, OrgClickHouseSettingsServiceLive, TinybirdOrgTokenServiceLive)),
 )
+
+const AuditLogServiceLive = AuditLogService.layer.pipe(Layer.provide(WarehouseQueryServiceLive))
 
 const BucketCacheServiceLive = BucketCacheService.layer.pipe(Layer.provideMerge(EdgeCacheServiceLive))
 
@@ -104,7 +107,7 @@ const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(
 
 const ErrorActorsServiceLive = ErrorActorsService.layer
 const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
-	Layer.provide(ErrorActorsServiceLive),
+	Layer.provide(Layer.mergeAll(ErrorActorsServiceLive, AuditLogServiceLive)),
 )
 const ErrorPolicyServiceLive = ErrorPolicyService.layer
 const ErrorIssueReadModelsServiceLive = ErrorIssueReadModelsService.layer.pipe(
@@ -164,6 +167,7 @@ const McpRuntimeServicesLive = Layer.mergeAll(
 	AlertReadModelsServiceLive,
 	AlertRulesServiceLive,
 	AlertsServiceLive,
+	AuditLogServiceLive,
 	DashboardPersistenceService.layer,
 	ErrorActorsServiceLive,
 	ErrorIssueReadModelsServiceLive,

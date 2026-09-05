@@ -14,11 +14,7 @@
 import { Effect } from "effect"
 import type * as Impl from "./CloudflareApiImpl"
 
-export type {
-	CloudflareGraphqlError,
-	CloudflareHyperdriveConfig,
-	CloudflareZone,
-} from "./CloudflareApiImpl"
+export type { CloudflareGraphqlError, CloudflareHyperdriveConfig, CloudflareZone } from "./CloudflareApiImpl"
 
 const impl = Effect.promise(() => import("./CloudflareApiImpl"))
 

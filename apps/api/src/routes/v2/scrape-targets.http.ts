@@ -10,6 +10,8 @@ import {
 } from "@maple/domain/http/v2"
 import type { V2ScrapeTarget, V2ScrapeTargetCheck } from "@maple/domain/http/v2"
 import { Effect } from "effect"
+import { auditDiff, redactAuditUrl } from "@/routes/v2/audit-changes"
+import { recordHttpAudit } from "@/services/audit/AuditLogService"
 import { ScrapeTargetsService } from "@/services/integrations/ScrapeTargetsService"
 import { requireAdmin } from "@/services/auth/auth"
 
@@ -40,6 +42,27 @@ const toV2ScrapeTarget = (target: ScrapeTargetResponse): V2ScrapeTarget => ({
 	last_scrape_error: target.lastScrapeError,
 	created_at: target.createdAt,
 	updated_at: target.updatedAt,
+})
+
+/** Update-payload fields diffable through the wire shape; credentials never appear. */
+const targetAuditDiff = auditDiff({
+	fields: [
+		"name",
+		"url",
+		"organization",
+		"include_branches",
+		"exclude_branches",
+		"scrape_interval_seconds",
+		"labels_json",
+		"auth_type",
+		"service_name",
+		"enabled",
+	],
+	// Scrape URLs may carry tokens in userinfo/query — audit only scheme/host/path.
+	// Identical redacted values still mean the URL changed within the stripped part.
+	redact: { url: redactAuditUrl },
+	// Credentials are write-only: audit that they rotated, never their value.
+	writeOnly: ["auth_credentials"],
 })
 
 export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeTargets", (handlers) =>
@@ -111,6 +134,11 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 						}),
 					)
 
+					yield* recordHttpAudit("scrape_target.created", {
+						resourceId: created.id,
+						metadata: { name: created.name },
+					})
+
 					return toV2ScrapeTarget(created)
 				}),
 			)
@@ -118,6 +146,7 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* requireAdmin(tenant.roles, adminOnly("update"))
+					const current = yield* service.get(tenant.orgId, params.id)
 					const updated = yield* service.update(
 						tenant.orgId,
 						params.id,
@@ -160,6 +189,14 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 						}),
 					)
 
+					// Read-then-write with no CAS: a concurrent update can make `before`
+					// reflect a state this update never saw. Accepted for audit purposes.
+					yield* recordHttpAudit("scrape_target.updated", {
+						resourceId: updated.id,
+						changes: targetAuditDiff(payload, toV2ScrapeTarget(current), toV2ScrapeTarget(updated)),
+						metadata: { name: updated.name },
+					})
+
 					return toV2ScrapeTarget(updated)
 				}),
 			)
@@ -168,6 +205,7 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 					const tenant = yield* CurrentTenant.Context
 					yield* requireAdmin(tenant.roles, adminOnly("delete"))
 					const deleted = yield* service.delete(tenant.orgId, params.id)
+					yield* recordHttpAudit("scrape_target.deleted", { resourceId: deleted.id })
 
 					return { id: deleted.id, object: "scrape_target" as const, deleted: true as const }
 				}),

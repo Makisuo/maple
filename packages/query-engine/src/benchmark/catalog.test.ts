@@ -23,6 +23,7 @@ import {
 import { builderFixtures } from "./builders"
 import * as activityQueries from "../ch/queries/activity"
 import * as alertCheckQueries from "../ch/queries/alert-checks"
+import * as auditLogQueries from "../ch/queries/audit-log"
 import * as anomalyQueries from "../ch/queries/anomaly"
 import * as attributeKeyQueries from "../ch/queries/attribute-keys"
 import * as containerQueries from "../ch/queries/containers"
@@ -253,6 +254,7 @@ describe("sql catalog", () => {
 const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 	activity: activityQueries,
 	"alert-checks": alertCheckQueries,
+	"audit-log": auditLogQueries,
 	anomaly: anomalyQueries,
 	"attribute-keys": attributeKeyQueries,
 	containers: containerQueries,

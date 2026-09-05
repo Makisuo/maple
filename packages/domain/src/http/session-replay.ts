@@ -2,6 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { SessionId, TraceId, UserId } from "../primitives"
 import { TinybirdDateTime } from "../query-engine"
+import { AuditedRead } from "./audit-log"
 import { Authorization, SessionAuthorization } from "./current-tenant"
 import { QueryEngineExecutionError, QueryEngineTimeoutError } from "./query-engine"
 import { warehouseHttpErrors } from "./warehouse"
@@ -330,7 +331,8 @@ export class SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays")
 		}),
 	)
 	.prefix("/api/session-replays")
-	.middleware(Authorization) {}
+	.middleware(Authorization)
+	.annotate(AuditedRead, "session_replay.read") {}
 
 /**
  * Session-replay helpers that exist for the dashboard and are not public API.
@@ -356,4 +358,5 @@ export class SessionReplaysInternalApiGroup extends HttpApiGroup.make("sessionRe
 		}),
 	)
 	.prefix("/internal/session-replays")
-	.middleware(SessionAuthorization) {}
+	.middleware(SessionAuthorization)
+	.annotate(AuditedRead, "session_replay.read") {}

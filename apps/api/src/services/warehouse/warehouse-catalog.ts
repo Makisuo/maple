@@ -99,12 +99,23 @@ export interface TableInfo extends TableSummary {
 	readonly partitionKey?: string
 }
 
+/**
+ * Datasources that raw SQL must never reach, even inside the caller's own org.
+ * The audit log records every member's activity and origin IP and is served
+ * only through the admin-gated `GET /v2/audit_log`; letting `run_sql` or a
+ * dashboard widget read it would bypass that gate (and let the log observe
+ * itself being read).
+ */
+const RAW_SQL_HIDDEN_DATASOURCES: ReadonlySet<string> = new Set(["audit_log"])
+
 function collectDatasources() {
 	// `Datasources` exports a mix of datasource definitions, type aliases, helper
 	// functions, and constant lookup tables. `isDatasourceDefinition` is the
 	// runtime filter; we cast to `unknown` first because the static union of all
 	// exports is too wide for TS to narrow with the predicate.
-	return (Object.values(Datasources) as ReadonlyArray<unknown>).filter(isDatasourceDefinition)
+	return (Object.values(Datasources) as ReadonlyArray<unknown>)
+		.filter(isDatasourceDefinition)
+		.filter((ds) => !RAW_SQL_HIDDEN_DATASOURCES.has(ds._name))
 }
 
 export function listWarehouseTables(): ReadonlyArray<TableSummary> {

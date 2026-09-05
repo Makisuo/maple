@@ -50,10 +50,3 @@ export const SERVICE_MAP_3D_TUNING: ServiceMap3DTuning = {
 	pipeOpacity: 0.42,
 	packetSpeed: 1,
 }
-
-/**
- * Identity of a laid-out graph: the camera re-frames when this changes, which
- * `layoutMode` alone cannot express once the spacing is dialable.
- */
-export const layoutKey = (mode: string, tuning: Layout3DTuning): string =>
-	`${mode}|${tuning.floorGap}|${tuning.floorRadius}|${tuning.clusterSpacing}|${tuning.ringInner}|${tuning.ringGap}`

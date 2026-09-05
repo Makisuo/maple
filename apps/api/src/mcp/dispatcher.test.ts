@@ -6,6 +6,7 @@ import { MCP_ANTICIPATED_ERROR_IDENTIFIERS } from "./expected-failures"
 import { mapleToolCatalog, toInputSchema } from "./tools/registry"
 import type { McpToolRuntimeRequirements } from "./tools/runtime-requirements"
 import type { TenantContext } from "@/services/auth/tenant-context"
+import { AuditLogService, makeMemoryAuditLog } from "@/services/audit/AuditLogService"
 
 const TENANT: TenantContext = {
 	orgId: "org_test" as TenantContext["orgId"],
@@ -16,7 +17,8 @@ const TENANT: TenantContext = {
 
 // These cases stop at registry lookup/schema decoding, before a tool service is read.
 const makeValidationExecutor = McpToolExecutor.make.pipe(
-	Effect.provide(Context.empty() as Context.Context<McpToolRuntimeRequirements>),
+	// Every tool call is audited, so the executor needs the audit service even here.
+	Effect.provide(Context.make(AuditLogService, makeMemoryAuditLog()) as Context.Context<McpToolRuntimeRequirements>),
 )
 
 const makeRecordingTracer = () => {

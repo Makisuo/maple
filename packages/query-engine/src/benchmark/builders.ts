@@ -338,6 +338,56 @@ const productEventsFixtures: ReadonlyArray<BuilderFixture> = [
 
 export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 	...productEventsFixtures,
+	// Audit log listing (apps/api/src/services/audit/AuditLogService.ts `list`).
+	{
+		module: "audit-log",
+		name: "auditLogEntriesQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(CH.auditLogEntriesQuery({ limit: 50, offset: 0 }), { orgId: ORG_ID }),
+	},
+	{
+		// Every optional filter bound at once, including the raw `has(...)` clause.
+		module: "audit-log",
+		name: "auditLogEntriesQuery",
+		label: "filtered",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.auditLogEntriesQuery({
+					actorType: true,
+					userId: true,
+					apiKeyId: true,
+					actorId: true,
+					affectedUserId: true,
+					action: true,
+					outcome: true,
+					resourceType: true,
+					resourceId: true,
+					changedField: true,
+					requestId: true,
+					since: true,
+					until: true,
+					limit: 50,
+					offset: 50,
+				}),
+				{
+					orgId: ORG_ID,
+					actorType: "user",
+					userId: "user_1",
+					apiKeyId: "key_1",
+					actorId: "actor_1",
+					affectedUserId: "user_2",
+					action: "dashboard.updated",
+					outcome: "allowed",
+					resourceType: "dashboard",
+					resourceId: "dash_1",
+					changedField: "name",
+					requestId: "ray",
+					since: START_TIME,
+					until: END_TIME,
+				},
+			),
+	},
 	// Session replay fixtures used by the replay routes.
 	{
 		module: "session-replays",

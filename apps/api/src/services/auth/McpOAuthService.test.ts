@@ -42,10 +42,7 @@ const verifier = "maple-mcp-oauth-verifier-that-is-long-enough-1234567890"
 const challenge = createHash("sha256").update(verifier).digest("base64url")
 
 /** Register → authorize → approve → exchange, the shortest path to a live grant. */
-const issueGrant = Effect.fnUntraced(function* (
-	oauth: McpOAuthService,
-	clientName: string,
-) {
+const issueGrant = Effect.fnUntraced(function* (oauth: McpOAuthService, clientName: string) {
 	const client = yield* oauth.register({ clientName, redirectUris: [redirectUri] }, "127.0.0.1")
 	const started = yield* oauth.startAuthorization(
 		{

@@ -736,9 +736,7 @@ describe("buildSessionSummary — work and failures", () => {
 		])
 
 		expect(summary.failures.errors).toBe(1)
-		expect(summary.failureGroups).toEqual([
-			{ kind: "error", label: "tool_error · run_sql", count: 1 },
-		])
+		expect(summary.failureGroups).toEqual([{ kind: "error", label: "tool_error · run_sql", count: 1 }])
 	})
 
 	it("counts a failed gen_ai.response.status on an Ok span, classified by its signal", () => {

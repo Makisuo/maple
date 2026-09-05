@@ -46,7 +46,9 @@ describe("FunnelQueryPanel", () => {
 	})
 
 	it("reveals Count by through the add-on bar and resets it to the default when toggled off", () => {
-		const { latest } = renderPanel(draft({ keyBy: "session", addOns: { keyBy: true, window: false, breakdown: false } }))
+		const { latest } = renderPanel(
+			draft({ keyBy: "session", addOns: { keyBy: true, window: false, breakdown: false } }),
+		)
 		expect(screen.getByRole("combobox", { name: "Count by" })).toBeTruthy()
 		fireEvent.click(screen.getByRole("button", { name: "Count by" }))
 		expect(latest().addOns.keyBy).toBe(false)

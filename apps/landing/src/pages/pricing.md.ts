@@ -8,7 +8,15 @@
  */
 import type { APIRoute } from "astro"
 import { blocks, docHeader, markdown, table } from "../lib/page-markdown"
-import { getOffer, money, platformFeatures, rateBlock, rateLabel, volume, type Allotment } from "../lib/pricing-offer"
+import {
+	getOffer,
+	money,
+	platformFeatures,
+	rateBlock,
+	rateLabel,
+	volume,
+	type Allotment,
+} from "../lib/pricing-offer"
 import * as m from "../paraglide/messages.js"
 
 /** "GB", "session", or "1,000 events" — the block the rate is quoted per. */
@@ -23,7 +31,11 @@ export const GET: APIRoute = async () => {
 		offer.allotments.map((a) => [
 			a.label,
 			volume(a, a.included),
-			a.unlimited ? m.pricing_free_beta() : a.rate === undefined ? "—" : `${rateLabel(a.rate)} / ${unitLabel(a)}`,
+			a.unlimited
+				? m.pricing_free_beta()
+				: a.rate === undefined
+					? "—"
+					: `${rateLabel(a.rate)} / ${unitLabel(a)}`,
 		]),
 	)
 

@@ -56,7 +56,12 @@ export function FunnelQueryPanel({ suggestionWindow, ...props }: FunnelQueryPane
 }
 
 /** The panel itself, suggestions handed in — what a test renders without a warehouse. */
-export function FunnelQueryPanelView({ funnel, onUpdate, onSourceChange, suggestions }: FunnelQueryPanelViewProps) {
+export function FunnelQueryPanelView({
+	funnel,
+	onUpdate,
+	onSourceChange,
+	suggestions,
+}: FunnelQueryPanelViewProps) {
 	const filterParse = parseProductEventsFilterClause(funnel.filterClause)
 	const filterError = filterParse.ok ? null : filterParse.error
 
@@ -99,7 +104,9 @@ export function FunnelQueryPanelView({ funnel, onUpdate, onSourceChange, suggest
 			{/* Steps */}
 			<div className="space-y-1.5">
 				<div className="flex items-baseline gap-2">
-					<span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Steps</span>
+					<span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+						Steps
+					</span>
 					<span className="font-mono text-[10px] text-muted-foreground">
 						in order · session step only first · up to 10
 					</span>
@@ -158,7 +165,9 @@ export function FunnelQueryPanelView({ funnel, onUpdate, onSourceChange, suggest
 								)}
 								value={funnel.keyBy}
 								onValueChange={(value) => {
-									const option = FUNNEL_KEY_BY_OPTIONS.find((candidate) => candidate.value === value)
+									const option = FUNNEL_KEY_BY_OPTIONS.find(
+										(candidate) => candidate.value === value,
+									)
 									if (option) onUpdate((current) => ({ ...current, keyBy: option.value }))
 								}}
 							>
@@ -186,7 +195,10 @@ export function FunnelQueryPanelView({ funnel, onUpdate, onSourceChange, suggest
 							<span className="w-16 shrink-0 text-[11px] text-muted-foreground">Window</span>
 							<Select
 								items={Object.fromEntries(
-									FUNNEL_WINDOW_OPTIONS.map((option) => [String(option.value), option.label]),
+									FUNNEL_WINDOW_OPTIONS.map((option) => [
+										String(option.value),
+										option.label,
+									]),
 								)}
 								value={String(funnel.windowSeconds)}
 								onValueChange={(value) => {
@@ -196,7 +208,10 @@ export function FunnelQueryPanelView({ funnel, onUpdate, onSourceChange, suggest
 									}
 								}}
 							>
-								<SelectTrigger className="h-8 w-[160px] text-xs" aria-label="Conversion window">
+								<SelectTrigger
+									className="h-8 w-[160px] text-xs"
+									aria-label="Conversion window"
+								>
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -205,7 +220,9 @@ export function FunnelQueryPanelView({ funnel, onUpdate, onSourceChange, suggest
 											{option.label}
 										</SelectItem>
 									))}
-									{FUNNEL_WINDOW_OPTIONS.every((option) => option.value !== funnel.windowSeconds) ? (
+									{FUNNEL_WINDOW_OPTIONS.every(
+										(option) => option.value !== funnel.windowSeconds,
+									) ? (
 										<SelectItem value={String(funnel.windowSeconds)}>
 											{funnel.windowSeconds}s
 										</SelectItem>
@@ -230,7 +247,9 @@ export function FunnelQueryPanelView({ funnel, onUpdate, onSourceChange, suggest
 									})
 								}
 							/>
-							<span className="text-[11px] text-muted-foreground">one bar per group, top 6</span>
+							<span className="text-[11px] text-muted-foreground">
+								one bar per group, top 6
+							</span>
 						</div>
 					)}
 				</div>

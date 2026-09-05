@@ -417,15 +417,24 @@ const handleQueue = async (
 			processPlanetScaleWebhookBatch,
 			flushPlanetScaleWebhookTelemetry,
 		} = await import("./planetscale-webhook-runtime")
-		try {
-			await runScheduledEffect(
-				buildPlanetScaleWebhookLayer(env),
-				await scoped(processPlanetScaleWebhookBatch(batch)),
-				ctx,
-			)
-		} finally {
-			ctx.waitUntil(flushPlanetScaleWebhookTelemetry(env))
-		}
+		await runScheduledEffect(
+			buildPlanetScaleWebhookLayer(env),
+			await scoped(processPlanetScaleWebhookBatch(batch)),
+			ctx,
+			{ onSettled: () => flushPlanetScaleWebhookTelemetry(env) },
+		)
+		return
+	}
+	if (queueKind === "audit-events") {
+		const { buildAuditEventsLayer, processAuditEventsBatch, flushAuditEventsTelemetry } = await import(
+			"./audit-events-runtime"
+		)
+		await runScheduledEffect(
+			buildAuditEventsLayer(env),
+			await scoped(processAuditEventsBatch(batch)),
+			ctx,
+			{ onSettled: () => flushAuditEventsTelemetry(env) },
+		)
 		return
 	}
 	if (queueKind === "unknown") {
@@ -433,11 +442,9 @@ const handleQueue = async (
 	}
 
 	const { buildVcsSyncLayer, processBatch, flushVcsTelemetry } = await import("./vcs-sync-runtime")
-	try {
-		await runScheduledEffect(buildVcsSyncLayer(env), await scoped(processBatch(batch)), ctx)
-	} finally {
-		ctx.waitUntil(flushVcsTelemetry(env))
-	}
+	await runScheduledEffect(buildVcsSyncLayer(env), await scoped(processBatch(batch)), ctx, {
+		onSettled: () => flushVcsTelemetry(env),
+	})
 }
 
 // Cron handler. Three schedules (see `crons` in alchemy.run.ts), dispatched on
@@ -464,50 +471,37 @@ const handleScheduled = async (
 		const { runScrapeCheckRetention } = await import("@/services/integrations/scrape-check-retention")
 		const { runPlanetScaleEventRetention } =
 			await import("@/services/integrations/planetscale-event-retention")
-		try {
-			// Both sweeps ride this one cron: each new cron string costs an entry in
-			// alchemy.run.ts and a branch here, and neither needs its own beat.
-			// Sequential, not concurrent — they share one Postgres socket for the
-			// whole tick, so running them concurrently would only queue on it.
-			await runScheduledEffect(
-				buildScrapeRetentionLayer(env),
-				await scoped(Effect.andThen(runScrapeCheckRetention, runPlanetScaleEventRetention)),
-				ctx,
-				{ onInterrupt: "graceful" },
-			)
-		} finally {
-			ctx.waitUntil(flushVcsTelemetry(env))
-		}
+		// Both sweeps ride this one cron: each new cron string costs an entry in
+		// alchemy.run.ts and a branch here, and neither needs its own beat.
+		// Sequential, not concurrent — they share one Postgres socket for the
+		// whole tick, so running them concurrently would only queue on it.
+		await runScheduledEffect(
+			buildScrapeRetentionLayer(env),
+			await scoped(Effect.andThen(runScrapeCheckRetention, runPlanetScaleEventRetention)),
+			ctx,
+			{ onInterrupt: "graceful", onSettled: () => flushVcsTelemetry(env) },
+		)
 		return
 	}
 
 	if (event.cron === SLACK_RECONCILE_CRON) {
 		const { buildSlackReconcileLayer, runSlackReconciliation, flushSlackTelemetry } =
 			await import("./slack-reconcile-runtime")
-		try {
-			await runScheduledEffect(
-				buildSlackReconcileLayer(env),
-				await scoped(runSlackReconciliation),
-				ctx,
-				{ onInterrupt: "graceful" },
-			)
-		} finally {
-			ctx.waitUntil(flushSlackTelemetry(env))
-		}
+		await runScheduledEffect(buildSlackReconcileLayer(env), await scoped(runSlackReconciliation), ctx, {
+			onInterrupt: "graceful",
+			onSettled: () => flushSlackTelemetry(env),
+		})
 		return
 	}
 
 	const { buildVcsScheduledLayer, runScheduledSync, flushVcsTelemetry } = await import("./vcs-sync-runtime")
-	try {
-		// Graceful on interrupt: a teardown mid-cron is expected lifecycle, and the
-		// schedule reruns — only the queue consumer above must keep rejecting so an
-		// interrupted batch redelivers instead of acking.
-		await runScheduledEffect(buildVcsScheduledLayer(env), await scoped(runScheduledSync), ctx, {
-			onInterrupt: "graceful",
-		})
-	} finally {
-		ctx.waitUntil(flushVcsTelemetry(env))
-	}
+	// Graceful on interrupt: a teardown mid-cron is expected lifecycle, and the
+	// schedule reruns — only the queue consumer above must keep rejecting so an
+	// interrupted batch redelivers instead of acking.
+	await runScheduledEffect(buildVcsScheduledLayer(env), await scoped(runScheduledSync), ctx, {
+		onInterrupt: "graceful",
+		onSettled: () => flushVcsTelemetry(env),
+	})
 }
 
 /**

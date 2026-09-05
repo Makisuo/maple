@@ -324,7 +324,11 @@ describe("product-event funnel widget", () => {
 				...funnelState().funnel,
 				steps: [
 					{ kind: "page", pagePath: "/pricing", host: "example.com" },
-					{ kind: "event", eventName: "signup_completed", filterClause: 'plan = "pro" AND source = cli' },
+					{
+						kind: "event",
+						eventName: "signup_completed",
+						filterClause: 'plan = "pro" AND source = cli',
+					},
 				],
 				filterClause: 'country = "DE" AND utm.source = "twitter"',
 				breakdownBy: "referrerHost",
@@ -335,7 +339,11 @@ describe("product-event funnel widget", () => {
 		expect(dataSource.params).toEqual({
 			steps: [
 				{ kind: "page", pagePath: "/pricing", host: "example.com" },
-				{ kind: "event", eventName: "signup_completed", attributeEquals: { plan: "pro", source: "cli" } },
+				{
+					kind: "event",
+					eventName: "signup_completed",
+					attributeEquals: { plan: "pro", source: "cli" },
+				},
 			],
 			keyBy: "visitor",
 			windowSeconds: 3600,
@@ -474,7 +482,10 @@ describe("product-event funnel widget", () => {
 			},
 		}
 		expect(validateQueries(badStepFilter)).toMatch(/^Step 1: /)
-		const badFilter = { ...funnelState(), funnel: { ...funnelState().funnel, filterClause: 'plan = "pro"' } }
+		const badFilter = {
+			...funnelState(),
+			funnel: { ...funnelState().funnel, filterClause: 'plan = "pro"' },
+		}
 		expect(validateQueries(badFilter)).toMatch(/^Filters: /)
 		// On the query-set source the ordinary rule is back: a funnel needs a group-by.
 		const plain = { ...funnelState(), funnel: defaultFunnelDraft() }

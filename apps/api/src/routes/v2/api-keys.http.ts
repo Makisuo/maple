@@ -10,6 +10,7 @@ import {
 } from "@maple/domain/http/v2"
 import type { V2ApiKey, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "@maple/domain/http/v2"
 import { Effect } from "effect"
+import { recordHttpAudit } from "@/services/audit/AuditLogService"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { AuthService } from "@/services/auth/AuthService"
 import { requireAdmin } from "@/services/auth/auth"
@@ -106,6 +107,10 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 							? { metadataJson: { source: "maple_mcp", roles: [...tenant.roles] } }
 							: undefined),
 					})
+					yield* recordHttpAudit("api_key.created", {
+						resourceId: created.id,
+						metadata: { name: created.name, kind: created.kind, scopes: created.scopes },
+					})
 					return toV2ApiKeyWithSecret(created)
 				}),
 			)
@@ -116,6 +121,10 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 					const createdByEmail = yield* auth.getUserEmail(tenant.userId)
 					const rolled = yield* apiKeysService.roll(tenant.orgId, tenant.userId, params.id, {
 						createdByEmail,
+					})
+					yield* recordHttpAudit("api_key.rolled", {
+						resourceId: rolled.id,
+						metadata: { name: rolled.name, scopes: rolled.scopes },
 					})
 					return toV2ApiKeyWithSecret(rolled)
 				}),
@@ -132,6 +141,10 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 						yield* requireAdmin(tenant.roles, adminOnly("revoke"))
 					}
 					const revoked = yield* apiKeysService.revoke(tenant.orgId, params.id)
+					yield* recordHttpAudit("api_key.revoked", {
+						resourceId: revoked.id,
+						metadata: { name: revoked.name },
+					})
 					return toV2ApiKeyMutationResponse(revoked)
 				}),
 			)

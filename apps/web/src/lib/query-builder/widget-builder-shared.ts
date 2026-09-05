@@ -133,8 +133,9 @@ export const defaultFunnelDraft = (): FunnelWidgetDraft => ({
 })
 
 /** Whether the widget is a product-event funnel — fetched from its definition, not its query set. */
-export const isProductEventsFunnel = (state: Pick<QueryBuilderWidgetState, "visualization" | "funnel">): boolean =>
-	state.visualization === "funnel" && state.funnel.source === "product_events"
+export const isProductEventsFunnel = (
+	state: Pick<QueryBuilderWidgetState, "visualization" | "funnel">,
+): boolean => state.visualization === "funnel" && state.funnel.source === "product_events"
 
 /**
  * What a panel type's `buildDataSource` is handed. `base` is the timeseries

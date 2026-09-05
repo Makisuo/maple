@@ -189,9 +189,22 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		// constant that no longer tracks the generator's header, and the identity
 		// this gate compares is the fingerprint/digest pair.
 		version: 17,
-		fingerprint: "cf6f38c252f1086e",
-		digest: "cf6f38c252f1086ecadd073ecb4253d21dbd8c86a2873a4013d0ceb282ccee2f",
-		manifestDigest: "82378706ddd9601e1449d5ff74a41a95c50f598cb13f19d53fcffc8168e10d41",
+		fingerprint: "b3800f55258f0ae3",
+		digest: "b3800f55258f0ae37a52bec6e4fe38be8fa9daebe3c912db2aa6885a4d73fa20",
+		manifestDigest: "f19b88567770ee1b67f77d5734de61adbfd3ba907ce8ae28ce65a4da4e544533",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
+	Object.freeze({
+		// TODO(v18): what changed, whether any part is rewritten or any row
+		// moves, and what this edge does NOT backfill.
+		//
+		// projectRevision is carried forward deliberately — it is a hardcoded
+		// constant that no longer tracks the generator's header, and the identity
+		// this gate compares is the fingerprint/digest pair.
+		version: 18,
+		fingerprint: "09ee43045937c44e",
+		digest: "09ee43045937c44e89cf65001569497fb2e2d5b3356a8ddc2d81e0a8551bf1b2",
+		manifestDigest: "2a7d05f4fb19422404264521f06ea9ca2f2106cdce2165899f00433215aca8b0",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
 ] as const)
