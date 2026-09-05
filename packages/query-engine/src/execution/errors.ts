@@ -16,9 +16,15 @@ import {
 } from "@maple/domain/http"
 import { detectQuotaSetting } from "../profiles"
 
-/** Strip HTML error pages and whitespace noise before classifying/logging an upstream failure. */
+const redactWarehouseCredentials = (message: string): string =>
+	message
+		.replace(/(Invalid token\s+b?)(['"])[\s\S]*?\2/gi, "$1$2[redacted]$2")
+		.replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted]")
+
+/** Strip credentials, HTML error pages and whitespace noise before exposing an upstream failure. */
 export const cleanErrorMessage = (raw: string): string => {
-	let cleaned = raw
+	const redacted = redactWarehouseCredentials(raw)
+	let cleaned = redacted
 	const htmlIndex = cleaned.search(/<\s*(html|head|body|center|h1|hr|title)\b/i)
 	if (htmlIndex >= 0) cleaned = cleaned.slice(0, htmlIndex)
 	cleaned = cleaned
@@ -26,7 +32,7 @@ export const cleanErrorMessage = (raw: string): string => {
 		.replace(/\s+/g, " ")
 		.trim()
 	if (cleaned.endsWith(":")) cleaned = cleaned.slice(0, -1).trim()
-	return cleaned || raw.slice(0, 200)
+	return cleaned || redacted.slice(0, 200)
 }
 
 const extractUpstreamStatus = (message: string): number | undefined => {
@@ -265,12 +271,15 @@ const CLASSIFICATION_RULES: ReadonlyArray<ClassificationRule> = [
 	},
 ]
 
-export const toWarehouseQueryError = (pipe: string, error: unknown) =>
-	new WarehouseQueryError({
-		message: cleanErrorMessage(unknownToMessage(error, "Warehouse query failed")),
+export const toWarehouseQueryError = (pipe: string, error: unknown) => {
+	const rawMessage = unknownToMessage(error, "Warehouse query failed")
+	const redacted = redactWarehouseCredentials(rawMessage)
+	return new WarehouseQueryError({
+		message: cleanErrorMessage(redacted),
 		pipeName: pipe,
-		cause: error,
+		cause: redacted === rawMessage ? error : redacted,
 	})
+}
 
 /**
  * Classify a warehouse failure into a tagged error.
@@ -285,11 +294,14 @@ export const mapWarehouseError = (
 	authoredBy: SqlAuthorship = "caller",
 ): WarehouseClassifiedError => {
 	const { message: rawMessage, code, type } = getClickHouseErrorDetails(error)
+	const redacted = redactWarehouseCredentials(rawMessage)
 	const message = cleanErrorMessage(rawMessage)
 	const base: ClassifiedBase = {
 		pipeName: pipe,
 		message,
-		cause: error,
+		// Tinybird can echo the rejected JWT. Keeping the original cause would
+		// leak it through Effect's cause/stack rendering even with a clean message.
+		cause: redacted === rawMessage ? error : redacted,
 		clickhouseCode: code,
 		clickhouseType: type,
 	}

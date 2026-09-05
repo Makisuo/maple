@@ -1,8 +1,9 @@
+import { computeTiers } from "@/components/service-map/three/graph"
 import { describe, expect, it } from "vitest"
 
 import { oklchToHex } from "./color"
 import { SERVICE_MAP_3D_TOPOLOGY } from "./fixture"
-import { bezierControl, computeTiers, layoutGraph, nodeScale, pipeRadius, sampleQuadratic } from "./layout"
+import { bezierControl, layoutGraph, nodeScale, pipeRadius, sampleQuadratic } from "./layout"
 
 const { nodes, edges } = SERVICE_MAP_3D_TOPOLOGY
 
@@ -24,8 +25,26 @@ describe("computeTiers", () => {
 
 	it("terminates on a cycle instead of relaxing forever", () => {
 		const cyclic = [
-			{ id: "a", label: "a", kind: "service" as const, namespace: "n", platform: "unknown" as const, throughput: 1, errorRate: 0, p95LatencyMs: 1 },
-			{ id: "b", label: "b", kind: "service" as const, namespace: "n", platform: "unknown" as const, throughput: 1, errorRate: 0, p95LatencyMs: 1 },
+			{
+				id: "a",
+				label: "a",
+				kind: "service" as const,
+				namespace: "n",
+				platform: "unknown" as const,
+				throughput: 1,
+				errorRate: 0,
+				p95LatencyMs: 1,
+			},
+			{
+				id: "b",
+				label: "b",
+				kind: "service" as const,
+				namespace: "n",
+				platform: "unknown" as const,
+				throughput: 1,
+				errorRate: 0,
+				p95LatencyMs: 1,
+			},
 		]
 		const loop = [
 			{ source: "a", target: "b", callsPerSecond: 1, errorRate: 0, avgLatencyMs: 1, p95LatencyMs: 1 },
@@ -39,7 +58,14 @@ describe("computeTiers", () => {
 	it("ignores edges pointing at nodes that are not in the graph", () => {
 		const tiers = computeTiers(nodes, [
 			...edges,
-			{ source: "browser", target: "ghost", callsPerSecond: 1, errorRate: 0, avgLatencyMs: 1, p95LatencyMs: 1 },
+			{
+				source: "browser",
+				target: "ghost",
+				callsPerSecond: 1,
+				errorRate: 0,
+				avgLatencyMs: 1,
+				p95LatencyMs: 1,
+			},
 		])
 		expect(tiers.has("ghost")).toBe(false)
 	})
@@ -88,7 +114,9 @@ describe("layoutGraph", () => {
 		const expected = layout.namespaceAngles.get("checkout")!
 		const checkoutTiers = [
 			...new Set(
-				nodes.filter((node) => node.namespace === "checkout").map((node) => layout.tiers.get(node.id)!),
+				nodes
+					.filter((node) => node.namespace === "checkout")
+					.map((node) => layout.tiers.get(node.id)!),
 			),
 		]
 		expect(checkoutTiers.length).toBeGreaterThan(1)

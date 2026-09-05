@@ -12,11 +12,11 @@ for the embedded chDB engine, the Rust insert mappings — is generated from tho
 
 ## The tier ladder
 
-| Tier | Grain | TTL | Answers |
-|---|---|---|---|
-| **raw** | one row per span/log/point | 30d | "show me this exact trace / these log lines" — anything needing attributes, span names, or a specific id |
-| **minutely** | pre-aggregated per minute | 90d | sub-hour timeseries and alert evaluation, where a per-span scan is the only alternative |
-| **hourly** | pre-aggregated per hour | 365d | dashboards and trends over days-to-a-year |
+| Tier         | Grain                      | TTL  | Answers                                                                                                  |
+| ------------ | -------------------------- | ---- | -------------------------------------------------------------------------------------------------------- |
+| **raw**      | one row per span/log/point | 30d  | "show me this exact trace / these log lines" — anything needing attributes, span names, or a specific id |
+| **minutely** | pre-aggregated per minute  | 90d  | sub-hour timeseries and alert evaluation, where a per-span scan is the only alternative                  |
+| **hourly**   | pre-aggregated per hour    | 365d | dashboards and trends over days-to-a-year                                                                |
 
 **A query must read the coarsest tier that can answer it.** The routing guards
 (`canUseAnnualServiceOverview`, `canUseTracesAggregatesMv`, `canUseServiceOverviewMv`,
@@ -70,7 +70,7 @@ rows / 12.3 GB** to serve an autocomplete dropdown read a couple hundred times a
 
 Bound it by measuring what is actually in the table, not by guessing. The intuitive rules —
 a length cap and a denylist of id-ish key names — would have missed the top two keys, which
-were `idle_ns` and `busy_ns`: short *numeric measurements* that together were ~70% of the
+were `idle_ns` and `busy_ns`: short _numeric measurements_ that together were ~70% of the
 rows. See `attributeValueCardinalityBound` for the rules that resulted and why.
 
 ### Keep the write filter and the read guard in sync, and test that they agree
@@ -102,8 +102,8 @@ db-query-shape drill-down hand-rolled the same boundary with the interior floore
 window whose start was not hour-aligned counted the whole leading hour, including spans
 outside the window. The web app snaps a 12h range to a 5-minute grid, so the start was
 essentially never aligned. The DB nodes on the service map read high against the service
-edges drawn beside them, permanently, and the boundary-exact e2e reproduces it as a *phantom
-database node* built entirely from rows before the window began.
+edges drawn beside them, permanently, and the boundary-exact e2e reproduces it as a _phantom
+database node_ built entirely from rows before the window began.
 
 Two things made it survive: nothing forced the shared helper, and those queries had no
 fixture in the SQL catalog at all, so neither the DESCRIBE sweep nor any structural gate ever

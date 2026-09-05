@@ -4,21 +4,30 @@ import { HttpRouter, type HttpServerRequest } from "effect/unstable/http"
 import { Env } from "@/platform/Env"
 import { MembershipRevocationService } from "@/services/auth/MembershipRevocationService"
 import {
+	CLERK_MEMBERSHIP_EVENTS,
 	decodeClerkEnvelope,
 	decodeClerkOrganizationMembership,
 	decodeClerkUserCreated,
 	decodeClerkUserDeleted,
+	isClerkMembershipEvent,
 	signupCompletedEvent,
+	type ClerkMembershipEventType,
 } from "@/services/product-events/clerk-events"
 import { ProductEventsService } from "@/services/product-events/ProductEventsService"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { receiveSvixWebhook, webhookText } from "./svix-receiver"
 
 /**
- * Clerk webhook receiver. Two jobs:
+ * Clerk webhook receiver. Three jobs:
  *
  * - `user.created` → `signup_completed` product event.
- * - membership lifecycle → the revocation sweep. This is the only thing in
- *   Maple that runs when somebody stops being a member of an organization;
+ * - membership lifecycle → an org audit entry (`member.added` / `role_changed`
+ *   / `removed`). Membership is the one org change the web app makes in Clerk
+ *   rather than through Maple's API, so this receiver is the only writer of
+ *   `affected_user`. Enabling the three `organizationMembership.*` events in
+ *   the Clerk dashboard is what turns it on.
+ * - membership removal/demotion → the revocation sweep. This is the only thing
+ *   in Maple that runs when somebody stops being a member of an organization;
  *   without it the membership cache and every user-bound credential keep
  *   answering yes indefinitely.
  *
@@ -35,6 +44,7 @@ const handler = Effect.gen(function* () {
 	const env = yield* Env
 	const productEvents = yield* ProductEventsService
 	const revocation = yield* MembershipRevocationService
+	const audit = yield* AuditLogService
 
 	/**
 	 * A revocation that only half-ran is the state this whole handler exists to
@@ -62,7 +72,7 @@ const handler = Effect.gen(function* () {
 
 	const handleMembership = Effect.fn("ClerkWebhook.membership")(function* (
 		data: unknown,
-		removed: boolean,
+		event: ClerkMembershipEventType,
 	) {
 		const payload = yield* decodeClerkOrganizationMembership(data).pipe(Effect.option)
 		if (Option.isNone(payload)) {
@@ -81,7 +91,28 @@ const handler = Effect.gen(function* () {
 			})
 			return webhookText("Unrecognized membership identifiers", 400)
 		}
-		if (removed) return yield* revoke(revocation.revokeMembership(orgId.value, userId.value))
+		// Clerk's payload names the member, never the admin who acted, so
+		// attributing this to a user would be a guess. `system` says truthfully
+		// that Maple learned of the change rather than made it. Recorded before
+		// the sweep: a revocation that fails and retries must not lose the entry.
+		yield* audit.record({
+			orgId: orgId.value,
+			actor: { type: "system" },
+			source: "system",
+			action: `member.${CLERK_MEMBERSHIP_EVENTS[event]}`,
+			affectedUserId: userId.value,
+			...(payload.value.role !== undefined ? { metadata: { role: payload.value.role } } : undefined),
+		})
+		if (event === "organizationMembership.created") {
+			yield* Effect.annotateCurrentSpan({
+				"http.response.status_code": 200,
+				"maple.webhook.outcome": "handled",
+			})
+			return webhookText("ok", 200)
+		}
+		if (event === "organizationMembership.deleted") {
+			return yield* revoke(revocation.revokeMembership(orgId.value, userId.value))
+		}
 
 		// A role change is not just a cache eviction: CLI/MCP/device keys pin the
 		// minting user's roles and are never re-checked, so a demotion has to go
@@ -121,11 +152,8 @@ const handler = Effect.gen(function* () {
 		}
 		yield* Effect.annotateCurrentSpan({ "maple.webhook.event": envelope.value.type })
 
-		if (envelope.value.type === "organizationMembership.deleted") {
-			return yield* handleMembership(envelope.value.data, true)
-		}
-		if (envelope.value.type === "organizationMembership.updated") {
-			return yield* handleMembership(envelope.value.data, false)
+		if (isClerkMembershipEvent(envelope.value.type)) {
+			return yield* handleMembership(envelope.value.data, envelope.value.type)
 		}
 		if (envelope.value.type === "user.deleted") {
 			const payload = yield* decodeClerkUserDeleted(envelope.value.data).pipe(Effect.option)

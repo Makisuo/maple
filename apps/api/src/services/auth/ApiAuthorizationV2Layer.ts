@@ -15,6 +15,10 @@ import { ORG_SELECTION_HEADER } from "@maple/auth"
 import { makeResolveTenant } from "./AuthService"
 import { OrgMembershipService } from "@/services/auth/OrgMembershipService"
 import { annotateAuthSpan } from "@/services/auth/auth-span"
+import { CurrentAuditActor } from "@/services/auth/audit-actor"
+import { AuditLogService } from "@/services/audit/AuditLogService"
+import { recordApiDenial } from "@/services/auth/audit-denial"
+import { withAuditedRead } from "@/services/audit/audit-access"
 import { Env } from "@/platform/Env"
 import {
 	API_V2_RATE_LIMIT_PERIOD_SECONDS,
@@ -67,6 +71,7 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 		const env = yield* Env
 		const apiKeys = yield* ApiKeysService
 		const rateLimiter = yield* ApiV2RateLimiter
+		const audit = yield* AuditLogService
 		// The one resolver wired for organization selection: `x-maple-org-id` is
 		// a v2-client affordance (the iOS app publishing a widget snapshot per
 		// organization), and every other resolver rejects the header instead.
@@ -83,7 +88,7 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 		)
 
 		return AuthorizationV2.of({
-			bearer: (httpEffect) =>
+			bearer: (httpEffect, options) =>
 				Effect.gen(function* () {
 					const request = yield* HttpServerRequest.HttpServerRequest
 
@@ -92,6 +97,18 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 
 					if (Option.isSome(apiKeyResolved)) {
 						const resolved = apiKeyResolved.value
+						// A refused attempt is the highest-signal audit row there is —
+						// denials carry the same actor attribution as successes, tagged
+						// `outcome: "denied"`, coalesced so a looping client cannot
+						// amplify into unbounded rows.
+						const recordDenied = (denialReason: string) =>
+							recordApiDenial(audit, request, {
+								orgId: resolved.orgId,
+								userId: resolved.userId,
+								apiKeyId: resolved.keyId,
+								apiKeyName: resolved.name,
+								denialReason,
+							})
 						// Deny-list, not an allow-list: `mcp` keys are minted through a
 						// path that does not gate on organization admin, so they must
 						// never reach the public API. `device` keys are admitted
@@ -99,9 +116,9 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 						// pinned roles below — is chosen by the server that minted
 						// them, not by whatever is holding them.
 						if (resolved.kind === "mcp") {
-							return yield* Effect.fail(
-								V2InvalidCredentials.make("This API key is only valid for the MCP server."),
-							)
+							const message = "This API key is only valid for the MCP server."
+							yield* recordDenied(message)
+							return yield* Effect.fail(V2InvalidCredentials.make(message))
 						}
 
 						// A device credential's authority is entirely its pinned
@@ -110,9 +127,9 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 						// permissive default — it is a key whose defining property
 						// is missing, so it is rejected rather than promoted.
 						if (resolved.kind === "device" && resolved.roles === null) {
-							return yield* Effect.fail(
-								V2InvalidCredentials.make("This device credential is not valid."),
-							)
+							const message = "This device credential is not valid."
+							yield* recordDenied(message)
+							return yield* Effect.fail(V2InvalidCredentials.make(message))
 						}
 
 						// Attribute before the scope check so scope-rejected
@@ -159,11 +176,9 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 							)
 						}
 						if (!scopeAllows(resolved.scopes, required)) {
-							return yield* Effect.fail(
-								V2InsufficientScope.make(
-									`This API key does not have the "${required.family}:${required.access}" scope required for this request.`,
-								),
-							)
+							const message = `This API key does not have the "${required.family}:${required.access}" scope required for this request.`
+							yield* recordDenied(message)
+							return yield* Effect.fail(V2InsufficientScope.make(message))
 						}
 
 						// An API key is already organization-bound, so a selection could
@@ -172,11 +187,9 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 						// check has to be here too.
 						const requestedOrg = getOrgSelectionHeader(request.headers)
 						if (requestedOrg !== undefined && requestedOrg !== resolved.orgId) {
-							return yield* Effect.fail(
-								V2OrganizationAccessDenied.make(
-									"An API key cannot select a different organization.",
-								),
-							)
+							const message = "An API key cannot select a different organization."
+							yield* recordDenied(message)
+							return yield* Effect.fail(V2OrganizationAccessDenied.make(message))
 						}
 
 						const tenant = new CurrentTenant.TenantSchema({
@@ -186,7 +199,26 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 							authMode: "self_hosted",
 							...(resolved.scopes !== null ? { scopes: resolved.scopes } : undefined),
 						})
-						return yield* Effect.provideService(httpEffect, CurrentTenant.Context, tenant)
+						return yield* httpEffect.pipe(
+							Effect.provideService(CurrentTenant.Context, tenant),
+							Effect.provideService(CurrentAuditActor, {
+								type: "api_key",
+								apiKeyId: resolved.keyId,
+								label: resolved.name,
+								source: "api",
+							}),
+							// Telemetry and replay reads are recorded (see `AuditedRead`).
+							withAuditedRead(audit, request, options, {
+								orgId: resolved.orgId,
+								actor: {
+									type: "api_key",
+									userId: resolved.userId,
+									apiKeyId: resolved.keyId,
+									label: resolved.name,
+								},
+								source: "api",
+							}),
+						)
 					}
 
 					const tenant = yield* resolveTenant(request.headers).pipe(
@@ -195,10 +227,14 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 						),
 					)
 					yield* annotateAuthSpan("session", { orgId: tenant.orgId, userId: tenant.userId })
-					return yield* Effect.provideService(
-						httpEffect,
-						CurrentTenant.Context,
-						new CurrentTenant.TenantSchema(tenant),
+					return yield* httpEffect.pipe(
+						Effect.provideService(CurrentTenant.Context, new CurrentTenant.TenantSchema(tenant)),
+						Effect.provideService(CurrentAuditActor, { type: "user", source: "dashboard" }),
+						withAuditedRead(audit, request, options, {
+							orgId: tenant.orgId,
+							actor: { type: "user", userId: tenant.userId },
+							source: "dashboard",
+						}),
 					)
 				}),
 		})

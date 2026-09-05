@@ -17,6 +17,7 @@ import { and, eq } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import type { TenantContext } from "@/services/auth/AuthService"
 import { Database, type DatabaseError } from "@/platform/DatabaseLive"
+import { msToDate } from "@/platform/time"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 
 type IssueRow = typeof orgRecommendationIssues.$inferSelect
@@ -204,10 +205,9 @@ export class RecommendationIssueService extends Context.Service<
 			yield* Effect.forEach(
 				plan.updates,
 				(update) => {
-					const fields: Record<string, unknown> = { updatedAt: new Date(now) } satisfies Record<
-						string,
-						unknown
-					>
+					const fields: Partial<typeof orgRecommendationIssues.$inferInsert> = {
+						updatedAt: msToDate(now),
+					}
 					if (update.usageCount !== undefined) fields.usageCount = update.usageCount
 					if (update.nextStatus !== undefined) {
 						fields.status = update.nextStatus
@@ -237,7 +237,7 @@ export class RecommendationIssueService extends Context.Service<
 		const setStatus = Effect.fn("RecommendationIssueService.setStatus")(function* (
 			tenant: TenantContext,
 			id: RecommendationIssueId,
-			fields: Record<string, unknown>,
+			fields: Partial<typeof orgRecommendationIssues.$inferInsert>,
 		) {
 			const orgId = tenant.orgId
 			yield* Effect.annotateCurrentSpan({ orgId, "maple.recommendation_issue.id": id })

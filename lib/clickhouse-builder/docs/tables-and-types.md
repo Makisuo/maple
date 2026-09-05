@@ -31,24 +31,24 @@ selected columns' schemas into the row schema `decodeRows` validates against —
 
 The constructors are values, not calls (except the parameterised ones):
 
-| Constructor           | ClickHouse type | Decodes to     | From the wire            |
-| --------------------- | --------------- | -------------- | ------------------------ |
-| `T.string`            | `String`        | `string`       | `string`                 |
-| `T.uint8`             | `UInt8`         | `number`       | number or quoted number  |
-| `T.uint16`            | `UInt16`        | `number`       | number or quoted number  |
-| `T.uint32`            | `UInt32`        | `number`       | number or quoted number  |
-| `T.uint64`            | `UInt64`        | `number`       | number or quoted number  |
-| `T.int32`             | `Int32`         | `number`       | number or quoted number  |
-| `T.float64`           | `Float64`       | `number`       | number or quoted number  |
-| `T.bool`              | `Bool`          | `boolean`      | `true`/`false` or `1`/`0` |
-| `T.dateTime`          | `DateTime`      | `DateTime.Utc` | `YYYY-MM-DD hh:mm:ss`    |
-| `T.dateTime64`        | `DateTime64`    | `DateTime.Utc` | with a fractional part   |
-| `T.dateTimeString`    | `DateTime`      | `string`       | unparsed, as sent        |
-| `T.dateTime64String`  | `DateTime64`    | `string`       | unparsed, as sent        |
-| `T.map(k, v)`         | `Map(K, V)`     | `Record<string, V>` | object              |
-| `T.array(e)`          | `Array(E)`      | `ReadonlyArray<E>`  | array               |
-| `T.nullable(t)`       | `Nullable(T)`   | `T \| null`    | value or `null`          |
-| `T.unknown(sql)`      | whatever you name | `unknown`    | unvalidated              |
+| Constructor          | ClickHouse type   | Decodes to          | From the wire             |
+| -------------------- | ----------------- | ------------------- | ------------------------- |
+| `T.string`           | `String`          | `string`            | `string`                  |
+| `T.uint8`            | `UInt8`           | `number`            | number or quoted number   |
+| `T.uint16`           | `UInt16`          | `number`            | number or quoted number   |
+| `T.uint32`           | `UInt32`          | `number`            | number or quoted number   |
+| `T.uint64`           | `UInt64`          | `number`            | number or quoted number   |
+| `T.int32`            | `Int32`           | `number`            | number or quoted number   |
+| `T.float64`          | `Float64`         | `number`            | number or quoted number   |
+| `T.bool`             | `Bool`            | `boolean`           | `true`/`false` or `1`/`0` |
+| `T.dateTime`         | `DateTime`        | `DateTime.Utc`      | `YYYY-MM-DD hh:mm:ss`     |
+| `T.dateTime64`       | `DateTime64`      | `DateTime.Utc`      | with a fractional part    |
+| `T.dateTimeString`   | `DateTime`        | `string`            | unparsed, as sent         |
+| `T.dateTime64String` | `DateTime64`      | `string`            | unparsed, as sent         |
+| `T.map(k, v)`        | `Map(K, V)`       | `Record<string, V>` | object                    |
+| `T.array(e)`         | `Array(E)`        | `ReadonlyArray<E>`  | array                     |
+| `T.nullable(t)`      | `Nullable(T)`     | `T \| null`         | value or `null`           |
+| `T.unknown(sql)`     | whatever you name | `unknown`           | unvalidated               |
 
 Two of those deserve a note.
 
@@ -59,7 +59,7 @@ type accepts both and decodes to a `number` — which also means a `UInt64` abov
 survive: emit those as `toString(...)` in the SELECT and declare the column `T.string`.
 
 **DateTimes.** ClickHouse sends `2026-05-24 14:30:00` — UTC, but with no zone marker, which
-`new Date(…)` reads as *local* time and shifts by the runtime's offset. `T.dateTime` parses it
+`new Date(…)` reads as _local_ time and shifts by the runtime's offset. `T.dateTime` parses it
 correctly to a `DateTime.Utc`. Use `T.dateTimeString` when the row is being forwarded onto a wire
 of its own and re-serializing the timestamp would change what your clients receive; the date
 functions preserve whichever flavour they are given.
@@ -81,7 +81,7 @@ import type { InferTS } from "@maple-dev/clickhouse-builder"
 type Ms = InferTS<typeof T.uint64> // number
 ```
 
-`InferEncoded<ColType>` is its counterpart — the wire type the schema decodes *from*.
+`InferEncoded<ColType>` is its counterpart — the wire type the schema decodes _from_.
 
 Related utilities: `ColumnDefs` (the shape of a `columns` record), `OutputToColumnDefs`
 (converts a query's output row back into column defs, used by `fromQuery`), and
@@ -99,7 +99,7 @@ const query = CH.from(Events)
 // SELECT Attributes['http.method'] AS method FROM events WHERE OrgId = 'org_123'
 ```
 
-`.get()` yields the map's *value* type — `Expr<string>` for a `Map(String, String)`, `Expr<number>` for a `Map(String, UInt64)`. For the other map operations — `mapContains`,
+`.get()` yields the map's _value_ type — `Expr<string>` for a `Map(String, String)`, `Expr<number>` for a `Map(String, UInt64)`. For the other map operations — `mapContains`,
 `mapKeys`, `mapValues`, `mapGet`, `mapLiteral` — see the
 [API reference](./reference.md#map).
 

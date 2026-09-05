@@ -189,6 +189,8 @@ export {
 	productEventsFunnelBreakdownRowSchema,
 	productEventNamesQuery,
 	productEventNamesRowSchema,
+	productEventsForTraceQuery,
+	productEventTraceSamplesQuery,
 	ProductEventsFunnelError,
 	FUNNEL_MAX_STEPS,
 	FUNNEL_BREAKDOWN_MAX_GROUPS,
@@ -196,6 +198,10 @@ export {
 	type FunnelKeyBy,
 	type FunnelSessionDimension,
 	type FunnelBreakdownBy,
+	type ProductEventsForTraceOpts,
+	type ProductEventForTraceOutput,
+	type ProductEventTraceSamplesOpts,
+	type ProductEventTraceSampleOutput,
 	type ProductEventsFunnelOpts,
 	type ProductEventsFunnelOutput,
 	type ProductEventsFunnelBreakdownOpts,
@@ -426,6 +432,13 @@ export {
 	type AlertChecksSummaryOpts,
 	type AlertChecksSummaryOutput,
 } from "./queries/alert-checks"
+
+// Queries — Audit log (org-wide audit trail, admin-only)
+export {
+	auditLogEntriesQuery,
+	type AuditLogEntriesOpts,
+	type AuditLogEntriesOutput,
+} from "./queries/audit-log"
 
 // Queries — Cloudflare integration usage (integrations-page ingest proof)
 

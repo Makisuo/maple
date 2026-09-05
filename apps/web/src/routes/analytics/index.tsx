@@ -19,6 +19,7 @@ import {
 	type BreakdownDimension,
 } from "@/components/analytics/analytics-breakdown-panel"
 import { AnalyticsBotNotice } from "@/components/analytics/analytics-bot-notice"
+import { ProductEventTraceSamples } from "@/components/analytics/product-event-trace-samples"
 import { AnalyticsFilterSidebar } from "@/components/analytics/analytics-filter-sidebar"
 import { AnalyticsLiveBadge } from "@/components/analytics/analytics-live-badge"
 import {
@@ -588,6 +589,10 @@ function AnalyticsContent({
 						{ id: "events", dimensions: eventDimensions, wide: true },
 					]
 
+					// Traces behind the filtered event; renders nothing unless the event
+					// came from an annotated span.
+					const eventName = filters.eventName
+
 					return (
 						<div className="grid items-start gap-4 @min-[880px]/page:grid-cols-2">
 							{cards.map((card) => (
@@ -603,6 +608,15 @@ function AnalyticsContent({
 									/>
 								</div>
 							))}
+							{eventName === undefined ? null : (
+								<div className="@min-[880px]/page:col-span-2">
+									<ProductEventTraceSamples
+										eventName={eventName}
+										startTime={startTime}
+										endTime={endTime}
+									/>
+								</div>
+							)}
 						</div>
 					)
 				})

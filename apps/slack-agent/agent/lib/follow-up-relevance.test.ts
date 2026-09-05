@@ -32,7 +32,11 @@ const input = (overrides: Partial<FollowUpRelevanceInput> = {}): FollowUpRelevan
 		raw: {},
 	},
 	threadMessages: [
-		threadMessage({ text: "why did this alert fire?", markdown: "why did this alert fire?", user: "U456" }),
+		threadMessage({
+			text: "why did this alert fire?",
+			markdown: "why did this alert fire?",
+			user: "U456",
+		}),
 		threadMessage({
 			text: "The error rate on checkout spiked at 14:10.",
 			markdown: "The error rate on checkout spiked at 14:10.",

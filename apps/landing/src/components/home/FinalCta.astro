@@ -11,6 +11,12 @@
  */
 import * as m from "../../paraglide/messages.js";
 import { APP_SIGN_UP_URL } from "../../lib/app-urls";
+
+// The command is markup (a <code>), not text, so the message carries a slot
+// for it and every locale keeps its own word order around it. Same sentinel
+// trick PricingTable uses for its rate amounts.
+const CMD_SLOT = "%CMD%";
+const [ledeBefore, ledeAfter = ""] = m.cta_bookend_lede({ cmd: CMD_SLOT }).split(CMD_SLOT);
 ---
 
 <section class="relative overflow-hidden drenched-amber">
@@ -21,12 +27,14 @@ import { APP_SIGN_UP_URL } from "../../lib/app-urls";
 			{m.cta_bookend_title()}
 		</h2>
 		<p class="mx-auto mt-5 max-w-[52ch] text-base leading-relaxed opacity-85 md:text-lg">
-			{m.cta_bookend_lede()}
+			{ledeBefore}<code class="rounded bg-primary-foreground/10 px-1.5 py-0.5 text-[0.9em]">maple start</code>{ledeAfter}
 		</p>
+		<!-- Ink on amber, not cream on amber: a cream fill next to the outline
+		     button read as the disabled one. -->
 		<div class="mt-10 flex flex-wrap items-center justify-center gap-3">
 			<a
 				href={APP_SIGN_UP_URL}
-				class="inline-flex h-11 items-center justify-center rounded-lg bg-foreground px-5 text-sm font-medium text-background transition-colors hover:bg-foreground/90"
+				class="ink-button inline-flex h-11 items-center justify-center rounded-lg px-5 text-sm font-medium transition-colors"
 			>
 				{m.cta_bookend_primary()}
 			</a>

@@ -149,7 +149,8 @@ export const funnelWidgetType: WidgetTypeDefinition = {
 				: undefined
 		const steps = stored?.steps ?? routeParams?.steps ?? []
 		const keyBy = stored?.keyBy ?? routeParams?.keyBy ?? DEFAULT_FUNNEL_KEY_BY
-		const windowSeconds = stored?.windowSeconds ?? routeParams?.windowSeconds ?? DEFAULT_FUNNEL_WINDOW_SECONDS
+		const windowSeconds =
+			stored?.windowSeconds ?? routeParams?.windowSeconds ?? DEFAULT_FUNNEL_WINDOW_SECONDS
 		const breakdownBy = stored?.breakdownBy ?? routeParams?.breakdownBy
 		const filterClause = formatProductEventsFilterClause(stored?.filters ?? routeParams)
 		const funnel: FunnelWidgetDraft = {
@@ -207,7 +208,8 @@ export const funnelWidgetType: WidgetTypeDefinition = {
 		if (!compiled.ok) return compiled.error
 		const filters = parseProductEventsFilterClause(filterClause)
 		if (!filters.ok) return `Filters: ${filters.error}`
-		if (!Number.isFinite(windowSeconds) || windowSeconds <= 0) return "The conversion window must be positive"
+		if (!Number.isFinite(windowSeconds) || windowSeconds <= 0)
+			return "The conversion window must be positive"
 		return null
 	},
 }
@@ -226,7 +228,8 @@ function funnelDefinition(funnel: FunnelWidgetDraft): ProductEventsFunnelDefinit
 		return step
 	})
 	const parsedFilters = parseProductEventsFilterClause(funnel.filterClause)
-	const filters = parsedFilters.ok && hasProductEventsFilters(parsedFilters.value) ? parsedFilters.value : undefined
+	const filters =
+		parsedFilters.ok && hasProductEventsFilters(parsedFilters.value) ? parsedFilters.value : undefined
 	return {
 		steps,
 		keyBy: funnel.keyBy,

@@ -1,11 +1,6 @@
 import type { IconProps } from "./icon"
 
-const paths: ReadonlyArray<string> = [
-	"M3 12H10",
-	"M14 12H21",
-	"M12 14V21",
-	"M12 3V10",
-]
+const paths: ReadonlyArray<string> = ["M3 12H10", "M14 12H21", "M12 14V21", "M12 3V10"]
 
 function PlusIcon({ size = 24, className, ...props }: IconProps) {
 	return (

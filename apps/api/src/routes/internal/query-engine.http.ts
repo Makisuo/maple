@@ -80,6 +80,8 @@ import {
 	ProductEventsFunnelResponse,
 	ProductEventsFunnelBreakdownResponse,
 	ProductEventNamesResponse,
+	ProductEventsForTraceResponse,
+	ProductEventTraceSamplesResponse,
 	CommitSha,
 	FingerprintHash,
 	ServiceName,
@@ -93,6 +95,7 @@ import { Clock, Effect, Match, Option, Schema } from "effect"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { isMissingProductEvents, isMissingServiceOperationsRollup } from "@/services/warehouse/missing-table"
 import { makeDirectRouteCachePolicy, makeExecuteRawSql } from "@maple/query-engine/runtime"
+import { describeFailure, recordRawSqlAudit } from "@/services/audit/audit-access"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { traceCacheTtlSeconds } from "@/services/warehouse/trace-detail-cache"
 import {
@@ -2148,6 +2151,43 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 						})
 					}),
 				)
+				// Both directions of the trace ↔ product-event link.
+				.handle("productEventsForTrace", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const rows = yield* runQuery(Queries.productEventsForTrace, tenant, payload)
+						return new ProductEventsForTraceResponse({
+							data: rows.map((row) => ({
+								timestamp: String(row.timestamp),
+								eventName: String(row.eventName),
+								spanId: String(row.spanId),
+								serviceName: String(row.serviceName),
+								userId: String(row.userId),
+								groupId: String(row.groupId),
+								visitorId: String(row.visitorId),
+								sessionId: String(row.sessionId),
+								// Already decoded as Record<string, string> by the derived row schema.
+								attributes: row.attributes,
+							})),
+						})
+					}),
+				)
+				.handle("productEventTraceSamples", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const rows = yield* runQuery(Queries.productEventTraceSamples, tenant, payload)
+						return new ProductEventTraceSamplesResponse({
+							data: rows.map((row) => ({
+								traceId: String(row.traceId),
+								spanId: String(row.spanId),
+								timestamp: String(row.timestamp),
+								serviceName: String(row.serviceName),
+								userId: String(row.userId),
+								visitorId: String(row.visitorId),
+							})),
+						})
+					}),
+				)
 				.handle("executeRawSql", ({ payload }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
@@ -2155,6 +2195,15 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 						const autoBucketSeconds = computeAutoBucketSeconds(payload.startTime, payload.endTime)
 						const granularitySeconds = payload.granularitySeconds ?? autoBucketSeconds
 
+						const audit = (result: Parameters<typeof recordRawSqlAudit>[0]["result"]) =>
+							recordRawSqlAudit({
+								tenant,
+								sql: payload.sql,
+								context: "rawSql",
+								startTime: payload.startTime,
+								endTime: payload.endTime,
+								result,
+							})
 						const result = yield* mapExecError(
 							executeRawSql(tenant, {
 								sql: payload.sql,
@@ -2164,7 +2213,19 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								granularitySeconds,
 								workload: "interactive",
 								context: "rawSql",
-							}),
+							}).pipe(
+								// Every statement is audited, however it ended: a refused one as `denied`.
+								Effect.tap((executed) =>
+									audit({ _tag: "rows", rowCount: executed.rowCount }),
+								),
+								Effect.tapError((error) =>
+									audit(
+										error._tag === "@maple/http/errors/RawSqlValidationError"
+											? { _tag: "rejected", reason: error.message }
+											: { _tag: "failed", error: describeFailure(error) },
+									),
+								),
+							),
 							"rawSql query failed",
 						)
 

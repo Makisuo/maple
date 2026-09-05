@@ -1,3 +1,4 @@
+import type { AuditLogService } from "@/services/audit/AuditLogService"
 import type { AlertsService } from "@/services/alerts/AlertsService"
 import type { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 import type { AlertRulesService } from "@/services/alerts/AlertRulesService"
@@ -22,6 +23,7 @@ import type { CurrentMcpTenant } from "../lib/query-warehouse"
  */
 export type McpToolRuntimeRequirements =
 	| AlertsService
+	| AuditLogService
 	| AlertReadModelsService
 	| AlertRulesService
 	| DashboardPersistenceService

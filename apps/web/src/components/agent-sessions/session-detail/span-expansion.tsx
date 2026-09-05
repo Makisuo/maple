@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { Schema } from "effect"
 
@@ -11,14 +11,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatDuration, formatNumber } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
 
-import {
-	CheckIcon,
-	ChevronDownIcon,
-	ChevronRightIcon,
-	CircleWarningIcon,
-	CopyIcon,
-	ExternalLinkIcon,
-} from "@/components/icons"
+import { ChevronDownIcon, ChevronRightIcon, CircleWarningIcon, ExternalLinkIcon } from "@/components/icons"
 import {
 	AttributesSection,
 	CopyableValue,
@@ -178,24 +171,17 @@ function TabButton({
 }
 
 function CopySpanJsonButton({ span }: { span: AiSessionSpan }) {
-	const [copied, setCopied] = useState(false)
-	const timeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
-
 	return (
-		<Button
+		<CopyButton
+			value={() => JSON.stringify(span, null, 2)}
+			label="Span JSON"
+			idleLabel="Copy JSON"
+			iconSize={12}
+			timeout={1500}
 			variant="outline"
 			size="sm"
 			className="h-6.5 gap-1.5 text-xs"
-			onClick={() => {
-				void navigator.clipboard?.writeText(JSON.stringify(span, null, 2))
-				setCopied(true)
-				clearTimeout(timeoutRef.current)
-				timeoutRef.current = setTimeout(() => setCopied(false), 1500)
-			}}
-		>
-			{copied ? <CheckIcon size={12} /> : <CopyIcon size={12} />}
-			Copy JSON
-		</Button>
+		/>
 	)
 }
 
@@ -607,9 +593,7 @@ function PayloadBody({ text, copyLabel }: { text: string; copyLabel: string }) {
 					mono
 				/>
 			</div>
-			{isJson && (
-				<ViewSwitch rendered="json" raw={raw} onRawChange={setRaw} className="self-start" />
-			)}
+			{isJson && <ViewSwitch rendered="json" raw={raw} onRawChange={setRaw} className="self-start" />}
 			<CopyButton value={raw ? text : formatted} label={copyLabel} className="-my-1 shrink-0" />
 		</div>
 	)

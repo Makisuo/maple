@@ -20,13 +20,17 @@ import type { MapleDatabaseTransaction } from "@maple/db/client"
 import { and, eq } from "drizzle-orm"
 import { Database, type DatabaseApi, type DatabaseClient } from "@/platform/DatabaseLive"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/platform/test-pglite"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { ErrorActorsService } from "./ErrorActorsService"
 import { ErrorIssueWorkflowService } from "./ErrorIssueWorkflowService"
 
 // Compile-time guard: broadening this service to warehouse, cache, Env,
 // notifications, or WorkerEnvironment makes this assignment fail.
-const databaseAndActorsOnly: Layer.Layer<ErrorIssueWorkflowService, never, Database | ErrorActorsService> =
-	ErrorIssueWorkflowService.layer
+const databaseAndActorsOnly: Layer.Layer<
+	ErrorIssueWorkflowService,
+	never,
+	Database | ErrorActorsService | AuditLogService
+> = ErrorIssueWorkflowService.layer
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const asPullRequestId = Schema.decodeUnknownSync(ErrorIssuePullRequestId)
@@ -44,7 +48,8 @@ afterEach(() => cleanupTestDbs(createdDbs))
 const makeLayer = () => {
 	const database = createTestDb(createdDbs).layer
 	const actors = ErrorActorsService.layer.pipe(Layer.provide(database))
-	const workflow = databaseAndActorsOnly.pipe(Layer.provide(Layer.mergeAll(database, actors)))
+	const audit = AuditLogService.layerMemory
+	const workflow = databaseAndActorsOnly.pipe(Layer.provide(Layer.mergeAll(database, actors, audit)))
 	return Layer.mergeAll(workflow, actors).pipe(Layer.provideMerge(database))
 }
 
@@ -94,7 +99,9 @@ const makeFaultyLayer = (failTable: unknown) => {
 		}),
 	).pipe(Layer.provide(database))
 	const actors = ErrorActorsService.layer.pipe(Layer.provide(faulty))
-	const workflow = databaseAndActorsOnly.pipe(Layer.provide(Layer.mergeAll(faulty, actors)))
+	const workflow = databaseAndActorsOnly.pipe(
+		Layer.provide(Layer.mergeAll(faulty, actors, AuditLogService.layerMemory)),
+	)
 	return Layer.mergeAll(workflow, actors).pipe(Layer.provideMerge(faulty))
 }
 

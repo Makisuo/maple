@@ -7,13 +7,13 @@ order: 8
 
 The Maple API is the public, stability-committed HTTP interface to everything in your Maple organisation: dashboards, alert rules and destinations, error issues and investigations, scrape targets, ingest and API keys, and read access to traces, logs, metrics, services, and session replays. The dashboard uses the same endpoints you do.
 
-| | |
-| --- | --- |
-| Base URL | `https://api.maple.dev/v2` |
-| Interactive reference | [api.maple.dev/v2/docs](https://api.maple.dev/v2/docs) |
+|                           |                                                                                                                 |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Base URL                  | `https://api.maple.dev/v2`                                                                                      |
+| Interactive reference     | [api.maple.dev/v2/docs](https://api.maple.dev/v2/docs)                                                          |
 | OpenAPI 3.1 specification | [maple.dev/openapi.json](/openapi.json) (also [api.maple.dev/openapi.json](https://api.maple.dev/openapi.json)) |
-| MCP server for AI agents | [Maple MCP server](/docs/mcp) |
-| Auth | `Authorization: Bearer maple_ak_…` |
+| MCP server for AI agents  | [Maple MCP server](/docs/mcp)                                                                                   |
+| Auth                      | `Authorization: Bearer maple_ak_…`                                                                              |
 
 ## Authentication
 
@@ -42,15 +42,15 @@ Every failure — including an unknown route — is a JSON envelope with the sam
 
 ```json
 {
-  "error": {
-    "_tag": "@maple/http/v2/RouteNotFoundError",
-    "type": "not_found_error",
-    "code": "route_not_found",
-    "title": "No such route",
-    "message": "No route matches GET /v2/typo. The Maple API is documented at https://api.maple.dev/v2/docs; the OpenAPI specification is at https://api.maple.dev/openapi.json.",
-    "retryable": false,
-    "recovery": "fix_request"
-  }
+	"error": {
+		"_tag": "@maple/http/v2/RouteNotFoundError",
+		"type": "not_found_error",
+		"code": "route_not_found",
+		"title": "No such route",
+		"message": "No route matches GET /v2/typo. The Maple API is documented at https://api.maple.dev/v2/docs; the OpenAPI specification is at https://api.maple.dev/openapi.json.",
+		"retryable": false,
+		"recovery": "fix_request"
+	}
 }
 ```
 

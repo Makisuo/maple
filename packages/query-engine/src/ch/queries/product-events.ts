@@ -694,3 +694,101 @@ export function productEventNamesQuery(
 		.limit(limit)
 		.format("JSON")
 }
+
+// Trace ↔ product event linking. An annotated span lands in `product_events` as
+// a `Source = 'trace'` row carrying its `TraceId`/`SpanId` (migration 0028 /
+// `product_events_traces_mv`); these two queries walk that link in each
+// direction. Both filter `TraceId` directly so `idx_trace_id` prunes.
+//
+// No declared `rowSchema`: every column is a plain String or the Map the builder
+// already derives, so a declared copy would only drift.
+
+export interface ProductEventForTraceOutput {
+	readonly timestamp: string
+	readonly eventName: string
+	readonly spanId: string
+	readonly serviceName: string
+	readonly userId: string
+	readonly groupId: string
+	readonly visitorId: string
+	readonly sessionId: string
+	readonly attributes: Record<string, string>
+}
+
+export interface ProductEventsForTraceOpts {
+	/** Default 50 — a single trace producing more than this is pathological. */
+	readonly limit?: number
+}
+
+/**
+ * The product events one trace produced, oldest first. The caller's time window
+ * is what keeps this off every retained partition; `Source` is not filtered
+ * because only the trace projection writes a `TraceId`.
+ */
+export function productEventsForTraceQuery(
+	opts: ProductEventsForTraceOpts = {},
+): CHQuery<any, ProductEventForTraceOutput, any> {
+	return from(ProductEvents)
+		.select(($) => ({
+			timestamp: $.Timestamp,
+			eventName: $.EventName,
+			spanId: $.SpanId,
+			serviceName: $.ServiceName,
+			userId: $.UserId,
+			groupId: $.GroupId,
+			visitorId: $.VisitorId,
+			sessionId: $.SessionId,
+			attributes: $.Attributes,
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
+			$.TraceId.eq(param.string("traceId")),
+		])
+		.orderBy(["timestamp", "asc"], ["spanId", "asc"])
+		.limit(opts.limit ?? 50)
+		.format("JSON")
+}
+
+export interface ProductEventTraceSampleOutput {
+	readonly traceId: string
+	readonly spanId: string
+	readonly timestamp: string
+	readonly serviceName: string
+	readonly userId: string
+	readonly visitorId: string
+}
+
+export interface ProductEventTraceSamplesOpts {
+	/** Default 20. */
+	readonly limit?: number
+}
+
+/**
+ * Recent traces behind one event name, newest first. `TraceId != ''` rather
+ * than `Source = 'trace'`: same set, and a row with no trace id is not a sample.
+ */
+export function productEventTraceSamplesQuery(
+	opts: ProductEventTraceSamplesOpts = {},
+): CHQuery<any, ProductEventTraceSampleOutput, any> {
+	return from(ProductEvents)
+		.select(($) => ({
+			traceId: $.TraceId,
+			spanId: $.SpanId,
+			timestamp: $.Timestamp,
+			serviceName: $.ServiceName,
+			userId: $.UserId,
+			visitorId: $.VisitorId,
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(param.dateTimeString("startTime")),
+			$.Timestamp.lte(param.dateTimeString("endTime")),
+			$.EventName.eq(param.string("eventName")),
+			$.TraceId.neq(""),
+		])
+		.orderBy(["timestamp", "desc"])
+		.limit(opts.limit ?? 20)
+		.format("JSON")
+}

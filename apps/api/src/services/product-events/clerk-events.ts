@@ -30,7 +30,12 @@ export const ClerkUserCreatedData = Schema.Struct({
 })
 
 /**
- * `organizationMembership.deleted` / `.updated`.
+ * `organizationMembership.*` payload. Membership is managed in Clerk directly —
+ * the web app never asks Maple's API to add or remove a member — so this
+ * webhook is both where those changes are audited and where the revocation
+ * sweep runs. Clerk does not name the admin who made the change, only the
+ * member it happened to, which is why the audit entries are attributed to
+ * `system`.
  *
  * `role` is the member's role *after* the change. It is trusted only to answer
  * "did this member just stop being an admin" — a question whose safe direction
@@ -42,6 +47,21 @@ export const ClerkOrganizationMembershipData = Schema.Struct({
 	public_user_data: Schema.Struct({ user_id: Schema.String }),
 	role: Schema.optionalKey(Schema.String),
 })
+export type ClerkOrganizationMembershipData = Schema.Schema.Type<
+	typeof ClerkOrganizationMembershipData
+>
+
+/** The membership verbs Maple audits, keyed by Clerk's event type. */
+export const CLERK_MEMBERSHIP_EVENTS = {
+	"organizationMembership.created": "added",
+	"organizationMembership.updated": "role_changed",
+	"organizationMembership.deleted": "removed",
+} as const satisfies Record<string, "added" | "role_changed" | "removed">
+
+export type ClerkMembershipEventType = keyof typeof CLERK_MEMBERSHIP_EVENTS
+
+export const isClerkMembershipEvent = (type: string): type is ClerkMembershipEventType =>
+	Object.hasOwn(CLERK_MEMBERSHIP_EVENTS, type)
 
 /**
  * `user.deleted`. Clerk's `DeletedObjectJSON` declares `id` optional, so a

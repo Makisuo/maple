@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatRuntime } from "./service-map-node"
+import { formatRuntime } from "./service-map-runtime"
 
 describe("formatRuntime", () => {
 	it("resolves a mark for the runtimes our SDKs emit", () => {

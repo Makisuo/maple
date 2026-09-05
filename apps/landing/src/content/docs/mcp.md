@@ -7,13 +7,13 @@ order: 9
 
 Maple ships a hosted **Model Context Protocol (MCP)** server, so an AI agent can investigate your production telemetry the way an engineer would: list services, search traces and logs, find and triage error issues, inspect dashboards, and create or update alert rules — all against your real data and scoped to your organisation.
 
-| | |
-| --- | --- |
-| Endpoint | `https://api.maple.dev/mcp` |
-| Transport | Streamable HTTP |
+|                          |                                                                                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Endpoint                 | `https://api.maple.dev/mcp`                                                                                                                |
+| Transport                | Streamable HTTP                                                                                                                            |
 | Manifest (`server.json`) | [maple.dev/.well-known/mcp.json](/.well-known/mcp.json) · [api.maple.dev/.well-known/mcp.json](https://api.maple.dev/.well-known/mcp.json) |
-| Registry name | `dev.maple/maple` |
-| Auth | Maple API key as Bearer token, or OAuth 2.1 |
+| Registry name            | `dev.maple/maple`                                                                                                                          |
+| Auth                     | Maple API key as Bearer token, or OAuth 2.1                                                                                                |
 
 ## Connecting a client
 
@@ -23,13 +23,13 @@ Any MCP client that speaks Streamable HTTP can connect. Two authentication optio
 
 ```json
 {
-  "mcpServers": {
-    "maple": {
-      "type": "http",
-      "url": "https://api.maple.dev/mcp",
-      "headers": { "Authorization": "Bearer maple_ak_…" }
-    }
-  }
+	"mcpServers": {
+		"maple": {
+			"type": "http",
+			"url": "https://api.maple.dev/mcp",
+			"headers": { "Authorization": "Bearer maple_ak_…" }
+		}
+	}
 }
 ```
 

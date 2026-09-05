@@ -1,6 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { MetricName, ServiceName, SpanId, TraceId } from "../../primitives"
+import { AuditedRead } from "../audit-log"
 import { AuthorizationV2 } from "./auth"
 import { wireExample, ListOf, ListQuery, Timestamp } from "./envelopes"
 import { defineV2Error, V2CursorInvalid, V2ParameterInvalid, V2TimeRangeInvalid } from "./errors"
@@ -765,6 +766,7 @@ export class V2TracesApiGroup extends HttpApiGroup.make("traces")
 	)
 	.prefix("/v2/traces")
 	.middleware(AuthorizationV2)
+	.annotate(AuditedRead, "telemetry.read")
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Traces",
@@ -867,6 +869,7 @@ export class V2LogsApiGroup extends HttpApiGroup.make("logs")
 	)
 	.prefix("/v2/logs")
 	.middleware(AuthorizationV2)
+	.annotate(AuditedRead, "telemetry.read")
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Logs",
@@ -947,6 +950,7 @@ export class V2MetricsApiGroup extends HttpApiGroup.make("metrics")
 	)
 	.prefix("/v2/metrics")
 	.middleware(AuthorizationV2)
+	.annotate(AuditedRead, "telemetry.read")
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Metrics",

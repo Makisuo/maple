@@ -11,10 +11,7 @@ const get = (fetchStub: typeof globalThis.fetch) =>
 	Effect.gen(function* () {
 		const client = withRequestTimeout(yield* HttpClient.HttpClient)
 		return yield* client.get("https://api.test/anything")
-	}).pipe(
-		Effect.provide(FetchHttpClient.layer),
-		Effect.provideService(FetchHttpClient.Fetch, fetchStub),
-	)
+	}).pipe(Effect.provide(FetchHttpClient.layer), Effect.provideService(FetchHttpClient.Fetch, fetchStub))
 
 /**
  * The deadline used to live in the fetch implementation as

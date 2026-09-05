@@ -4,22 +4,18 @@
 // series — only a handful are ever drawn, but every series is still fetched,
 // JSON-parsed, and zero-filled into a dense buckets×series matrix client-side,
 // OOMing the browser tab. When a per-chart `seriesLimit` is set on a group-by
-// query, `finalizeTimeseries` wraps the inner query in a CTE and restricts the
-// outer query to the N groups with the largest value (ranked across all
-// buckets), so the long tail is never fetched.
+// query, `finalizeTimeseries` ranks the aggregated rows with window functions
+// and restricts the result to the N groups with the largest value across all
+// buckets, so the long tail is never fetched.
 //
 // The cap is opt-in: when `seriesLimit` is unset (or the query has no real
 // group-by), the inner query is returned unchanged so existing SQL snapshots
 // stay byte-identical.
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-// From the root, not `/expr`: takes a `CHQuery`, so the subquery stays typed.
-import { inSubquery } from "@maple-dev/clickhouse-builder"
-import { from, fromQuery, type CHQuery } from "@maple-dev/clickhouse-builder"
-import { table } from "@maple-dev/clickhouse-builder"
+import { fromQuery, type CHQuery } from "@maple-dev/clickhouse-builder"
 import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
-
-const SERIES_BASE_ALIAS = "__series_base"
+import { uint64 } from "@maple-dev/clickhouse-builder/types"
 
 function hasRealGroupBy(groupBy: readonly string[] | undefined): boolean {
 	return !!groupBy && groupBy.some((key) => key !== "none")
@@ -52,20 +48,6 @@ export function finalizeTimeseries<Output extends Record<string, unknown>>(
 		return inner.format("JSON")
 	}
 
-	const baseTable = table(SERIES_BASE_ALIAS, outputColumns)
-
-	// Top-N group names, ranked by the max of `rankColumn` across all buckets.
-	const ranked = from(baseTable)
-		.select(() => ({
-			groupName: CH.dynamicColumn<string>("groupName", outputColumns.groupName),
-			rank: CH.max_(CH.dynamicColumn<number>(rankColumn, outputColumns[rankColumn])),
-		}))
-		.groupBy("groupName")
-		.orderBy(["rank", "desc"])
-		.limit(Math.floor(limit))
-	// Project down to just `groupName`: an IN subquery must return one column.
-	const topGroups = fromQuery(ranked, "ranked").select(($) => ({ groupName: $.groupName }))
-
 	// Typed from `outputColumns`, which is the whole reason the caller passes
 	// them: the cap re-selects the inner query's columns by name, and an untyped
 	// passthrough would drop every one of their schemas — taking the series-capped
@@ -76,12 +58,34 @@ export function finalizeTimeseries<Output extends Record<string, unknown>>(
 		passthrough[key] = CH.dynamicColumn(key, columnType)
 	}
 
-	const capped = from(baseTable)
-		// The capped query reads only from this CTE, so it inherits the inner
-		// query's tenant scope — derived at compile time, not asserted here.
-		.withCTE(SERIES_BASE_ALIAS, inner)
+	const groupName = CH.dynamicColumn<string>("groupName", outputColumns.groupName)
+	// A CTE referenced by both a top-groups subquery and the result query repeats
+	// the base scan in ClickHouse. Windows rank the already aggregated buckets
+	// while reading the tenant-scoped inner query once.
+	const peaks = fromQuery(inner.orderBy(), "__series_base").select(() => ({
+		...passthrough,
+		__series_peak: CH.over(
+			CH.max_(CH.dynamicColumn<number>(rankColumn, outputColumns[rankColumn])),
+			CH.windowSpec({ partitionBy: [groupName] }),
+		),
+	}))
+	const ranked = fromQuery(peaks, "__series_peaks").select(() => ({
+		...passthrough,
+		// All buckets of one group have the same rank. The group-name tie break
+		// keeps the cap at N groups even when multiple groups share a peak.
+		__series_rank: CH.over(
+			CH.rawExpr("dense_rank()", uint64),
+			CH.windowSpec({
+				orderBy: [
+					[CH.dynamicColumn<number>("__series_peak"), "desc"],
+					[groupName, "asc"],
+				],
+			}),
+		),
+	}))
+	const capped = fromQuery(ranked, "__series_ranked")
 		.select(() => passthrough)
-		.where(() => [inSubquery(CH.dynamicColumn<string>("groupName"), topGroups)])
+		.where(() => [CH.dynamicColumn<number>("__series_rank", uint64).lte(Math.floor(limit))])
 		.orderBy(["bucket", "asc"], ["groupName", "asc"])
 		.format("JSON")
 

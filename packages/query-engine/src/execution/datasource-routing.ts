@@ -8,7 +8,7 @@
  * org-BYO backend while referencing one of these tables would silently return
  * empty rows, so it logs a warning instead of failing quietly.
  */
-export const INGEST_PINNED_TABLES: ReadonlyArray<string> = ["alert_checks"]
+export const INGEST_PINNED_TABLES: ReadonlyArray<string> = ["alert_checks", "audit_log"]
 
 export const findIngestPinnedTable = (sql: string): string | undefined =>
 	INGEST_PINNED_TABLES.find((table) => sql.includes(table))

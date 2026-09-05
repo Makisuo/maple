@@ -21,12 +21,12 @@ it", not a phantom tag. So a query built from typed pieces already knows how its
 
 ```ts
 const compiled = CH.compileUnsafe(
-		CH.from(Events)
-			.select(($) => ({ name: $.Name, calls: CH.count() }))
-			.where(($) => [$.OrgId.eq(CH.param.string("orgId"))])
-			.groupBy("name"),
-		{ orgId: "org_123" },
-	)
+	CH.from(Events)
+		.select(($) => ({ name: $.Name, calls: CH.count() }))
+		.where(($) => [$.OrgId.eq(CH.param.string("orgId"))])
+		.groupBy("name"),
+	{ orgId: "org_123" },
+)
 
 compiled.rowSchemaSource // "derived"
 await Effect.runPromise(compiled.decodeRows([{ name: "checkout", calls: "42" }]))
@@ -47,9 +47,9 @@ all:
 
 ```ts
 const compiled = CH.compileUnsafe(
-		CH.from(Events).select(($) => ({ name: $.Name, odd: CH.untypedExpr("anyLast(Whatever)") })),
-		params,
-	)
+	CH.from(Events).select(($) => ({ name: $.Name, odd: CH.untypedExpr("anyLast(Whatever)") })),
+	params,
+)
 
 compiled.rowSchemaSource // "none"
 compiled.untypedColumns // ["odd"] — the aliases responsible
@@ -85,11 +85,11 @@ A declared `rowSchema` wins over the derived one, and it can do something deriva
 
 ```ts
 const compiled = CH.compileUnsafe(query, params, {
-		rowSchema: Schema.Struct({
-			name: Schema.String,
-			status: Schema.Literals(["ok", "error"]), // narrower than the String column
-		}),
-	})
+	rowSchema: Schema.Struct({
+		name: Schema.String,
+		status: Schema.Literals(["ok", "error"]), // narrower than the String column
+	}),
+})
 
 compiled.rowSchemaSource // "declared"
 ```

@@ -26,6 +26,7 @@ import { Cause, Clock, Context, Effect, Exit, Layer, Option, Redacted, Schema } 
 import { encryptAes256Gcm, parseBase64Aes256GcmKey, type EncryptedValue } from "@/platform/Crypto"
 import { forkRequestScoped } from "@/platform/fork-request-scoped"
 import { Database } from "@/platform/DatabaseLive"
+import { msToDate } from "@/platform/time"
 import { Env } from "@/platform/Env"
 import {
 	BasicCredentialsSchema,
@@ -834,13 +835,9 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				const labels = yield* validateLabelsJson(request.labelsJson)
 
 				const now = yield* Clock.currentTimeMillis
-				const updates: Record<string, unknown> = { updatedAt: new Date(now) } satisfies Record<
-					string,
-					unknown
-				>
+				const updates: Partial<typeof scrapeTargets.$inferInsert> = { updatedAt: msToDate(now) }
 
-				// Tracked separately from `updates` so the origin check below reads a
-				// typed value rather than digging back out of the untyped patch.
+				// Track URL changes separately for the credential-origin check below.
 				let nextUrl: string | null = null
 
 				if (request.name !== undefined) updates.name = request.name.trim()

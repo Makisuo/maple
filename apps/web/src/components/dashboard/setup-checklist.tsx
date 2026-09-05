@@ -132,7 +132,11 @@ function FirstTraceCelebration({ serviceName, onDismiss }: { serviceName?: strin
 							: "We're seeing your telemetry. Jump in to explore."}
 					</p>
 				</div>
-				<Button size="sm" onClick={handleExplore} className="gap-2 shrink-0 max-sm:order-last max-sm:w-full">
+				<Button
+					size="sm"
+					onClick={handleExplore}
+					className="gap-2 shrink-0 max-sm:order-last max-sm:w-full"
+				>
 					Explore your traces
 					<RocketIcon size={14} />
 				</Button>
