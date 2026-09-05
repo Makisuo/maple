@@ -63,15 +63,20 @@ describe("query-builder funnel: breakdown rows", () => {
 
 	it("sizes group bars against the largest group bar anywhere in the funnel", () => {
 		const { container } = render(<QueryBuilderFunnelChart data={grouped} />)
-		const widths = [...container.querySelectorAll('[data-slot="funnel-group-bars"] div[style*="width"]')].map(
-			(node) => (node as HTMLElement).style.width,
-		)
+		const widths = [
+			...container.querySelectorAll('[data-slot="funnel-group-bars"] div[style*="width"]'),
+		].map((node) => (node as HTMLElement).style.width)
 		expect(widths).toEqual(["100%", "25%", "50%", "6.25%"])
 	})
 
 	it("keeps the unsegmented rendering when rows carry no group", () => {
 		const { container } = render(
-			<QueryBuilderFunnelChart data={[{ name: "a", value: 10 }, { name: "b", value: 5 }]} />,
+			<QueryBuilderFunnelChart
+				data={[
+					{ name: "a", value: 10 },
+					{ name: "b", value: 5 },
+				]}
+			/>,
 		)
 		expect(container.querySelector('[data-slot="funnel-legend"]')).toBeNull()
 		expect(container.querySelectorAll('[data-slot="funnel-group-bars"]')).toHaveLength(0)

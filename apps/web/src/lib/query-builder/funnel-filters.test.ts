@@ -48,7 +48,11 @@ describe("step drafts", () => {
 		})
 		expect(compileFunnelStep(draft)).toEqual({
 			ok: true,
-			value: { kind: "event", eventName: "signup_completed", attributeEquals: { plan: "pro", source: "cli" } },
+			value: {
+				kind: "event",
+				eventName: "signup_completed",
+				attributeEquals: { plan: "pro", source: "cli" },
+			},
 		})
 	})
 
@@ -90,7 +94,9 @@ describe("step drafts", () => {
 
 describe("population filter clause", () => {
 	it("maps the where-clause vocabulary (and aliases) onto the filter fields", () => {
-		expect(parseProductEventsFilterClause('country = "DE" AND utm.source = twitter AND referrer = "x.com"')).toEqual({
+		expect(
+			parseProductEventsFilterClause('country = "DE" AND utm.source = twitter AND referrer = "x.com"'),
+		).toEqual({
 			ok: true,
 			value: { country: "DE", utmSource: "twitter", referrerHost: "x.com" },
 		})
@@ -109,7 +115,11 @@ describe("population filter clause", () => {
 	})
 
 	it("prints stored filters in canonical key order and round-trips", () => {
-		const text = formatProductEventsFilterClause({ utmSource: "twitter", country: "DE", visitorType: "returning" })
+		const text = formatProductEventsFilterClause({
+			utmSource: "twitter",
+			country: "DE",
+			visitorType: "returning",
+		})
 		expect(text).toBe('country = "DE" AND utm.source = "twitter" AND visitor_type = "returning"')
 		expect(parseProductEventsFilterClause(text)).toEqual({
 			ok: true,

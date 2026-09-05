@@ -2,7 +2,12 @@
 version: 1
 slug: "apps-web-src-routes-lab-service-map-3d-tsx"
 primary_target: "apps/web/src/routes/lab/service-map-3d.tsx"
-related_targets: ["apps/web/src/lab/service-map-3d/index.tsx", "apps/web/src/components/service-map/three/viewport.tsx", "apps/web/src/routes/service-map.tsx"]
+related_targets:
+    [
+        "apps/web/src/lab/service-map-3d/index.tsx",
+        "apps/web/src/components/service-map/three/viewport.tsx",
+        "apps/web/src/routes/service-map.tsx",
+    ]
 ---
 
 # Service map 3D lab

@@ -474,10 +474,7 @@ const endedCutoff = () => CH.intervalSub(param.dateTimeString("endTime"), ENDED_
 const podLiveCondition = ($: PodLifecycleColumns) => $.lastSeen.gte(endedCutoff())
 const podEndedCondition = ($: PodLifecycleColumns) => $.lastSeen.lt(endedCutoff())
 
-const podLifecycleCondition = (
-	$: PodLifecycleColumns,
-	lifecycle: PodLifecycle,
-): CH.Condition | undefined => {
+const podLifecycleCondition = ($: PodLifecycleColumns, lifecycle: PodLifecycle): CH.Condition | undefined => {
 	switch (lifecycle) {
 		case "live":
 			return podLiveCondition($)
@@ -1182,11 +1179,7 @@ export interface InfraPresenceOutput {
  * "K8s Workloads" row, so which owner attribute is set doesn't change what it
  * shows — only whether *any* of them is.
  */
-const WORKLOAD_OWNER_KEYS = [
-	"k8s.deployment.name",
-	"k8s.statefulset.name",
-	"k8s.daemonset.name",
-] as const
+const WORKLOAD_OWNER_KEYS = ["k8s.deployment.name", "k8s.statefulset.name", "k8s.daemonset.name"] as const
 
 const presenceBranch = (
 	surface: InfraSurface,
@@ -1219,9 +1212,7 @@ export function infraPresenceQuery(): CHUnionQuery<InfraPresenceOutput> {
 			$.ResourceAttributes.get("k8s.node.name").neq(""),
 		),
 		presenceBranch("k8sWorkloads", POD_FACET_PROBE_METRIC, ($) =>
-			WORKLOAD_OWNER_KEYS.map((key) => $.ResourceAttributes.get(key).neq("")).reduce((a, b) =>
-				a.or(b),
-			),
+			WORKLOAD_OWNER_KEYS.map((key) => $.ResourceAttributes.get(key).neq("")).reduce((a, b) => a.or(b)),
 		),
 	).format("JSON")
 }

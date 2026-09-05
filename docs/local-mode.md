@@ -430,16 +430,16 @@ as one meant every CLI binary pinned the server's query catalog.
 **Some commands are local-only.** Where v2 has no equivalent, the command fails
 with the reason rather than returning a narrower answer:
 
-| Command                             | Why it needs local mode                                                                                          |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `maple query "<sql>"`               | A raw-SQL passthrough against the multi-tenant warehouse would let a client read other orgs' data.               |
-| `maple attributes keys` / `values`  | v2 exposes no attribute-discovery surface (`/v2/attribute_mappings` is mapping config, not observed keys).       |
-| `maple slow-traces`                 | `/v2/traces/search` filters by minimum duration but cannot order by it.                                          |
-| `maple top-ops`                     | Needs count, latency and error rate ranked together; `/v2/traces/breakdown` returns one aggregation per request. |
-| `maple traces --span-name`          | v2 search returns root-based summaries matched on an exact name, not spans matched by substring.                 |
-| `maple errors`                      | `/v2/error_issues` holds one issue per fingerprint, so it cannot report how many services an error spans.        |
-| `maple compare`                     | v2 has no window-comparison endpoint.                                                                            |
-| `maple diagnose`                    | Its error breakdown depends on the exception-type aggregates above.                                              |
+| Command                            | Why it needs local mode                                                                                          |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `maple query "<sql>"`              | A raw-SQL passthrough against the multi-tenant warehouse would let a client read other orgs' data.               |
+| `maple attributes keys` / `values` | v2 exposes no attribute-discovery surface (`/v2/attribute_mappings` is mapping config, not observed keys).       |
+| `maple slow-traces`                | `/v2/traces/search` filters by minimum duration but cannot order by it.                                          |
+| `maple top-ops`                    | Needs count, latency and error rate ranked together; `/v2/traces/breakdown` returns one aggregation per request. |
+| `maple traces --span-name`         | v2 search returns root-based summaries matched on an exact name, not spans matched by substring.                 |
+| `maple errors`                     | `/v2/error_issues` holds one issue per fingerprint, so it cannot report how many services an error spans.        |
+| `maple compare`                    | v2 has no window-comparison endpoint.                                                                            |
+| `maple diagnose`                   | Its error breakdown depends on the exception-type aggregates above.                                              |
 
 `maple error <fp>` **does** work remotely: `/v2/error_issues?fingerprint_hash=`
 resolves the hash to an issue, and the issue detail carries the timeseries and

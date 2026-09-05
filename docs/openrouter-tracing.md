@@ -13,11 +13,11 @@ References verified on August 4, 2026:
 
 ## Where OpenRouter Is Called
 
-| Path                                  | Client                                | Surfaces                                                         |
-| ------------------------------------- | ------------------------------------- | ---------------------------------------------------------------- |
+| Path                                  | Client                                     | Surfaces                                                         |
+| ------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------- |
 | `apps/api/src/platform/Llm.ts`        | `@opencode-ai/ai` (`OpenRouter.configure`) | chat turns and investigation planner/hypothesis/validator agents |
-| `apps/slack-agent/agent/agent.ts`     | `@openrouter/ai-sdk-provider`         | the Slack agent                                                  |
-| `apps/api/src/mcp/__evals__/model.ts` | `@ai-sdk/openai-compatible`           | MCP evals in CI — **not** attributed or tagged                   |
+| `apps/slack-agent/agent/agent.ts`     | `@openrouter/ai-sdk-provider`              | the Slack agent                                                  |
+| `apps/api/src/mcp/__evals__/model.ts` | `@ai-sdk/openai-compatible`                | MCP evals in CI — **not** attributed or tagged                   |
 
 `apps/api` can also run on Cloudflare Workers AI instead (`MAPLE_LLM_PROVIDER=workers-ai`). None of
 the attribution below applies on that path — the headers and tag fields are OpenRouter's, and

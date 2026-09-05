@@ -9,12 +9,12 @@ where it is going — read it before adding another overlay.
 
 ## What one page load costs
 
-| Request | ClickHouse queries |
-|---|---|
-| `serviceMapBundle` | `serviceDependencies`, `serviceOverview`, `serviceDbEdges`, `servicePlatforms`, then `serviceWorkloads` |
-| `serviceCloudflareStats` | `cloudflareServiceCounters`, `cloudflareServiceLatency` |
-| `servicePlanetScaleStats` | `planetscaleServiceGauges`, `…Connections`, `…Storage` |
-| control plane | `planetscaleIntegration.databases`, `integrations.cloudflareHyperdrives` |
+| Request                   | ClickHouse queries                                                                                      |
+| ------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `serviceMapBundle`        | `serviceDependencies`, `serviceOverview`, `serviceDbEdges`, `servicePlatforms`, then `serviceWorkloads` |
+| `serviceCloudflareStats`  | `cloudflareServiceCounters`, `cloudflareServiceLatency`                                                 |
+| `servicePlanetScaleStats` | `planetscaleServiceGauges`, `…Connections`, `…Storage`                                                  |
+| control plane             | `planetscaleIntegration.databases`, `integrations.cloudflareHyperdrives`                                |
 
 Clicking a database node adds three more (`serviceDbQuerySummary`, `…Timeseries`,
 `…TopQueries`); clicking a PlanetScale node adds `planetscaleBranchStats`.
@@ -23,8 +23,8 @@ Two things about that table are not yet true but should be:
 
 - **The Cloudflare and PlanetScale query sets run unconditionally.** An org with neither
   integration still pays five metrics scans per load to render nothing — and the inventory
-  that would prove them empty arrives in a *different* request.
-- **`serviceOverview` is the services-*list* query.** 500 rows, each carrying a 20-element
+  that would prove them empty arrives in a _different_ request.
+- **`serviceOverview` is the services-_list_ query.** 500 rows, each carrying a 20-element
   `commits` tuple array built by a per-commit `GROUP BY` and tDigest merge. The map reads
   four fields off it. Its cache entry cannot be shared with `/services` either: cache
   identity is the raw payload, and the two callers pass different request classes.
@@ -36,12 +36,12 @@ Two things about that table are not yet true but should be:
 Every edge query reconstructs its window from two sources: an hourly rollup for the whole-hour
 interior, and raw rows for the two partial hours at the ends.
 
-| Layer | Interior tier | Raw tier | Filled by |
-|---|---|---|---|
-| service → service | `service_map_edges_hourly` | `service_map_spans` ⋈ `service_map_children` | **scheduled rollup** |
-| service → database | `service_map_db_edges_hourly` | `traces` | MV |
-| service → external | `service_external_edges_hourly` | `traces` | MV |
-| db query shapes | `service_map_db_query_shapes_hourly` | `traces` | MV |
+| Layer              | Interior tier                        | Raw tier                                     | Filled by            |
+| ------------------ | ------------------------------------ | -------------------------------------------- | -------------------- |
+| service → service  | `service_map_edges_hourly`           | `service_map_spans` ⋈ `service_map_children` | **scheduled rollup** |
+| service → database | `service_map_db_edges_hourly`        | `traces`                                     | MV                   |
+| service → external | `service_external_edges_hourly`      | `traces`                                     | MV                   |
+| db query shapes    | `service_map_db_query_shapes_hourly` | `traces`                                     | MV                   |
 
 **The two tiers must tile the window exactly once — no gap, no overlap.** That boundary is
 not written per query; it comes from `ch/queries/rollup-splice.ts`, and
@@ -90,12 +90,12 @@ merge loop inside that function — whose input interface is now twelve optional
 
 Each layer independently re-decides four things, and each is a chance to drift:
 
-| Concern | Owned by | Should be |
-|---|---|---|
-| window boundary | `rollup-splice` ✅ | done — enforced by the catalog gate |
-| fan-out + caching | a hand-written `Effect.all` per handler | one runner over declared layers |
-| wire shape | `Schema.Record(String, Unknown)` passthrough | typed rows |
-| client merge | a new prop + a new loop | one contribution point |
+| Concern           | Owned by                                     | Should be                           |
+| ----------------- | -------------------------------------------- | ----------------------------------- |
+| window boundary   | `rollup-splice` ✅                           | done — enforced by the catalog gate |
+| fan-out + caching | a hand-written `Effect.all` per handler      | one runner over declared layers     |
+| wire shape        | `Schema.Record(String, Unknown)` passthrough | typed rows                          |
+| client merge      | a new prop + a new loop                      | one contribution point              |
 
 The direction, not yet built:
 

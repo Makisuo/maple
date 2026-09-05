@@ -236,7 +236,12 @@ describe("spanToolCalls", () => {
 					{
 						role: "assistant",
 						parts: [
-							{ type: "tool_call", id: "toolu_01", name: "read_file", arguments: { path: "a" } },
+							{
+								type: "tool_call",
+								id: "toolu_01",
+								name: "read_file",
+								arguments: { path: "a" },
+							},
 							{ type: "tool_call", id: "toolu_02", name: "run_tests", arguments: {} },
 							{ type: "tool_call", id: "toolu_03", name: "grep_repo", arguments: {} },
 						],
@@ -311,7 +316,10 @@ describe("spanToolCalls", () => {
 			durationMs: 1000,
 			genAi: {
 				inputMessages: [
-					{ role: "tool", parts: [{ type: "tool_call_response", id: "toolu_01", result: "42 rows" }] },
+					{
+						role: "tool",
+						parts: [{ type: "tool_call_response", id: "toolu_01", result: "42 rows" }],
+					},
 				],
 			},
 		})
@@ -354,9 +362,9 @@ describe("spanMessages — reasoning payloads", () => {
 	})
 
 	it("prefers `text` over `thinking` when a vendor writes both", () => {
-		expect(reasoningPart({ type: "thinking", text: "the text key", thinking: "the other" })).toStrictEqual(
-			{ kind: "reasoning", text: "the text key", redacted: false },
-		)
+		expect(
+			reasoningPart({ type: "thinking", text: "the text key", thinking: "the other" }),
+		).toStrictEqual({ kind: "reasoning", text: "the text key", redacted: false })
 	})
 
 	it("reports no reasoning text for an empty string", () => {
@@ -378,9 +386,7 @@ describe("sessionToolResults", () => {
 				startMs: 0,
 				durationMs: 1000,
 				genAi: {
-					inputMessages: [
-						{ role: "tool", parts: [{ type: "tool_call_response", id: "toolu_1" }] },
-					],
+					inputMessages: [{ role: "tool", parts: [{ type: "tool_call_response", id: "toolu_1" }] }],
 				},
 			}),
 			llmSpan({
@@ -389,7 +395,10 @@ describe("sessionToolResults", () => {
 				durationMs: 1000,
 				genAi: {
 					inputMessages: [
-						{ role: "tool", parts: [{ type: "tool_call_response", id: "toolu_1", result: "62 rows" }] },
+						{
+							role: "tool",
+							parts: [{ type: "tool_call_response", id: "toolu_1", result: "62 rows" }],
+						},
 					],
 				},
 			}),

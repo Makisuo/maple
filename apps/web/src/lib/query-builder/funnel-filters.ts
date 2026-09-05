@@ -27,7 +27,9 @@ interface EqualsClause {
 	readonly value: string
 }
 
-export type FunnelFilterParse<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: string }
+export type FunnelFilterParse<T> =
+	| { readonly ok: true; readonly value: T }
+	| { readonly ok: false; readonly error: string }
 
 // `key = "quoted"`, `key = 'quoted'`, or `key = bare` (no spaces). The key
 // takes anything but whitespace and operator characters, so a dotted or
@@ -85,7 +87,9 @@ export function parseFunnelStepFilter(text: string): FunnelFilterParse<Record<st
 }
 
 /** The canonical text for a stored `attributeEquals` — what the editor shows on open. */
-export function formatFunnelStepFilter(attributeEquals: Readonly<Record<string, string>> | undefined): string {
+export function formatFunnelStepFilter(
+	attributeEquals: Readonly<Record<string, string>> | undefined,
+): string {
 	if (!attributeEquals) return ""
 	return Object.entries(attributeEquals)
 		.map(([key, value]) => `${key} = ${quote(value)}`)
@@ -125,7 +129,9 @@ export function compileFunnelStep(draft: FunnelStepDraft): FunnelFilterParse<Fun
 			const host = draft.host?.trim()
 			return {
 				ok: true,
-				value: host ? { kind: "page", pagePath: draft.pagePath, host } : { kind: "page", pagePath: draft.pagePath },
+				value: host
+					? { kind: "page", pagePath: draft.pagePath, host }
+					: { kind: "page", pagePath: draft.pagePath },
 			}
 		}
 		case "session":
@@ -134,7 +140,9 @@ export function compileFunnelStep(draft: FunnelStepDraft): FunnelFilterParse<Fun
 }
 
 /** Every draft → wire steps, or the first step whose filter does not compile. */
-export function compileFunnelSteps(drafts: ReadonlyArray<FunnelStepDraft>): FunnelFilterParse<ReadonlyArray<FunnelStep>> {
+export function compileFunnelSteps(
+	drafts: ReadonlyArray<FunnelStepDraft>,
+): FunnelFilterParse<ReadonlyArray<FunnelStep>> {
 	const steps: FunnelStep[] = []
 	for (const [index, draft] of drafts.entries()) {
 		const compiled = compileFunnelStep(draft)
@@ -219,10 +227,13 @@ export function formatProductEventsFilterClause(filters: FunnelPopulationFilters
 	if (!filters) return ""
 	return FUNNEL_POPULATION_FILTER_FIELDS.flatMap((field) => {
 		const value = filters[field]
-		return value === undefined || value === "" ? [] : [`${productEventsFilterKey(field)} = ${quote(value)}`]
+		return value === undefined || value === ""
+			? []
+			: [`${productEventsFilterKey(field)} = ${quote(value)}`]
 	}).join(" AND ")
 }
 
 /** True when a filters object narrows anything. */
 export const hasProductEventsFilters = (filters: FunnelPopulationFilters | undefined): boolean =>
-	filters !== undefined && FUNNEL_POPULATION_FILTER_FIELDS.some((field) => filters[field] !== undefined && filters[field] !== "")
+	filters !== undefined &&
+	FUNNEL_POPULATION_FILTER_FIELDS.some((field) => filters[field] !== undefined && filters[field] !== "")

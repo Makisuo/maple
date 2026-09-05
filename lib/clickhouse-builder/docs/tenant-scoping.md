@@ -20,11 +20,7 @@ Row-per-tenant is the usual ClickHouse multi-tenancy shape, but whether a table 
 what the column is called — is a schema decision, so it is declared on the table:
 
 ```ts
-const Events = CH.table(
-	"events",
-	{ OrgId: T.string, Name: T.string },
-	{ tenantColumn: "OrgId" },
-)
+const Events = CH.table("events", { OrgId: T.string, Name: T.string }, { tenantColumn: "OrgId" })
 ```
 
 The option is checked against the column names you just declared, so a typo is a type error

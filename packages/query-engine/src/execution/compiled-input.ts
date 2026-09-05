@@ -13,9 +13,7 @@ import type { CompiledQuery, CompiledQueryInput } from "../ch"
  * Exported because every stand-in for a warehouse — a test double, the SQL
  * catalog's capturing warehouse — needs the same step before it can read `.sql`.
  */
-export const resolveCompiledQuery = <T>(
-	input: CompiledQueryInput<T>,
-): Effect.Effect<CompiledQuery<T>> =>
+export const resolveCompiledQuery = <T>(input: CompiledQueryInput<T>): Effect.Effect<CompiledQuery<T>> =>
 	// `sql` is what a compiled query has and an unrun compile does not, which is
 	// enough to narrow — and cheaper to read than a runtime Effect check, which
 	// would need a cast to keep `T`.

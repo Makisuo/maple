@@ -14,12 +14,8 @@ describe("githubWebBaseUrl", () => {
 	})
 
 	it("strips the Enterprise Server API suffix", () => {
-		expect(githubWebBaseUrl("https://github.acme.internal/api/v3")).toBe(
-			"https://github.acme.internal",
-		)
-		expect(githubWebBaseUrl("https://github.acme.internal/api/v3/")).toBe(
-			"https://github.acme.internal",
-		)
+		expect(githubWebBaseUrl("https://github.acme.internal/api/v3")).toBe("https://github.acme.internal")
+		expect(githubWebBaseUrl("https://github.acme.internal/api/v3/")).toBe("https://github.acme.internal")
 	})
 
 	it("keeps a path prefix that is not the API suffix", () => {

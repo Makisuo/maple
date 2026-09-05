@@ -1,7 +1,11 @@
 import { generateText } from "ai"
 import { createOpenRouter } from "@openrouter/ai-sdk-provider"
 import type { SlackThreadMessage } from "eve/channels/slack"
-import { formatContextBlock, formatContextMessage, type RenderableSlackMessage } from "./slack-context-format.js"
+import {
+	formatContextBlock,
+	formatContextMessage,
+	type RenderableSlackMessage,
+} from "./slack-context-format.js"
 
 /**
  * Relevance gate for promoted thread follow-ups: should the bot answer this
@@ -115,9 +119,9 @@ export function relevanceSystemPrompt(botUserId: string): string {
 	return [
 		`You decide whether Maple AI, an observability assistant in a Slack thread, should reply to the newest message. The assistant's Slack user id is <@${botUserId}>. Users in a thread the assistant is active in can talk to it without @-mentioning it, so the absence of a mention means nothing.`,
 		"",
-		"Answer RESPOND when the message is directed at the assistant or expects it to act: a question or request it can serve, a follow-up, correction, or new instruction about work it has been doing in this thread, an answer to something the assistant asked, criticism of its output, or thanks and praise clearly meant for the assistant. Criticism counts however it is dressed — a complaint, mockery, or a joke at the assistant's expense (\"this chart is useless lol\") is a defect report and gets a reply. A thank-you meant for the assistant gets a reply too — ghosting it reads wrong.",
+		'Answer RESPOND when the message is directed at the assistant or expects it to act: a question or request it can serve, a follow-up, correction, or new instruction about work it has been doing in this thread, an answer to something the assistant asked, criticism of its output, or thanks and praise clearly meant for the assistant. Criticism counts however it is dressed — a complaint, mockery, or a joke at the assistant\'s expense ("this chart is useless lol") is a defect report and gets a reply. A thank-you meant for the assistant gets a reply too — ghosting it reads wrong.',
 		"",
-		"Answer PASS when the message expects nothing from the assistant: people talking to each other, a message explicitly addressed to another person, status updates and side conversation, or a bare acknowledgment (\"ok\", \"done\", an emoji) that needs no reply. Thanks and praise are PASS when they are meant for another person or for no one in particular — butting into someone else's thank-you is worse than staying quiet. Do not file criticism of the assistant's work under banter or acknowledgment — that is RESPOND.",
+		'Answer PASS when the message expects nothing from the assistant: people talking to each other, a message explicitly addressed to another person, status updates and side conversation, or a bare acknowledgment ("ok", "done", an emoji) that needs no reply. Thanks and praise are PASS when they are meant for another person or for no one in particular — butting into someone else\'s thank-you is worse than staying quiet. Do not file criticism of the assistant\'s work under banter or acknowledgment — that is RESPOND.',
 		"",
 		"When genuinely torn, answer RESPOND — silently dropping a message meant for the assistant is worse than replying once too often.",
 		"",

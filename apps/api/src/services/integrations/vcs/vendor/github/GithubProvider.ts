@@ -752,32 +752,24 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 				}
 			}
 
-			const fetchPullRequests: VcsProviderClient["fetchPullRequests"] = (
-				installation,
-				repo,
-				opts,
-			) =>
+			const fetchPullRequests: VcsProviderClient["fetchPullRequests"] = (installation, repo, opts) =>
 				client
-					.listPullRequests(
-						installation.externalInstallationId,
-						repo.owner,
-						repo.name,
-						opts.limit,
+					.listPullRequests(installation.externalInstallationId, repo.owner, repo.name, opts.limit)
+					.pipe(
+						Effect.map((prs) => prs.map(normalizePullRequest)),
+						Effect.mapError(toVcsError),
 					)
-					.pipe(Effect.map((prs) => prs.map(normalizePullRequest)), Effect.mapError(toVcsError))
 
-			const fetchPullRequest: VcsProviderClient["fetchPullRequest"] = (
-				installation,
-				repo,
-				number,
-			) =>
+			const fetchPullRequest: VcsProviderClient["fetchPullRequest"] = (installation, repo, number) =>
 				client
 					.getPullRequest(installation.externalInstallationId, repo.owner, repo.name, number)
 					.pipe(
 						// The client already turns a 404 into `null` — no such PR in this
 						// repo is an expected answer, not a failure.
 						Effect.map((pr) =>
-							pr === null ? Option.none<PullRequestSummary>() : Option.some(normalizePullRequest(pr)),
+							pr === null
+								? Option.none<PullRequestSummary>()
+								: Option.some(normalizePullRequest(pr)),
 						),
 						Effect.mapError(toVcsError),
 					)

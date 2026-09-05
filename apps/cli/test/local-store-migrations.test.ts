@@ -267,9 +267,7 @@ describe("current local schema identity", () => {
 			"ai_trace_index_mv",
 		])
 		expect([...v13Names].filter((name) => !currentSchemaNames.has(name))).toEqual([])
-		const aiTraceIndex = LOCAL_SCHEMA_MANIFEST.objects.find(
-			(object) => object.name === "ai_trace_index",
-		)
+		const aiTraceIndex = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "ai_trace_index")
 		expect(aiTraceIndex?.engine).toBe("MergeTree")
 		expect(aiTraceIndex?.orderBy).toBe("(OrgId, Timestamp, TraceId)")
 		const aiTraceIndexView = LOCAL_SCHEMA_MANIFEST.objects.find(

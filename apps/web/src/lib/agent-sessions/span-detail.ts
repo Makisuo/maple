@@ -78,10 +78,7 @@ export interface SpanToolCall {
  * fills those in by call id, so a call and its response read together instead
  * of sending the reader off to open the tool spans one by one.
  */
-export function spanToolCalls(
-	span: AiSessionSpan,
-	results?: SessionToolResults,
-): readonly SpanToolCall[] {
+export function spanToolCalls(span: AiSessionSpan, results?: SessionToolResults): readonly SpanToolCall[] {
 	const calls: SpanToolCall[] = []
 	const own = ownToolCall(span)
 	if (own !== undefined) calls.push(withResolvedResult(own, span, results))

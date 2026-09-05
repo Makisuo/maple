@@ -337,7 +337,7 @@ its own filter.
 
 Both axes travel together as `SessionController.DataScope`, which the list
 screens key `.task(id:)` on and store on their models. The environment is part
-of what a model *is* rather than something pushed at it, because it is not
+of what a model _is_ rather than something pushed at it, because it is not
 always known when a screen first builds: `EnvironmentController.load` restores a
 stored selection and drops one the organization no longer has, and the second of
 those can only happen once the network answers. Making it part of the scope
@@ -356,10 +356,10 @@ The mechanism is where they differ, and the difference is the thing to know:
 
 What it does not reach, and why:
 
-| Read                                | Behaviour                                                         |
-| ----------------------------------- | ----------------------------------------------------------------- |
-| `GET /v2/services/{name}`           | Aggregates across environments by contract — service detail is unfiltered. |
-| `/v2/alerts/*`                      | No filter exists. A rule's `environments` is the scope it fires on, not a filter over rules. |
+| Read                                  | Behaviour                                                                                                                                            |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v2/services/{name}`             | Aggregates across environments by contract — service detail is unfiltered.                                                                           |
+| `/v2/alerts/*`                        | No filter exists. A rule's `environments` is the scope it fires on, not a filter over rules.                                                         |
 | `GET /v2/error_issues/service_counts` | No parameters at all. **The one visible seam:** with an environment selected, a Services row's metrics are filtered and its open-issue badge is not. |
 
 `GET /v2/anomalies/incidents` spells the parameter **`deployment_env`**, not
