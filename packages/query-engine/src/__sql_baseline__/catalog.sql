@@ -1595,7 +1595,7 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- builder:releases:releasesListQuery:default  [ec4ff2d7]
+-- builder:releases:releasesListQuery:default  [1518e976]
 SELECT
           bServiceName AS serviceName,
           bEnvironment AS environment,
@@ -1654,14 +1654,14 @@ SELECT
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
         GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
-        WHERE bCommitSha != ''
+        WHERE bCommitSha NOT IN ('', 'unknown', 'N/A')
           AND bServiceName IN ('api', 'web')
         GROUP BY serviceName, environment, commitSha
         ORDER BY firstSeen DESC, spanCount DESC
         LIMIT 500
         FORMAT JSON
 
--- builder:releases:releasesListQuery:singleService  [5054c224]
+-- builder:releases:releasesListQuery:singleService  [27aed65f]
 SELECT
           bServiceName AS serviceName,
           bEnvironment AS environment,
@@ -1722,13 +1722,13 @@ SELECT
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
         GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
-        WHERE bCommitSha != ''
+        WHERE bCommitSha NOT IN ('', 'unknown', 'N/A')
         GROUP BY serviceName, environment, commitSha
         ORDER BY firstSeen DESC, spanCount DESC
         LIMIT 100
         FORMAT JSON
 
--- builder:releases:releasesTimelineQuery:hourly  [a40265cd]
+-- builder:releases:releasesTimelineQuery:hourly  [1e98427c]
 SELECT
           toStartOfInterval(bBucket, INTERVAL 3600 SECOND) AS bucket,
           bServiceName AS serviceName,
@@ -1780,13 +1780,13 @@ SELECT
           AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
         GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
-        WHERE bCommitSha != ''
+        WHERE bCommitSha NOT IN ('', 'unknown', 'N/A')
         GROUP BY bucket, serviceName, commitSha
         ORDER BY bucket ASC
         LIMIT 5000
         FORMAT JSON
 
--- builder:releases:releasesTimelineQuery:minutely  [33044903]
+-- builder:releases:releasesTimelineQuery:minutely  [fc2c14a6]
 SELECT
           toStartOfInterval(bBucket, INTERVAL 300 SECOND) AS bucket,
           bServiceName AS serviceName,
@@ -1838,13 +1838,13 @@ SELECT
           AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
         GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
 ) AS service_windows
-        WHERE bCommitSha != ''
+        WHERE bCommitSha NOT IN ('', 'unknown', 'N/A')
         GROUP BY bucket, serviceName, commitSha
         ORDER BY bucket ASC
         LIMIT 5000
         FORMAT JSON
 
--- builder:releases:releasesTimelineQuery:raw  [5586ada1]
+-- builder:releases:releasesTimelineQuery:raw  [d69f9338]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 30 SECOND) AS bucket,
           ServiceName AS serviceName,
@@ -1855,7 +1855,7 @@ SELECT
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
           AND ServiceName = 'api'
-          AND CommitSha != ''
+          AND CommitSha NOT IN ('', 'unknown', 'N/A')
         GROUP BY bucket, serviceName, commitSha
         ORDER BY bucket ASC
         LIMIT 5000

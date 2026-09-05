@@ -252,6 +252,7 @@ export {
 	releaseErrorFingerprintsQuery,
 	releaseErrorFingerprintsRowSchema,
 	RELEASES_LIST_CAP,
+	PLACEHOLDER_COMMIT_SHAS,
 	type ReleasesListOpts,
 	type ReleasesListOutput,
 	type ReleasesTimelineOpts,

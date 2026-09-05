@@ -20,7 +20,7 @@ describe("releasesListQuery", () => {
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("DeploymentEnv IN ('production')")
 		expect(sql).toContain("bServiceName IN ('api', 'web')")
-		expect(sql).toContain("bCommitSha != ''")
+		expect(sql).toContain("bCommitSha NOT IN ('', 'unknown', 'N/A')")
 		expect(sql).toContain("GROUP BY serviceName, environment, commitSha")
 		expect(sql).toContain("quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles)")
 		expect(sql).toContain("ORDER BY firstSeen DESC, spanCount DESC")
@@ -62,7 +62,7 @@ describe("releasesTimelineQuery", () => {
 		expect(sql).toContain("FROM service_overview_spans")
 		expect(sql).not.toContain("UNION ALL")
 		expect(sql).toContain("ServiceName = 'api'")
-		expect(sql).toContain("CommitSha != ''")
+		expect(sql).toContain("CommitSha NOT IN ('', 'unknown', 'N/A')")
 	})
 })
 

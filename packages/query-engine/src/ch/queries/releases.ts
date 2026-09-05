@@ -22,6 +22,14 @@ import { serviceOverviewWindows, serviceWindowTiersForBucket } from "./services"
  */
 export const RELEASES_LIST_CAP = 500
 
+/**
+ * Values an SDK writes into `vcs.ref.head.revision` when it has no revision
+ * to report. They are not releases: the services table drops them from its
+ * deploy cell, and one of them showing up here as "errors from 0" was the
+ * first thing the page did against live data.
+ */
+export const PLACEHOLDER_COMMIT_SHAS: readonly string[] = ["", "unknown", "N/A"]
+
 export interface ReleasesListOpts {
 	readonly serviceName?: string
 	readonly serviceNames?: readonly string[]
@@ -102,7 +110,7 @@ export function releasesListQuery(opts: ReleasesListOpts = {}) {
 			apdexToleratingCount: CH.sum($.bApdexToleratingCount),
 		}))
 		.where(($) => [
-			$.bCommitSha.neq(""),
+			CH.notInList($.bCommitSha, PLACEHOLDER_COMMIT_SHAS),
 			opts.serviceNames?.length ? CH.inList($.bServiceName, opts.serviceNames) : undefined,
 		])
 		.groupBy("serviceName", "environment", "commitSha")
@@ -161,7 +169,7 @@ function releasesTimelineRawQuery(
 				excludedEnvironments: opts.excludedEnvironments,
 				excludedNamespaces: opts.excludedNamespaces,
 			}),
-			$.CommitSha.neq(""),
+			CH.notInList($.CommitSha, PLACEHOLDER_COMMIT_SHAS),
 		])
 		.groupBy("bucket", "serviceName", "commitSha")
 		.orderBy(["bucket", "asc"])
@@ -192,7 +200,7 @@ export function releasesTimelineQuery(
 			count: CH.sum($.bSpanCount),
 		}))
 		.where(($) => [
-			$.bCommitSha.neq(""),
+			CH.notInList($.bCommitSha, PLACEHOLDER_COMMIT_SHAS),
 			opts.serviceNames?.length ? CH.inList($.bServiceName, opts.serviceNames) : undefined,
 		])
 		.groupBy("bucket", "serviceName", "commitSha")
