@@ -52,9 +52,7 @@ export interface ReleaseServiceImpact {
 	environment: string
 	commitSha: string
 	firstSeen: string
-	lastSeen: string
 	spanCount: number
-	estimatedSpanCount: number
 	errorCount: number
 	errorRate: number
 	p50LatencyMs: number
@@ -79,7 +77,6 @@ export interface ReleaseGroup {
 	commitSha: string
 	/** Earliest first-seen across services. */
 	firstSeen: string
-	lastSeen: string
 	services: ReleaseServiceImpact[]
 	spanCount: number
 	errorCount: number
@@ -201,9 +198,7 @@ export function deriveReleaseImpacts(
 				environment: row.environment,
 				commitSha: row.commitSha,
 				firstSeen: row.firstSeen,
-				lastSeen: row.lastSeen,
 				spanCount: row.spanCount,
-				estimatedSpanCount: row.estimatedSpanCount,
 				errorCount: row.errorCount,
 				errorRate,
 				p50LatencyMs: row.p50LatencyMs,
@@ -258,7 +253,6 @@ export function groupReleases(impacts: ReadonlyArray<ReleaseServiceImpact>): Rel
 				(min, s) => (s.firstSeen < min ? s.firstSeen : min),
 				sorted[0]!.firstSeen,
 			),
-			lastSeen: sorted.reduce((max, s) => (s.lastSeen > max ? s.lastSeen : max), sorted[0]!.lastSeen),
 			services: sorted,
 			spanCount,
 			errorCount,

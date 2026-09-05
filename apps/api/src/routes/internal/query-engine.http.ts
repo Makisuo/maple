@@ -259,11 +259,8 @@ const toReleaseRow = (row: CH.ReleasesListOutput): ReleaseRow => {
 		environment: String(row.environment ?? ""),
 		commitSha: decodeCommitSha(row.commitSha),
 		firstSeen: String(row.firstSeen),
-		lastSeen: String(row.lastSeen),
 		spanCount,
-		estimatedSpanCount: Number(row.estimatedSpanCount),
 		errorCount: Number(row.errorCount),
-		estimatedErrorCount: Number(row.estimatedErrorCount),
 		p50LatencyMs: Number(row.p50LatencyMs),
 		p95LatencyMs: Number(row.p95LatencyMs),
 		p99LatencyMs: Number(row.p99LatencyMs),
@@ -277,7 +274,6 @@ const toReleaseTimelinePoint = (row: CH.ReleasesTimelineOutput) => ({
 	serviceName: decodeServiceName(String(row.serviceName ?? "")),
 	commitSha: decodeCommitSha(row.commitSha),
 	count: Number(row.count),
-	errorCount: Number(row.errorCount),
 })
 
 const toServiceWorkloadRow = (row: CH.ServiceWorkloadsOutput) => ({
@@ -1082,7 +1078,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 						return new ReleasesListResponse({
 							releases: rows.map(toReleaseRow),
 							timeline: timelineRows.map(toReleaseTimelinePoint),
-							truncated: rows.length >= (payload.limit ?? CH.RELEASES_LIST_CAP),
+							truncated: rows.length >= CH.RELEASES_LIST_CAP,
 						})
 					}),
 				)
@@ -1110,7 +1106,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								fingerprintHash: decodeFingerprintHash(row.fingerprintHash),
 								count: Number(row.count),
 								firstSeen: String(row.firstSeen),
-								lastSeen: String(row.lastSeen),
 							})),
 						})
 					}),

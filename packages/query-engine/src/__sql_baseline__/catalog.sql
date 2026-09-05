@@ -1467,12 +1467,11 @@ SELECT
         ORDER BY step ASC
         FORMAT JSON
 
--- builder:releases:releaseErrorFingerprintsQuery:default  [e0e008b0]
+-- builder:releases:releaseErrorFingerprintsQuery:default  [fc9f9c14]
 SELECT
           toString(FingerprintHash) AS fingerprintHash,
           count() AS count,
-          min(Timestamp) AS firstSeen,
-          max(Timestamp) AS lastSeen
+          min(Timestamp) AS firstSeen
         FROM error_events_by_time
         WHERE OrgId = 'org_sql_catalog'
           AND ServiceName = 'api'
@@ -1485,17 +1484,14 @@ SELECT
         LIMIT 50
         FORMAT JSON
 
--- builder:releases:releasesListQuery:default  [e12717bf]
+-- builder:releases:releasesListQuery:default  [ec4ff2d7]
 SELECT
           bServiceName AS serviceName,
           bEnvironment AS environment,
           bCommitSha AS commitSha,
           min(bFirstSeen) AS firstSeen,
-          max(bBucket) AS lastSeen,
           sum(bSpanCount) AS spanCount,
-          sum(bEstimatedSpanCount) AS estimatedSpanCount,
           sum(bErrorCount) AS errorCount,
-          sum(bEstimatedErrorCount) AS estimatedErrorCount,
           arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000 AS p50LatencyMs,
           arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000 AS p95LatencyMs,
           arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99LatencyMs,
@@ -1554,17 +1550,14 @@ SELECT
         LIMIT 500
         FORMAT JSON
 
--- builder:releases:releasesListQuery:singleService  [e3891cbc]
+-- builder:releases:releasesListQuery:singleService  [5054c224]
 SELECT
           bServiceName AS serviceName,
           bEnvironment AS environment,
           bCommitSha AS commitSha,
           min(bFirstSeen) AS firstSeen,
-          max(bBucket) AS lastSeen,
           sum(bSpanCount) AS spanCount,
-          sum(bEstimatedSpanCount) AS estimatedSpanCount,
           sum(bErrorCount) AS errorCount,
-          sum(bEstimatedErrorCount) AS estimatedErrorCount,
           arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000 AS p50LatencyMs,
           arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000 AS p95LatencyMs,
           arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99LatencyMs,
@@ -1624,13 +1617,12 @@ SELECT
         LIMIT 100
         FORMAT JSON
 
--- builder:releases:releasesTimelineQuery:hourly  [10107a11]
+-- builder:releases:releasesTimelineQuery:hourly  [a40265cd]
 SELECT
           toStartOfInterval(bBucket, INTERVAL 3600 SECOND) AS bucket,
           bServiceName AS serviceName,
           bCommitSha AS commitSha,
-          sum(bSpanCount) AS count,
-          sum(bErrorCount) AS errorCount
+          sum(bSpanCount) AS count
         FROM (
 SELECT
           toStartOfHour(Timestamp) AS bBucket,
@@ -1683,13 +1675,12 @@ SELECT
         LIMIT 5000
         FORMAT JSON
 
--- builder:releases:releasesTimelineQuery:minutely  [e9a0172f]
+-- builder:releases:releasesTimelineQuery:minutely  [33044903]
 SELECT
           toStartOfInterval(bBucket, INTERVAL 300 SECOND) AS bucket,
           bServiceName AS serviceName,
           bCommitSha AS commitSha,
-          sum(bSpanCount) AS count,
-          sum(bErrorCount) AS errorCount
+          sum(bSpanCount) AS count
         FROM (
 SELECT
           toStartOfMinute(Timestamp) AS bBucket,
@@ -1742,13 +1733,12 @@ SELECT
         LIMIT 5000
         FORMAT JSON
 
--- builder:releases:releasesTimelineQuery:raw  [50272b8a]
+-- builder:releases:releasesTimelineQuery:raw  [5586ada1]
 SELECT
           toStartOfInterval(Timestamp, INTERVAL 30 SECOND) AS bucket,
           ServiceName AS serviceName,
           CommitSha AS commitSha,
-          count() AS count,
-          countIf(StatusCode = 'Error') AS errorCount
+          count() AS count
         FROM service_overview_spans
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'

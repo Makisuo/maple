@@ -530,8 +530,6 @@ export const releasesList = defineQuery({
 				namespaces: payload.namespaces,
 				serviceNames: payload.services,
 				excludedEnvironments: payload.excludedEnvironments,
-				excludedNamespaces: payload.excludedNamespaces,
-				limit: payload.limit,
 			}),
 			{ orgId, startTime: payload.startTime, endTime: payload.endTime },
 			{ rowSchema: CH.releasesListRowSchema },
@@ -549,7 +547,6 @@ export const releasesTimeline = defineQuery({
 				namespaces: payload.namespaces,
 				serviceNames: payload.services,
 				excludedEnvironments: payload.excludedEnvironments,
-				excludedNamespaces: payload.excludedNamespaces,
 				bucketSeconds: payload.bucketSeconds,
 			}),
 			{

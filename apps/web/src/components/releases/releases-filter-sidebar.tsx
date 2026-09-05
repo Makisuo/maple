@@ -12,7 +12,7 @@ import {
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
 import { getReleasesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { releasesQueryInput } from "@/routes/releases/index"
+import { releasesQueryInput } from "./releases-query-input"
 import { cn } from "@maple/ui/lib/utils"
 
 import { RELEASE_HEALTH_DESCRIPTION, RELEASE_HEALTH_DOT_CLASS, RELEASE_HEALTH_LABEL } from "./release-health"

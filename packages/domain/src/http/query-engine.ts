@@ -736,12 +736,8 @@ const ReleaseRow = Schema.Struct({
 	commitSha: CommitSha,
 	/** Warehouse datetime of the earliest span this version served in the window. */
 	firstSeen: Schema.String,
-	/** Warehouse datetime of the last bucket this version served in the window. */
-	lastSeen: Schema.String,
 	spanCount: Schema.Number,
-	estimatedSpanCount: Schema.Number,
 	errorCount: Schema.Number,
-	estimatedErrorCount: Schema.Number,
 	p50LatencyMs: Schema.Number,
 	p95LatencyMs: Schema.Number,
 	p99LatencyMs: Schema.Number,
@@ -754,11 +750,8 @@ const ReleaseTimelinePoint = Schema.Struct({
 	serviceName: ServiceName,
 	commitSha: CommitSha,
 	count: Schema.Number,
-	errorCount: Schema.Number,
 })
 export type ReleaseTimelinePoint = Schema.Schema.Type<typeof ReleaseTimelinePoint>
-
-export const RELEASES_LIST_MAX = 500
 
 export class ReleasesListRequest extends Schema.Class<ReleasesListRequest>("ReleasesListRequest")({
 	startTime: TinybirdDateTime,
@@ -767,13 +760,9 @@ export class ReleasesListRequest extends Schema.Class<ReleasesListRequest>("Rele
 	namespaces: OptionalServiceNamespaces,
 	services: OptionalServiceNames,
 	excludedEnvironments: OptionalDeploymentEnvs,
-	excludedNamespaces: OptionalServiceNamespaces,
 	// Bucket for the swimlane timeline. Whole minutes at least: the rollup tiers
 	// cannot place a row inside a minute, and the list is org-wide.
 	bucketSeconds: BucketSeconds,
-	limit: Schema.optional(
-		Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: RELEASES_LIST_MAX })),
-	),
 }) {}
 
 export class ReleasesListResponse extends Schema.Class<ReleasesListResponse>("ReleasesListResponse")({
@@ -810,7 +799,6 @@ export class ReleaseDetailResponse extends Schema.Class<ReleaseDetailResponse>("
 			fingerprintHash: FingerprintHash,
 			count: Schema.Number,
 			firstSeen: Schema.String,
-			lastSeen: Schema.String,
 		}),
 	),
 }) {}

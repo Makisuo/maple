@@ -1,6 +1,5 @@
 import { useMemo } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { warmAtoms } from "@effect-router/core"
 import { Schema } from "effect"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { ActiveFilterChips } from "@maple/ui/components/filters/active-filter-chips"
@@ -8,10 +7,9 @@ import { formatNumber } from "@maple/ui/lib/format"
 
 import { OptionalStringArrayParam } from "@/lib/search-params"
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
-import { resolveEffectiveTimeRange, useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { getReleasesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import type { GetReleasesInput } from "@/api/warehouse/releases"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import {
@@ -23,18 +21,14 @@ import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { LONG_RANGE_PRESET_OPTIONS } from "@/lib/time-utils"
 import { ReleasesFilterSidebar } from "@/components/releases/releases-filter-sidebar"
+import { RELEASES_DEFAULT_PRESET, releasesQueryInput } from "@/components/releases/releases-query-input"
 import { ReleasesTimeline } from "@/components/releases/releases-timeline"
 import { ReleasesTable } from "@/components/releases/releases-table"
-import {
-	RELEASE_HEALTH_ORDER,
-	deriveReleaseImpacts,
-	groupReleases,
-	type ReleaseHealth,
-} from "@/components/releases/release-model"
+import { deriveReleaseImpacts, groupReleases, type ReleaseHealth } from "@/components/releases/release-model"
 import { RELEASE_HEALTH_LABEL } from "@/components/releases/release-health"
 
 const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60
-const DEFAULT_PRESET = "7d"
+const DEFAULT_PRESET = RELEASES_DEFAULT_PRESET
 
 const releasesSearchSchema = Schema.Struct({
 	environments: OptionalStringArrayParam,
@@ -42,39 +36,24 @@ const releasesSearchSchema = Schema.Struct({
 	services: OptionalStringArrayParam,
 	// Render-only: the health band is derived client-side from the same rows,
 	// so it never reaches the atom input.
-	impact: Schema.optional(Schema.Literals(RELEASE_HEALTH_ORDER)),
+	// The literals are spelled out rather than imported from the model: the
+	// search schema lives in the route shell (startup code), and importing
+	// the model here would pull it into every page's first load.
+	impact: Schema.optional(
+		Schema.Literals(["regressed", "watch", "rolling", "healthy"] satisfies ReleaseHealth[]),
+	),
 	...TimeRangeSearchFields,
 })
 
 export type ReleasesSearchParams = Schema.Schema.Type<typeof releasesSearchSchema>
 
-/**
- * The releases atom's input, from search alone. Exported so the loader, the
- * sidebar and the page cannot drift onto different keys — a mismatch does not
- * fail, it fetches twice.
- */
-export function releasesQueryInput(search: ReleasesSearchParams): GetReleasesInput {
-	const { startTime, endTime } = resolveEffectiveTimeRange(
-		search.startTime,
-		search.endTime,
-		search.timePreset ?? DEFAULT_PRESET,
-	)
-	return {
-		startTime,
-		endTime,
-		environments: search.environments,
-		excludedEnvironments: search.excludedEnvironments,
-		services: search.services,
-	}
-}
-
+// No hover-preload loader on purpose: loaders stay in the route shell (see
+// vite.config's code-splitting order), and the whole web app pays for every
+// shell at startup. The 650 KB budget had 1.6 KB of headroom; this page's
+// contract and atoms take 1.3 of it, and a loader would take the rest.
 export const Route = createFileRoute("/releases/")({
 	component: ReleasesPage,
 	validateSearch: Schema.toStandardSchemaV1(releasesSearchSchema),
-	loaderDeps: ({ search }) => search,
-	loader: ({ context, deps }) => {
-		warmAtoms(context.effectRegistry, [getReleasesResultAtom({ data: releasesQueryInput(deps) })])
-	},
 })
 
 function ReleasesPage() {

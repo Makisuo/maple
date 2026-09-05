@@ -37,11 +37,8 @@ export interface ReleasesListOutput {
 	readonly environment: string
 	readonly commitSha: string
 	readonly firstSeen: string
-	readonly lastSeen: string
 	readonly spanCount: number
-	readonly estimatedSpanCount: number
 	readonly errorCount: number
-	readonly estimatedErrorCount: number
 	readonly p50LatencyMs: number
 	readonly p95LatencyMs: number
 	readonly p99LatencyMs: number
@@ -54,13 +51,10 @@ export const releasesListRowSchema = Schema.Struct({
 	environment: Schema.String,
 	commitSha: Schema.String,
 	firstSeen: Schema.String,
-	lastSeen: Schema.String,
 	// `CHNumber`, never `Schema.Number`: UInt64 counts arrive quoted on a
 	// gateway that refuses `output_format_json_quote_64bit_integers=0`.
 	spanCount: CHNumber,
-	estimatedSpanCount: CHNumber,
 	errorCount: CHNumber,
-	estimatedErrorCount: CHNumber,
 	p50LatencyMs: CHNumber,
 	p95LatencyMs: CHNumber,
 	p99LatencyMs: CHNumber,
@@ -90,11 +84,8 @@ export function releasesListQuery(opts: ReleasesListOpts = {}) {
 			environment: $.bEnvironment,
 			commitSha: $.bCommitSha,
 			firstSeen: CH.min_($.bFirstSeen),
-			lastSeen: CH.max_($.bBucket),
 			spanCount: CH.sum($.bSpanCount),
-			estimatedSpanCount: CH.sum($.bEstimatedSpanCount),
 			errorCount: CH.sum($.bErrorCount),
-			estimatedErrorCount: CH.sum($.bEstimatedErrorCount),
 			p50LatencyMs: CH.rawExpr(
 				"arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000",
 				T.float64,
@@ -146,7 +137,6 @@ export interface ReleasesTimelineOutput {
 	readonly serviceName: string
 	readonly commitSha: string
 	readonly count: number
-	readonly errorCount: number
 }
 
 const RELEASES_TIMELINE_CAP = 5000
@@ -161,7 +151,6 @@ function releasesTimelineRawQuery(
 			serviceName: $.ServiceName,
 			commitSha: $.CommitSha,
 			count: CH.count(),
-			errorCount: CH.countIf($.StatusCode.eq("Error")),
 		}))
 		.where(($) => [
 			...serviceOverviewWhereConditions($, {
@@ -201,7 +190,6 @@ export function releasesTimelineQuery(
 			serviceName: $.bServiceName,
 			commitSha: $.bCommitSha,
 			count: CH.sum($.bSpanCount),
-			errorCount: CH.sum($.bErrorCount),
 		}))
 		.where(($) => [
 			$.bCommitSha.neq(""),
@@ -231,7 +219,6 @@ export interface ReleaseErrorFingerprintsOutput {
 	readonly fingerprintHash: string
 	readonly count: number
 	readonly firstSeen: string
-	readonly lastSeen: string
 }
 
 export const releaseErrorFingerprintsRowSchema = Schema.Struct({
@@ -240,7 +227,6 @@ export const releaseErrorFingerprintsRowSchema = Schema.Struct({
 	fingerprintHash: Schema.String,
 	count: CHNumber,
 	firstSeen: Schema.String,
-	lastSeen: Schema.String,
 }) satisfies CompiledQueryRowSchema<ReleaseErrorFingerprintsOutput>
 
 export function releaseErrorFingerprintsQuery(opts: ReleaseErrorFingerprintsOpts) {
@@ -249,7 +235,6 @@ export function releaseErrorFingerprintsQuery(opts: ReleaseErrorFingerprintsOpts
 			fingerprintHash: CH.toString_($.FingerprintHash),
 			count: CH.count(),
 			firstSeen: CH.min_($.Timestamp),
-			lastSeen: CH.max_($.Timestamp),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),

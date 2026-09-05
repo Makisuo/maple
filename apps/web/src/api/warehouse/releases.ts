@@ -32,10 +32,9 @@ const defaultWindow = (nowMs: number) => ({
 	endTime: formatWarehouseDateTime(nowMs),
 })
 
-/** A release row with its warehouse datetimes normalised to ISO. */
-export interface Release extends Omit<ReleaseRow, "firstSeen" | "lastSeen"> {
+/** A release row with its warehouse datetime normalised to ISO. */
+export interface Release extends Omit<ReleaseRow, "firstSeen"> {
 	firstSeen: string
-	lastSeen: string
 }
 
 export interface ReleaseTimelineBucket extends Omit<ReleaseTimelinePoint, "bucket"> {
@@ -45,7 +44,6 @@ export interface ReleaseTimelineBucket extends Omit<ReleaseTimelinePoint, "bucke
 const toRelease = (row: ReleaseRow): Release => ({
 	...row,
 	firstSeen: toIsoBucket(row.firstSeen),
-	lastSeen: toIsoBucket(row.lastSeen),
 })
 
 const toTimelineBucket = (row: ReleaseTimelinePoint): ReleaseTimelineBucket => ({
@@ -62,7 +60,6 @@ const GetReleasesInput = Schema.Struct({
 	namespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
 	services: Schema.optional(Schema.mutable(Schema.Array(ServiceName))),
 	excludedEnvironments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
-	excludedNamespaces: Schema.optional(Schema.mutable(Schema.Array(ServiceNamespace))),
 })
 
 export type GetReleasesInput = (typeof GetReleasesInput)["Encoded"]
@@ -108,7 +105,6 @@ const getReleasesEffect = Effect.fn("QueryEngine.getReleases")(function* ({
 					namespaces: input.namespaces,
 					services: input.services,
 					excludedEnvironments: toEnvFilter(input.excludedEnvironments),
-					excludedNamespaces: input.excludedNamespaces,
 					bucketSeconds,
 				}),
 			})
@@ -141,7 +137,6 @@ export interface ReleaseErrorFingerprint {
 	fingerprintHash: string
 	count: number
 	firstSeen: string
-	lastSeen: string
 }
 
 export interface ReleaseDetailResult {
@@ -220,7 +215,6 @@ const getReleaseDetailEffect = Effect.fn("QueryEngine.getReleaseDetail")(functio
 			fingerprintHash: row.fingerprintHash,
 			count: row.count,
 			firstSeen: toIsoBucket(row.firstSeen),
-			lastSeen: toIsoBucket(row.lastSeen),
 		})),
 		startTime: toIsoBucket(startTime),
 		endTime: toIsoBucket(endTime),

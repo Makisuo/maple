@@ -22,11 +22,8 @@ function release(overrides: Partial<Release> & Pick<Release, "commitSha" | "serv
 	return {
 		environment: "production",
 		firstSeen: "2026-09-05T09:00:00.000Z",
-		lastSeen: "2026-09-05T12:00:00.000Z",
 		spanCount: 1000,
-		estimatedSpanCount: 1000,
 		errorCount: 3,
-		estimatedErrorCount: 3,
 		p50LatencyMs: 90,
 		p95LatencyMs: 400,
 		p99LatencyMs: 1200,
@@ -41,7 +38,7 @@ function bucket(
 	commitSha: CommitSha,
 	count: number,
 ): ReleaseTimelineBucket {
-	return { bucket: iso, serviceName, commitSha, count, errorCount: 0 }
+	return { bucket: iso, serviceName, commitSha, count }
 }
 
 describe("deriveReleaseImpacts", () => {

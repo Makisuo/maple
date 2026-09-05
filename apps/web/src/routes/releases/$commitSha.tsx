@@ -345,7 +345,6 @@ function ReleaseBody({
 				bucket: point.bucket,
 				commitSha: point.commitSha,
 				count: point.count,
-				errorCount: point.errorCount,
 			}))
 		return { response, impacts, impact, releases }
 	}, [result, commitSha, serviceName])
