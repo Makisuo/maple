@@ -33,6 +33,7 @@ export function liveTopology(
 				kind,
 				namespace: data.namespace || (data.kind === "database" ? "databases" : "services"),
 				platform: data.platform ?? "unknown",
+				runtime: data.runtime,
 				system: data.dbSystem,
 				throughput: data.throughput,
 				errorRate: data.errorRate,

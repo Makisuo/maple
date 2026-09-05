@@ -6,21 +6,14 @@ import { latencyToneClass } from "@maple/ui/lib/latency-tone"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@maple/ui/components/ui/tooltip"
 import {
 	AwsLambdaIcon,
-	BunIcon,
 	CloudflareIcon,
-	CloudflareMonoIcon,
 	CubeIcon,
-	DenoIcon,
 	GlobeIcon,
 	type IconComponent,
 	KubernetesIcon,
-	NodejsMonoIcon,
-	OpenjdkMonoIcon,
-	PythonIcon,
-	RubyIcon,
-	RustIcon,
 	ServerIcon,
 } from "@/components/icons"
+import { formatRuntime } from "./service-map-runtime"
 import type { ServicePlatform } from "@/api/warehouse/service-map"
 import { resolveDbNodePresentation, resolvePlanetScaleDbPresentation, withAlpha } from "./service-map-db"
 import { getServiceMapNodeColor, type ServiceNodeData } from "./service-map-utils"
@@ -42,66 +35,6 @@ function getPlatformIcon(platform: ServicePlatform | undefined): {
 		default:
 			return { Icon: ServerIcon, label: "Unknown runtime", branded: false }
 	}
-}
-
-/**
- * `process.runtime.name` ⇒ the mark we draw for it. Values are normalized first
- * because the canonical OTel strings differ per SDK ("cpython", ".NET Core",
- * "OpenJDK Runtime Environment"), and self-instrumenters emit shorter aliases.
- *
- * A runtime with no mark keeps the short text chip: unrecognized values aren't
- * worth guessing a logo for, and Go/.NET/PHP ship wordmarks — at the ~12px the
- * node renders them, the existing text chip IS the wordmark, only legible.
- */
-function resolveRuntimeGlyph(rt: string): { Icon: IconComponent | null; short: string; full: string } {
-	const key = rt.trim().toLowerCase()
-	if (key.startsWith("openjdk") || key === "jvm" || key === "java")
-		return { Icon: OpenjdkMonoIcon, short: "jvm", full: "JVM" }
-	if (key.startsWith(".net") || key === "dotnet" || key === "coreclr")
-		return { Icon: null, short: "dotnet", full: ".NET" }
-	switch (key) {
-		case "nodejs":
-		case "node":
-			return { Icon: NodejsMonoIcon, short: "node", full: "Node.js" }
-		case "bun":
-			return { Icon: BunIcon, short: "bun", full: "Bun" }
-		case "deno":
-			return { Icon: DenoIcon, short: "deno", full: "Deno" }
-		case "workerd":
-			return { Icon: CloudflareMonoIcon, short: "workerd", full: "Cloudflare workerd" }
-		case "rust":
-			return { Icon: RustIcon, short: "rust", full: "Rust" }
-		case "go":
-		case "golang":
-			return { Icon: null, short: "go", full: "Go" }
-		case "python":
-		case "cpython":
-			return { Icon: PythonIcon, short: "python", full: "Python" }
-		case "ruby":
-		case "cruby":
-			return { Icon: RubyIcon, short: "ruby", full: "Ruby" }
-		case "php":
-			return { Icon: null, short: "php", full: "PHP" }
-		case "edge-light":
-			return { Icon: null, short: "edge", full: "Edge runtime" }
-		case "fastly":
-			return { Icon: null, short: "fastly", full: "Fastly Compute" }
-		default:
-			return { Icon: null, short: rt, full: rt }
-	}
-}
-
-/**
- * The runtime the platform icon already implies is dropped rather than drawn
- * twice — a Cloudflare node running workerd gets one Cloudflare mark, not two.
- */
-export function formatRuntime(
-	rt: string | undefined,
-	platform: ServicePlatform | undefined,
-): { Icon: IconComponent | null; short: string; full: string } | null {
-	if (!rt) return null
-	if (platform === "cloudflare" && rt.toLowerCase() === "workerd") return null
-	return resolveRuntimeGlyph(rt)
 }
 
 function formatRate(value: number): string {

@@ -4,6 +4,7 @@ import { Input } from "@maple/ui/components/ui/input"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { SERVICE_MAP_3D_TOPOLOGY } from "./fixture"
 import type { Node3D } from "@/components/service-map/three/types"
+import { resolveMachineBadge } from "@/components/service-map/three/factory-badge"
 import { ServiceMap3DViewport } from "@/components/service-map/three/viewport"
 import {
 	formatError,
@@ -44,6 +45,7 @@ function ServiceInventory({
 }) {
 	const [query, setQuery] = useState("")
 	const selected = selectedId ? nodesById.get(selectedId) : undefined
+	const selectedBadge = selected && resolveMachineBadge(selected)
 	const filtered = topology.nodes.filter((node) =>
 		`${node.label} ${node.namespace} ${node.kind}`.includes(query.trim().toLowerCase()),
 	)
@@ -69,7 +71,8 @@ function ServiceInventory({
 						<h2 className="min-w-0 break-all text-sm font-semibold">{selected.label}</h2>
 					</div>
 					<p className="text-xs text-muted-foreground">
-						{selected.namespace} / {selected.system ?? selected.platform}
+						{selected.namespace}
+						{selectedBadge && ` / ${selectedBadge.label}`}
 					</p>
 					<div
 						className="mt-4 inline-flex items-center gap-1.5 text-xs capitalize"

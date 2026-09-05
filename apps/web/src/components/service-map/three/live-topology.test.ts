@@ -44,7 +44,7 @@ describe("live 3D topology", () => {
 	it("uses weighted rates and preserves max latency without inventing a percentile", () => {
 		const topology = liveTopology(
 			[
-				node("api", { namespace: "checkout" }),
+				node("api", { namespace: "checkout", runtime: "bun" }),
 				node("db", { kind: "database", dbSystem: "postgresql", p95LatencyMs: 42 }),
 			],
 			[edge("api", "db")],
@@ -56,6 +56,7 @@ describe("live 3D topology", () => {
 			throughput: 120,
 			hasSampling: true,
 			namespace: "checkout",
+			runtime: "bun",
 			errorRate: 0.03,
 		})
 		expect(topology.nodes[1]).toMatchObject({ kind: "database", system: "postgresql", p95LatencyMs: 42 })
@@ -65,6 +66,7 @@ describe("live 3D topology", () => {
 			avgLatencyMs: 12,
 			maxLatencyMs: 240,
 		})
+		expect(topology.nodes[1]?.runtime).toBeUndefined()
 		expect(topology.edges[0]?.p95LatencyMs).toBeUndefined()
 	})
 	it("keeps structural relations idle and propagates the existing focus dim state", () => {

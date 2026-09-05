@@ -11,6 +11,8 @@ export interface Node3D {
 	/** OTel `service.namespace`; drives the vertical column a node sits in. */
 	namespace: string
 	platform: ServicePlatform
+	/** OTel `process.runtime.name`, shared with the 2D map. */
+	runtime?: string
 	/** Requests per second handled by the node. */
 	throughput: number
 	errorRate: number

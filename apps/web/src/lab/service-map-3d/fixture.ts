@@ -9,7 +9,18 @@ const service = (
 	throughput: number,
 	errorRate: number,
 	p95LatencyMs: number,
-): Node3D => ({ id, label: id, kind: "service", namespace, platform, throughput, errorRate, p95LatencyMs })
+	runtime: string,
+): Node3D => ({
+	id,
+	label: id,
+	kind: "service",
+	namespace,
+	platform,
+	runtime,
+	throughput,
+	errorRate,
+	p95LatencyMs,
+})
 
 const store = (
 	id: string,
@@ -43,24 +54,24 @@ const NODES: ReadonlyArray<Node3D> = [
 		errorRate: 0.004,
 		p95LatencyMs: 620,
 	},
-	service("cdn-edge", "edge", "cloudflare", 1810, 0.002, 18),
-	service("api-gateway", "edge", "cloudflare", 1240, 0.006, 34),
+	service("cdn-edge", "edge", "cloudflare", 1810, 0.002, 18, "workerd"),
+	service("api-gateway", "edge", "cloudflare", 1240, 0.006, 34, "workerd"),
 
-	service("storefront-bff", "storefront", "kubernetes", 720, 0.008, 148),
-	service("catalog-api", "storefront", "kubernetes", 610, 0.003, 62),
-	service("search-api", "storefront", "kubernetes", 260, 0.011, 210),
-	service("media-resizer", "storefront", "lambda", 95, 0.021, 480),
+	service("storefront-bff", "storefront", "kubernetes", 720, 0.008, 148, "nodejs"),
+	service("catalog-api", "storefront", "kubernetes", 610, 0.003, 62, "go"),
+	service("search-api", "storefront", "kubernetes", 260, 0.011, 210, "OpenJDK Runtime Environment"),
+	service("media-resizer", "storefront", "lambda", 95, 0.021, 480, "python"),
 
-	service("checkout-api", "checkout", "kubernetes", 180, 0.017, 240),
-	service("payments-api", "checkout", "kubernetes", 165, 0.032, 390),
-	service("orders-worker", "checkout", "kubernetes", 150, 0.009, 175),
-	service("inventory-api", "checkout", "kubernetes", 205, 0.005, 88),
+	service("checkout-api", "checkout", "kubernetes", 180, 0.017, 240, "bun"),
+	service("payments-api", "checkout", "kubernetes", 165, 0.032, 390, ".NET Core"),
+	service("orders-worker", "checkout", "kubernetes", 150, 0.009, 175, "nodejs"),
+	service("inventory-api", "checkout", "kubernetes", 205, 0.005, 88, "rust"),
 
-	service("identity-api", "identity", "kubernetes", 430, 0.002, 54),
-	service("session-edge", "identity", "cloudflare", 980, 0.001, 9),
+	service("identity-api", "identity", "kubernetes", 430, 0.002, 54, "deno"),
+	service("session-edge", "identity", "cloudflare", 980, 0.001, 9, "workerd"),
 
-	service("notifications-worker", "platform", "kubernetes", 70, 0.014, 320),
-	service("ingest-collector", "platform", "kubernetes", 2400, 0.0007, 12),
+	service("notifications-worker", "platform", "kubernetes", 70, 0.014, 320, "ruby"),
+	service("ingest-collector", "platform", "kubernetes", 2400, 0.0007, 12, "rust"),
 
 	store("db:postgresql/orders", "orders", "postgresql", "data", 320, 0.001, 24),
 	store("db:postgresql/catalog", "catalog", "postgresql", "data", 640, 0.0004, 11),

@@ -9,6 +9,7 @@ import {
 	MediaPauseIcon,
 	MediaPlayIcon,
 } from "@/components/icons"
+import { resolveMachineBadge } from "./factory-badge"
 import { ServiceMap3D, type CameraCommand } from "./scene"
 import type { Topology3D, Edge3D } from "./types"
 import { MAP_MATERIALS } from "./appearance"
@@ -139,29 +140,32 @@ export function ServiceMap3DViewport({
 					labels={labels}
 				/>
 				<div className="pointer-events-none absolute inset-0 overflow-hidden" aria-label="Map nodes">
-					{topology.nodes.map((node) => (
-						<button
-							key={node.id}
-							type="button"
-							ref={(element) => {
-								if (element) labels.current.set(node.id, element)
-								else labels.current.delete(node.id)
-							}}
-							title={node.label}
-							className={`pointer-events-auto absolute top-0 left-0 max-w-40 truncate rounded px-1.5 py-1 text-[10px] leading-none whitespace-nowrap transition-colors hover:bg-background focus-visible:outline-2 focus-visible:outline-ring ${selectedId === node.id ? "bg-background text-foreground ring-1 ring-primary" : "text-foreground/90"}`}
-							style={{
-								visibility: "hidden",
-								opacity: node.dimmed || (related && !related.has(node.id)) ? 0.25 : 1,
-								backgroundColor:
-									selectedId === node.id ? undefined : dark ? "#242321e6" : "#e5e5dfe6",
-							}}
-							onClick={() => onSelect(selectedId === node.id ? null : node.id)}
-							aria-label={`Select ${node.label}`}
-							aria-pressed={selectedId === node.id}
-						>
-							{node.label}
-						</button>
-					))}
+					{topology.nodes.map((node) => {
+						const badge = resolveMachineBadge(node)
+						return (
+							<button
+								key={node.id}
+								type="button"
+								ref={(element) => {
+									if (element) labels.current.set(node.id, element)
+									else labels.current.delete(node.id)
+								}}
+								title={badge ? `${node.label} · ${badge.label}` : node.label}
+								className={`pointer-events-auto absolute top-0 left-0 max-w-40 truncate rounded px-1.5 py-1 text-[10px] leading-none whitespace-nowrap transition-colors hover:bg-background focus-visible:outline-2 focus-visible:outline-ring ${selectedId === node.id ? "bg-background text-foreground ring-1 ring-primary" : "text-foreground/90"}`}
+								style={{
+									visibility: "hidden",
+									opacity: node.dimmed || (related && !related.has(node.id)) ? 0.25 : 1,
+									backgroundColor:
+										selectedId === node.id ? undefined : dark ? "#242321e6" : "#e5e5dfe6",
+								}}
+								onClick={() => onSelect(selectedId === node.id ? null : node.id)}
+								aria-label={`Select ${node.label}${badge ? `, ${badge.label}` : ""}`}
+								aria-pressed={selectedId === node.id}
+							>
+								{node.label}
+							</button>
+						)
+					})}
 					{links
 						.filter((link) => !link.edge.relation)
 						.filter((link) =>

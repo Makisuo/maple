@@ -7,6 +7,7 @@ import { FACTORY_FINISH, MAP_MATERIALS } from "./appearance"
 import { health, HEALTH_COLOR, nodeHeight, type SpatialView } from "./spatial-layout"
 import { Axle, BoxInstances, MachineBox } from "./factory-primitives"
 import { FactoryBadge } from "./factory-brand"
+import { resolveMachineBadge } from "./factory-badge"
 
 interface Finish {
 	body: string
@@ -77,7 +78,9 @@ function Processor({ height, finish, running }: { height: number; finish: Finish
 				positions={[0, 1, 2, 3, 4].map((i) => [-0.58, height * 0.55 + i * 0.12, 0.84])}
 				color={finish.dark}
 			/>
-			<RoofFan y={height + 0.29} finish={finish} running={running} />
+			<group position={[0.4, height + 0.29, 0]} scale={0.82}>
+				<RoofFan y={0} finish={finish} running={running} />
+			</group>
 			<StackLight y={height + 0.23} finish={finish} />
 		</group>
 	)
@@ -101,7 +104,7 @@ function StorageTank({ height, finish }: { height: number; finish: Finish }) {
 				<sphereGeometry args={[0.86, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
 				<meshStandardMaterial color={finish.trim} roughness={0.65} metalness={0.25} />
 			</mesh>
-			<Axle position={[0, height + 0.62, 0]} radius={0.12} length={0.26} color={finish.steel} />
+			<Axle position={[0, height + 0.55, -0.48]} radius={0.12} length={0.26} color={finish.steel} />
 			<MachineBox
 				size={[0.25, height * 0.62, 0.07]}
 				position={[0, height * 0.55 + 0.2, 0.87]}
@@ -257,18 +260,23 @@ const MACHINE_MODELS = {
 	pump: PumpStation,
 }
 
-function badgePosition(kind: ReturnType<typeof machineKind>, height: number): Vec3 {
+function badgeMount(
+	kind: ReturnType<typeof machineKind>,
+	height: number,
+): { position: Vec3; rotation: Vec3; scale?: number } {
+	// Roof plates share the machine's orientation and stay legible from above.
+	// Tank plates sit on the cap; gantries carry a tilted sign.
 	switch (kind) {
 		case "processor":
-			return [-0.62, height * 0.82 + 0.14, 0.858]
+			return { position: [-0.64, height + 0.31, 0], rotation: [-Math.PI / 2, 0, 0] }
 		case "tank":
-			return [-0.38, height * 0.76 + 0.2, 0.8]
+			return { position: [-0.24, height + 0.55, 0.12], rotation: [-Math.PI / 2, 0, 0], scale: 0.9 }
 		case "gateway":
-			return [-0.8, height + 0.09, 0.795]
+			return { position: [0, height + 0.33, 0], rotation: [-Math.PI / 2, 0, 0] }
 		case "loader":
-			return [-0.78, height + 0.68, -0.36]
+			return { position: [0, height + 0.72, -0.12], rotation: [-Math.PI / 5, 0, 0] }
 		case "pump":
-			return [-0.53, height * 0.225 + 0.2, 0.715]
+			return { position: [-0.48, height * 0.225 + 0.2, 0.99], rotation: [-Math.PI / 6, 0, 0] }
 	}
 }
 
@@ -293,6 +301,7 @@ export const FactoryMachine = memo(function FactoryMachine({
 }) {
 	const materials = MAP_MATERIALS[dark ? "dark" : "light"]
 	const kind = machineKind(node)
+	const badge = resolveMachineBadge(node)
 	const height = view === "atlas" ? nodeHeight(node) : 1.15
 	const finish: Finish = {
 		body: dimmed ? materials.dimmed : FACTORY_FINISH.paint[kind],
@@ -317,7 +326,7 @@ export const FactoryMachine = memo(function FactoryMachine({
 				color={selected ? "#c7a15b" : materials.base}
 			/>
 			<Model {...machineProps} />
-			<FactoryBadge position={badgePosition(kind, height)} muted={dimmed} />
+			{badge && <FactoryBadge {...badgeMount(kind, height)} muted={dimmed} badge={badge} />}
 			{[-1, 1].map((side) => (
 				<Axle
 					key={side}
