@@ -53,6 +53,7 @@ import { GithubConnectService } from "@/services/integrations/vcs/vendor/github/
 import { GithubHttp } from "@/services/integrations/vcs/vendor/github/GithubHttp"
 import { GithubProvider } from "@/services/integrations/vcs/vendor/github/GithubProvider"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { DemoService } from "@/services/org/DemoService"
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
 import { OnboardingService } from "@/services/org/OnboardingService"
@@ -109,6 +110,13 @@ const CoreServicesLive = Layer.mergeAll(
 ).pipe(Layer.provideMerge(InfraLive))
 
 const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(Layer.provideMerge(CoreServicesLive))
+
+/**
+ * Audit entries are warehouse rows (Tinybird-pinned `ingest`), so the service
+ * composes after the warehouse rather than inside CoreServicesLive. Exported
+ * for the auth layers in `http-graph.ts`, which record denials and reads.
+ */
+export const AuditLogServiceLive = AuditLogService.layer.pipe(Layer.provide(WarehouseQueryServiceLive))
 
 // Serves the integration page's per-zone collection status; the poll loop itself
 // runs in the alerting worker's cron, not here.
@@ -176,6 +184,7 @@ const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(
 
 const ErrorActorsServiceLive = ErrorActorsService.layer
 const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
+	Layer.provide(AuditLogServiceLive),
 	Layer.provideMerge(ErrorActorsServiceLive),
 )
 const ErrorPolicyServiceLive = ErrorPolicyService.layer
@@ -298,6 +307,7 @@ const MainServicesLive = Layer.mergeAll(
 	ProductEventsServiceLive,
 	DailySpendServiceLive,
 	CloudflareAnalyticsServiceLive,
+	AuditLogServiceLive,
 	WarehouseQueryServiceLive,
 	EdgeCacheServiceLive,
 	QueryEngineServiceLive,

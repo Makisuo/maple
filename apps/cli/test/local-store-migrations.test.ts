@@ -31,6 +31,7 @@ import {
 	LOCAL_SCHEMA_V14,
 	LOCAL_SCHEMA_V15,
 	LOCAL_SCHEMA_V16,
+	LOCAL_SCHEMA_V17,
 	SCHEMA_DIGEST,
 	SCHEMA_FINGERPRINT,
 } from "../src/server/schema-identity"
@@ -78,16 +79,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("current local schema identity", () => {
-	it("matches the generated v16 revision and keeps the issue-297 identity frozen", () => {
-		expect(SCHEMA_FINGERPRINT).toBe("d975e674ce66af41")
-		expect(SCHEMA_DIGEST).toBe("d975e674ce66af417e4398d8ca336d41340c9c1aa7b26082a6c55ecd02effe38")
+	it("matches the generated v17 revision and keeps the issue-297 identity frozen", () => {
+		expect(SCHEMA_FINGERPRINT).toBe("b3800f55258f0ae3")
+		expect(SCHEMA_DIGEST).toBe("b3800f55258f0ae37a52bec6e4fe38be8fa9daebe3c912db2aa6885a4d73fa20")
 		expect(ISSUE_297_TARGET_SCHEMA_PROJECT_REVISION).toBe(
 			"506bc745f7a7eca202ec905a6403a6815e86413faf0cd3cbbf73881023edce91",
 		)
 		expect(CURRENT_SCHEMA_PROJECT_REVISION).toMatch(/^[0-9a-f]{64}$/)
 		expect(LOCAL_SCHEMA_MANIFEST.objects.length).toBeGreaterThan(60)
-		expect(CURRENT_LOCAL_SCHEMA.version).toBe(16)
-		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V16)
+		expect(CURRENT_LOCAL_SCHEMA.version).toBe(17)
+		expect(CURRENT_LOCAL_SCHEMA).toEqual(LOCAL_SCHEMA_V17)
 		const logs = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "logs")
 		expect(logs?.columns.some((column) => column.name.startsWith("idx_"))).toBe(false)
 		expect(logs?.indexes).toContain("idx_lower_body")
@@ -155,7 +156,8 @@ describe("current local schema identity", () => {
 		// bodies, so their object set is identical to v5 and the manifest digest
 		// differs solely through those definitions. v9 removes `error_spans` and
 		// its view; v11 replaces `web_events` with `product_events` and adds
-		// `identity_links`. Asserted as an exact set difference rather than a
+		// `identity_links`; v17 adds `audit_log`, which local mode creates but
+		// never writes. Asserted as an exact set difference rather than a
 		// relaxed check, so a future edge still cannot add or drop an object
 		// unnoticed.
 		expect([...v5Names].filter((name) => !currentNames.has(name))).toEqual([
@@ -167,6 +169,7 @@ describe("current local schema identity", () => {
 		expect([...currentNames].filter((name) => !v5Names.has(name))).toEqual([
 			"ai_trace_index",
 			"ai_trace_index_mv",
+			"audit_log",
 			"identity_links",
 			"identity_links_mv",
 			"product_events",
@@ -255,7 +258,8 @@ describe("current local schema identity", () => {
 
 		// v12 replaces two view bodies and v13 adds columns to two rollups; neither
 		// adds an object. v14 is exactly the GenAI span index and its view, created
-		// empty and filled forward.
+		// empty and filled forward; v17 adds `audit_log`, created empty and never
+		// written in local mode.
 		const v12Names = new Set(LOCAL_SCHEMA_V12_MANIFEST.objects.map((object) => object.name))
 		const v13Names = new Set(LOCAL_SCHEMA_V13_MANIFEST.objects.map((object) => object.name))
 		const currentSchemaNames = new Set(LOCAL_SCHEMA_MANIFEST.objects.map((object) => object.name))
@@ -265,6 +269,7 @@ describe("current local schema identity", () => {
 		expect([...currentSchemaNames].filter((name) => !v13Names.has(name))).toEqual([
 			"ai_trace_index",
 			"ai_trace_index_mv",
+			"audit_log",
 		])
 		expect([...v13Names].filter((name) => !currentSchemaNames.has(name))).toEqual([])
 		const aiTraceIndex = LOCAL_SCHEMA_MANIFEST.objects.find((object) => object.name === "ai_trace_index")
@@ -312,6 +317,7 @@ describe("local migration registry", () => {
 			"local-0013-to-0014-ai-trace-index",
 			"local-0014-to-0015-commit-sha-vcs-revision",
 			"local-0015-to-0016-ai-trace-index-filter-columns",
+			"local-0016-to-0017-audit-log",
 		])
 		expect(chain[0]?.from.fingerprint).toBe(LEGACY_SCHEMA_FINGERPRINT)
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V1)
@@ -358,7 +364,7 @@ describe("local migration registry", () => {
 				// One past the current tip — bump alongside LOCAL_SCHEMA_VERSION, or this
 				// stops testing the future-store guard and starts testing the
 				// unknown-fingerprint one.
-				{ ...CURRENT_LOCAL_SCHEMA, version: 17, fingerprint: "future", digest: SCHEMA_DIGEST },
+				{ ...CURRENT_LOCAL_SCHEMA, version: 18, fingerprint: "future", digest: SCHEMA_DIGEST },
 				CURRENT_LOCAL_SCHEMA,
 			),
 		).toThrow(/newer than this build/)
@@ -1363,6 +1369,7 @@ describe("v10 -> v11 product events module", () => {
 			"local-0013-to-0014-ai-trace-index",
 			"local-0014-to-0015-commit-sha-vcs-revision",
 			"local-0015-to-0016-ai-trace-index-filter-columns",
+			"local-0016-to-0017-audit-log",
 		])
 		expect(chain[0]?.to).toEqual(LOCAL_SCHEMA_V11)
 		// The dropped table is declared, and the backfilled ones say what they

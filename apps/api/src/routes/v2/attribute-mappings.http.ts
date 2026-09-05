@@ -11,6 +11,8 @@ import { MapleApiV2, paginateArray } from "@maple/domain/http/v2"
 import type { V2AttributeMapping } from "@maple/domain/http/v2"
 import { Array as Arr, Effect, Option } from "effect"
 import { requireAdmin } from "@/services/auth/auth"
+import { diffAuditChanges, pickPresentFields } from "@/routes/v2/audit-changes"
+import { recordHttpAudit } from "@/services/audit/AuditLogService"
 import { IngestAttributeMappingService } from "@/services/org/IngestAttributeMappingService"
 
 const toV2AttributeMapping = (mapping: IngestAttributeMapping): V2AttributeMapping => ({
@@ -25,6 +27,11 @@ const toV2AttributeMapping = (mapping: IngestAttributeMapping): V2AttributeMappi
 	created_at: mapping.createdAt,
 	updated_at: mapping.updatedAt,
 })
+
+/** Update-payload fields that are diffable through the wire shape. */
+const mappingAuditKeys: ReadonlyArray<
+	"name" | "source_context" | "source_key" | "target_key" | "operation" | "enabled"
+> = ["name", "source_context", "source_key", "target_key", "operation", "enabled"]
 
 export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "attributeMappings", (handlers) =>
 	Effect.gen(function* () {
@@ -95,6 +102,11 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 						}),
 					)
 
+					yield* recordHttpAudit("attribute_mapping.created", {
+						resourceId: created.id,
+						metadata: { name: created.name },
+					})
+
 					return toV2AttributeMapping(created)
 				}),
 			)
@@ -102,6 +114,7 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* requireMappingAdmin(tenant, "update")
+					const current = yield* findMapping(tenant.orgId, params.id)
 					const updated = yield* service.update(
 						tenant.orgId,
 						params.id,
@@ -125,6 +138,16 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 						}),
 					)
 
+					const changes = diffAuditChanges(
+						pickPresentFields(mappingAuditKeys, payload, toV2AttributeMapping(current)),
+						pickPresentFields(mappingAuditKeys, payload, toV2AttributeMapping(updated)),
+					)
+					yield* recordHttpAudit("attribute_mapping.updated", {
+						resourceId: updated.id,
+						changes,
+						metadata: { name: updated.name },
+					})
+
 					return toV2AttributeMapping(updated)
 				}),
 			)
@@ -133,6 +156,9 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 					const tenant = yield* CurrentTenant.Context
 					yield* requireMappingAdmin(tenant, "delete")
 					const deleted = yield* service.delete(tenant.orgId, params.id)
+					yield* recordHttpAudit("attribute_mapping.deleted", {
+						resourceId: deleted.id,
+					})
 
 					return { id: deleted.id, object: "attribute_mapping" as const, deleted: true as const }
 				}),

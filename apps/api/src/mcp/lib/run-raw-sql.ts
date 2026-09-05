@@ -5,6 +5,7 @@ import { computeBucketSecondsForRange } from "@maple/query-engine"
 import { makeExecuteRawSql } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import type { TenantContext } from "@/services/auth/tenant-context"
+import { describeFailure, recordRawSqlAudit } from "@/services/audit/audit-access"
 
 /**
  * `$__interval_s` when the caller doesn't pin `granularitySeconds`.
@@ -42,6 +43,15 @@ export const runRawSql = Effect.fn("runRawSql")(function* (input: RunRawSqlInput
 	const executeRawSql = makeExecuteRawSql<TenantContext, WarehouseExecutionError | RawSqlValidationError>(
 		warehouse,
 	)
+	const audit = (result: Parameters<typeof recordRawSqlAudit>[0]["result"]) =>
+		recordRawSqlAudit({
+			tenant: input.tenant,
+			sql: input.sql,
+			context: "mcp.run_sql",
+			startTime: input.startTime,
+			endTime: input.endTime,
+			result,
+		})
 	return yield* executeRawSql(input.tenant, {
 		sql: input.sql,
 		orgId: input.tenant.orgId,
@@ -50,5 +60,15 @@ export const runRawSql = Effect.fn("runRawSql")(function* (input: RunRawSqlInput
 		granularitySeconds: input.granularitySeconds,
 		workload: "interactive",
 		context: "mcp.run_sql",
-	})
+	}).pipe(
+		// Every statement is audited, however it ended: a refused one as `denied`.
+		Effect.tap((result) => audit({ _tag: "rows", rowCount: result.rowCount })),
+		Effect.tapError((error) =>
+			audit(
+				error._tag === "@maple/http/errors/RawSqlValidationError"
+					? { _tag: "rejected", reason: error.message }
+					: { _tag: "failed", error: describeFailure(error) },
+			),
+		),
+	)
 })

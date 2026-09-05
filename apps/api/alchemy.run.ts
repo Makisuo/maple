@@ -249,6 +249,8 @@ const makeWorkerBindings = ({
 	vcsSyncQueueName,
 	planetScaleWebhookQueue,
 	planetScaleWebhookQueueName,
+	auditEventsQueue,
+	auditEventsQueueName,
 }: {
 	stage: MapleStage
 	mapleDb: Cloudflare.Hyperdrive.Connection | undefined
@@ -258,6 +260,8 @@ const makeWorkerBindings = ({
 	vcsSyncQueueName: string
 	planetScaleWebhookQueue: Cloudflare.Queues.Queue
 	planetScaleWebhookQueueName: string
+	auditEventsQueue: Cloudflare.Queues.Queue
+	auditEventsQueueName: string
 }) => ({
 	// Ref stages attach MAPLE_DB via `bindMapleDbRef` below.
 	...(mapleDb ? { MAPLE_DB: mapleDb } : undefined),
@@ -279,6 +283,8 @@ const makeWorkerBindings = ({
 	VCS_SYNC_QUEUE_NAME: vcsSyncQueueName,
 	PLANETSCALE_WEBHOOK_QUEUE: planetScaleWebhookQueue,
 	PLANETSCALE_WEBHOOK_QUEUE_NAME: planetScaleWebhookQueueName,
+	AUDIT_EVENTS_QUEUE: auditEventsQueue,
+	AUDIT_EVENTS_QUEUE_NAME: auditEventsQueueName,
 	// Long-running schema-apply: chunks heavy backfill migrations across durable
 	// steps so they never hit the Worker request budget. Class is exported from
 	// src/worker.ts. The first Workflow arg IS the physical workflow name; the
@@ -389,6 +395,15 @@ export const createMapleApi = ({
 		const planetScaleWebhookQueue = yield* Cloudflare.Queues.Queue("planetscale-webhooks", {
 			name: planetScaleWebhookQueueName,
 		})
+		const auditEventsQueueName = resolveWorkerName("audit-events", stage)
+		const auditEventsQueue = yield* Cloudflare.Queues.Queue("audit-events", {
+			name: auditEventsQueueName,
+		})
+		// Parking lot for audit entries that exhausted their retries. Deliberately
+		// has no consumer: an entry landing here is a lost audit record, and the
+		// point is that it survives for inspection instead of being dropped.
+		const auditEventsDlqName = resolveWorkerName("audit-events-dlq", stage)
+		yield* Cloudflare.Queues.Queue("audit-events-dlq", { name: auditEventsDlqName })
 
 		const worker = (yield* Cloudflare.Worker("api", {
 			name: resolveWorkerName("api", stage),
@@ -434,6 +449,8 @@ export const createMapleApi = ({
 					vcsSyncQueueName,
 					planetScaleWebhookQueue,
 					planetScaleWebhookQueueName,
+					auditEventsQueue,
+					auditEventsQueueName,
 				}),
 				...configuredEnv,
 				...devEnv,
@@ -460,6 +477,21 @@ export const createMapleApi = ({
 				batchSize: 10,
 				maxConcurrency: 2,
 				maxRetries: 3,
+				maxWaitTimeMs: 5000,
+			},
+		})
+		// Audit entries tolerate a few seconds of delivery latency; batch wider and
+		// wait longer so one insert round-trip covers many entries.
+		yield* Cloudflare.Queues.Consumer("audit-events-consumer", {
+			queueId: auditEventsQueue.queueId,
+			scriptName: worker.workerName,
+			// `maxRetries` must stay in sync with AUDIT_EVENTS_MAX_RETRIES in
+			// audit-events-runtime.ts, which logs the drop on the final attempt.
+			deadLetterQueue: auditEventsDlqName,
+			settings: {
+				batchSize: 25,
+				maxConcurrency: 2,
+				maxRetries: 5,
 				maxWaitTimeMs: 5000,
 			},
 		})

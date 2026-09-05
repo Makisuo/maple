@@ -1,4 +1,4 @@
-import { formatWarehouseDateTime, snapAlertWindowEndMs } from "@maple/query-engine"
+import { formatWarehouseDateTime, snapAlertWindowEndMs, warehouseDateTime64 } from "@maple/query-engine"
 import {
 	AlertComparator as AlertComparatorSchema,
 	AlertDeliveryError,
@@ -283,13 +283,7 @@ export const interleaveAlertRulesByOrg = <T extends { readonly orgId: string }>(
 	return fair
 }
 
-// Tinybird DateTime64(3) wire format for alert_checks ingest:
-// "YYYY-MM-DD HH:MM:SS.SSS" (UTC, no timezone).
-const toIngestDateTime64 = (epochMs: number) => {
-	const d = new Date(epochMs)
-	const pad = (n: number, w = 2) => n.toString().padStart(w, "0")
-	return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`
-}
+const toIngestDateTime64 = warehouseDateTime64
 
 const compareThreshold = (
 	value: number,

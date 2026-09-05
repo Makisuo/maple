@@ -16,6 +16,7 @@ import {
 	TraceId,
 	UserId,
 } from "../primitives"
+import { AuditedRead } from "./audit-log"
 import { Authorization } from "./current-tenant"
 import { AlertSeverity } from "./alerts"
 import {
@@ -881,7 +882,7 @@ export class ErrorsApiGroup extends HttpApiGroup.make("errors")
 			query: IssueListQuery,
 			success: ErrorIssuesListResponse,
 			error: ErrorPersistenceError,
-		}),
+		}).annotate(AuditedRead, "telemetry.read"),
 	)
 	.add(
 		HttpApiEndpoint.get("getIssue", "/issues/:issueId", {
@@ -889,7 +890,7 @@ export class ErrorsApiGroup extends HttpApiGroup.make("errors")
 			query: IssueDetailQuery,
 			success: ErrorIssueDetailResponse,
 			error: [ErrorPersistenceError, ErrorIssueNotFoundError],
-		}),
+		}).annotate(AuditedRead, "telemetry.read"),
 	)
 	.add(
 		HttpApiEndpoint.post("transitionIssue", "/issues/:issueId/transitions", {
@@ -985,20 +986,20 @@ export class ErrorsApiGroup extends HttpApiGroup.make("errors")
 			query: IssueEventsQuery,
 			success: ErrorIssueEventsResponse,
 			error: [ErrorPersistenceError, ErrorIssueNotFoundError],
-		}),
+		}).annotate(AuditedRead, "telemetry.read"),
 	)
 	.add(
 		HttpApiEndpoint.get("listIssueIncidents", "/issues/:issueId/incidents", {
 			params: { issueId: ErrorIssueId },
 			success: ErrorIncidentsListResponse,
 			error: [ErrorPersistenceError, ErrorIssueNotFoundError],
-		}),
+		}).annotate(AuditedRead, "telemetry.read"),
 	)
 	.add(
 		HttpApiEndpoint.get("listOpenIncidents", "/incidents", {
 			success: ErrorIncidentsListResponse,
 			error: ErrorPersistenceError,
-		}),
+		}).annotate(AuditedRead, "telemetry.read"),
 	)
 	.add(
 		HttpApiEndpoint.post("registerAgent", "/agents", {

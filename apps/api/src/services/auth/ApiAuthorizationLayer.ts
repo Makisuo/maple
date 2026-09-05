@@ -4,6 +4,10 @@ import { Effect, Layer, Option, Schema } from "effect"
 import { ApiKeysService } from "@/services/org/ApiKeysService"
 import { makeResolveTenant } from "./AuthService"
 import { annotateAuthSpan } from "@/services/auth/auth-span"
+import { CurrentAuditActor } from "@/services/auth/audit-actor"
+import { AuditLogService } from "@/services/audit/AuditLogService"
+import { recordApiDenial } from "@/services/auth/audit-denial"
+import { withAuditedRead } from "@/services/audit/audit-access"
 import { Env } from "@/platform/Env"
 
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
@@ -22,10 +26,11 @@ export const ApiAuthorizationLayer = Layer.effect(
 	Effect.gen(function* () {
 		const env = yield* Env
 		const apiKeys = yield* ApiKeysService
+		const audit = yield* AuditLogService
 		const resolveTenant = makeResolveTenant(env)
 
 		return CurrentTenant.Authorization.of({
-			bearer: (httpEffect) =>
+			bearer: (httpEffect, options) =>
 				Effect.gen(function* () {
 					const request = yield* HttpServerRequest.HttpServerRequest
 
@@ -42,12 +47,26 @@ export const ApiAuthorizationLayer = Layer.effect(
 
 					if (Option.isSome(apiKeyResolved)) {
 						const resolved = apiKeyResolved.value
+						// Denied attempts are audited with the same attribution as
+						// successes — a key probing a surface it is not valid for is
+						// exactly what the audit log exists to surface. This layer has
+						// no rate limiter, so coalescing is what bounds the volume.
+						const recordDenied = (denialReason: string) =>
+							recordApiDenial(audit, request, {
+								orgId: resolved.orgId,
+								userId: resolved.userId,
+								apiKeyId: resolved.keyId,
+								apiKeyName: resolved.name,
+								denialReason,
+							})
 						if (resolved.kind !== "standard") {
+							yield* recordDenied("This API key is only valid for the MCP server")
 							return yield* new UnauthorizedError({
 								message: "This API key is only valid for the MCP server",
 							})
 						}
 						if (resolved.scopes !== null) {
+							yield* recordDenied("Restricted API keys must use the /v2 API")
 							return yield* new UnauthorizedError({
 								message: "Restricted API keys must use the /v2 API",
 							})
@@ -63,15 +82,37 @@ export const ApiAuthorizationLayer = Layer.effect(
 							roles: resolved.roles ?? apiKeyDefaultRoles,
 							authMode: "self_hosted",
 						})
-						return yield* Effect.provideService(httpEffect, CurrentTenant.Context, tenant)
+						return yield* httpEffect.pipe(
+							Effect.provideService(CurrentTenant.Context, tenant),
+							Effect.provideService(CurrentAuditActor, {
+								type: "api_key",
+								apiKeyId: resolved.keyId,
+								label: resolved.name,
+								source: "api",
+							}),
+							withAuditedRead(audit, request, options, {
+								orgId: resolved.orgId,
+								actor: {
+									type: "api_key",
+									userId: resolved.userId,
+									apiKeyId: resolved.keyId,
+									label: resolved.name,
+								},
+								source: "api",
+							}),
+						)
 					}
 
 					const tenant = yield* resolveTenant(request.headers)
 					yield* annotateAuthSpan("session", { orgId: tenant.orgId, userId: tenant.userId })
-					return yield* Effect.provideService(
-						httpEffect,
-						CurrentTenant.Context,
-						new CurrentTenant.TenantSchema(tenant),
+					return yield* httpEffect.pipe(
+						Effect.provideService(CurrentTenant.Context, new CurrentTenant.TenantSchema(tenant)),
+						Effect.provideService(CurrentAuditActor, { type: "user", source: "dashboard" }),
+						withAuditedRead(audit, request, options, {
+							orgId: tenant.orgId,
+							actor: { type: "user", userId: tenant.userId },
+							source: "dashboard",
+						}),
 					)
 				}),
 		})

@@ -7336,6 +7336,10 @@
       "name": "Attribute Mappings"
     },
     {
+      "description": "The organization's append-only audit trail — allowed and denied actions performed through the dashboard, the public API, and MCP, attributed to the user, API key, or agent that performed them, with before/after diffs for updates. Reading it requires organization-administrator access (or the `audit_log:read` scope for API keys).",
+      "name": "Audit Log"
+    },
+    {
       "description": "Metrics endpoints Maple scrapes on a schedule — self-hosted Prometheus endpoints and PlanetScale branch metrics. Manage targets, probe them on demand, and inspect recent scrape checks. Credentials are write-only.",
       "name": "Scrape Targets"
     },
