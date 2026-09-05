@@ -15,6 +15,7 @@ import {
 	getServiceDetailThroughputRefinement,
 } from "@/api/warehouse/custom-charts"
 import { getErrorsByType, getErrorsFacets, getErrorsSpark, getErrorsSummary } from "@/api/warehouse/errors"
+import { getReleaseDetail, getReleases } from "@/api/warehouse/releases"
 import {
 	getLog,
 	getLogAttributeKeys,
@@ -627,6 +628,18 @@ export const cloudflareTopTrafficResultAtom = makeQueryAtomFamily(getCloudflareT
 // environments in one fetch. The chart grid and the environment switcher read
 // this atom with the same input key, so they share a single round-trip.
 export const getServiceDetailOverviewResultAtom = makeQueryAtomFamily(getServiceDetailOverview, {
+	staleTime: 30_000,
+})
+
+// Releases page: per-commit rows + swimlane timeline in one fetch. The list
+// takes `namespaces`, so the org-global pin lands in its key; the detail is
+// scoped to one service and needs no pin.
+export const getReleasesResultAtom = makeQueryAtomFamily(getReleases, {
+	staleTime: 30_000,
+	globalNamespace: "top",
+})
+
+export const getReleaseDetailResultAtom = makeQueryAtomFamily(getReleaseDetail, {
 	staleTime: 30_000,
 })
 

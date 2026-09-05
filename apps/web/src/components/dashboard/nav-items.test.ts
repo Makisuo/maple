@@ -63,11 +63,12 @@ describe("isNavItemActive", () => {
 })
 
 describe("navGroups", () => {
-	it("renders ten top-level rows", () => {
+	it("renders eleven top-level rows", () => {
 		const rows = navGroups().flatMap((group) => group.items)
 		expect(rows.map((item) => item.title)).toEqual([
 			"Overview",
 			"Services",
+			"Releases",
 			"Service Map",
 			"Infrastructure",
 			"Explore",

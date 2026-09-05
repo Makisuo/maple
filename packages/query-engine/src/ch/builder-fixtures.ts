@@ -628,6 +628,70 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 			),
 	},
 
+	// Releases page — routes/internal/query-engine.http.ts `releasesList` and
+	// `releaseDetail`. Same splice as the services list, grouped one level
+	// finer (per commit), plus the error-events bridge keyed on the version.
+	{
+		module: "releases",
+		name: "releasesListQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.releasesListQuery({ environments: ["production"], serviceNames: ["api", "web"] }),
+				window,
+			),
+	},
+	{
+		module: "releases",
+		name: "releasesListQuery",
+		label: "singleService",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.releasesListQuery({ serviceName: "api", environments: ["production"], limit: 100 }),
+				window,
+			),
+	},
+	{
+		module: "releases",
+		name: "releasesTimelineQuery",
+		label: "minutely",
+		compile: () =>
+			CH.compileUnsafe(CH.releasesTimelineQuery({ environments: ["production"], bucketSeconds: 300 }), {
+				...window,
+				bucketSeconds: 300,
+			}),
+	},
+	{
+		module: "releases",
+		name: "releasesTimelineQuery",
+		label: "hourly",
+		compile: () =>
+			CH.compileUnsafe(CH.releasesTimelineQuery({ serviceName: "api", bucketSeconds: 3600 }), {
+				...window,
+				bucketSeconds: 3600,
+			}),
+	},
+	{
+		module: "releases",
+		name: "releasesTimelineQuery",
+		label: "raw",
+		compile: () =>
+			CH.compileUnsafe(CH.releasesTimelineQuery({ serviceName: "api", bucketSeconds: 30 }), {
+				...window,
+				bucketSeconds: 30,
+			}),
+	},
+	{
+		module: "releases",
+		name: "releaseErrorFingerprintsQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.releaseErrorFingerprintsQuery({ serviceName: "api", environments: ["production"] }),
+				{ ...window, serviceVersion: "0af7651916cd43dd8448eb211c80319c0af76519" },
+			),
+	},
+
 	// Service-catalog hourly-rollup splice.
 	{
 		// routes/v2/services.http.ts — the services list.

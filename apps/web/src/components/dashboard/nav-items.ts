@@ -16,6 +16,7 @@ import {
 	PlanetScaleIcon,
 	PlayRotateClockwiseIcon,
 	PulseIcon,
+	RocketIcon,
 	ServerIcon,
 	SquareSparkleIcon,
 } from "@/components/icons"
@@ -255,6 +256,7 @@ export function navGroups(flags?: OrganizationFeatureFlags): NavGroup[] {
 			label: "Monitor",
 			items: [
 				{ title: "Services", href: "/services", icon: ServerIcon },
+				{ title: "Releases", href: "/releases", icon: RocketIcon },
 				{ title: "Service Map", href: "/service-map", icon: NetworkNodesIcon },
 				infrastructureItem,
 			],

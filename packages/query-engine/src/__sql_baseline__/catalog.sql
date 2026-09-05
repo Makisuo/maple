@@ -1467,6 +1467,299 @@ SELECT
         ORDER BY step ASC
         FORMAT JSON
 
+-- builder:releases:releaseErrorFingerprintsQuery:default  [e0e008b0]
+SELECT
+          toString(FingerprintHash) AS fingerprintHash,
+          count() AS count,
+          min(Timestamp) AS firstSeen,
+          max(Timestamp) AS lastSeen
+        FROM error_events_by_time
+        WHERE OrgId = 'org_sql_catalog'
+          AND ServiceName = 'api'
+          AND ServiceVersion = '0af7651916cd43dd8448eb211c80319c0af76519'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND DeploymentEnv IN ('production')
+        GROUP BY fingerprintHash
+        ORDER BY count DESC
+        LIMIT 50
+        FORMAT JSON
+
+-- builder:releases:releasesListQuery:default  [e12717bf]
+SELECT
+          bServiceName AS serviceName,
+          bEnvironment AS environment,
+          bCommitSha AS commitSha,
+          min(bFirstSeen) AS firstSeen,
+          max(bBucket) AS lastSeen,
+          sum(bSpanCount) AS spanCount,
+          sum(bEstimatedSpanCount) AS estimatedSpanCount,
+          sum(bErrorCount) AS errorCount,
+          sum(bEstimatedErrorCount) AS estimatedErrorCount,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000 AS p50LatencyMs,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000 AS p95LatencyMs,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99LatencyMs,
+          sum(bApdexSatisfiedCount) AS apdexSatisfiedCount,
+          sum(bApdexToleratingCount) AS apdexToleratingCount
+        FROM (
+SELECT
+          toStartOfHour(Timestamp) AS bBucket,
+          ServiceName AS bServiceName,
+          ServiceNamespace AS bServiceNamespace,
+          DeploymentEnv AS bEnvironment,
+          CommitSha AS bCommitSha,
+          count() AS bSpanCount,
+          sum(SampleRate) AS bEstimatedSpanCount,
+          countIf(StatusCode = 'Error') AS bErrorCount,
+          sumIf(SampleRate, StatusCode = 'Error') AS bEstimatedErrorCount,
+          sum(toFloat64(Duration)) AS bDurationSum,
+          quantilesTDigestState(0.5, 0.95, 0.99)(Duration) AS bDurationQuantiles,
+          min(Timestamp) AS bFirstSeen,
+          countIf((StatusCode != 'Error' AND Duration < 500000000)) AS bApdexSatisfiedCount,
+          countIf(((StatusCode != 'Error' AND Duration >= 500000000) AND Duration < 2000000000)) AS bApdexToleratingCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND DeploymentEnv IN ('production')
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+UNION ALL
+SELECT
+          Hour AS bBucket,
+          ServiceName AS bServiceName,
+          ServiceNamespace AS bServiceNamespace,
+          DeploymentEnv AS bEnvironment,
+          CommitSha AS bCommitSha,
+          sum(SpanCount) AS bSpanCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          sum(ErrorCount) AS bErrorCount,
+          sum(EstimatedErrorCount) AS bEstimatedErrorCount,
+          sum(DurationSum) AS bDurationSum,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles) AS bDurationQuantiles,
+          min(FirstSeen) AS bFirstSeen,
+          sum(ApdexSatisfiedCount) AS bApdexSatisfiedCount,
+          sum(ApdexToleratingCount) AS bApdexToleratingCount
+        FROM service_overview_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND DeploymentEnv IN ('production')
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+) AS service_windows
+        WHERE bCommitSha != ''
+          AND bServiceName IN ('api', 'web')
+        GROUP BY serviceName, environment, commitSha
+        ORDER BY firstSeen DESC, spanCount DESC
+        LIMIT 500
+        FORMAT JSON
+
+-- builder:releases:releasesListQuery:singleService  [e3891cbc]
+SELECT
+          bServiceName AS serviceName,
+          bEnvironment AS environment,
+          bCommitSha AS commitSha,
+          min(bFirstSeen) AS firstSeen,
+          max(bBucket) AS lastSeen,
+          sum(bSpanCount) AS spanCount,
+          sum(bEstimatedSpanCount) AS estimatedSpanCount,
+          sum(bErrorCount) AS errorCount,
+          sum(bEstimatedErrorCount) AS estimatedErrorCount,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 1) / 1000000 AS p50LatencyMs,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 2) / 1000000 AS p95LatencyMs,
+          arrayElement(quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles), 3) / 1000000 AS p99LatencyMs,
+          sum(bApdexSatisfiedCount) AS apdexSatisfiedCount,
+          sum(bApdexToleratingCount) AS apdexToleratingCount
+        FROM (
+SELECT
+          toStartOfHour(Timestamp) AS bBucket,
+          ServiceName AS bServiceName,
+          ServiceNamespace AS bServiceNamespace,
+          DeploymentEnv AS bEnvironment,
+          CommitSha AS bCommitSha,
+          count() AS bSpanCount,
+          sum(SampleRate) AS bEstimatedSpanCount,
+          countIf(StatusCode = 'Error') AS bErrorCount,
+          sumIf(SampleRate, StatusCode = 'Error') AS bEstimatedErrorCount,
+          sum(toFloat64(Duration)) AS bDurationSum,
+          quantilesTDigestState(0.5, 0.95, 0.99)(Duration) AS bDurationQuantiles,
+          min(Timestamp) AS bFirstSeen,
+          countIf((StatusCode != 'Error' AND Duration < 500000000)) AS bApdexSatisfiedCount,
+          countIf(((StatusCode != 'Error' AND Duration >= 500000000) AND Duration < 2000000000)) AS bApdexToleratingCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ServiceName = 'api'
+          AND DeploymentEnv IN ('production')
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+UNION ALL
+SELECT
+          Hour AS bBucket,
+          ServiceName AS bServiceName,
+          ServiceNamespace AS bServiceNamespace,
+          DeploymentEnv AS bEnvironment,
+          CommitSha AS bCommitSha,
+          sum(SpanCount) AS bSpanCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          sum(ErrorCount) AS bErrorCount,
+          sum(EstimatedErrorCount) AS bEstimatedErrorCount,
+          sum(DurationSum) AS bDurationSum,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles) AS bDurationQuantiles,
+          min(FirstSeen) AS bFirstSeen,
+          sum(ApdexSatisfiedCount) AS bApdexSatisfiedCount,
+          sum(ApdexToleratingCount) AS bApdexToleratingCount
+        FROM service_overview_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND ServiceName = 'api'
+          AND DeploymentEnv IN ('production')
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+) AS service_windows
+        WHERE bCommitSha != ''
+        GROUP BY serviceName, environment, commitSha
+        ORDER BY firstSeen DESC, spanCount DESC
+        LIMIT 100
+        FORMAT JSON
+
+-- builder:releases:releasesTimelineQuery:hourly  [10107a11]
+SELECT
+          toStartOfInterval(bBucket, INTERVAL 3600 SECOND) AS bucket,
+          bServiceName AS serviceName,
+          bCommitSha AS commitSha,
+          sum(bSpanCount) AS count,
+          sum(bErrorCount) AS errorCount
+        FROM (
+SELECT
+          toStartOfHour(Timestamp) AS bBucket,
+          ServiceName AS bServiceName,
+          ServiceNamespace AS bServiceNamespace,
+          DeploymentEnv AS bEnvironment,
+          CommitSha AS bCommitSha,
+          count() AS bSpanCount,
+          sum(SampleRate) AS bEstimatedSpanCount,
+          countIf(StatusCode = 'Error') AS bErrorCount,
+          sumIf(SampleRate, StatusCode = 'Error') AS bEstimatedErrorCount,
+          sum(toFloat64(Duration)) AS bDurationSum,
+          quantilesTDigestState(0.5, 0.95, 0.99)(Duration) AS bDurationQuantiles,
+          min(Timestamp) AS bFirstSeen,
+          countIf((StatusCode != 'Error' AND Duration < 500000000)) AS bApdexSatisfiedCount,
+          countIf(((StatusCode != 'Error' AND Duration >= 500000000) AND Duration < 2000000000)) AS bApdexToleratingCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ServiceName = 'api'
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR) OR Timestamp >= toStartOfHour(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+UNION ALL
+SELECT
+          Hour AS bBucket,
+          ServiceName AS bServiceName,
+          ServiceNamespace AS bServiceNamespace,
+          DeploymentEnv AS bEnvironment,
+          CommitSha AS bCommitSha,
+          sum(SpanCount) AS bSpanCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          sum(ErrorCount) AS bErrorCount,
+          sum(EstimatedErrorCount) AS bEstimatedErrorCount,
+          sum(DurationSum) AS bDurationSum,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles) AS bDurationQuantiles,
+          min(FirstSeen) AS bFirstSeen,
+          sum(ApdexSatisfiedCount) AS bApdexSatisfiedCount,
+          sum(ApdexToleratingCount) AS bApdexToleratingCount
+        FROM service_overview_hourly
+        WHERE OrgId = 'org_sql_catalog'
+          AND ServiceName = 'api'
+          AND Hour >= if(toDateTime('2026-01-01 10:30:00') = toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')), toStartOfHour(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 HOUR)
+          AND Hour < toStartOfHour(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+) AS service_windows
+        WHERE bCommitSha != ''
+        GROUP BY bucket, serviceName, commitSha
+        ORDER BY bucket ASC
+        LIMIT 5000
+        FORMAT JSON
+
+-- builder:releases:releasesTimelineQuery:minutely  [e9a0172f]
+SELECT
+          toStartOfInterval(bBucket, INTERVAL 300 SECOND) AS bucket,
+          bServiceName AS serviceName,
+          bCommitSha AS commitSha,
+          sum(bSpanCount) AS count,
+          sum(bErrorCount) AS errorCount
+        FROM (
+SELECT
+          toStartOfMinute(Timestamp) AS bBucket,
+          ServiceName AS bServiceName,
+          ServiceNamespace AS bServiceNamespace,
+          DeploymentEnv AS bEnvironment,
+          CommitSha AS bCommitSha,
+          count() AS bSpanCount,
+          sum(SampleRate) AS bEstimatedSpanCount,
+          countIf(StatusCode = 'Error') AS bErrorCount,
+          sumIf(SampleRate, StatusCode = 'Error') AS bEstimatedErrorCount,
+          sum(toFloat64(Duration)) AS bDurationSum,
+          quantilesTDigestState(0.5, 0.95, 0.99)(Duration) AS bDurationQuantiles,
+          min(Timestamp) AS bFirstSeen,
+          countIf((StatusCode != 'Error' AND Duration < 500000000)) AS bApdexSatisfiedCount,
+          countIf(((StatusCode != 'Error' AND Duration >= 500000000) AND Duration < 2000000000)) AS bApdexToleratingCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND DeploymentEnv IN ('production')
+          AND (Timestamp < if(toDateTime('2026-01-01 10:30:00') = toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 MINUTE) OR Timestamp >= toStartOfMinute(toDateTime('2026-01-03 14:15:00')))
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+UNION ALL
+SELECT
+          Minute AS bBucket,
+          ServiceName AS bServiceName,
+          ServiceNamespace AS bServiceNamespace,
+          DeploymentEnv AS bEnvironment,
+          CommitSha AS bCommitSha,
+          sum(SpanCount) AS bSpanCount,
+          sum(EstimatedSpanCount) AS bEstimatedSpanCount,
+          sum(ErrorCount) AS bErrorCount,
+          sum(EstimatedErrorCount) AS bEstimatedErrorCount,
+          sum(DurationSum) AS bDurationSum,
+          quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles) AS bDurationQuantiles,
+          min(FirstSeen) AS bFirstSeen,
+          sum(ApdexSatisfiedCount) AS bApdexSatisfiedCount,
+          sum(ApdexToleratingCount) AS bApdexToleratingCount
+        FROM service_overview_minutely
+        WHERE OrgId = 'org_sql_catalog'
+          AND DeploymentEnv IN ('production')
+          AND Minute >= if(toDateTime('2026-01-01 10:30:00') = toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')), toStartOfMinute(toDateTime('2026-01-01 10:30:00')) + INTERVAL 1 MINUTE)
+          AND Minute < toStartOfMinute(toDateTime('2026-01-03 14:15:00'))
+        GROUP BY bBucket, bServiceName, bServiceNamespace, bEnvironment, bCommitSha
+) AS service_windows
+        WHERE bCommitSha != ''
+        GROUP BY bucket, serviceName, commitSha
+        ORDER BY bucket ASC
+        LIMIT 5000
+        FORMAT JSON
+
+-- builder:releases:releasesTimelineQuery:raw  [50272b8a]
+SELECT
+          toStartOfInterval(Timestamp, INTERVAL 30 SECOND) AS bucket,
+          ServiceName AS serviceName,
+          CommitSha AS commitSha,
+          count() AS count,
+          countIf(StatusCode = 'Error') AS errorCount
+        FROM service_overview_spans
+        WHERE OrgId = 'org_sql_catalog'
+          AND Timestamp >= '2026-01-01 10:30:00'
+          AND Timestamp <= '2026-01-03 14:15:00'
+          AND ServiceName = 'api'
+          AND CommitSha != ''
+        GROUP BY bucket, serviceName, commitSha
+        ORDER BY bucket ASC
+        LIMIT 5000
+        FORMAT JSON
+
 -- builder:service-endpoints:serviceEndpointsSummaryQuery:default  [3e379104]
 SELECT
           bSpanName AS spanName,
