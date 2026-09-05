@@ -10,9 +10,10 @@ import { connectedIds, type SpatialLayout, type SpatialView } from "./spatial-la
 import { MachineBox } from "./factory-primitives"
 import { FactoryMachine } from "./factory-machines"
 import { Landscape } from "./landscape"
-import { EARTH_DEPTH, islandFootprint } from "./terrain"
+import { Sky } from "./sky"
+import { islandDepth, islandFootprint } from "./terrain"
 import { FactoryTransport } from "./factory-transport"
-import type { FactoryLink } from "./factory-routing"
+import type { FactoryLink, FactoryRoute } from "./factory-routing"
 
 export interface CameraCommand {
 	action: "reset" | "in" | "out"
@@ -22,6 +23,7 @@ export interface SceneProps {
 	topology: Topology3D
 	layout: SpatialLayout
 	links: FactoryLink[]
+	routes: FactoryRoute[]
 	view: SpatialView
 	selectedId: string | null
 	onSelect: (id: string | null) => void
@@ -76,7 +78,7 @@ function CameraRig({
 		)
 		const island = islandFootprint(layout)
 		for (const point of island.outline) {
-			points.push(new THREE.Vector3(point.x, GROUND_Y - EARTH_DEPTH, point.y))
+			points.push(new THREE.Vector3(point.x, GROUND_Y - islandDepth(island), point.y))
 			points.push(new THREE.Vector3(point.x, GROUND_Y + 3.2, point.y))
 		}
 		for (const point of layout.positions.values())
@@ -227,38 +229,74 @@ function CameraRig({
 }
 
 function MapScene(props: SceneProps) {
-	const { topology, layout, links, view, selectedId, onSelect, dark, flowing } = props
+	const { topology, layout, links, routes, view, selectedId, onSelect, dark, flowing } = props
 	const related = connectedIds(topology, selectedId)
 	const materials = MAP_MATERIALS[dark ? "dark" : "light"]
 	const layoutKey = useMemo(() => JSON.stringify([...layout.positions]), [layout])
 	const island = useMemo(() => islandFootprint(layout), [layout])
-	const shadowExtent = (island.maxX - island.minX) / 2 + 4
+	const highestPlatform = Math.max(0, ...layout.districts.map((district) => district.position[1]))
+	const shadowExtent = (island.maxX - island.minX) / Math.SQRT2 + highestPlatform / 2 + 4
+	const lightTarget = useMemo(() => {
+		const target = new THREE.Object3D()
+		target.position.set(island.center.x, highestPlatform / 2, island.center.y)
+		return target
+	}, [island, highestPlatform])
+	const keyLight = useRef<THREE.DirectionalLight>(null)
+	const lastShadow = useRef("")
+	const shadowRevision = JSON.stringify([
+		layoutKey,
+		topology.nodes.map((node) => [node.id, node.throughput, node.kind, node.platform]),
+		links.map((link) => [link.geometryKey, link.radius]),
+	])
+	useFrame(() => {
+		// Rebuild when geometry changes, not during orbit or selection. A stable
+		// world-space shadow map avoids crawling edges and repeated shadow passes.
+		if (keyLight.current && lastShadow.current !== shadowRevision) {
+			keyLight.current.shadow.needsUpdate = true
+			lastShadow.current = shadowRevision
+		}
+	})
 	return (
 		<>
-			<ambientLight intensity={0.46} />
-			<hemisphereLight args={["#eef4e8", "#67836b", 0.86]} />
+			<primitive object={lightTarget} />
+			<hemisphereLight args={["#ffe9cf", "#9b829f", 1.45]} />
 			<directionalLight
+				ref={keyLight}
 				key={layoutKey}
-				position={[-shadowExtent * 0.45, shadowExtent * 1.8, shadowExtent * 0.4]}
-				intensity={1.38}
-				color="#fff4e0"
+				target={lightTarget}
+				position={[
+					island.center.x - shadowExtent * 0.95,
+					highestPlatform / 2 + shadowExtent * 1.15,
+					island.center.y + shadowExtent * 0.75,
+				]}
+				intensity={2.5}
+				color="#ffe0a8"
 				castShadow
-				shadow-mapSize={[2048, 2048]}
+				shadow-mapSize={[4096, 4096]}
 				shadow-camera-left={-shadowExtent}
 				shadow-camera-right={shadowExtent}
 				shadow-camera-top={shadowExtent}
 				shadow-camera-bottom={-shadowExtent}
-				shadow-camera-near={1}
-				shadow-camera-far={shadowExtent * 5}
-				shadow-bias={-0.0001}
-				shadow-normalBias={0.025}
-				shadow-radius={5}
-				shadow-intensity={0.56}
+				shadow-camera-near={0.5}
+				shadow-camera-far={shadowExtent * 4}
+				shadow-bias={-0.00015}
+				shadow-normalBias={0.04}
+				shadow-intensity={0.42}
 				shadow-autoUpdate={false}
 				shadow-needsUpdate
 			/>
-			<directionalLight position={[18, 12, -20]} intensity={0.48} color="#e2ebdf" />
-			<Landscape key={`${view}:${dark}:${layoutKey}`} layout={layout} links={links} dark={dark} />
+			<directionalLight
+				target={lightTarget}
+				position={[
+					island.center.x + shadowExtent,
+					highestPlatform + shadowExtent * 0.6,
+					island.center.y - shadowExtent,
+				]}
+				intensity={0.7}
+				color="#e1c5e7"
+			/>
+			<Sky island={island} />
+			<Landscape key={`${view}:${dark}:${layoutKey}`} layout={layout} routes={routes} dark={dark} />
 			<CameraRig {...props} />
 			{layout.districts.map((district) => {
 				// Every platform has a real underside meeting the common ground plane.
@@ -350,10 +388,15 @@ export function ServiceMap3D(props: SceneProps) {
 		<SceneBoundary>
 			<Canvas
 				orthographic
-				shadows="percentage"
-				dpr={[1, 1.75]}
+				shadows="soft"
+				dpr={[1, 2]}
 				frameloop={props.flowing ? "always" : "demand"}
-				gl={{ antialias: true, alpha: true }}
+				gl={{
+					antialias: true,
+					alpha: true,
+					toneMapping: THREE.ACESFilmicToneMapping,
+					toneMappingExposure: 1.05,
+				}}
 				onPointerMissed={() => props.onSelect(null)}
 				style={{ position: "absolute", inset: 0 }}
 			>

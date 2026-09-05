@@ -1,12 +1,12 @@
 import { extend, type ThreeElement } from "@react-three/fiber"
-import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js"
+import { VoxelGeometry } from "./voxel-geometry"
 import * as THREE from "three"
 import type { Vec3 } from "./types"
 
-extend({ RoundedBoxGeometry })
+extend({ VoxelGeometry })
 declare module "@react-three/fiber" {
 	interface ThreeElements {
-		roundedBoxGeometry: ThreeElement<typeof RoundedBoxGeometry>
+		voxelGeometry: ThreeElement<typeof VoxelGeometry>
 	}
 }
 
@@ -21,8 +21,8 @@ export function MachineBox({
 }) {
 	return (
 		<mesh position={[...position]} castShadow receiveShadow>
-			<roundedBoxGeometry args={[...size, 1, 0.045]} />
-			<meshLambertMaterial color={color} />
+			<voxelGeometry args={["box", ...size]} />
+			<meshLambertMaterial color={color} vertexColors />
 		</mesh>
 	)
 }
@@ -52,8 +52,8 @@ export function BoxInstances({
 				mesh.computeBoundingSphere()
 			}}
 		>
-			<boxGeometry args={size} />
-			<meshStandardMaterial color={color} roughness={0.8} />
+			<voxelGeometry args={["box", ...size]} />
+			<meshStandardMaterial color={color} roughness={0.8} vertexColors />
 		</instancedMesh>
 	)
 }
@@ -78,8 +78,8 @@ export function Axle({
 			castShadow
 			receiveShadow
 		>
-			<cylinderGeometry args={[radius, radius, length, 20]} />
-			<meshStandardMaterial color={color} roughness={0.5} metalness={0.4} />
+			<voxelGeometry args={["cylinder", radius * 2, length, radius * 2, Math.max(0.03, radius / 6)]} />
+			<meshLambertMaterial color={color} vertexColors />
 		</mesh>
 	)
 }

@@ -29,9 +29,9 @@ function PipeTraffic({
 	const motion = useFactoryMotion(link, running, count, 3.2 + link.edge.avgLatencyMs / 180)
 	return (
 		<instancedMesh args={[undefined, undefined, count]} frustumCulled={false} visible={!dimmed}>
-			<sphereGeometry args={[link.radius * 0.68, 10, 8]}>
+			<boxGeometry args={[link.radius, link.radius, link.radius]}>
 				<instancedBufferAttribute attach="attributes-factoryPhase" args={[motion.phases, 1]} />
-			</sphereGeometry>
+			</boxGeometry>
 			<meshBasicMaterial color={color} {...motion.material} />
 		</instancedMesh>
 	)
@@ -69,12 +69,12 @@ function Signpost({ link }: { link: FactoryLink }) {
 	return (
 		<group>
 			<mesh position={[base.x, base.y + 0.5, base.z]}>
-				<cylinderGeometry args={[0.035, 0.035, 0.8, 8]} />
-				<meshStandardMaterial color="#a3a69a" metalness={0.5} roughness={0.5} />
+				<boxGeometry args={[0.07, 0.8, 0.07]} />
+				<meshStandardMaterial color="#a3a69a" metalness={0.15} roughness={0.85} />
 			</mesh>
 			<mesh position={[base.x, base.y + 0.9, base.z]}>
-				<sphereGeometry args={[0.07, 10, 8]} />
-				<meshStandardMaterial color="#c5bd9f" metalness={0.4} roughness={0.5} />
+				<boxGeometry args={[0.12, 0.12, 0.12]} />
+				<meshStandardMaterial color="#c5bd9f" metalness={0.15} roughness={0.85} />
 			</mesh>
 		</group>
 	)
@@ -104,12 +104,12 @@ function Pipeline({ link, running, active, dimmed, dark }: TransportProps) {
 		<group>
 			{sections.map((section, i) => (
 				<mesh key={i} castShadow receiveShadow>
-					<tubeGeometry args={[section, 48, link.radius, 10, false]} />
-					<meshStandardMaterial color={metal} roughness={0.44} metalness={0.48} />
+					<tubeGeometry args={[section, 48, link.radius, 4, false]} />
+					<meshStandardMaterial color={metal} roughness={0.85} metalness={0.15} flatShading />
 				</mesh>
 			))}
 			<mesh renderOrder={2}>
-				<tubeGeometry args={[glass, 32, link.radius, 12, false]} />
+				<tubeGeometry args={[glass, 32, link.radius, 4, false]} />
 				<meshStandardMaterial
 					color={dark ? "#afcbbc" : "#698b7b"}
 					roughness={0.15}
@@ -122,19 +122,19 @@ function Pipeline({ link, running, active, dimmed, dark }: TransportProps) {
 			</mesh>
 			{collars.map(({ point, rotation }, i) => (
 				<mesh key={i} position={point} quaternion={rotation} castShadow>
-					<cylinderGeometry args={[link.radius * 1.48, link.radius * 1.48, 0.13, 16]} />
+					<boxGeometry args={[link.radius * 2.6, 0.13, link.radius * 2.6]} />
 					<meshStandardMaterial
 						color={dimmed ? metal : FACTORY_FINISH.collar}
-						roughness={0.5}
-						metalness={0.4}
+						roughness={0.85}
+						metalness={0.15}
 					/>
 				</mesh>
 			))}
 			<group position={valve}>
 				<Axle position={[0, 0.23, 0]} radius={0.035} length={0.46} color={metal} />
 				<mesh position={[0, 0.46, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-					<torusGeometry args={[0.22, 0.035, 6, 20]} />
-					<meshStandardMaterial color={dimmed ? metal : "#d29543"} roughness={0.6} />
+					<voxelGeometry args={["torus", 0.5, 0.5, 0.08, 0.035]} />
+					<meshStandardMaterial vertexColors color={dimmed ? metal : "#d29543"} roughness={0.6} />
 				</mesh>
 				<mesh position={[0, 0.46, 0]}>
 					<boxGeometry args={[0.4, 0.03, 0.04]} />
@@ -156,7 +156,7 @@ function Pipeline({ link, running, active, dimmed, dark }: TransportProps) {
 
 function BeltCargo({ link, running, dimmed }: { link: FactoryLink; running: boolean; dimmed: boolean }) {
 	const count = Math.min(8, 3 + Math.ceil(link.edge.callsPerSecond / 50))
-	const motion = useFactoryMotion(link, running, count, 7, 0.27, true)
+	const motion = useFactoryMotion(link, running, count, 7, 0.34, true)
 	return (
 		<group visible={!dimmed}>
 			<instancedMesh args={[undefined, undefined, count]} frustumCulled={false}>
@@ -177,7 +177,7 @@ function BeltCargo({ link, running, dimmed }: { link: FactoryLink; running: bool
 
 function ConveyorTreads({ link, running, dimmed }: { link: FactoryLink; running: boolean; dimmed: boolean }) {
 	const count = Math.min(100, Math.ceil(link.curve.getLength() / 0.5))
-	const motion = useFactoryMotion(link, running, count, 7 * 0.86, 0.09)
+	const motion = useFactoryMotion(link, running, count, 7 * 0.86, 0.11)
 	return (
 		<instancedMesh args={[undefined, undefined, count]} frustumCulled={false}>
 			<boxGeometry args={[0.77, 0.035, 0.12]}>
@@ -230,7 +230,7 @@ function Conveyor({ link, running, dimmed, dark }: TransportProps) {
 					<meshStandardMaterial
 						color={dimmed ? "#667166" : "#d09d58"}
 						side={THREE.DoubleSide}
-						roughness={0.55}
+						roughness={0.85}
 						metalness={0.3}
 					/>
 				</mesh>
@@ -244,11 +244,12 @@ function Conveyor({ link, running, dimmed, dark }: TransportProps) {
 					mesh.computeBoundingSphere()
 				}}
 			>
-				<cylinderGeometry args={[0.055, 0.055, 0.76, 10]} />
+				<voxelGeometry args={["cylinder", 0.11, 0.76, 0.11, 0.025]} />
 				<meshStandardMaterial
+					vertexColors
 					color={dimmed ? "#505b50" : "#879285"}
 					roughness={0.6}
-					metalness={0.45}
+					metalness={0.15}
 				/>
 			</instancedMesh>
 			<Supports link={link} dark={dark} />

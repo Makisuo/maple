@@ -144,7 +144,7 @@ half of this; renaming was the cheap half.
 ## 2D and 3D presentation
 
 `/service-map` stores its renderer choice in the `view=2d|3d` search parameter; 2D remains
-the default. The lazy-loaded factory renderer in `components/service-map/three` consumes
+the default. The lazy-loaded voxel factory renderer in `components/service-map/three` consumes
 the same resolved `buildFlowElements` graph after decluttering, including integration
 nodes and links. It adds no warehouse queries. Environment, time range, focus, traffic
 thresholds, namespace expansion, and service/database detail panels remain shared.
@@ -155,6 +155,15 @@ origin links stay idle. Atlas groups by the actual namespaces; Cascade condenses
 cycles before assigning depth. Layout and route geometry depend on graph structure, so a
 metric refresh updates the factory without resetting the camera. The lab uses this same
 renderer with explicitly labeled fixture traffic.
+
+The voxel scene uses 0.4-unit terrain steps, 0.2-unit tree blocks, and 0.1-unit
+machine shells, with finer mechanical details. `voxel-geometry.ts` emits only the
+exterior faces of each machine part; `voxel-landscape.ts` builds two instanced
+batches for terrain and plants and omits buried soil blocks. The landscape receives
+structural routes separately from live edge metrics, so traffic refreshes do not
+rebuild it. Warm/cool lighting uses a stable soft shadow map refreshed on geometry
+changes. Pause and reduced motion stop scene animation; HTML labels and the shared
+service inspector retain keyboard access.
 
 ## Known-unresolved
 

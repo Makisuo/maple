@@ -5,11 +5,11 @@ import { health, HEALTH_COLOR } from "./spatial-layout"
 export const GROUND_Y = -0.36
 export const MAP_MATERIALS = {
 	dark: {
-		air: "#242c2a",
-		ground: "#669747",
-		grass: "#8bbd52",
-		platform: "#5a4b37",
-		turf: "#71a84a",
+		air: "#d9ada5",
+		ground: "#749451",
+		grass: "#65924c",
+		platform: "#b49468",
+		turf: "#83a35d",
 		body: "#b68c5c",
 		cap: "#d1c4a5",
 		base: "#7b7158",
@@ -17,11 +17,11 @@ export const MAP_MATERIALS = {
 		dimmed: "#686751",
 	},
 	light: {
-		air: "#e8efeb",
-		ground: "#72a14f",
-		grass: "#9ac664",
-		platform: "#948160",
-		turf: "#82b258",
+		air: "#e7bba5",
+		ground: "#85a660",
+		grass: "#74a357",
+		platform: "#c5a373",
+		turf: "#92b36d",
 		body: "#c39965",
 		cap: "#e3d7b8",
 		base: "#a89978",
@@ -51,3 +51,10 @@ export function connectionStyle(errorRate: number, dark: boolean, active: boolea
 		color = dark ? HEALTH_COLOR[health(errorRate)] : errorRate >= 0.02 ? "#a95a4a" : "#9d762b"
 	return { color, opacity: dimmed ? 0.08 : active ? 0.95 : dark ? 0.48 : 0.72 }
 }
+
+/** The reference's dusk sky is scene art, independent of the app chrome theme. */
+export const MAP_SKY = {
+	backgroundColor: "#d9ada5",
+	backgroundImage:
+		"radial-gradient(ellipse at 16% 30%, #ffe5b880 0%, transparent 46%), linear-gradient(180deg, #a99bb6 0%, #d3a7b0 30%, #efbd99 65%, #f2c990 78%, #bc8eaa 100%)",
+} as const

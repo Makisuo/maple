@@ -1,5 +1,4 @@
 import * as THREE from "three"
-import { GROUND_Y, MAP_MATERIALS } from "./appearance"
 import type { SpatialLayout } from "./spatial-layout"
 
 export const EARTH_DEPTH = 3.4
@@ -48,68 +47,26 @@ export function insideIsland(island: IslandFootprint, x: number, z: number, inse
 	return inside && clearance >= inset
 }
 
-function topGeometry(island: IslandFootprint, dark: boolean) {
-	const geometry = new THREE.PlaneGeometry(island.maxX - island.minX, island.maxZ - island.minZ, 24, 24)
-	geometry.rotateX(-Math.PI / 2)
-	geometry.translate(island.center.x, GROUND_Y, island.center.y)
-	const positions = geometry.getAttribute("position")
-	const colors: number[] = []
-	const materials = MAP_MATERIALS[dark ? "dark" : "light"]
-	const base = new THREE.Color(materials.ground),
-		high = new THREE.Color(materials.turf)
-	for (let i = 0; i < positions.count; i++) {
-		const x = positions.getX(i),
-			z = positions.getZ(i)
-		const color = base.clone().lerp(high, 0.3 + 0.12 * Math.sin(x * 0.3 + z * 0.2))
-		colors.push(color.r, color.g, color.b)
-	}
-	geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3))
-	return geometry
+/** A conservative footprint frames the scene; the visible shoreline is stepped. */
+export function islandDepth(island: IslandFootprint) {
+	return Math.min(10, Math.max(EARTH_DEPTH, (island.maxX - island.minX) * 0.16))
 }
 
-/** Flat soil strata share exact square edges, with no gaps or rounded taper. */
-function earthGeometry(island: IslandFootprint, dark: boolean) {
-	const levels = [0, -0.2, -0.62, -2.28, -EARTH_DEPTH]
-	const palette = dark
-		? ["#39752a", "#54301f", "#8e5129", "#665039"]
-		: ["#488730", "#663920", "#a26230", "#796042"]
-	const vertices: number[] = [],
-		colors: number[] = []
-	const point = (index: number, level: number) => {
-		const wrapped = index % island.outline.length
-		const p = island.outline[wrapped] ?? island.center
-		const depth = levels[level] ?? 0
-		return new THREE.Vector3(p.x, GROUND_Y + depth, p.y)
-	}
-	for (let layer = 0; layer < levels.length - 1; layer++) {
-		for (let i = 0; i < island.outline.length; i++) {
-			const a = point(i, layer),
-				b = point(i + 1, layer)
-			const c = point(i, layer + 1),
-				d = point(i + 1, layer + 1)
-			const pigment = new THREE.Color(palette[layer])
-			for (const p of [a, b, c, b, d, c]) {
-				vertices.push(p.x, p.y, p.z)
-				colors.push(pigment.r, pigment.g, pigment.b)
-			}
-		}
-	}
-	// Close the underside so this stays a solid volume when the camera is lowered.
-	for (let i = 0; i < island.outline.length; i++) {
-		const bottom = new THREE.Vector3(island.center.x, GROUND_Y - EARTH_DEPTH, island.center.y)
-		const color = new THREE.Color(palette[3])
-		for (const p of [bottom, point(i, 4), point(i + 1, 4)]) {
-			vertices.push(p.x, p.y, p.z)
-			colors.push(color.r, color.g, color.b)
-		}
-	}
-	const geometry = new THREE.BufferGeometry()
-	geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3))
-	geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3))
-	geometry.computeVertexNormals()
-	return geometry
-}
-
-export function islandGeometry(island: IslandFootprint, dark: boolean) {
-	return { top: topGeometry(island, dark), earth: earthGeometry(island, dark) }
+export function islandColumn(island: IslandFootprint, x: number, z: number, cell: number) {
+	const half = (island.maxX - island.minX) / 2
+	const dx = Math.abs(x - island.center.x)
+	const dz = Math.abs(z - island.center.y)
+	const edgeX = half - dx
+	const edgeZ = half - dz
+	const rim = Math.floor(1.2 + 0.65 * Math.sin(x * 0.7 + z * 0.31) + 0.5 * Math.cos(z * 0.8)) * cell
+	const present = edgeX >= rim && edgeZ >= rim && edgeX + edgeZ >= Math.min(2.4, half * 0.18) + rim
+	const radial = Math.max(dx, dz) / half
+	const contour = 0.4 * Math.sin(x * 0.72 + z * 0.27) + 0.25 * Math.cos(z * 0.64 - x * 0.35)
+	const depth = Math.max(
+		cell * 2,
+		Math.round(
+			(islandDepth(island) * (0.35 + 0.65 * Math.pow(Math.max(0, 1 - radial), 0.6)) + contour) / cell,
+		) * cell,
+	)
+	return { present, depth }
 }

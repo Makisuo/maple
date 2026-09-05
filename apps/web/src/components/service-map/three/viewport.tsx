@@ -12,7 +12,7 @@ import {
 import { resolveMachineBadge } from "./factory-badge"
 import { ServiceMap3D, type CameraCommand } from "./scene"
 import type { Topology3D, Edge3D } from "./types"
-import { MAP_MATERIALS } from "./appearance"
+import { MAP_SKY } from "./appearance"
 import { factoryRoutes, decorateRoutes, type RoutingTopology } from "./factory-routing"
 import {
 	connectedIds,
@@ -125,12 +125,17 @@ export function ServiceMap3DViewport({
 			<section
 				className="relative min-h-0 flex-1 overflow-hidden"
 				aria-label={`${copy.title} 3D service map`}
-				style={{ backgroundColor: MAP_MATERIALS[dark ? "dark" : "light"].air }}
+				style={MAP_SKY}
 			>
+				<div
+					aria-hidden="true"
+					className="pointer-events-none absolute left-[8%] top-[12%] aspect-square w-[17%] max-w-52 rounded-full bg-[#fff0bb] opacity-85"
+				/>
 				<ServiceMap3D
 					topology={topology}
 					layout={layout}
 					links={links}
+					routes={routes}
 					view={view}
 					selectedId={selectedId}
 					onSelect={onSelect}
