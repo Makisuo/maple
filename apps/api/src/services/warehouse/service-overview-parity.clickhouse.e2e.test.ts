@@ -246,6 +246,16 @@ const num = (value: unknown): number => Number(value ?? 0)
 /** The cases the services list and its detail charts actually produce. */
 const BUCKET_CASES = [300, 900, 3600, 7200] as const
 
+const METRIC_FIELDS = {
+	count: [],
+	error_rate: ["errorRate"],
+	avg_duration: ["avgDuration"],
+	p50_duration: ["p50Duration", "p95Duration", "p99Duration"],
+	p95_duration: ["p50Duration", "p95Duration", "p99Duration"],
+	p99_duration: ["p50Duration", "p95Duration", "p99Duration"],
+	apdex: ["satisfiedCount", "toleratingCount", "apdexScore"],
+} as const
+
 describe.skipIf(!clickhouseE2eEnabled)("service overview raw-vs-rollup parity", () => {
 	beforeAll(async () => {
 		await clickhouseExec(`CREATE DATABASE ${database}`)
@@ -289,6 +299,65 @@ describe.skipIf(!clickhouseE2eEnabled)("service overview raw-vs-rollup parity", 
 			assert.isAbove(num(rows[0]?.n), 0, `no span sits exactly on seam ${chDateTime(seam)}`)
 		}
 	})
+
+	for (const metric of Object.keys(METRIC_FIELDS) as Array<keyof typeof METRIC_FIELDS>) {
+		for (const needsSampling of [false, true]) {
+			// Hour-multiple single-metric requests deliberately use the separate
+			// weighted aggregate route, with different sample-count semantics.
+			for (const bucketSeconds of [300, 900]) {
+				it(`preserves ${metric} and sample counts when pruning unused aggregates (sampling=${needsSampling}, bucket=${bucketSeconds})`, async () => {
+					const opts = {
+						metric,
+						needsSampling,
+						rootOnly: true,
+						bucketSeconds,
+						groupBy: ["service"],
+					}
+					const params = { ...window, bucketSeconds }
+					assert.isTrue(CH.canUseAnnualServiceOverview(opts))
+					const [selected, all] = await Promise.all([
+						runJson(CH.compileUnsafe(CH.tracesTimeseriesQuery(opts), params).sql),
+						runJson(
+							CH.compileUnsafe(CH.tracesTimeseriesQuery({ ...opts, allMetrics: true }), params)
+								.sql,
+						),
+					])
+					assert.isAbove(selected.length, 0)
+					assert.deepEqual(selected.map(key), all.map(key))
+					const used = new Set<string>([
+						"count",
+						"spanCount",
+						"estimatedSpanCount",
+						...METRIC_FIELDS[metric],
+					])
+					const fields = new Set(Object.values(METRIC_FIELDS).flat())
+					for (let i = 0; i < selected.length; i++) {
+						for (const field of used) {
+							const expected = num(all[i][field])
+							const tolerance = /^p\d+Duration$/.test(field)
+								? Math.max(Math.abs(expected) * 0.01, 1e-6)
+								: 1e-12
+							assert.closeTo(
+								num(selected[i][field]),
+								expected,
+								tolerance,
+								`${field} @ ${key(selected[i])}`,
+							)
+						}
+						for (const field of fields) {
+							if (!used.has(field))
+								assert.strictEqual(num(selected[i][field]), 0, `unused ${field}`)
+						}
+					}
+					assert.isAbove(
+						all.reduce((n, row) => n + num(row.count), 0),
+						all.reduce((n, row) => n + num(row.spanCount), 0),
+						"sampling seed must distinguish weighted counts from confidence counts",
+					)
+				})
+			}
+		}
+	}
 
 	// A `for` loop, not `describe.each`: the latter OOMs tsc in this repo.
 	for (const bucketSeconds of BUCKET_CASES) {

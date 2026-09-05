@@ -290,6 +290,27 @@ describe("mapWarehouseError", () => {
 })
 
 describe("cleanErrorMessage", () => {
+	it("retains the authentication diagnostic without the echoed token", () => {
+		const message =
+			"invalid authentication token. Invalid token b'opaque-secret': Signature verification failed"
+		expect(cleanErrorMessage(message)).toBe(
+			"invalid authentication token. Invalid token b'[redacted]': Signature verification failed",
+		)
+		const classified = mapWarehouseError("alertRawQuery", new Error(message))
+		expect(classified).toBeInstanceOf(WarehouseAuthError)
+		expect(classified.message).not.toContain("opaque-secret")
+		expect(String(classified.cause)).not.toContain("opaque-secret")
+	})
+
+	it("redacts JWTs from both generic failures and HTML fallbacks", () => {
+		const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature"
+		const cause = new Error(`Request failed with bearer ${jwt}`)
+		const error = toWarehouseQueryError("alertRawQuery", cause)
+		expect(error.message).toBe("Request failed with bearer [redacted]")
+		expect(String(error.cause)).not.toContain(jwt)
+		expect(cleanErrorMessage(`<html>${jwt}</html>`)).not.toContain(jwt)
+	})
+
 	it("strips a leaked nginx HTML body", () => {
 		const cleaned = cleanErrorMessage(
 			"Request failed with status 503: <html><head><title>503 Service Temporarily Unavailable</title></head><body><center><h1>503</h1></center></body></html>",
