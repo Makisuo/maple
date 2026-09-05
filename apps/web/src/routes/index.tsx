@@ -441,8 +441,7 @@ function DashboardContent({
 				<DashboardLayout.Content>
 					<DashboardLayout.Sticky>
 						<DashboardLayout.Header
-							title="Dashboard"
-							description="Observability overview for your services."
+							title="Overview"
 						>
 							<div className="flex items-center gap-2">
 								<Select

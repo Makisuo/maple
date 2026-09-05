@@ -293,6 +293,10 @@ function NavRow({
 	// The pruning is about how many rows you scroll past when it's open.
 	const preview = useMemo(() => {
 		if (isOpen || !item.subItems?.every((sub) => sub.icon)) return undefined
+		// Only brand marks earn the slot. Explore's children are generic signal
+		// glyphs — at 12px, in muted ink, five of them were a grey smudge that
+		// said nothing "Explore" didn't, and the real rows appear once it opens.
+		if (!item.subItems.some((sub) => sub.iconColor)) return undefined
 		const seen = new Set<NavSubItem["icon"]>()
 		const unique: NavSubItem[] = []
 		for (const sub of item.subItems) {

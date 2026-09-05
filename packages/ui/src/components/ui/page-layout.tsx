@@ -126,7 +126,7 @@ function Title({
 		<h1
 			data-slot="page-title"
 			className={cn(
-				"font-display text-3xl font-semibold tracking-tight truncate leading-[1.1]",
+				"font-display text-2xl font-semibold tracking-tight truncate leading-[1.1]",
 				className,
 			)}
 			title={title}

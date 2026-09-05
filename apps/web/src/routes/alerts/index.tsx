@@ -95,7 +95,6 @@ function AlertsPage() {
 					<DashboardLayout.Sticky>
 						<DashboardLayout.Header
 							title="Alerts"
-							description="Monitor your services and get notified when things go wrong."
 						>
 							{headerActions}
 						</DashboardLayout.Header>

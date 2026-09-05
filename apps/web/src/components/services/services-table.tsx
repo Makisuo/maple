@@ -486,7 +486,7 @@ const ServiceRow = React.memo(function ServiceRow({
 					to="/services/$serviceName"
 					params={{ serviceName: service.serviceName }}
 					search={serviceDetailSearch(filters, service.environment)}
-					className="flex max-w-full items-center gap-1.5 font-medium text-primary hover:underline"
+					className="flex max-w-full items-center gap-1.5 font-medium text-foreground hover:underline"
 					onClick={(e) => e.stopPropagation()}
 					title={service.serviceName}
 				>
@@ -909,7 +909,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 															className="flex min-h-11 items-center justify-between gap-3 border-b px-3 py-2.5 last:border-b-0 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
 														>
 															<div className="min-w-0 flex-1">
-																<div className="flex items-center gap-1.5 text-sm font-medium text-primary">
+																<div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
 																	<ServiceDot
 																		serviceName={service.serviceName}
 																	/>

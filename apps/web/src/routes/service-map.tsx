@@ -148,7 +148,6 @@ function ServiceMapContent() {
 					<DashboardLayout.Sticky>
 						<DashboardLayout.Header
 							title="Service Map"
-							description="Visualize service-to-service dependencies and data flow."
 						>
 							{/* Wraps, and below the header's side-by-side breakpoint the
 							    environment select takes a row of its own: all three controls

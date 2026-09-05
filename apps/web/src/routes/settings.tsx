@@ -81,7 +81,6 @@ function SettingsPage() {
 						<DashboardLayout.Sticky>
 							<DashboardLayout.Header
 								title="Settings"
-								description="Manage your workspace settings."
 							/>
 						</DashboardLayout.Sticky>
 						<DashboardLayout.Scroll>
@@ -103,7 +102,7 @@ function SettingsPage() {
 				<DashboardLayout.Body>
 					<DashboardLayout.Content>
 						<DashboardLayout.Sticky>
-							<DashboardLayout.Header title="Settings" description="Workspace settings." />
+							<DashboardLayout.Header title="Settings" />
 						</DashboardLayout.Sticky>
 						<DashboardLayout.Scroll>
 							<p className="text-muted-foreground text-sm">

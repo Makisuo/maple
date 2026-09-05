@@ -249,7 +249,7 @@ export function ServiceHealthOverview(props: ServiceHealthProps) {
 							delay={0}
 						/>
 						<StatRailItem
-							eyebrow="No active issues"
+							eyebrow="Healthy"
 							value={String(counts.healthy)}
 							tone={counts.healthy > 0 ? "ok" : "neutral"}
 							action={railAction("healthy")}
