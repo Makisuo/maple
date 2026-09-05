@@ -239,8 +239,8 @@ const exploreItem = (flags?: OrganizationFeatureFlags): NavItem => ({
  *
  * `flags` is *optional*, so a caller with no organization context yet hides a
  * flagged row rather than flashing it — a row that appears and then vanishes is
- * worse than one that arrives a beat late. Agent Sessions is the one row behind
- * a staged rollout right now (`agentTracing`).
+ * worse than one that arrives a beat late. Agent Sessions (`agentTracing`) and
+ * Releases (`releases`) are the rows behind a staged rollout right now.
  */
 export function navGroups(flags?: OrganizationFeatureFlags): NavGroup[] {
 	const analyzeItems: NavItem[] = [
@@ -256,7 +256,9 @@ export function navGroups(flags?: OrganizationFeatureFlags): NavGroup[] {
 			label: "Monitor",
 			items: [
 				{ title: "Services", href: "/services", icon: ServerIcon },
-				{ title: "Releases", href: "/releases", icon: RocketIcon },
+				// Behind the `releases` rollout flag while the page settles; the
+				// route itself is open, this only decides who sees the row.
+				...(flags?.releases ? [{ title: "Releases", href: "/releases", icon: RocketIcon }] : []),
 				{ title: "Service Map", href: "/service-map", icon: NetworkNodesIcon },
 				infrastructureItem,
 			],

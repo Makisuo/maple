@@ -63,12 +63,11 @@ describe("isNavItemActive", () => {
 })
 
 describe("navGroups", () => {
-	it("renders eleven top-level rows", () => {
+	it("renders ten top-level rows", () => {
 		const rows = navGroups().flatMap((group) => group.items)
 		expect(rows.map((item) => item.title)).toEqual([
 			"Overview",
 			"Services",
-			"Releases",
 			"Service Map",
 			"Infrastructure",
 			"Explore",
@@ -98,6 +97,22 @@ describe("navGroups", () => {
 			expect(item.subItems?.length).toBeGreaterThan(0)
 			expect(item.subItems?.every((sub) => sub.icon)).toBe(true)
 		}
+	})
+
+	it("shows Releases only behind the releases flag", () => {
+		for (const off of [undefined, DISABLED_ORGANIZATION_FEATURE_FLAGS]) {
+			expect(
+				navGroups(off)
+					.flatMap((group) => group.items)
+					.map((item) => item.href),
+			).not.toContain("/releases")
+			expect(paletteNavItems(off).map((entry) => entry.href)).not.toContain("/releases")
+		}
+		const on = navGroups(ENABLED_ORGANIZATION_FEATURE_FLAGS).flatMap((group) => group.items)
+		expect(on.map((item) => item.title)).toContain("Releases")
+		expect(paletteNavItems(ENABLED_ORGANIZATION_FEATURE_FLAGS).map((entry) => entry.href)).toContain(
+			"/releases",
+		)
 	})
 
 	it("shows Agent Sessions only behind the agentTracing flag", () => {
