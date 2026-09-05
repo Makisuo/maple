@@ -110,8 +110,10 @@ export const GET: APIRoute = ({ site }) => {
 
 		"## Command line tool",
 		"",
-		"The official `maple` CLI runs the whole platform locally against a single embedded ClickHouse binary — no account required — and talks to the hosted service for the rest.",
+		"The official `maple` binary is a standalone observability stack for local development: one process on localhost that receives OpenTelemetry and serves a full dashboard and query CLI — no account, no Docker, no hosted service required. It replaces the collector + Jaeger + Prometheus + Loki + Grafana compose stack. The same CLI can optionally talk to a hosted workspace.",
 		"",
+		`- [Maple Local (Markdown)](${url("/local.md")})`,
+		`- [Maple Local (HTML)](${url("/local")})`,
 		`- Homebrew: \`brew install Makisuo/tap/maple\``,
 		`- Install script: \`curl -fsSL ${url("/cli/install")} | sh\` ([source](${url("/cli/install")}))`,
 		`- [Releases on GitHub](${GITHUB_URL}/releases)`,

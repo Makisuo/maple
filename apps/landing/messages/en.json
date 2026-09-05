@@ -697,7 +697,7 @@
 
 	"local_eyebrow": "05 \u00b7 Local",
 	"local_title": "The whole platform, as one binary.",
-	"local_body": "One maple executable — OTLP ingest, an embedded database, the query API, and the dashboard — running on 127.0.0.1. No account, no cloud, no rate limits.",
+	"local_body": "One maple executable — OTLP ingest, an embedded database, the query API, and the dashboard — running on 127.0.0.1. A complete, standalone stack for local development: no account, no cloud, no rate limits.",
 	"local_install_alt": "or",
 	"local_link_docs": "Read the docs \u2192",
 
@@ -707,7 +707,7 @@
 
 	"nav_login": "Log in",
 	"nav_docs": "Docs",
-	"nav_local": "Local",
+	"nav_local": "Maple Local",
 	"nav_guides": "Guides",
 	"nav_blog": "Blog",
 	"nav_changelog": "Changelog",

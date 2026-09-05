@@ -1,0 +1,167 @@
+---
+/**
+ * LocalStackCompare — the "replace the compose file" argument, made visible.
+ *
+ * Left: the stack most repos copy in for local telemetry — a collector plus one
+ * backend per signal plus a dashboard, each with its own port and UI. Right:
+ * `maple start`. Both cards share one row grammar (name · port · role) so the
+ * reader compares like with like; the point is the height difference, and the
+ * empty space on the right is left empty on purpose.
+ *
+ * The tools on the left are named factually — they are good software, and this
+ * page never says otherwise. What we claim is only the shape: five containers
+ * versus one process.
+ */
+const usual = [
+	{ name: "otel-collector", port: ":4317 :4318", role: "Receive and route", note: "collector.yaml" },
+	{ name: "jaeger", port: ":16686", role: "Traces", note: "own UI" },
+	{ name: "prometheus", port: ":9090", role: "Metrics", note: "scrape config · own UI" },
+	{ name: "loki", port: ":3100", role: "Logs", note: "loki.yaml" },
+	{ name: "grafana", port: ":3000", role: "Dashboards", note: "datasources · provisioning · own UI" },
+];
+---
+
+<div class="grid gap-4 md:grid-cols-2">
+	<!-- The usual stack -->
+	<section class="lsc" aria-labelledby="lsc-usual">
+		<header class="lsc__head">
+			<h3 id="lsc-usual" class="lsc__title">docker-compose.yml</h3>
+			<span class="lsc__tag">The usual stack</span>
+		</header>
+		<ul class="lsc__rows" role="list">
+			{
+				usual.map((r) => (
+					<li class="lsc__row">
+						<code class="lsc__name">{r.name}</code>
+						<span class="lsc__port">{r.port}</span>
+						<span class="lsc__role">{r.role}</span>
+						<span class="lsc__note">{r.note}</span>
+					</li>
+				))
+			}
+		</ul>
+		<footer class="lsc__foot">5 containers · 3 UIs · a compose file to keep in sync</footer>
+	</section>
+
+	<!-- Maple Local -->
+	<section class="lsc" aria-labelledby="lsc-maple">
+		<header class="lsc__head">
+			<h3 id="lsc-maple" class="lsc__title">Maple Local</h3>
+			<span class="lsc__tag">One process</span>
+		</header>
+		<ul class="lsc__rows" role="list">
+			<li class="lsc__row">
+				<code class="lsc__name lsc__name--on">maple start</code>
+				<span class="lsc__port">:4318</span>
+				<span class="lsc__role">Traces, logs, metrics, errors, sessions, service map</span>
+				<span class="lsc__note">one UI · no config</span>
+			</li>
+		</ul>
+		<footer class="lsc__foot">1 process · 1 port · 1 UI · no Docker</footer>
+	</section>
+</div>
+
+<p class="mt-5 max-w-[66ch] text-[13px] leading-relaxed text-fg-muted">
+	Light means the running footprint: one process, one port, nothing to orchestrate before your app starts.
+	The download is not small — the embedded database engine is a few hundred megabytes on disk.
+</p>
+
+<style>
+	.lsc {
+		display: flex;
+		flex-direction: column;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-xl);
+		background: var(--bg-elevated);
+		overflow: hidden;
+	}
+	.lsc__head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 8px;
+		padding: 14px 20px;
+		border-bottom: 1px solid var(--border);
+	}
+	.lsc__title {
+		margin: 0;
+		font-family: var(--font-mono);
+		font-size: 13px;
+		font-weight: 500;
+		color: var(--foreground);
+	}
+	.lsc__tag {
+		font-size: 12px;
+		color: var(--muted-foreground);
+	}
+
+	.lsc__rows {
+		list-style: none;
+		margin: 0;
+		padding: 0 20px;
+	}
+	.lsc__row {
+		display: grid;
+		grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.8fr) minmax(0, 1.4fr);
+		grid-template-areas:
+			"name port role"
+			"note note note";
+		column-gap: 16px;
+		row-gap: 3px;
+		padding: 13px 0;
+		border-bottom: 1px solid var(--border);
+	}
+	.lsc__row:last-child {
+		border-bottom: 0;
+	}
+	.lsc__name {
+		grid-area: name;
+		font-family: var(--font-mono);
+		font-size: 13px;
+		color: var(--foreground);
+		background: none;
+		border: 0;
+		padding: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.lsc__name--on {
+		color: var(--primary);
+	}
+	.lsc__port {
+		grid-area: port;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--muted-foreground);
+		white-space: nowrap;
+	}
+	.lsc__role {
+		grid-area: role;
+		font-size: 13px;
+		line-height: 1.45;
+		color: var(--foreground);
+	}
+	.lsc__note {
+		grid-area: note;
+		font-size: 12px;
+		color: var(--muted-foreground);
+	}
+	.lsc__foot {
+		margin-top: auto;
+		padding: 12px 20px;
+		border-top: 1px solid var(--border);
+		font-size: 12px;
+		color: var(--muted-foreground);
+	}
+
+	@media (max-width: 640px) {
+		.lsc__row {
+			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-areas:
+				"name port"
+				"role role"
+				"note note";
+		}
+	}
+</style>

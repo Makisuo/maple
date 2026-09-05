@@ -1,0 +1,112 @@
+---
+/**
+ * LocalCTA — the /local page's closing call, replacing the shared BottomCTA.
+ *
+ * BottomCTA's primary action is "Start free trial", which on a page whose whole
+ * argument is "you never need an account" reads as a bait-and-switch. Here the
+ * primary action is the install command itself, and the hosted service appears
+ * exactly once, as an optional bridge in body text.
+ */
+const INSTALL = "brew install Makisuo/tap/maple";
+const CURL = "curl -fsSL https://maple.dev/cli/install | sh";
+---
+
+<section class="border-t border-border bg-bg">
+	<div class="mx-auto max-w-6xl px-6 py-24 text-center md:py-32">
+		<h2
+			class="mx-auto max-w-[22ch] font-display text-3xl font-medium leading-[1.06] tracking-[-0.02em] text-fg sm:text-4xl md:text-5xl"
+		>
+			Start on localhost. Stay there as long as you like.
+		</h2>
+		<p class="mx-auto mt-5 max-w-[48ch] text-base leading-relaxed text-fg-muted">
+			One install, one command, and your next request shows up as a trace. No trial clock, no account,
+			nothing to cancel later.
+		</p>
+
+		<div class="lcta__install mx-auto mt-9" data-copy={INSTALL}>
+			<span class="text-fg-muted select-none" aria-hidden="true">$</span>
+			<code>{INSTALL}</code>
+			<button class="lcta__copy" type="button" aria-label="Copy install command">Copy</button>
+		</div>
+		<p class="mt-3 text-xs text-fg-muted">
+			or <code class="font-mono">{CURL}</code>
+		</p>
+
+		<div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+			<a
+				href="/docs/local-mode"
+				class="inline-flex h-10 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+			>
+				Read the docs
+			</a>
+			<a
+				href="https://github.com/MapleTechLabs/maple"
+				target="_blank"
+				rel="noopener noreferrer"
+				class="inline-flex h-10 items-center justify-center rounded-lg border border-border px-4 text-sm font-medium text-fg transition-colors hover:bg-bg-elevated"
+			>
+				View on GitHub
+			</a>
+		</div>
+
+		<p class="mx-auto mt-14 max-w-[58ch] text-[13px] leading-relaxed text-fg-muted">
+			Shipping to production later? The same CLI and the same endpoint swap work against
+			<a href="/" class="text-fg underline decoration-border underline-offset-4 transition-colors hover:decoration-fg">Maple Cloud</a>.
+			<code class="font-mono text-fg">maple auth login</code> switches a command over and
+			<code class="font-mono text-fg">--local</code> switches it back. Entirely optional.
+		</p>
+	</div>
+</section>
+
+<script>
+	import { bindCopyButtons } from "../../lib/copy-to-clipboard";
+	bindCopyButtons({ hostSelector: ".lcta__install[data-copy]", buttonSelector: ".lcta__copy" });
+</script>
+
+<style>
+	.lcta__install {
+		display: inline-flex;
+		align-items: center;
+		gap: 12px;
+		max-width: 100%;
+		padding: 6px 6px 6px 14px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-lg);
+		background: var(--bg-elevated);
+		font-family: var(--font-mono);
+		font-size: 13px;
+	}
+	.lcta__install code {
+		font-family: var(--font-mono);
+		background: none;
+		border: 0;
+		padding: 0;
+		color: var(--foreground);
+		overflow-x: auto;
+		white-space: nowrap;
+	}
+	.lcta__copy {
+		flex: none;
+		font-size: 12px;
+		font-family: var(--font-sans);
+		color: var(--muted-foreground);
+		background: none;
+		border: 1px solid transparent;
+		border-radius: calc(var(--radius-lg) - 4px);
+		padding: 5px 10px;
+		cursor: pointer;
+		transition: color 140ms ease, background-color 140ms ease;
+	}
+	.lcta__copy:hover {
+		color: var(--foreground);
+		background: var(--bg);
+	}
+	.lcta__copy.is-done {
+		color: var(--chart-3);
+	}
+	code {
+		background: none;
+		border: 0;
+		padding: 0;
+	}
+</style>
