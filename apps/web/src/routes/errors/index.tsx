@@ -86,9 +86,7 @@ function ErrorsContent() {
 				</DashboardLayout.Filters>
 				<DashboardLayout.Content>
 					<DashboardLayout.Sticky>
-						<DashboardLayout.Header
-							title="Errors"
-						>
+						<DashboardLayout.Header title="Errors">
 							<ReloadControls />
 						</DashboardLayout.Header>
 					</DashboardLayout.Sticky>

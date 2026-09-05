@@ -440,9 +440,7 @@ function DashboardContent({
 			<DashboardLayout.Body>
 				<DashboardLayout.Content>
 					<DashboardLayout.Sticky>
-						<DashboardLayout.Header
-							title="Overview"
-						>
+						<DashboardLayout.Header title="Overview">
 							<div className="flex items-center gap-2">
 								<Select
 									items={environmentItems}

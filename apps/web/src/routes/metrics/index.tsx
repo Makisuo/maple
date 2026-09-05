@@ -57,9 +57,7 @@ function MetricsPage() {
 				<DashboardLayout.Body>
 					<DashboardLayout.Content>
 						<DashboardLayout.Sticky>
-							<DashboardLayout.Header
-								title="Metrics"
-							>
+							<DashboardLayout.Header title="Metrics">
 								<TimeRangeHeaderControls
 									startTime={search.startTime}
 									endTime={search.endTime}

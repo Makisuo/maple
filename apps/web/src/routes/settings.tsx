@@ -79,9 +79,7 @@ function SettingsPage() {
 				<DashboardLayout.Body>
 					<DashboardLayout.Content>
 						<DashboardLayout.Sticky>
-							<DashboardLayout.Header
-								title="Settings"
-							/>
+							<DashboardLayout.Header title="Settings" />
 						</DashboardLayout.Sticky>
 						<DashboardLayout.Scroll>
 							<div className="space-y-3">
