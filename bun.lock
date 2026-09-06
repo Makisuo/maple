@@ -109,6 +109,7 @@
     "apps/electric-sync": {
       "name": "@maple/electric-sync",
       "dependencies": {
+        "@maple-dev/effect-sdk": "workspace:*",
         "@maple/auth": "workspace:*",
         "@maple/domain": "workspace:*",
         "@maple/infra": "workspace:*",
