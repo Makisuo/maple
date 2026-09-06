@@ -36,15 +36,16 @@ beforeEach(() => {
 	vi.setSystemTime(new Date("2026-05-22T12:00:00Z"))
 	storage = new FakeStorage()
 	resetVisitorCacheForTests()
-	;(globalThis as { window?: unknown }).window = {
+	vi.stubGlobal("window", {
 		sessionStorage: storage,
 		localStorage: new FakeStorage(),
-	}
+	})
+	vi.stubGlobal("document", { cookie: "" })
 })
 
 afterEach(() => {
 	vi.useRealTimers()
-	delete (globalThis as { window?: unknown }).window
+	vi.unstubAllGlobals()
 })
 
 describe("getSession", () => {
@@ -111,6 +112,13 @@ describe("getSession", () => {
 })
 
 describe("getSessionId", () => {
+	it("does not mint a browser session in React Native", () => {
+		vi.stubGlobal("document", undefined)
+		vi.stubGlobal("crypto", undefined)
+		expect(getSessionId()).toBeUndefined()
+		expect(storage.getItem(STORAGE_KEY)).toBeNull()
+	})
+
 	it("returns undefined outside a browser (SSR)", () => {
 		delete (globalThis as { window?: unknown }).window
 		expect(getSessionId()).toBeUndefined()

@@ -269,21 +269,28 @@ describe("MapleFlush.make (client)", () => {
 
 	it("stamps session.id from the self-managed session when no sink is published", async () => {
 		const { calls, restore: rf } = setupFetch()
-		// Standalone: no @maple-dev/browser sink, just a browser-like window with
+		// Standalone: no @maple-dev/browser sink, just a browser DOM with
 		// sessionStorage. The bundled @maple/browser-session core must mint a
 		// session and stamp its id on every span.
 		const store = new Map<string, string>()
-		vi.stubGlobal("window", {
-			sessionStorage: {
-				getItem: (k: string) => store.get(k) ?? null,
-				setItem: (k: string, v: string) => void store.set(k, v),
-			},
-		})
+		vi.stubGlobal(
+			"window",
+			Object.assign(new EventTarget(), {
+				sessionStorage: {
+					getItem: (k: string) => store.get(k) ?? null,
+					setItem: (k: string, v: string) => void store.set(k, v),
+				},
+			}),
+		)
+		vi.stubGlobal(
+			"document",
+			Object.assign(new EventTarget(), { cookie: "", visibilityState: "visible" }),
+		)
 		restore = () => {
 			rf()
 			vi.unstubAllGlobals()
 		}
-		const telemetry = make(baseConfig)
+		const telemetry = make({ ...baseConfig, replay: { enabled: false } })
 
 		await Effect.runPromise(
 			Effect.succeed(undefined).pipe(Effect.withSpan("op-a"), Effect.provide(telemetry.layer)),
@@ -309,6 +316,7 @@ describe("MapleFlush.make (client)", () => {
 			const sessionAttr = span.attributes.find((a) => a.key === "session.id")
 			expect(sessionAttr?.value.stringValue).toBe(stored.id)
 		}
+		await telemetry.dispose()
 	})
 
 	it("flushes on pagehide and dispose() removes the unload listeners", async () => {
