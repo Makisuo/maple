@@ -2,7 +2,7 @@ import { describe, it } from "@effect/vitest"
 import { getActiveSink } from "@maple/browser-session"
 import { Effect } from "effect"
 import { afterEach, beforeEach, expect, vi } from "vitest"
-import { make } from "./flushable.js"
+import { make as makeTelemetry } from "./flushable.js"
 import { resetStandaloneSessionForTests } from "./standalone-session.js"
 import { identify } from "./user.js"
 
@@ -42,15 +42,19 @@ const setupFetch = () => {
 	return { metaPosts, restore: () => void (globalThis.fetch = original) }
 }
 
-const stubWindow = () => {
+const stubBrowser = () => {
 	const store = new Map<string, string>()
-	vi.stubGlobal("window", {
-		sessionStorage: {
-			getItem: (k: string) => store.get(k) ?? null,
-			setItem: (k: string, v: string) => void store.set(k, v),
-		},
-		location: { href: "https://app.example.com/dashboard" },
-	})
+	vi.stubGlobal(
+		"window",
+		Object.assign(new EventTarget(), {
+			sessionStorage: {
+				getItem: (k: string) => store.get(k) ?? null,
+				setItem: (k: string, v: string) => void store.set(k, v),
+			},
+			location: { href: "https://app.example.com/dashboard" },
+		}),
+	)
+	vi.stubGlobal("document", Object.assign(new EventTarget(), { cookie: "", visibilityState: "visible" }))
 	return store
 }
 
@@ -62,16 +66,25 @@ const baseConfig = {
 	serviceVersion: "63c0c0321644dce742e92dfd09fb96e907649bc4",
 	autoFlushInterval: false as const,
 	flushOnUnload: false as const,
+	replay: { enabled: false },
 }
 
 describe("standalone session emission (client)", () => {
 	let restore: () => void
+	const clients: Array<ReturnType<typeof makeTelemetry>> = []
+	const make = (config: Parameters<typeof makeTelemetry>[0]) => {
+		const client = makeTelemetry(config)
+		clients.push(client)
+		return client
+	}
 
 	beforeEach(() => {
 		resetStandaloneSessionForTests()
 	})
 
-	afterEach(() => {
+	afterEach(async () => {
+		await Promise.all(clients.splice(0).map((client) => client.dispose()))
+		resetStandaloneSessionForTests()
 		identify(undefined)
 		restore?.()
 		vi.unstubAllGlobals()
@@ -80,7 +93,7 @@ describe("standalone session emission (client)", () => {
 	it("posts an active session row on make() with the stored session id", async () => {
 		const { metaPosts, restore: r } = setupFetch()
 		restore = r
-		const store = stubWindow()
+		const store = stubBrowser()
 
 		make(baseConfig)
 
@@ -107,7 +120,7 @@ describe("standalone session emission (client)", () => {
 	it("normalizes cleared identity to an anonymous session row", async () => {
 		const { metaPosts, restore: r } = setupFetch()
 		restore = r
-		stubWindow()
+		stubBrowser()
 		identify("user_to_clear")
 		identify(undefined)
 
@@ -120,7 +133,7 @@ describe("standalone session emission (client)", () => {
 	it("keeps persisted click/error totals and adds live capture deltas", async () => {
 		const { metaPosts, restore: r } = setupFetch()
 		restore = r
-		const store = stubWindow()
+		const store = stubBrowser()
 		store.set(
 			"maple.session",
 			JSON.stringify({
@@ -160,7 +173,7 @@ describe("standalone session emission (client)", () => {
 	it("keeps the session alive while a second client runtime still holds it", async () => {
 		const { metaPosts, restore: r } = setupFetch()
 		restore = r
-		stubWindow()
+		stubBrowser()
 
 		const first = make(baseConfig)
 		const second = make(baseConfig)
@@ -180,7 +193,7 @@ describe("standalone session emission (client)", () => {
 	it("treats a repeated dispose of the same runtime as a no-op", async () => {
 		const { metaPosts, restore: r } = setupFetch()
 		restore = r
-		stubWindow()
+		stubBrowser()
 
 		const telemetry = make(baseConfig)
 		await new Promise((resolve) => setTimeout(resolve, 0))
@@ -199,7 +212,7 @@ describe("standalone session emission (client)", () => {
 			rf()
 			delete g.__MAPLE_BROWSER_SESSION__
 		}
-		stubWindow()
+		stubBrowser()
 
 		make(baseConfig)
 
@@ -213,7 +226,7 @@ describe("standalone session emission (client)", () => {
 
 		make(baseConfig) // node: no window
 
-		stubWindow()
+		stubBrowser()
 		make({ ...baseConfig, ingestKey: undefined }) // window but no key
 
 		await new Promise((resolve) => setTimeout(resolve, 0))
@@ -223,7 +236,7 @@ describe("standalone session emission (client)", () => {
 	it("attaches observed trace ids to the ended row and rotates sessions", async () => {
 		const { metaPosts, restore: r } = setupFetch()
 		restore = r
-		const store = stubWindow()
+		const store = stubBrowser()
 
 		const telemetry = make(baseConfig)
 		await Effect.runPromise(

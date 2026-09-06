@@ -71,7 +71,9 @@ export const startClientSession = (config: ClientSessionConfig): ClientSessionHa
 	configurePrivacy(config.privacy)
 	if (!hasConsent()) clearPendingEvents()
 	const ingestKey = config.ingestKey
-	if (typeof window === "undefined" || !ingestKey || readSessionSink()) return noOpHandle
+	// React Native exposes window without a browser DOM or Web Crypto.
+	if (typeof window === "undefined" || typeof document === "undefined" || !ingestKey || readSessionSink())
+		return noOpHandle
 
 	const engineConfig = {
 		endpoint: config.endpoint.replace(/\/$/, ""),
