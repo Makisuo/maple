@@ -29,6 +29,10 @@
 		".": {
 			"types": "./dist/index.d.mts",
 			"import": "./dist/index.mjs"
+		},
+		"./telemetry": {
+			"types": "./dist/telemetry.d.mts",
+			"import": "./dist/telemetry.mjs"
 		}
 	},
 	"publishConfig": {
@@ -39,6 +43,9 @@
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
 		"prepublishOnly": "bun run build"
+	},
+	"dependencies": {
+		"@maple-dev/effect-sdk": "workspace:*"
 	},
 	"devDependencies": {
 		"@effect/language-service": "catalog:effect",

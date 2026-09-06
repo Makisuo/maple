@@ -27,7 +27,7 @@
 		"lint:slack-agent": "oxlint -c .oxlintrc.json --quiet apps/slack-agent",
 		"lint:audit": "oxlint -c .oxlintrc.effect.json alchemy.run.ts scripts apps packages lib examples",
 		"lint:fix": "oxlint -c .oxlintrc.effect.json --fix alchemy.run.ts scripts apps packages lib examples",
-		"alchemy:build-deps": "turbo build --filter=@maple-dev/effect-sdk --filter=@maple-dev/browser --filter=@maple-dev/clickhouse-builder",
+		"alchemy:build-deps": "turbo build --filter=@maple-dev/effect-sdk --filter=@maple-dev/alchemy --filter=@maple-dev/browser --filter=@maple-dev/clickhouse-builder",
 		"alchemy:deploy": "bun run alchemy:build-deps && alchemy deploy --yes",
 		"alchemy:deploy:prd": "bun run alchemy:build-deps && alchemy deploy --yes --adopt --stage prd",
 		"alchemy:deploy:stg": "bun run alchemy:build-deps && alchemy deploy --yes --adopt --stage stg",

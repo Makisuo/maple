@@ -90,13 +90,33 @@ The same `MAPLE_ENDPOINT` / `MAPLE_INGEST_KEY` / `MAPLE_ENVIRONMENT` env vars ap
 
 Server spans follow the OTEL HTTP semantic conventions for status: a 5xx response marks the span `Error` (with an `HttpServerErrorResponse` exception event) even when the handler returned it as a plain response — which is what `HttpRouter.toWebHandler` and alchemy's Worker bridge do with a defect — while 4xx responses stay `Ok`.
 
+### alchemy Workers
+
+Alchemy's Worker bridge owns the request lifecycle: it traces every fetch with Effect's HTTP tracer, opens a scope per event and closes it after the response through `ctx.waitUntil`. `telemetry.requestLayer` plugs into that — the same exporters plus a flush when the scope closes — so there is no `waitUntil` to write:
+
+```typescript
+import * as Telemetry from "alchemy/Telemetry"
+
+export default class Api extends Cloudflare.Worker<Api>()(
+	"api",
+	props,
+	Effect.gen(function* () {
+		// ...
+		return { fetch: HttpRouter.toHttpEffect(AppLayer) }
+	}).pipe(Effect.provide(Telemetry.layer(telemetry.requestLayer))),
+) {}
+```
+
+`@maple-dev/alchemy/telemetry` wraps this as `Maple.Telemetry({ serviceName, ingestKey })`, which also binds the ingest key onto the Worker at deploy time.
+
 ### Native tracing (experimental)
 
 `tracer: "native"` hands span export to Cloudflare instead of the OTLP buffer. Every Effect span is mirrored onto `tracing.startActiveSpan` from `cloudflare:workers`, so it lands in the same trace as Cloudflare's own fetch / KV / R2 / D1 spans, and the whole trace reaches Maple through the Worker's [ObservabilityDestination](https://developers.cloudflare.com/workers/observability/exporting-opentelemetry-data/). Nothing is buffered in the isolate, no ingest key is read, and it works from Durable Object and Workflow isolates, where a `ctx.waitUntil` flush is unreliable.
 
 ```typescript
 const telemetry = MapleCloudflareSDK.make({ tracer: "native" })
-// Handler wiring is unchanged; `telemetry.flush(env)` resolves immediately in this mode.
+// Handler wiring is unchanged: `telemetry.flush(env)` resolves immediately in this mode,
+// and `telemetry.requestLayer` is the same layer with nothing to flush.
 ```
 
 Requirements: `compatibility_date >= 2026-07-28` (for `startActiveSpan`), the `nodejs_compat` compatibility flag (for `AsyncLocalStorage.snapshot`, which is how a span opened after a fiber yields still nests under its parent), `observability.traces.enabled = true`, and an ObservabilityDestination pointed at Maple's OTLP endpoint. When either runtime API is missing the layer logs one notice and keeps spans Effect-local — the Worker keeps running, nothing is exported. The layer builds asynchronously (it imports both modules on first build); `HttpRouter.toWebHandler` handles that.

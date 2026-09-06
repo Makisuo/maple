@@ -21,6 +21,14 @@
 //     },
 //   }
 //
+// Runtimes that own a per-event scope — alchemy's Worker bridge, or anything
+// built on `HttpEffect.toHandled` — use `requestLayer` instead of calling
+// `flush` themselves: it is the same exporters plus a flush when the scope
+// closes, and it reads the env from alchemy's `WorkerEnvironment` service:
+//
+//   // alchemy, on the Worker's init Effect:
+//   Effect.provide(Telemetry.layer(telemetry.requestLayer))
+//
 // Errors during flush are swallowed and logged to `console.error`. After a
 // failure the exporter sleeps for 60 seconds (per signal) before retrying so
 // a broken collector doesn't get hammered.
@@ -29,7 +37,7 @@
 // flushable presets via `../shared/flush-core.ts`; this module owns only the
 // Cloudflare-specific lazy `env` resolution.
 
-import { Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 import {
 	buildResolved,
 	fetchTransport,
@@ -117,6 +125,16 @@ export interface Config {
 	readonly tracer?: "otlp" | "native" | undefined
 }
 
+/**
+ * The Worker's `env`, under alchemy's exact service key: Effect resolves a
+ * service by that string, so the value alchemy's Worker bridge provides to
+ * every event satisfies this tag without either side importing the other. A
+ * hand-written entry provides it with `Layer.succeed(WorkerEnvironment, env)`.
+ */
+export class WorkerEnvironment extends Context.Service<WorkerEnvironment, Record<string, unknown>>()(
+	"Cloudflare.Workers.WorkerEnvironment",
+) {}
+
 export interface Telemetry {
 	/**
 	 * Effect Layer that installs the OTLP tracer + Effect logger. Stable across
@@ -126,6 +144,15 @@ export interface Telemetry {
 	 * Tracer reference must be in the same runtime as your handler code).
 	 */
 	readonly layer: Layer.Layer<never>
+	/**
+	 * `layer` plus a flush when the scope it is built into closes — for
+	 * runtimes that own a per-event scope and close it after the response
+	 * (alchemy's Worker bridge registers the close with `ctx.waitUntil`). Reads
+	 * the env from {@link WorkerEnvironment}. Where the tracer ends the server
+	 * span on a deferred task, `flush` yields one macrotask first, so that span
+	 * is in the buffer before the drain.
+	 */
+	readonly requestLayer: Layer.Layer<never, never, WorkerEnvironment>
 	/**
 	 * Drain in-isolate buffers to the OTLP collector. Call inside
 	 * `ctx.waitUntil(telemetry.flush(env))` after sending the response.
@@ -163,10 +190,16 @@ export const make = (config: Config = {}): Telemetry => {
 		anticipatedErrorIdentifiers.length > 0 ? new Set(anticipatedErrorIdentifiers) : undefined
 
 	if (config.tracer === "native") {
+		const nativeLayer = makeNativeTracerLayer({
+			dropSpan,
+			anticipatedErrorIdentifiers: anticipatedIdentifiers,
+		})
 		return {
-			layer: makeNativeTracerLayer({ dropSpan, anticipatedErrorIdentifiers: anticipatedIdentifiers }),
-			// Cloudflare exports the mirrored spans itself; `flush` stays so the
-			// handler wiring is the same in both modes.
+			layer: nativeLayer,
+			// Cloudflare exports the mirrored spans itself, so there is nothing to
+			// flush when the event's scope closes; `flush` and `requestLayer` stay
+			// so the handler wiring is the same in both modes.
+			requestLayer: nativeLayer,
 			flush: () => Promise.resolve(),
 		}
 	}
@@ -220,7 +253,17 @@ export const make = (config: Config = {}): Telemetry => {
 		}),
 	)
 
-	return { layer, flush }
+	const requestLayer = Layer.mergeAll(
+		layer,
+		Layer.effectDiscard(
+			Effect.gen(function* () {
+				const env = yield* WorkerEnvironment
+				yield* Effect.addFinalizer(() => Effect.promise(() => flush(env)))
+			}),
+		),
+	)
+
+	return { layer, requestLayer, flush }
 }
 
 // Convenience namespace export so call sites read as
