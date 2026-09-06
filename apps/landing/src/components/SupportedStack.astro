@@ -15,6 +15,7 @@
  * components the docs SDK picker uses. Every chip carries a mark: a naked text
  * chip in a row of marked ones reads as "we forgot", not "no logo exists".
  */
+import type { AstroComponentFactory } from "astro/runtime/server/index.js";
 import * as m from "../paraglide/messages.js";
 import { BRAND_MARKS, markColor, type BrandMarkId } from "../lib/brand-marks";
 import EffectLogo from "./icons/EffectLogo.astro";
@@ -29,7 +30,7 @@ import KotlinLogo from "./icons/KotlinLogo.astro";
 import LaravelLogo from "./icons/LaravelLogo.astro";
 import HazelLogo from "./icons/HazelLogo.astro";
 
-type Chip = { name: string; mark?: BrandMarkId; Icon?: (props: { class?: string }) => unknown };
+type Chip = { name: string; mark?: BrandMarkId; Icon?: AstroComponentFactory };
 
 const mark = (id: BrandMarkId, name: string = BRAND_MARKS[id].name): Chip => ({ name, mark: id });
 
