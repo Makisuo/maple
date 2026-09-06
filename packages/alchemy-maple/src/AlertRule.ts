@@ -1,11 +1,20 @@
 import { Schema } from "effect"
 import * as Effect from "effect/Effect"
 import { deepEqual, isResolved } from "alchemy/Diff"
+import { Unowned } from "alchemy/AdoptPolicy"
 import * as Provider from "alchemy/Provider"
 import { Resource } from "alchemy/Resource"
 import { listAll, MapleApi } from "./MapleApi"
 import { MapleErrorTags } from "./errors"
 import type { Providers } from "./Providers"
+import {
+	canAdoptRule,
+	ownershipError,
+	ownershipTags,
+	ownsRule,
+	ruleOwnerTags,
+	ruleTags,
+} from "./AlertRuleOwnership"
 
 export type AlertSignalType =
 	| "error_rate"
@@ -39,6 +48,7 @@ export interface AlertRuleProps {
 	enabled?: boolean
 	service_names?: string[]
 	exclude_service_names?: string[]
+	/** Up to 19 user tags; `alchemy:` tags are reserved for stack ownership. */
 	tags?: string[]
 	group_by?: string[] | null
 	threshold_upper?: number | null
@@ -62,6 +72,8 @@ export type AlertRule = Resource<
 		ruleId: string
 		name: string
 		enabled: boolean
+		/** Observed declared fields and ownership tags, used by Alchemy sync. */
+		configuration?: Record<string, unknown>
 	},
 	never,
 	Providers
@@ -89,11 +101,15 @@ export type AlertRule = Resource<
  */
 export const AlertRule = Resource<AlertRule>("Maple.AlertRule")
 
-const WireRule = Schema.Struct({
-	id: Schema.String,
-	name: Schema.String,
-	enabled: Schema.Boolean,
-})
+const WireRule = Schema.StructWithRest(
+	Schema.Struct({
+		id: Schema.String,
+		name: Schema.String,
+		enabled: Schema.Boolean,
+		tags: Schema.Array(Schema.String),
+	}),
+	[Schema.Record(Schema.String, Schema.Unknown)],
+)
 const decodeWireRule = Schema.decodeUnknownEffect(WireRule)
 
 /** The create/update body: exactly the props the user declared. */
@@ -106,15 +122,21 @@ const desiredBody = (props: AlertRuleProps): Record<string, unknown> => {
 }
 
 /** Wire drift compare: declared fields vs the observed wire rule. */
-const drifted = (props: AlertRuleProps, observed: Record<string, unknown>): boolean => {
-	const body = desiredBody(props)
+const drifted = (body: Record<string, unknown>, observed: Record<string, unknown>): boolean => {
 	return Object.keys(body).some((key) => !deepEqual(body[key], observed[key], { stripNullish: true }))
 }
 
-const toAttributes = (observed: Schema.Schema.Type<typeof WireRule>) => ({
+const toAttributes = (observed: Schema.Schema.Type<typeof WireRule>, props?: AlertRuleProps) => ({
 	ruleId: observed.id,
 	name: observed.name,
 	enabled: observed.enabled,
+	configuration: {
+		...Object.fromEntries(
+			Object.keys(props ? desiredBody(props) : {}).map((key) => [key, observed[key]]),
+		),
+		// Observe ownership even when the user leaves ordinary tags unmanaged.
+		tags: props?.tags === undefined ? ownershipTags(observed.tags) : observed.tags,
+	},
 })
 
 export const AlertRuleProvider = () =>
@@ -123,7 +145,7 @@ export const AlertRuleProvider = () =>
 		Effect.gen(function* () {
 			const api = yield* MapleApi
 
-			/** Rule names are org-unique — adopt an existing rule with the same name. */
+			/** A name locates a candidate; its ownership tags decide whether it is ours. */
 			const findByName = (name: string) =>
 				Effect.gen(function* () {
 					const items = yield* listAll(api, "/v2/alerts/rules")
@@ -138,15 +160,17 @@ export const AlertRuleProvider = () =>
 
 			return {
 				stables: ["ruleId" as const],
-				diff: Effect.fn(function* ({ news, olds }) {
+				diff: Effect.fn(function* ({ news, olds, output }) {
+					// Add snapshots and ownership to resources from pre-tag releases.
+					if (output && output.configuration === undefined) return { action: "update" } as const
 					if (!isResolved(news)) return undefined
 					if (olds !== undefined && !deepEqual(olds, news, { stripNullish: true })) {
 						return { action: "update", stables: ["ruleId"] } as const
 					}
 					return undefined
 				}),
-				reconcile: Effect.fn(function* ({ news, output }) {
-					// The unique name prevents duplicates after partial state persistence.
+				reconcile: Effect.fn(function* ({ news, output, fqn }) {
+					const owners = yield* ruleOwnerTags(fqn)
 					let observedRaw: unknown
 					if (output?.ruleId) {
 						observedRaw = yield* api
@@ -164,21 +188,52 @@ export const AlertRuleProvider = () =>
 						}
 					}
 
-					if (observedRaw === undefined) {
-						observedRaw = yield* api.post("/v2/alerts/rules", desiredBody(news))
-					} else if (drifted(news, observedRaw as Record<string, unknown>)) {
-						const current = yield* decodeWireRule(observedRaw)
-						observedRaw = yield* api.patch(`/v2/alerts/rules/${current.id}`, desiredBody(news))
+					const current = observedRaw === undefined ? undefined : yield* decodeWireRule(observedRaw)
+					// Plan can skip read for unresolved upstream inputs; enforce ownership
+					// here too, before any mutation or name-based recovery.
+					if (current && !ownsRule(current.tags, owners, output?.ruleId === current.id)) {
+						if (!(yield* canAdoptRule(fqn))) return yield* ownershipError(fqn, current.name)
+					}
+					const body = {
+						...desiredBody(news),
+						tags: yield* ruleTags(news.tags, current?.tags ?? [], owners[0]),
+					}
+					if (current === undefined) {
+						observedRaw = yield* api.post("/v2/alerts/rules", body)
+					} else if (drifted(body, current)) {
+						observedRaw = yield* api.patch(`/v2/alerts/rules/${current.id}`, body)
 					}
 
-					return toAttributes(yield* decodeWireRule(observedRaw))
+					return toAttributes(yield* decodeWireRule(observedRaw), news)
 				}),
-				delete: Effect.fn(function* ({ output }) {
+				delete: Effect.fn(function* ({ output, fqn, force }) {
+					// A previous owner must not delete a rule another stack has adopted.
+					if (!force) {
+						const fetched = yield* api
+							.get(`/v2/alerts/rules/${output.ruleId}`)
+							.pipe(
+								Effect.catchTag(MapleErrorTags.alertRuleNotFound, () =>
+									Effect.succeed(undefined),
+								),
+							)
+						if (fetched === undefined) return
+						const current = yield* decodeWireRule(fetched)
+						if (!ownsRule(current.tags, yield* ruleOwnerTags(fqn), true)) {
+							return yield* ownershipError(fqn, current.name)
+						}
+					}
 					yield* api
 						.delete(`/v2/alerts/rules/${output.ruleId}`)
 						.pipe(Effect.catchTag(MapleErrorTags.alertRuleNotFound, () => Effect.void))
 				}),
-				read: Effect.fn(function* ({ olds, output }) {
+				read: Effect.fn(function* ({ olds, output, fqn }) {
+					const owners = yield* ruleOwnerTags(fqn)
+					const attributes = (observed: Schema.Schema.Type<typeof WireRule>) => {
+						const result = toAttributes(observed, olds)
+						return ownsRule(observed.tags, owners, output?.ruleId === observed.id)
+							? result
+							: Unowned(result)
+					}
 					if (output?.ruleId) {
 						const fetched = yield* api
 							.get(`/v2/alerts/rules/${output.ruleId}`)
@@ -187,18 +242,18 @@ export const AlertRuleProvider = () =>
 									Effect.succeed(undefined),
 								),
 							)
-						if (fetched !== undefined) return toAttributes(yield* decodeWireRule(fetched))
+						if (fetched !== undefined) return attributes(yield* decodeWireRule(fetched))
 					}
 					if (olds?.name !== undefined) {
 						const adopted = yield* findByName(olds.name)
-						if (adopted !== undefined) return toAttributes(adopted)
+						if (adopted !== undefined) return attributes(adopted)
 					}
 					return undefined
 				}),
 				list: Effect.fn(function* () {
 					const items = yield* listAll(api, "/v2/alerts/rules")
 					return yield* Effect.forEach(items, (item) =>
-						Effect.map(decodeWireRule(item), toAttributes),
+						Effect.map(decodeWireRule(item), (observed) => toAttributes(observed)),
 					)
 				}),
 			}

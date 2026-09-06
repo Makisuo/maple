@@ -10,6 +10,7 @@
  * than an absent section.
  */
 import type { APIRoute } from "astro"
+import { competitors } from "../lib/competitors"
 import { features } from "../lib/features"
 import { useCases } from "../lib/use-cases"
 import { absolute, plainText } from "../lib/page-markdown"
@@ -76,6 +77,14 @@ export const GET: APIRoute = ({ site }) => {
 		`Worked debugging stories, step by step. ${CONVENTION("use-case")}`,
 		"",
 		...useCases.map((useCase) => `- [${useCase.navLabel()}](${url(`/use-cases/${useCase.slug}.md`)})`),
+		"",
+
+		"## Comparisons",
+		"",
+		`Maple against Datadog, Grafana Cloud, New Relic and Dash0. Each page tabulates the differences with who has the edge on each row, prices one reference month on both at list price, and cites the vendor pages it was checked against, with dates. ${CONVENTION("comparison")}`,
+		"",
+		...both("Comparisons index", "/compare"),
+		...competitors.map((competitor) => `- [${competitor.navLabel()}](${url(`/compare/${competitor.slug}.md`)})`),
 		"",
 
 		"## Guides",

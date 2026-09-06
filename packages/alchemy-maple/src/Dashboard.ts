@@ -35,6 +35,8 @@ export type Dashboard = Resource<
 		/** The `dash_…` public ID. */
 		dashboardId: string
 		name: string
+		/** Observed declared fields, used by Alchemy sync to detect drift. */
+		configuration?: Record<string, unknown>
 	},
 	never,
 	Providers
@@ -66,7 +68,7 @@ const WireDashboard = Schema.Struct({
 	// would make `alchemy deploy` fail to decode every dashboard served by a
 	// deployment that predates sections. `drifted` reads it as `[]` when absent,
 	// which is what such an API means anyway.
-	sections: Schema.optional(Schema.Array(Schema.Record(Schema.String, Schema.Unknown))),
+	sections: Schema.optionalKey(Schema.Array(Schema.Record(Schema.String, Schema.Unknown))),
 	variables: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
 })
 const decodeWireDashboard = Schema.decodeUnknownEffect(WireDashboard)
@@ -94,10 +96,19 @@ const drifted = (props: DashboardProps, observed: Schema.Schema.Type<typeof Wire
 	return Object.keys(body).some((key) => !deepEqual(body[key], seen[key], { stripNullish: true }))
 }
 
-const toAttributes = (observed: Schema.Schema.Type<typeof WireDashboard>) => ({
-	dashboardId: observed.id,
-	name: observed.name,
-})
+const toAttributes = (
+	observed: Schema.Schema.Type<typeof WireDashboard>,
+	props: DashboardProps = { name: observed.name },
+) => {
+	const seen = { ...observed, sections: observed.sections ?? [] }
+	return {
+		dashboardId: observed.id,
+		name: observed.name,
+		configuration: Object.fromEntries(
+			Object.keys(desiredBody(props)).map((key) => [key, seen[key as keyof typeof seen]]),
+		),
+	}
+}
 
 export const DashboardProvider = () =>
 	Provider.effect(
@@ -106,7 +117,9 @@ export const DashboardProvider = () =>
 			const api = yield* MapleApi
 			return {
 				stables: ["dashboardId" as const],
-				diff: Effect.fn(function* ({ news, olds }) {
+				diff: Effect.fn(function* ({ news, olds, output }) {
+					// Populate snapshots for resources deployed by older provider versions.
+					if (output && output.configuration === undefined) return { action: "update" } as const
 					if (!isResolved(news)) return undefined
 					if (olds !== undefined && !deepEqual(olds, news, { stripNullish: true })) {
 						return { action: "update", stables: ["dashboardId"] } as const
@@ -134,14 +147,14 @@ export const DashboardProvider = () =>
 						observed = yield* decodeWireDashboard(updated)
 					}
 
-					return toAttributes(observed)
+					return toAttributes(observed, news)
 				}),
 				delete: Effect.fn(function* ({ output }) {
 					yield* api
 						.delete(`/v2/dashboards/${output.dashboardId}`)
 						.pipe(Effect.catchTag(MapleErrorTags.dashboardNotFound, () => Effect.void))
 				}),
-				read: Effect.fn(function* ({ output }) {
+				read: Effect.fn(function* ({ output, olds }) {
 					if (!output?.dashboardId) return undefined
 					const fetched = yield* api
 						.get(`/v2/dashboards/${output.dashboardId}`)
@@ -151,12 +164,12 @@ export const DashboardProvider = () =>
 							),
 						)
 					if (fetched === undefined) return undefined
-					return toAttributes(yield* decodeWireDashboard(fetched))
+					return toAttributes(yield* decodeWireDashboard(fetched), olds)
 				}),
 				list: Effect.fn(function* () {
 					const items = yield* listAll(api, "/v2/dashboards")
 					return yield* Effect.forEach(items, (item) =>
-						Effect.map(decodeWireDashboard(item), toAttributes),
+						Effect.map(decodeWireDashboard(item), (observed) => toAttributes(observed)),
 					)
 				}),
 			}

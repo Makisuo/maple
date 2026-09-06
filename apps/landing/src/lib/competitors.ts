@@ -1,707 +1,355 @@
-interface CompetitorFeature {
-	maple: string | boolean
-	competitor: string | boolean
-}
+/**
+ * The comparison registry. One entry per `/compare/<slug>` route, in all
+ * three locales, rendered by `components/compare/ComparePage.astro`.
+ *
+ * Same rules as `page-registry.ts`: copy is stored as uncalled Paraglide
+ * thunks and resolved by the template at render time, and this module must
+ * not import `.astro` or `astro:i18n`.
+ *
+ * The shape is difference-first. A comparison is not a feature matrix with
+ * two columns of checkmarks — those pages had eleven ✓/✓ rows out of sixteen
+ * and buried the five that mattered. Each entry instead carries:
+ *
+ * - `differences`: rows where the two tools actually diverge, each cell a
+ *   sentence and each row tagged with who has the `edge`, so the honest
+ *   "where the other tool is ahead" group is data, not a separate section
+ *   someone forgets to write;
+ * - `parity`: everything both do, collapsed to one chip line;
+ * - `sources`: the vendor pages the competitor cells were checked against,
+ *   with the month they were checked. Rows reference them by index.
+ *
+ * Every vendor-specific literal (prices, product names, URLs) is literal and
+ * untranslated; only prose is a thunk.
+ */
+import * as m from "../paraglide/messages.js"
+import type { BrandMarkId } from "./brand-marks"
+import type { Vendor } from "./vendor-pricing"
 
-interface PainPoint {
-	problem: string
-	solution: string
-}
+type Locale = "en" | "ja" | "ko"
 
-interface MigrationStep {
-	title: string
-	description: string
-}
+/** A Paraglide message, uncalled. */
+type Msg = () => string
 
-interface FAQ {
-	question: string
-	answer: string
-}
+export type Edge = "maple" | "competitor" | "even"
 
-interface Stat {
-	value: string
+export interface Source {
 	label: string
-	detail: string
+	url: string
+	/** `YYYY-MM` — the month the claim was last checked against the page. */
+	checked: string
+}
+
+export interface DifferenceRow {
+	/** Stable anchor id: `#row-<id>`. Shared vocabulary across vendors. */
+	id: string
+	topic: Msg
+	maple: Msg
+	competitor: Msg
+	edge: Edge
+	/** Index into `Competitor.sources`. */
+	source?: number
+	/** A roadmap entry that closes this gap, when one exists. */
+	roadmap?: string
+}
+
+export interface MigrationStep {
+	title: Msg
+	body: Msg
+}
+
+export interface Faq {
+	question: Msg
+	answer: Msg
 }
 
 export interface Competitor {
-	name: string
 	slug: string
-	tagline: string
-	description: string
-	features: Record<string, CompetitorFeature>
-	painPoints: PainPoint[]
-	migrationSteps: MigrationStep[]
-	faqs: FAQ[]
-	stats: Stat[]
+	/** Literal vendor name; product names are never translated. */
+	name: string
+	/** Which price model `lib/vendor-pricing.ts` runs for the receipts. */
+	vendor: Vendor
+	/** The vendor's mark in `lib/brand-marks.ts`, for the hero pairing and hub cards. */
+	mark: BrandMarkId
+	/** The vendor's site, shown under the mark. Literal. */
+	site: string
+	navLabel: Msg
+	navDesc: Msg
+	seoTitle: Msg
+	seoDescription: Msg
+	heroTitle: Msg
+	heroLede: Msg
+	differences: DifferenceRow[]
+	parity: Msg[]
+	migration: MigrationStep[]
+	/**
+	 * The one code block on the page: the Collector exporter change, as the
+	 * operator would type it. Literal YAML.
+	 */
+	migrationDiff: string
+	faqs: Faq[]
+	sources: Source[]
+	related: string[]
+	locales: readonly Locale[]
 }
 
-export const competitors: Record<string, Competitor> = {
-	datadog: {
-		name: "Datadog",
+const CHECKED = "2026-08"
+
+const MAPLE_EXPORTER = `  otlphttp/maple:
+    endpoint: https://ingest.maple.dev
+    headers:
+      x-maple-ingest-key: \${env:MAPLE_INGEST_KEY}`
+
+const collectorDiff = (existingKey: string, existingBlock: string) => `exporters:
+${existingBlock}
+${MAPLE_EXPORTER}
+
+service:
+  pipelines:
+    traces:
+      exporters: [${existingKey}, otlphttp/maple]
+    logs:
+      exporters: [${existingKey}, otlphttp/maple]
+    metrics:
+      exporters: [${existingKey}, otlphttp/maple]`
+
+const CORE_PARITY: Msg[] = [
+	m.cmp_parity_tracing,
+	m.cmp_parity_logs,
+	m.cmp_parity_metrics,
+	m.cmp_parity_alerting,
+	m.cmp_parity_errors,
+	m.cmp_parity_k8s,
+	m.cmp_parity_api,
+	m.cmp_parity_mcp,
+]
+
+export const competitors: Competitor[] = [
+	{
 		slug: "datadog",
-		tagline: "Open-source observability without the surprise bills",
-		description:
-			"Maple covers the core observability workflow — distributed tracing, log management, and metrics dashboards — built on OpenTelemetry with a flat per-GB rate and source code you can read.",
-		features: {
-			"Pricing model": {
-				maple: "Usage-based, transparent",
-				competitor: "Complex per-host + per-GB",
-			},
-			"Open source": {
-				maple: "FSL-1.1 → Apache 2.0",
-				competitor: false,
-			},
-			"OpenTelemetry native": {
-				maple: true,
-				competitor: "OTLP ingest via Datadog Agent",
-			},
-			"Distributed tracing": {
-				maple: true,
-				competitor: true,
-			},
-			"Log management": {
-				maple: true,
-				competitor: true,
-			},
-			"Metrics & dashboards": {
-				maple: true,
-				competitor: true,
-			},
-			"AI / MCP integration": {
-				maple: true,
-				competitor: true,
-			},
-			"Self-hosting available": {
-				maple: true,
-				competitor: false,
-			},
-			"No vendor lock-in": {
-				maple: true,
-				competitor: "Proprietary agent by default",
-			},
-			"Custom dashboards": {
-				maple: true,
-				competitor: true,
-			},
-			Alerting: {
-				maple: true,
-				competitor: true,
-			},
-			"Setup time": {
-				maple: "Minutes",
-				competitor: "Agent rollout per host",
-			},
-			"Proprietary agents required": {
-				maple: false,
-				competitor: true,
-			},
-			"Data retention control": {
-				maple: "Configurable",
-				competitor: "Fixed tiers per product",
-			},
-			"Team seats included": {
-				maple: "Unlimited",
-				competitor: "Per-seat pricing",
-			},
-			"API-first design": {
-				maple: true,
-				competitor: true,
-			},
-		},
-		painPoints: [
-			{
-				problem: "Unpredictable billing that spikes with traffic",
-				solution:
-					"Transparent usage-based pricing — you always know what you'll pay before you scale.",
-			},
-			{
-				problem: "Proprietary agent lock-in ties your instrumentation to one vendor",
-				solution: "100% OpenTelemetry native. Your instrumentation is portable and vendor-neutral.",
-			},
-			{
-				problem: "Complex pricing tiers across hosts, containers, custom metrics, and log volume",
-				solution:
-					"One simple pricing model based on data volume. No per-host fees, no hidden surcharges.",
-			},
-			{
-				problem: "No option to self-host or keep data within your own infrastructure",
-				solution:
-					"Self-host Maple on your own infrastructure for full data sovereignty and compliance.",
-			},
+		name: "Datadog",
+		vendor: "datadog",
+		mark: "datadog",
+		site: "datadoghq.com",
+		navLabel: m.nav_vs_datadog,
+		navDesc: m.nav_desc_vs_datadog,
+		seoTitle: m.cmp_dd_seo_title,
+		seoDescription: m.cmp_dd_seo_desc,
+		heroTitle: m.cmp_dd_hero_title,
+		heroLede: m.cmp_dd_hero_lede,
+		differences: [
+			{ id: "pricing", topic: m.cmp_topic_pricing, maple: m.cmp_dd_pricing_maple, competitor: m.cmp_dd_pricing_them, edge: "maple", source: 0 },
+			{ id: "hosts", topic: m.cmp_topic_hosts, maple: m.cmp_dd_hosts_maple, competitor: m.cmp_dd_hosts_them, edge: "maple", source: 0 },
+			{ id: "agents", topic: m.cmp_topic_agents, maple: m.cmp_dd_agents_maple, competitor: m.cmp_dd_agents_them, edge: "maple", source: 1 },
+			{ id: "source", topic: m.cmp_topic_source, maple: m.cmp_dd_source_maple, competitor: m.cmp_dd_source_them, edge: "maple" },
+			{ id: "selfhost", topic: m.cmp_topic_selfhost, maple: m.cmp_dd_selfhost_maple, competitor: m.cmp_dd_selfhost_them, edge: "maple" },
+			{ id: "retention", topic: m.cmp_topic_retention, maple: m.cmp_dd_retention_maple, competitor: m.cmp_dd_retention_them, edge: "maple", source: 2 },
+			{ id: "setup", topic: m.cmp_topic_setup, maple: m.cmp_dd_setup_maple, competitor: m.cmp_dd_setup_them, edge: "maple" },
+			{ id: "ai", topic: m.cmp_topic_ai, maple: m.cmp_dd_ai_maple, competitor: m.cmp_dd_ai_them, edge: "even", source: 3 },
+			{ id: "synthetics", topic: m.cmp_topic_synthetics, maple: m.cmp_dd_synthetics_maple, competitor: m.cmp_dd_synthetics_them, edge: "competitor", source: 0 },
+			{ id: "products", topic: m.cmp_topic_products, maple: m.cmp_dd_products_maple, competitor: m.cmp_dd_products_them, edge: "competitor", source: 0 },
+			{ id: "integrations", topic: m.cmp_topic_integrations, maple: m.cmp_dd_integrations_maple, competitor: m.cmp_dd_integrations_them, edge: "competitor", source: 4 },
+			{ id: "rum", topic: m.cmp_topic_rum, maple: m.cmp_dd_rum_maple, competitor: m.cmp_dd_rum_them, edge: "competitor", source: 0 },
+			{ id: "compliance", topic: m.cmp_topic_compliance, maple: m.cmp_dd_compliance_maple, competitor: m.cmp_dd_compliance_them, edge: "competitor", source: 5 },
 		],
-		migrationSteps: [
-			{
-				title: "Keep your existing OTel instrumentation",
-				description:
-					"If you already use OpenTelemetry SDKs alongside the Datadog agent, just point the OTLP exporter to Maple. No code changes needed for OTel-instrumented services.",
-			},
-			{
-				title: "Replace the Datadog agent with the OTel Collector",
-				description:
-					"Swap the proprietary Datadog agent for the open-source OpenTelemetry Collector. Configure it to export to Maple's OTLP endpoint.",
-			},
-			{
-				title: "Rebuild dashboards and alerts in Maple",
-				description:
-					"Use Maple's dashboard builder and alerting system to recreate your monitoring views. AI-assisted setup helps you get started faster.",
-			},
+		parity: [...CORE_PARITY, m.cmp_parity_replay],
+		migration: [
+			{ title: m.cmp_dd_mig_1_title, body: m.cmp_dd_mig_1_body },
+			{ title: m.cmp_dd_mig_2_title, body: m.cmp_dd_mig_2_body },
+			{ title: m.cmp_dd_mig_3_title, body: m.cmp_dd_mig_3_body },
 		],
+		migrationDiff: collectorDiff(
+			"datadog",
+			`  datadog:
+    api:
+      key: \${env:DD_API_KEY}`,
+		),
 		faqs: [
-			{
-				question: "Is Maple a drop-in replacement for Datadog?",
-				answer: "Maple covers the core observability features most teams use: distributed tracing, log management, metrics dashboards, alerting, and AI-powered diagnostics. If your workflow centers on traces, logs, and metrics, Maple can replace Datadog for those use cases. Some advanced Datadog-specific features like Synthetic Monitoring or Network Performance Monitoring are not yet available.",
-			},
-			{
-				question: "How does Maple's pricing compare to Datadog?",
-				answer: "Maple charges a flat rate per GB of ingested data — no per-host fees, no per-seat charges, no separate costs for custom metrics. Datadog's list pricing combines per-host, per-GB, and per-feature charges. Whether you save depends on your host count and data volume; the pricing calculator compares both on your actual numbers.",
-			},
-			{
-				question: "Can I migrate from Datadog to Maple without downtime?",
-				answer: "Yes. You can run Maple alongside Datadog during migration by dual-shipping your telemetry data. Point your OpenTelemetry Collector at both backends, verify your data in Maple, then cut over when ready.",
-			},
-			{
-				question: "Does Maple support the Datadog agent?",
-				answer: "Maple does not use proprietary agents. Instead, it's built on OpenTelemetry — the open standard for observability. You'll replace the Datadog agent with the open-source OpenTelemetry Collector, which gives you vendor-neutral instrumentation that works with any OTel-compatible backend.",
-			},
-			{
-				question: "Can I self-host Maple instead of using the cloud version?",
-				answer: "Yes. Maple's source is available under FSL-1.1 and can be self-hosted on your own infrastructure. This gives you complete control over your data, compliance with data residency requirements, and eliminates ongoing SaaS costs.",
-			},
-			{
-				question: "Does Maple have AI-powered features like Datadog?",
-				answer: "Maple includes AI-powered diagnostics and an MCP (Model Context Protocol) integration that lets AI agents query your observability data directly. This enables automated root cause analysis, anomaly detection, and conversational debugging workflows that go beyond traditional dashboards.",
-			},
+			{ question: m.cmp_dd_faq_1_q, answer: m.cmp_dd_faq_1_a },
+			{ question: m.cmp_dd_faq_2_q, answer: m.cmp_dd_faq_2_a },
+			{ question: m.cmp_dd_faq_3_q, answer: m.cmp_dd_faq_3_a },
+			{ question: m.cmp_dd_faq_4_q, answer: m.cmp_dd_faq_4_a },
+			{ question: m.cmp_dd_faq_5_q, answer: m.cmp_dd_faq_5_a },
 		],
-		stats: [
-			{
-				value: "5 min",
-				label: "Setup time",
-				detail: "From zero to ingesting traces, logs, and metrics with OpenTelemetry",
-			},
-			{
-				value: "100%",
-				label: "Source on GitHub",
-				detail: "FSL-1.1, converting to Apache 2.0 — audit it, fork it, self-host it",
-			},
-			{
-				value: "$0",
-				label: "Per-seat cost",
-				detail: "No per-seat pricing on any plan — every engineer gets access",
-			},
+		sources: [
+			{ label: "Datadog pricing", url: "https://www.datadoghq.com/pricing/", checked: CHECKED },
+			{ label: "Datadog: OpenTelemetry in Datadog", url: "https://docs.datadoghq.com/opentelemetry/", checked: CHECKED },
+			{ label: "Datadog: Log Management pricing", url: "https://www.datadoghq.com/pricing/?product=log-management", checked: CHECKED },
+			{ label: "Datadog: Bits AI and MCP Server", url: "https://docs.datadoghq.com/bits_ai/mcp_server/", checked: CHECKED },
+			{ label: "Datadog integrations", url: "https://docs.datadoghq.com/integrations/", checked: CHECKED },
+			{ label: "Datadog Trust Center", url: "https://www.datadoghq.com/security/", checked: CHECKED },
 		],
+		related: ["new-relic", "grafana", "dash0"],
+		locales: ["en", "ja", "ko"],
 	},
-	grafana: {
-		name: "Grafana",
+
+	{
 		slug: "grafana",
-		tagline: "The simplicity of Grafana with zero configuration overhead",
-		description:
-			"Maple delivers the open-source flexibility of Grafana Cloud with a purpose-built OpenTelemetry backend — no Prometheus, Loki, or Tempo stack to configure and maintain.",
-		features: {
-			"Pricing model": {
-				maple: "Usage-based, transparent",
-				competitor: "Usage-based + self-host costs",
-			},
-			"Open source": {
-				maple: "FSL-1.1 → Apache 2.0",
-				competitor: true,
-			},
-			"OpenTelemetry native": {
-				maple: true,
-				competitor: true,
-			},
-			"Distributed tracing": {
-				maple: true,
-				competitor: true,
-			},
-			"Log management": {
-				maple: true,
-				competitor: true,
-			},
-			"Metrics & dashboards": {
-				maple: true,
-				competitor: true,
-			},
-			"AI / MCP integration": {
-				maple: true,
-				competitor: true,
-			},
-			"Self-hosting available": {
-				maple: true,
-				competitor: true,
-			},
-			"No vendor lock-in": {
-				maple: true,
-				competitor: true,
-			},
-			"Custom dashboards": {
-				maple: true,
-				competitor: true,
-			},
-			Alerting: {
-				maple: true,
-				competitor: true,
-			},
-			"Setup time": {
-				maple: "Minutes",
-				competitor: "Hours (multi-tool config)",
-			},
-			"Proprietary agents required": {
-				maple: false,
-				competitor: false,
-			},
-			"Data retention control": {
-				maple: true,
-				competitor: true,
-			},
-			"Team seats included": {
-				maple: "Unlimited",
-				competitor: "Varies by plan",
-			},
-			"API-first design": {
-				maple: true,
-				competitor: true,
-			},
-		},
-		painPoints: [
-			{
-				problem: "Managing separate backends for Loki, Tempo, Mimir, and Prometheus",
-				solution:
-					"One unified platform handles traces, logs, and metrics. No stack to assemble or maintain.",
-			},
-			{
-				problem: "Hours of configuration before you can ingest your first trace",
-				solution:
-					"Point your OTel Collector at Maple and start seeing data in minutes. Zero configuration required.",
-			},
-			{
-				problem: "Learning PromQL, LogQL, and TraceQL — three different query languages",
-				solution:
-					"A single, intuitive query interface across all signal types. No query language fragmentation.",
-			},
-			{
-				problem: "Scaling each backend independently with different resource requirements",
-				solution:
-					"Maple scales as one system. Built on ClickHouse for high-throughput ingestion and fast queries at any scale.",
-			},
+		name: "Grafana",
+		vendor: "grafana",
+		mark: "grafana",
+		site: "grafana.com",
+		navLabel: m.nav_vs_grafana,
+		navDesc: m.nav_desc_vs_grafana,
+		seoTitle: m.cmp_gf_seo_title,
+		seoDescription: m.cmp_gf_seo_desc,
+		heroTitle: m.cmp_gf_hero_title,
+		heroLede: m.cmp_gf_hero_lede,
+		differences: [
+			{ id: "backends", topic: m.cmp_topic_backends, maple: m.cmp_gf_backends_maple, competitor: m.cmp_gf_backends_them, edge: "maple" },
+			{ id: "query", topic: m.cmp_topic_query, maple: m.cmp_gf_query_maple, competitor: m.cmp_gf_query_them, edge: "maple" },
+			{ id: "pricing", topic: m.cmp_topic_pricing, maple: m.cmp_gf_pricing_maple, competitor: m.cmp_gf_pricing_them, edge: "maple", source: 0 },
+			{ id: "seats", topic: m.cmp_topic_seats, maple: m.cmp_gf_seats_maple, competitor: m.cmp_gf_seats_them, edge: "maple", source: 0 },
+			{ id: "setup", topic: m.cmp_topic_setup, maple: m.cmp_gf_setup_maple, competitor: m.cmp_gf_setup_them, edge: "maple" },
+			{ id: "source", topic: m.cmp_topic_source, maple: m.cmp_gf_source_maple, competitor: m.cmp_gf_source_them, edge: "even", source: 1 },
+			{ id: "selfhost", topic: m.cmp_topic_selfhost, maple: m.cmp_gf_selfhost_maple, competitor: m.cmp_gf_selfhost_them, edge: "even" },
+			{ id: "otel", topic: m.cmp_topic_otel, maple: m.cmp_gf_otel_maple, competitor: m.cmp_gf_otel_them, edge: "even", source: 2 },
+			{ id: "plugins", topic: m.cmp_topic_plugins, maple: m.cmp_gf_plugins_maple, competitor: m.cmp_gf_plugins_them, edge: "competitor", source: 3 },
+			{ id: "promql", topic: m.cmp_topic_promql, maple: m.cmp_gf_promql_maple, competitor: m.cmp_gf_promql_them, edge: "competitor" },
+			{ id: "datasources", topic: m.cmp_topic_datasources, maple: m.cmp_gf_datasources_maple, competitor: m.cmp_gf_datasources_them, edge: "competitor", source: 3 },
+			{ id: "oncall", topic: m.cmp_topic_oncall, maple: m.cmp_gf_oncall_maple, competitor: m.cmp_gf_oncall_them, edge: "competitor", source: 4 },
 		],
-		migrationSteps: [
-			{
-				title: "Point your OTel Collector to Maple",
-				description:
-					"If you're already using the OpenTelemetry Collector with Grafana backends, just change the OTLP exporter endpoint to Maple. Your instrumentation stays the same.",
-			},
-			{
-				title: "Migrate dashboards to Maple's builder",
-				description:
-					"Recreate your Grafana dashboards using Maple's drag-and-drop dashboard builder. Most teams find the setup faster since data sources are pre-connected.",
-			},
-			{
-				title: "Decommission the Grafana stack",
-				description:
-					"Once verified, shut down Loki, Tempo, Mimir, and Prometheus. You've just replaced five services with one.",
-			},
+		parity: CORE_PARITY,
+		migration: [
+			{ title: m.cmp_gf_mig_1_title, body: m.cmp_gf_mig_1_body },
+			{ title: m.cmp_gf_mig_2_title, body: m.cmp_gf_mig_2_body },
+			{ title: m.cmp_gf_mig_3_title, body: m.cmp_gf_mig_3_body },
 		],
+		migrationDiff: collectorDiff(
+			"otlp/tempo",
+			`  otlp/tempo:
+    endpoint: tempo:4317`,
+		),
 		faqs: [
-			{
-				question: "Is Maple a replacement for the entire Grafana stack?",
-				answer: "Yes. Maple replaces the combination of Grafana (visualization), Loki (logs), Tempo (traces), and Mimir/Prometheus (metrics) with a single unified platform. You get traces, logs, metrics, dashboards, and alerting in one system.",
-			},
-			{
-				question: "How does Maple compare to Grafana Cloud?",
-				answer: "Grafana Cloud manages the Loki/Tempo/Mimir stack for you, but you're still working with multiple query languages and separate data stores. Maple stores all three signals in one database, so traces, logs, and metrics are correlated automatically instead of joined across backends.",
-			},
-			{
-				question: "Do I need to learn a new query language?",
-				answer: "No. Maple provides an intuitive visual query builder and search interface. Unlike Grafana where you need to learn PromQL for metrics, LogQL for logs, and TraceQL for traces, Maple uses a single query approach across all signal types.",
-			},
-			{
-				question: "Can I still self-host with Maple like I can with Grafana?",
-				answer: "Yes. Maple's source is available under FSL-1.1 and can be self-hosted. The difference is you're deploying one system instead of four or five separate components.",
-			},
-			{
-				question: "What about Grafana's plugin ecosystem?",
-				answer: "Maple focuses on the core observability experience: traces, logs, metrics, dashboards, alerting, and AI. While it doesn't have Grafana's extensive plugin ecosystem, most teams find they don't need it — the built-in features cover the standard observability workflow without additional configuration.",
-			},
-			{
-				question: "Is Maple built on OpenTelemetry like Grafana Tempo?",
-				answer: "Yes, but Maple goes further. The entire platform is built for OpenTelemetry from the ground up — not just the tracing backend. Traces, logs, and metrics all flow through standard OTLP ingestion, giving you a consistent, vendor-neutral pipeline.",
-			},
+			{ question: m.cmp_gf_faq_1_q, answer: m.cmp_gf_faq_1_a },
+			{ question: m.cmp_gf_faq_2_q, answer: m.cmp_gf_faq_2_a },
+			{ question: m.cmp_gf_faq_3_q, answer: m.cmp_gf_faq_3_a },
+			{ question: m.cmp_gf_faq_4_q, answer: m.cmp_gf_faq_4_a },
+			{ question: m.cmp_gf_faq_5_q, answer: m.cmp_gf_faq_5_a },
 		],
-		stats: [
-			{
-				value: "1",
-				label: "System to manage",
-				detail: "Replace Loki, Tempo, Mimir, Prometheus, and Grafana with one platform",
-			},
-			{
-				value: "0",
-				label: "Query languages to learn",
-				detail: "Visual query builder instead of PromQL, LogQL, and TraceQL",
-			},
-			{
-				value: "5 min",
-				label: "To first data",
-				detail: "From OTel Collector config to seeing traces, logs, and metrics",
-			},
+		sources: [
+			{ label: "Grafana Cloud pricing", url: "https://grafana.com/pricing/", checked: CHECKED },
+			{ label: "Grafana licensing (AGPL-3.0)", url: "https://grafana.com/licensing/", checked: CHECKED },
+			{ label: "Grafana Alloy", url: "https://grafana.com/docs/alloy/latest/", checked: CHECKED },
+			{ label: "Grafana plugins catalog", url: "https://grafana.com/grafana/plugins/", checked: CHECKED },
+			{ label: "Grafana IRM", url: "https://grafana.com/products/cloud/irm/", checked: CHECKED },
 		],
+		related: ["datadog", "dash0", "new-relic"],
+		locales: ["en", "ja", "ko"],
 	},
-	"new-relic": {
-		name: "New Relic",
+
+	{
 		slug: "new-relic",
-		tagline: "Full-stack observability without per-seat pricing",
-		description:
-			"Maple covers the observability core — traces, logs, and metrics — with OpenTelemetry-native ingestion, no per-seat fees, and the freedom to self-host.",
-		features: {
-			"Pricing model": {
-				maple: "Usage-based, transparent",
-				competitor: "Per-seat + per-GB",
-			},
-			"Open source": {
-				maple: "FSL-1.1 → Apache 2.0",
-				competitor: false,
-			},
-			"OpenTelemetry native": {
-				maple: true,
-				competitor: true,
-			},
-			"Distributed tracing": {
-				maple: true,
-				competitor: true,
-			},
-			"Log management": {
-				maple: true,
-				competitor: true,
-			},
-			"Metrics & dashboards": {
-				maple: true,
-				competitor: true,
-			},
-			"AI / MCP integration": {
-				maple: true,
-				competitor: true,
-			},
-			"Self-hosting available": {
-				maple: true,
-				competitor: false,
-			},
-			"No vendor lock-in": {
-				maple: true,
-				competitor: "Proprietary agents, NRQL",
-			},
-			"Custom dashboards": {
-				maple: true,
-				competitor: true,
-			},
-			Alerting: {
-				maple: true,
-				competitor: true,
-			},
-			"Setup time": {
-				maple: "Minutes",
-				competitor: "Moderate",
-			},
-			"Proprietary agents required": {
-				maple: false,
-				competitor: true,
-			},
-			"Data retention control": {
-				maple: "Configurable",
-				competitor: "Extended retention costs extra",
-			},
-			"Team seats included": {
-				maple: "Unlimited",
-				competitor: "Per-seat pricing",
-			},
-			"API-first design": {
-				maple: true,
-				competitor: true,
-			},
-		},
-		painPoints: [
-			{
-				problem: "Per-seat pricing limits observability access to a few engineers",
-				solution:
-					"Unlimited team seats included. Every engineer, on-call responder, and manager gets access.",
-			},
-			{
-				problem: "Closed-source platform means no visibility into how your data is processed",
-				solution:
-					"Maple's source is available under FSL-1.1. Audit the code, understand the data pipeline, and contribute back.",
-			},
-			{
-				problem: "Vendor lock-in through proprietary agents and NRQL query language",
-				solution:
-					"Built on OpenTelemetry standards. Your instrumentation and data remain portable to any OTel backend.",
-			},
-			{
-				problem: "No option to self-host or meet data residency requirements on your own terms",
-				solution:
-					"Self-host Maple on your own infrastructure for complete control over data storage and compliance.",
-			},
+		name: "New Relic",
+		vendor: "new-relic",
+		mark: "newrelic",
+		site: "newrelic.com",
+		navLabel: m.nav_vs_new_relic,
+		navDesc: m.nav_desc_vs_new_relic,
+		seoTitle: m.cmp_nr_seo_title,
+		seoDescription: m.cmp_nr_seo_desc,
+		heroTitle: m.cmp_nr_hero_title,
+		heroLede: m.cmp_nr_hero_lede,
+		differences: [
+			{ id: "seats", topic: m.cmp_topic_seats, maple: m.cmp_nr_seats_maple, competitor: m.cmp_nr_seats_them, edge: "maple", source: 0 },
+			{ id: "pricing", topic: m.cmp_topic_pricing, maple: m.cmp_nr_pricing_maple, competitor: m.cmp_nr_pricing_them, edge: "maple", source: 0 },
+			{ id: "agents", topic: m.cmp_topic_agents, maple: m.cmp_nr_agents_maple, competitor: m.cmp_nr_agents_them, edge: "maple", source: 1 },
+			{ id: "source", topic: m.cmp_topic_source, maple: m.cmp_nr_source_maple, competitor: m.cmp_nr_source_them, edge: "maple" },
+			{ id: "selfhost", topic: m.cmp_topic_selfhost, maple: m.cmp_nr_selfhost_maple, competitor: m.cmp_nr_selfhost_them, edge: "maple" },
+			{ id: "retention", topic: m.cmp_topic_retention, maple: m.cmp_nr_retention_maple, competitor: m.cmp_nr_retention_them, edge: "maple", source: 2 },
+			{ id: "query", topic: m.cmp_topic_query, maple: m.cmp_nr_query_maple, competitor: m.cmp_nr_query_them, edge: "even" },
+			{ id: "ai", topic: m.cmp_topic_ai, maple: m.cmp_nr_ai_maple, competitor: m.cmp_nr_ai_them, edge: "even", source: 3 },
+			{ id: "synthetics", topic: m.cmp_topic_synthetics, maple: m.cmp_nr_synthetics_maple, competitor: m.cmp_nr_synthetics_them, edge: "competitor", source: 0 },
+			{ id: "rum", topic: m.cmp_topic_rum, maple: m.cmp_nr_rum_maple, competitor: m.cmp_nr_rum_them, edge: "competitor", source: 0 },
+			{ id: "integrations", topic: m.cmp_topic_integrations, maple: m.cmp_nr_integrations_maple, competitor: m.cmp_nr_integrations_them, edge: "competitor", source: 4 },
+			{ id: "security", topic: m.cmp_topic_security, maple: m.cmp_nr_security_maple, competitor: m.cmp_nr_security_them, edge: "competitor", source: 0 },
 		],
-		migrationSteps: [
-			{
-				title: "Switch from New Relic agents to OpenTelemetry",
-				description:
-					"Replace New Relic's proprietary agents with OpenTelemetry SDKs. OTel provides the same auto-instrumentation for popular frameworks and languages.",
-			},
-			{
-				title: "Point OTLP exports to Maple",
-				description:
-					"Configure your OpenTelemetry Collector or SDK to export to Maple's OTLP endpoint. You can dual-ship to both New Relic and Maple during the transition.",
-			},
-			{
-				title: "Set up dashboards and alerts",
-				description:
-					"Build your monitoring views in Maple's dashboard builder. Set up alerting rules to match your existing New Relic alert policies.",
-			},
+		parity: [...CORE_PARITY, m.cmp_parity_replay],
+		migration: [
+			{ title: m.cmp_nr_mig_1_title, body: m.cmp_nr_mig_1_body },
+			{ title: m.cmp_nr_mig_2_title, body: m.cmp_nr_mig_2_body },
+			{ title: m.cmp_nr_mig_3_title, body: m.cmp_nr_mig_3_body },
 		],
+		migrationDiff: collectorDiff(
+			"otlp/newrelic",
+			`  otlp/newrelic:
+    endpoint: https://otlp.nr-data.net:4317
+    headers:
+      api-key: \${env:NEW_RELIC_LICENSE_KEY}`,
+		),
 		faqs: [
-			{
-				question: "Is Maple a full replacement for New Relic?",
-				answer: "Maple covers the core observability features: distributed tracing, log management, metrics dashboards, alerting, and AI-powered diagnostics. If you're using New Relic primarily for APM, logs, and infrastructure monitoring, Maple handles those use cases. For browser-side visibility Maple offers session replay correlated with backend traces rather than full RUM; Synthetics has no Maple equivalent yet.",
-			},
-			{
-				question: "How much can I save by switching from New Relic to Maple?",
-				answer: "Savings depend on your team size and data volume. New Relic's list price charges per full-platform user plus per GB of data beyond the free tier. Maple charges only for data volume, with no seat fees — so the difference grows with the number of engineers who need access. Run both through the pricing calculator on your actual numbers.",
-			},
-			{
-				question: "Does Maple support NRQL or a similar query language?",
-				answer: "Maple provides a visual query builder and search interface instead of a proprietary query language like NRQL. This means no learning curve and no lock-in to a vendor-specific syntax. For advanced queries, you can use the API.",
-			},
-			{
-				question: "Can I run New Relic and Maple side by side during migration?",
-				answer: "Yes. Dual-ship your telemetry data by configuring the OpenTelemetry Collector to export to both New Relic and Maple simultaneously. Verify your data in Maple, then decommission New Relic when ready.",
-			},
-			{
-				question: "Is Maple open source? Can I self-host it?",
-				answer: "Yes to both. Maple's source is available under FSL-1.1. You can self-host it on your own infrastructure for complete data sovereignty, or use the hosted cloud version at app.maple.dev.",
-			},
-			{
-				question: "How does Maple's AI compare to New Relic AI?",
-				answer: "Maple includes AI-powered diagnostics and an MCP (Model Context Protocol) integration that lets AI agents query your observability data directly. This enables automated root cause analysis and conversational debugging that integrates with your existing AI workflow tools.",
-			},
+			{ question: m.cmp_nr_faq_1_q, answer: m.cmp_nr_faq_1_a },
+			{ question: m.cmp_nr_faq_2_q, answer: m.cmp_nr_faq_2_a },
+			{ question: m.cmp_nr_faq_3_q, answer: m.cmp_nr_faq_3_a },
+			{ question: m.cmp_nr_faq_4_q, answer: m.cmp_nr_faq_4_a },
+			{ question: m.cmp_nr_faq_5_q, answer: m.cmp_nr_faq_5_a },
 		],
-		stats: [
-			{
-				value: "$0",
-				label: "Per-seat cost",
-				detail: "No per-user fees to limit observability access",
-			},
-			{
-				value: "100%",
-				label: "Source on GitHub",
-				detail: "FSL-1.1, converting to Apache 2.0 — no black-box data processing",
-			},
-			{
-				value: "0",
-				label: "Proprietary agents",
-				detail: "Pure OpenTelemetry — no vendor-specific agents to install or maintain",
-			},
+		sources: [
+			{ label: "New Relic pricing", url: "https://newrelic.com/pricing", checked: CHECKED },
+			{ label: "New Relic: OpenTelemetry", url: "https://docs.newrelic.com/docs/opentelemetry/", checked: CHECKED },
+			{ label: "New Relic: data retention", url: "https://docs.newrelic.com/docs/data-apis/manage-data/manage-data-retention/", checked: CHECKED },
+			{ label: "New Relic AI", url: "https://newrelic.com/platform/new-relic-ai", checked: CHECKED },
+			{ label: "New Relic instant observability", url: "https://newrelic.com/instant-observability", checked: CHECKED },
 		],
+		related: ["datadog", "grafana", "dash0"],
+		locales: ["en", "ja", "ko"],
 	},
-	dash0: {
-		name: "Dash0",
+
+	{
 		slug: "dash0",
-		tagline: "OpenTelemetry-native observability you can actually own",
-		description:
-			"Dash0 and Maple are both OpenTelemetry-native with transparent usage-based pricing and no per-seat fees. The difference is ownership: Maple is open source and self-hostable, so you can run it on your own infrastructure — including your own ClickHouse — for full data sovereignty and retention control, instead of a closed SaaS backend.",
-		features: {
-			"Pricing model": {
-				maple: "Usage-based, transparent",
-				competitor: "Usage-based, transparent",
-			},
-			"Open source": {
-				maple: "FSL-1.1 → Apache 2.0",
-				competitor: false,
-			},
-			"OpenTelemetry native": {
-				maple: true,
-				competitor: true,
-			},
-			"Distributed tracing": {
-				maple: true,
-				competitor: true,
-			},
-			"Log management": {
-				maple: true,
-				competitor: true,
-			},
-			"Metrics & dashboards": {
-				maple: true,
-				competitor: true,
-			},
-			"AI / MCP integration": {
-				maple: true,
-				competitor: true,
-			},
-			"Self-hosting available": {
-				maple: true,
-				competitor: false,
-			},
-			"No vendor lock-in": {
-				maple: true,
-				competitor: true,
-			},
-			"Custom dashboards": {
-				maple: true,
-				competitor: true,
-			},
-			Alerting: {
-				maple: true,
-				competitor: true,
-			},
-			"Setup time": {
-				maple: "Minutes",
-				competitor: "Minutes",
-			},
-			"Proprietary agents required": {
-				maple: false,
-				competitor: false,
-			},
-			"Data retention control": {
-				maple: "Configurable",
-				competitor: "Fixed periods",
-			},
-			"Team seats included": {
-				maple: "Unlimited",
-				competitor: "No per-seat fees",
-			},
-			"API-first design": {
-				maple: true,
-				competitor: true,
-			},
-		},
-		painPoints: [
-			{
-				problem: "Closed-source SaaS backend — no way to audit how your telemetry is processed",
-				solution:
-					"Maple's source is available under FSL-1.1. Inspect every line, contribute features, and trust there are no black boxes.",
-			},
-			{
-				problem: "No self-hosting option — your telemetry has to live in Dash0's cloud",
-				solution:
-					"Self-host Maple on your own infrastructure to meet data residency and compliance requirements and keep telemetry inside your own perimeter.",
-			},
-			{
-				problem: "Fixed retention windows you can't tune to your own needs",
-				solution:
-					"Self-hosting puts you in control of retention and storage — keep data as long as your compliance and debugging workflows require.",
-			},
-			{
-				problem: "SaaS-only means an ongoing subscription with no escape hatch",
-				solution:
-					"Run Maple on infrastructure you already own to eliminate per-data SaaS fees — or use the hosted version when you'd rather not operate it.",
-			},
+		name: "Dash0",
+		vendor: "dash0",
+		mark: "dash0",
+		site: "dash0.com",
+		navLabel: m.nav_vs_dash0,
+		navDesc: m.nav_desc_vs_dash0,
+		seoTitle: m.cmp_d0_seo_title,
+		seoDescription: m.cmp_d0_seo_desc,
+		heroTitle: m.cmp_d0_hero_title,
+		heroLede: m.cmp_d0_hero_lede,
+		differences: [
+			{ id: "source", topic: m.cmp_topic_source, maple: m.cmp_d0_source_maple, competitor: m.cmp_d0_source_them, edge: "maple", source: 1 },
+			{ id: "selfhost", topic: m.cmp_topic_selfhost, maple: m.cmp_d0_selfhost_maple, competitor: m.cmp_d0_selfhost_them, edge: "maple" },
+			{ id: "retention", topic: m.cmp_topic_retention, maple: m.cmp_d0_retention_maple, competitor: m.cmp_d0_retention_them, edge: "maple", source: 0 },
+			{ id: "pricing", topic: m.cmp_topic_pricing, maple: m.cmp_d0_pricing_maple, competitor: m.cmp_d0_pricing_them, edge: "even", source: 0 },
+			{ id: "ai", topic: m.cmp_topic_ai, maple: m.cmp_d0_ai_maple, competitor: m.cmp_d0_ai_them, edge: "even" },
+			{ id: "promql", topic: m.cmp_topic_promql, maple: m.cmp_d0_promql_maple, competitor: m.cmp_d0_promql_them, edge: "competitor", source: 2 },
+			{ id: "k8s-tooling", topic: m.cmp_topic_k8s_tooling, maple: m.cmp_d0_k8s_tooling_maple, competitor: m.cmp_d0_k8s_tooling_them, edge: "competitor", source: 1 },
 		],
-		migrationSteps: [
-			{
-				title: "Keep your OpenTelemetry instrumentation",
-				description:
-					"Both Dash0 and Maple ingest standard OTLP, so your existing SDKs, auto-instrumentation, and semantic conventions carry over unchanged. Nothing to rewrite.",
-			},
-			{
-				title: "Re-point your OTel Collector exporter",
-				description:
-					"Change the OTLP exporter endpoint from Dash0 to Maple — or dual-ship to both during the transition to verify your data lands correctly.",
-			},
-			{
-				title: "Recreate dashboards and alerts",
-				description:
-					"Rebuild your monitoring views in Maple's dashboard builder and set up alerting rules. AI-assisted setup helps you get there faster.",
-			},
+		parity: [...CORE_PARITY, m.cmp_parity_otel],
+		migration: [
+			{ title: m.cmp_d0_mig_1_title, body: m.cmp_d0_mig_1_body },
+			{ title: m.cmp_d0_mig_2_title, body: m.cmp_d0_mig_2_body },
+			{ title: m.cmp_d0_mig_3_title, body: m.cmp_d0_mig_3_body },
 		],
+		migrationDiff: collectorDiff(
+			"otlp/dash0",
+			`  otlp/dash0:
+    endpoint: ingress.eu-west-1.aws.dash0.com:4317
+    headers:
+      Authorization: Bearer \${env:DASH0_AUTH_TOKEN}`,
+		),
 		faqs: [
-			{
-				question: "How is Maple different from Dash0?",
-				answer: "The fundamentals are similar — both are OpenTelemetry-native, both have transparent usage-based pricing with no per-seat fees, and both offer an MCP integration for AI agents. The real difference is ownership: Maple is open source (FSL-1.1) and self-hostable on your own infrastructure, including your own ClickHouse, with full control over data retention and residency. Dash0 is a closed-source, SaaS-only backend.",
-			},
-			{
-				question: "Is Maple open source? Can I self-host it?",
-				answer: "Yes to both. Maple's source is available under the Functional Source License (FSL-1.1) and can be self-hosted on your own infrastructure for full data sovereignty and compliance. Dash0's observability backend is closed-source and SaaS-only with no self-hosting — they do open-source client-side tooling like their OpenTelemetry distribution and Kubernetes operator, but not the platform itself.",
-			},
-			{
-				question: "How hard is it to migrate from Dash0 to Maple?",
-				answer: "Moving the telemetry pipeline is about as easy as it gets: since both platforms ingest standard OTLP, you just re-point your OpenTelemetry Collector's exporter at Maple's endpoint — no instrumentation changes. You can dual-ship to both backends during the transition. Dashboards, saved views, and alert rules don't transfer over OTLP, so plan to recreate those in Maple.",
-			},
-			{
-				question: "Can I keep my telemetry on my own infrastructure?",
-				answer: "Yes — self-host Maple for full data residency and sovereignty, which is useful for compliance requirements that keep data inside your own perimeter. Dash0 is SaaS-only, so your telemetry lives in their cloud. Maple also offers a hosted version if you'd rather not operate it yourself.",
-			},
-			{
-				question: "How does Maple's pricing compare to Dash0?",
-				answer: "Both use transparent, usage-based pricing and neither charges per seat, so the models are comparable (Dash0 bills per data point; Maple bills per GB of ingested data). The main lever Maple gives you is self-hosting: run it on infrastructure you already own and you pay for compute and storage instead of per-data SaaS fees.",
-			},
-			{
-				question: "Will my OpenTelemetry instrumentation work with Maple?",
-				answer: "Yes. Maple is built for OpenTelemetry from the ground up and ingests standard OTLP for traces, logs, and metrics. Any instrumentation that already works with Dash0 works with Maple unchanged — your pipeline stays vendor-neutral.",
-			},
+			{ question: m.cmp_d0_faq_1_q, answer: m.cmp_d0_faq_1_a },
+			{ question: m.cmp_d0_faq_2_q, answer: m.cmp_d0_faq_2_a },
+			{ question: m.cmp_d0_faq_3_q, answer: m.cmp_d0_faq_3_a },
+			{ question: m.cmp_d0_faq_4_q, answer: m.cmp_d0_faq_4_a },
+			{ question: m.cmp_d0_faq_5_q, answer: m.cmp_d0_faq_5_a },
 		],
-		stats: [
-			{
-				value: "100%",
-				label: "Open source",
-				detail: "Source-available under FSL-1.1 — audit, contribute, and self-host freely",
-			},
-			{
-				value: "1",
-				label: "Config change to migrate",
-				detail: "Both are OTLP-native — just re-point your OTel Collector exporter",
-			},
-			{
-				value: "Yes",
-				label: "Self-hostable",
-				detail: "Run Maple on your own infrastructure, including your own ClickHouse — Dash0 is SaaS-only",
-			},
+		sources: [
+			{ label: "Dash0 pricing", url: "https://www.dash0.com/pricing", checked: CHECKED },
+			{ label: "Dash0 on GitHub", url: "https://github.com/dash0hq", checked: CHECKED },
+			{ label: "Dash0 documentation", url: "https://www.dash0.com/documentation", checked: CHECKED },
 		],
+		related: ["grafana", "datadog", "new-relic"],
+		locales: ["en", "ja", "ko"],
 	},
-} satisfies Record<string, Competitor>
+]
 
-export const featureCategories = [
-	{
-		name: "Core Observability",
-		features: [
-			"Distributed tracing",
-			"Log management",
-			"Metrics & dashboards",
-			"Custom dashboards",
-			"Alerting",
-		],
-	},
-	{
-		name: "Platform & Architecture",
-		features: [
-			"OpenTelemetry native",
-			"Open source",
-			"Self-hosting available",
-			"No vendor lock-in",
-			"AI / MCP integration",
-			"API-first design",
-		],
-	},
-	{
-		name: "Pricing & Access",
-		features: [
-			"Pricing model",
-			"Team seats included",
-			"Setup time",
-			"Proprietary agents required",
-			"Data retention control",
-		],
-	},
-] as const
+export const competitorSlugs = competitors.map((competitor) => competitor.slug)
 
-export const featureOrder = [
-	"Pricing model",
-	"Open source",
-	"OpenTelemetry native",
-	"Distributed tracing",
-	"Log management",
-	"Metrics & dashboards",
-	"AI / MCP integration",
-	"Self-hosting available",
-	"No vendor lock-in",
-	"Custom dashboards",
-	"Alerting",
-] as const
+export const competitorBySlug = (slug: string) => competitors.find((competitor) => competitor.slug === slug)
+
+const localePath = (locale: string, path: string) => (locale === "en" ? path : `/${locale}${path}`)
+
+export const comparePath = (locale: string, slug?: string) =>
+	localePath(locale, slug ? `/compare/${slug}` : "/compare")

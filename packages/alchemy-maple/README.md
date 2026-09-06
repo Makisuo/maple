@@ -7,7 +7,7 @@ npm install @maple-dev/alchemy alchemy effect
 ```
 
 `alchemy` and `effect` are peer dependencies — this release is built and tested against
-`alchemy@2.0.0-beta.72` and `effect@4.0.0-rc.108`.
+`alchemy@2.0.0-beta.74` and `effect@4.0.0-rc.111`, the minimum supported versions.
 
 ## Usage
 
@@ -103,7 +103,7 @@ seam when constructing the API client without the Alchemy provider collection.
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Maple.Dashboard`        | Full CRUD. Props are the v2 wire shape (`snake_case`, see `/v2/docs`); widget/variable documents pass through verbatim. Updates PATCH in place.                                                                                                                   |
 | `Maple.AlertDestination` | Full CRUD for declaratively provisionable types (PagerDuty, webhook, Discord, email). Channel secrets are write-only — accept `Redacted` values. Slack and Hazel use installed integrations managed in Maple. Changing `type` replaces the destination.           |
-| `Maple.AlertRule`        | Full CRUD. `destination_ids` accepts outputs from `Maple.AlertDestination`. Rule names are org-unique, so lost state is re-adopted by name instead of duplicating.                                                                                                |
+| `Maple.AlertRule`        | Full CRUD. `destination_ids` accepts outputs from `Maple.AlertDestination`. Lost state is recovered only when the rule's ownership tag matches the stack, stage, and logical resource. Other rules require explicit adoption.                                     |
 | `Maple.ApiKey`           | Create / roll / revoke (the API has no key update). Changing props replaces the key; bumping the `rotate` prop rolls it in place (same name/scopes, new secret). `secret` is captured once and preserved in Alchemy state — it can never be re-read from the API. |
 | `Maple.IngestKeys`       | Read-only per-org singleton. Surfaces `publicKey` / `privateKey` as `Redacted` outputs; delete only stops tracking it.                                                                                                                                            |
 
@@ -139,6 +139,9 @@ Cloudflare options, forwarded unchanged.
 
 ## Notes
 
+- Alert rules reserve one of Maple's 20 tag slots for an `alchemy:` ownership tag, leaving up to 19 user tags. Keep the ownership tag intact. To take over an existing rule deliberately, wrap the resource in Alchemy's `adopt(true)` or deploy with `--adopt`. Use distinct rule names for different stages in the same Maple organization.
+- Existing tracked dashboards and rules gain configuration snapshots on their next deploy; existing tracked rules also gain an ownership tag. If an older rule's state was lost before it had ownership tags, recovery requires explicit adoption.
+- `alchemy sync` restores declared dashboard fields and alert-rule configuration. Fields omitted from those props remain unmanaged. Alert destinations default to `enabled: true` on both create and update.
 - Store your Alchemy state somewhere durable: the `ApiKey.secret` output lives only there.
 - The client retries 429/5xx with bounded exponential backoff (the v2 API allows 600 requests per 60s per key).
 - Deleting an `AlertDestination` fails with a conflict while alert rules still reference it — Alchemy's dependency ordering handles this automatically when the rule is declared in the same stack.

@@ -1,9 +1,11 @@
 import { Schema } from "effect"
 import * as Effect from "effect/Effect"
+import * as Config from "effect/Config"
 import * as Redacted from "effect/Redacted"
 import { deepEqual, isResolved } from "alchemy/Diff"
 import * as Provider from "alchemy/Provider"
 import { Resource } from "alchemy/Resource"
+import { isOutput } from "alchemy/Output"
 import { listAll, MapleApi } from "./MapleApi"
 import { MapleErrorTags } from "./errors"
 import type { Providers } from "./Providers"
@@ -24,12 +26,20 @@ interface DestinationBaseProps {
  * the API never returns them, so drift on secret fields is detected from
  * prop changes only.
  */
-export type AlertDestinationProps =
+type DestinationVariant =
 	| (DestinationBaseProps & { type: "pagerduty"; integration_key: SecretInput })
 	| (DestinationBaseProps & { type: "webhook"; url: string; signing_secret?: SecretInput })
 	| (DestinationBaseProps & { type: "discord"; webhook_url: SecretInput })
 	| (DestinationBaseProps & { type: "telegram"; bot_token: SecretInput; chat_id: string })
 	| (DestinationBaseProps & { type: "email"; member_user_ids: string[] })
+
+// Explicitly exclude other variants' fields: Input wraps the discriminant too,
+// so TypeScript's usual excess-property check alone cannot keep them separate.
+type VariantKeys<T> = T extends unknown ? keyof T : never
+type ExclusiveVariant<T, All = T> = T extends unknown
+	? T & Partial<Record<Exclude<VariantKeys<All>, keyof T>, never>>
+	: never
+export type AlertDestinationProps = ExclusiveVariant<DestinationVariant>
 
 export type AlertDestination = Resource<
 	"Maple.AlertDestination",
@@ -59,20 +69,7 @@ export type AlertDestination = Resource<
  * })
  * ```
  */
-const AlertDestinationResource = Resource<AlertDestination>("Maple.AlertDestination")
-
-/**
- * Alchemy types resource props as `InputProps<Props>` — a mapped type, which
- * collapses a discriminated union to the keys its members share. That erases
- * every channel-specific field (`webhook_url`, `integration_key`, `url`,
- * `bot_token`, `member_user_ids`), making the resource uncallable. Restore the union on the
- * call signature; props are forwarded untouched, and `alertDestinationProps`
- * keeps the round-trip honest in the type test.
- */
-type AlertDestinationConstructor = Omit<typeof AlertDestinationResource, never> &
-	((id: string, props: AlertDestinationProps) => Effect.Effect<AlertDestination, never, Providers>)
-
-export const AlertDestination = AlertDestinationResource as AlertDestinationConstructor
+export const AlertDestination = Resource<AlertDestination>("Maple.AlertDestination")
 
 const WireDestination = Schema.Struct({
 	id: Schema.String,
@@ -91,7 +88,7 @@ const desiredBody = (props: AlertDestinationProps): Record<string, unknown> => {
 		string,
 		unknown
 	>
-	if (props.enabled !== undefined) body.enabled = props.enabled
+	body.enabled = props.enabled ?? true
 	switch (props.type) {
 		case "pagerduty":
 			body.integration_key = unwrap(props.integration_key)
@@ -138,14 +135,16 @@ export const AlertDestinationProvider = () =>
 			return {
 				stables: ["destinationId" as const],
 				diff: Effect.fn(function* ({ news, olds, output }) {
-					if (!isResolved(news)) return undefined
+					if (isOutput(news) || Effect.isEffect(news) || Config.isConfig(news))
+						return { action: "replace" } as const
 					// `type` is immutable server-side — changing it replaces the destination.
 					if (
 						(output?.type ?? olds?.type) !== undefined &&
-						news.type !== (output?.type ?? olds?.type)
+						(!isResolved(news.type) || news.type !== (output?.type ?? olds?.type))
 					) {
 						return { action: "replace" } as const
 					}
+					if (!isResolved(news)) return undefined
 					if (olds !== undefined && !deepEqual(olds, news, { stripNullish: true })) {
 						return { action: "update", stables: ["destinationId"] } as const
 					}

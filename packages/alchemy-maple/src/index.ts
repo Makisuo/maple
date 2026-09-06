@@ -46,6 +46,8 @@ export {
 	isMapleApiResponseError,
 	makeMapleApiResponseError,
 	MapleApiProtocolError,
+	MapleAlertRuleOwnershipError,
+	MapleAlertRuleTagsError,
 	MapleApiRequestEncodingError,
 	MapleApiResponseDecodeError,
 	MapleApiResponseReadError,

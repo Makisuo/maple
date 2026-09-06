@@ -4,6 +4,7 @@
 		"target": "ES2022",
 		"module": "ESNext",
 		"lib": ["ES2022", "DOM"],
+		"types": ["node"],
 		"moduleResolution": "bundler",
 		"verbatimModuleSyntax": true,
 		"noEmit": true,

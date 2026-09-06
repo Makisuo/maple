@@ -1,0 +1,22 @@
+---
+/**
+ * /ko/compare/<slug> — generated from the comparison registry.
+ *
+ * A route claim, nothing more — the page is ComparePage and its content is
+ * the registry entry for `slug`. Physical per-locale files rather than i18n
+ * `fallbackType: "rewrite"`, for the same reason as /features: a fallback
+ * page self-canonicalises to English and never enters the sitemap.
+ *
+ * Nothing here may call a Paraglide message. `getStaticPaths()` runs outside
+ * the locale storage and would resolve every locale to English; the template
+ * calls them during render, where they resolve to Korean.
+ */
+import ComparePage from "../../../components/compare/ComparePage.astro";
+import { competitorSlugs } from "../../../lib/competitors";
+
+export const getStaticPaths = () => competitorSlugs.map((slug) => ({ params: { slug } }));
+
+const { slug } = Astro.params;
+---
+
+<ComparePage slug={slug!} />

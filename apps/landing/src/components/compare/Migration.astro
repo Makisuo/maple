@@ -1,0 +1,64 @@
+---
+/**
+ * Migration — three steps and the one code block on the page.
+ *
+ * The steps are a ruled list, the same construction as CrossLinks' numbering.
+ * The block on the right is the Collector change as the operator types it:
+ * the vendor's exporter stays, Maple's is added beside it, and every pipeline
+ * fans out to both. Lines that mention Maple are the only ones in full
+ * foreground, so the eye reads the diff without diff markers.
+ */
+import * as m from "../../paraglide/messages.js";
+
+interface Props {
+	competitorName: string;
+	steps: { title: string; body: string }[];
+	diff: string;
+}
+
+const { competitorName, steps, diff } = Astro.props;
+
+const lines = diff.split("\n").map((text) => ({ text, added: /maple/i.test(text) }));
+---
+
+<section id="migration" class="scroll-mt-28 bg-bg-deep">
+	<div class="shell py-16 md:py-24">
+		<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{m.cmp_migration_eyebrow()}</p>
+		<h2
+			class="mt-4 max-w-[22ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px]"
+		>
+			{m.cmp_migration_title({ name: competitorName })}
+		</h2>
+		<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-[15px]">{m.cmp_migration_lede()}</p>
+
+		<div class="mt-10 grid gap-10 md:mt-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:gap-16">
+			<ol class="border-t border-border">
+				{
+					steps.map((step, i) => (
+						<li class="grid gap-x-6 gap-y-2 border-b border-border py-5 sm:grid-cols-[2.5rem_1fr] lg:py-6">
+							<span class="text-[11px] font-medium tabular-nums text-fg-muted">{String(i + 1).padStart(2, "0")}</span>
+							<div class="min-w-0">
+								<h3 class="font-display text-base leading-snug tracking-[-0.01em] text-fg md:text-lg">{step.title}</h3>
+								<p class="mt-2 max-w-[58ch] text-[13px] leading-relaxed text-fg-muted">{step.body}</p>
+							</div>
+						</li>
+					))
+				}
+			</ol>
+
+			<figure class="min-w-0">
+				<div class="live-frame">
+					<div class="live-frame__head">
+						<span>otel-collector.yaml</span>
+						<span class="normal-case tracking-normal">{m.cmp_migration_diff_label()}</span>
+					</div>
+					<pre
+						class="overflow-x-auto px-5 py-4 text-[12.5px] leading-[1.7]"><code>{lines.map((line) => (
+							<span class:list={["block whitespace-pre", line.added ? "text-fg" : "text-fg-muted"]}>{line.text || " "}</span>
+						))}</code></pre>
+				</div>
+				<figcaption class="mt-3 text-[12px] leading-relaxed text-fg-muted">{m.cmp_migration_diff_caption()}</figcaption>
+			</figure>
+		</div>
+	</div>
+</section>

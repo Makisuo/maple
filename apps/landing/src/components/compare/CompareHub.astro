@@ -1,0 +1,74 @@
+---
+/**
+ * CompareHub — `/compare`, the index the breadcrumbs used to point at without
+ * it existing.
+ *
+ * Two things and a CTA: the line-item bill every vendor on one sheet (the
+ * homepage's BillComparison, re-headed), then one cell per comparison page.
+ * Nothing vendor-specific here — that lives on the per-vendor pages.
+ */
+import * as m from "../../paraglide/messages.js";
+import { comparePath, competitors } from "../../lib/competitors";
+import Layout from "../../layouts/Layout.astro";
+import BillComparison from "../BillComparison.astro";
+import BrandMarkIcon from "../BrandMarkIcon.astro";
+import HubPair from "./HubPair.astro";
+import Footer from "../Footer.astro";
+import Nav from "../Nav.astro";
+import SeoHead from "../SeoHead.astro";
+import PageCta from "../page/PageCta.astro";
+import PageHero from "../page/PageHero.astro";
+
+const locale = Astro.currentLocale ?? "en";
+const title = m.cmp_hub_seo_title();
+const description = m.cmp_hub_seo_desc();
+---
+
+<Layout title={title} description={description} mdHref={locale === "en" ? "/compare.md" : undefined}>
+	<SeoHead title={title} description={description} />
+	<Nav />
+
+	<PageHero
+		eyebrow={m.cmp_eyebrow()}
+		title={m.cmp_hub_title()}
+		lede={m.cmp_hub_lede()}
+		breadcrumb={[{ label: m.breadcrumb_home(), href: "/" }, { label: m.breadcrumb_compare() }]}
+	>
+		<HubPair slot="aside" />
+	</PageHero>
+
+	<section class="border-t border-border bg-bg">
+		<div class="shell py-16 md:py-24">
+			<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{m.cmp_hub_pages_eyebrow()}</p>
+			<h2 class="mt-4 max-w-[24ch] font-display text-2xl font-medium leading-[1.08] tracking-[-0.02em] text-fg md:text-3xl">
+				{m.cmp_hub_pages_title()}
+			</h2>
+
+			<div class="mt-10 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
+				{
+					competitors.map((competitor) => (
+						<a
+							href={comparePath(locale, competitor.slug)}
+							class="group flex flex-col gap-3 bg-bg p-6 transition-colors hover:bg-bg-elevated md:p-8"
+						>
+							<span class="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-bg-elevated">
+								<BrandMarkIcon id={competitor.mark} class="h-5 w-5" />
+							</span>
+							<h3 class="font-display text-lg leading-snug tracking-[-0.01em] text-fg md:text-xl">{competitor.navLabel()}</h3>
+							<p class="max-w-[40ch] text-[13px] leading-relaxed text-fg-muted">{competitor.navDesc()}</p>
+							<span class="mt-auto inline-flex items-center gap-1.5 pt-2 text-xs text-fg-muted transition-colors group-hover:text-fg">
+								<span class="transition-transform group-hover:translate-x-0.5">→</span>
+							</span>
+						</a>
+					))
+				}
+			</div>
+		</div>
+	</section>
+
+	<BillComparison eyebrow={m.cmp_hub_matrix_eyebrow()} title={m.cmp_hub_matrix_title()} lede={m.bill_lede()} links={false} />
+
+	<PageCta title={m.cmp_cta_title()} lede={m.cmp_cta_lede()} />
+
+	<Footer />
+</Layout>

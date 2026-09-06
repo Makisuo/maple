@@ -3,9 +3,12 @@ import * as m from "../paraglide/messages.js";
 
 interface Props {
     items: Array<{ question: string; answer: string }>;
+    /** Pages laid out on the `.shell` grid pass true so the column sits on the
+     *  same left axis as their other sections instead of centred. */
+    shell?: boolean;
 }
 
-const { items } = Astro.props;
+const { items, shell = false } = Astro.props;
 
 const faqJsonLd = {
     "@context": "https://schema.org",
@@ -22,11 +25,11 @@ const faqJsonLd = {
 ---
 
 <section class="border-t border-border py-16 md:py-32">
-    <div class="mx-auto max-w-3xl px-6">
+    <div class={shell ? "shell" : "mx-auto max-w-3xl px-6"}>
         <span class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{m.faq_badge()}</span>
         <h2 class="mt-4 mb-12 font-display text-3xl font-medium tracking-[-0.02em] text-fg md:text-4xl">{m.faq_heading()}</h2>
 
-        <div class="divide-y divide-border border-t border-border">
+        <div class:list={["divide-y divide-border border-t border-border", shell && "max-w-3xl"]}>
             {items.map(item => (
                 <details class="faq-item">
                     <summary class="flex items-center justify-between py-5 cursor-pointer text-sm font-medium text-fg select-none">

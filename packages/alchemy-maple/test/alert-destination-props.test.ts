@@ -1,15 +1,21 @@
 /**
  * The `AlertDestination` constructor must keep its discriminated union.
  *
- * Alchemy types props as `InputProps<Props>`, a mapped type that collapses a
- * union to the keys its members share — which erased every channel-specific
- * field and made the resource uncallable. The declared call signature restores
- * it; these compile-time assertions are how we notice if it regresses (a stale
- * `@ts-expect-error` fails as TS2578). Wire bodies are covered by contract.test.
+ * Preserve variant-specific fields while accepting Alchemy inputs for URLs,
+ * credentials and other fields. A stale `@ts-expect-error` fails typechecking.
  */
-import { Effect } from "effect"
+import { Config, Effect } from "effect"
+import type { Output } from "alchemy/Output"
 import { expect, it } from "vitest"
 import { AlertDestination } from "../src/AlertDestination"
+
+export const acceptsOutputs = (url: Output<string>, secret: Output<string>) =>
+	AlertDestination("hook", {
+		type: "webhook",
+		name: Config.string("HOOK_NAME"),
+		url,
+		signing_secret: secret,
+	})
 
 // Every declaratively provisionable channel is constructible with its own fields.
 export const accepts = Effect.gen(function* () {

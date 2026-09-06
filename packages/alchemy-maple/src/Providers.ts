@@ -36,7 +36,7 @@ export const providers = () =>
  * transport. The returned layer requires both
  * {@link MapleEnvironment.MapleEnvironment} and Effect's `HttpClient` service,
  * so layers supplied by the caller are the services the providers actually
- * capture.
+ * capture. Alchemy supplies the Stack and Stage services used for rule ownership.
  *
  * @example
  * ```typescript

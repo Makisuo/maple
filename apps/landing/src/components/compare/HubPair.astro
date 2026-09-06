@@ -1,0 +1,48 @@
+---
+/**
+ * HubPair — ComparePair for the hub: Maple on the left, the four vendors it
+ * is compared against on the right, each mark linking to its page.
+ */
+import { MapleMark } from "@maple/ui/components/icons/maple-mark";
+import BrandMarkIcon from "../BrandMarkIcon.astro";
+import { comparePath, competitors } from "../../lib/competitors";
+
+const locale = Astro.currentLocale ?? "en";
+---
+
+<div class="relative grid grid-cols-[1fr_1.6fr] gap-px overflow-hidden rounded-xl border border-border bg-border">
+	<div class="flex flex-col items-center gap-4 bg-bg px-6 py-10 text-center md:py-12">
+		<span class="flex h-16 w-16 items-center justify-center rounded-xl border border-border bg-bg-elevated">
+			<MapleMark size={34} className="text-primary" />
+		</span>
+		<div>
+			<div class="font-display text-lg font-medium tracking-[-0.01em] text-fg md:text-xl">Maple</div>
+			<div class="mt-1 font-mono text-[11px] text-fg-muted">maple.dev</div>
+		</div>
+	</div>
+	<ul class="grid grid-cols-2 gap-x-4 gap-y-6 bg-bg px-6 py-8 sm:grid-cols-4 sm:gap-x-2 md:py-10">
+		{
+			competitors.map((competitor) => (
+				<li>
+					<a
+						href={comparePath(locale, competitor.slug)}
+						class="group flex flex-col items-center gap-3 text-center"
+						aria-label={competitor.navLabel()}
+					>
+						<span class="flex h-12 w-12 items-center justify-center rounded-lg border border-border bg-bg-elevated transition-colors group-hover:border-fg-muted">
+							<BrandMarkIcon id={competitor.mark} class="h-6 w-6" />
+						</span>
+						<span class="text-[12px] text-fg-muted transition-colors group-hover:text-fg">{competitor.name}</span>
+					</a>
+				</li>
+			))
+		}
+	</ul>
+	<span
+		class="pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-border bg-bg px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted"
+		style="left: calc(100% / 2.6)"
+		aria-hidden="true"
+	>
+		vs
+	</span>
+</div>

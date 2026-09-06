@@ -36,6 +36,11 @@ interface Props {
 }
 
 const { eyebrow, title, lede, breadcrumb, signal } = Astro.props;
+
+// An optional right-hand column (the /compare logo pairing). Without it the
+// hero keeps its single-column measure; with it, the copy and the aside sit
+// on one row from lg up, centred on each other.
+const hasAside = Astro.slots.has("aside");
 ---
 
 <section class="relative overflow-hidden bg-bg">
@@ -44,7 +49,13 @@ const { eyebrow, title, lede, breadcrumb, signal } = Astro.props;
 	<div class="relative">
 		<Breadcrumb items={breadcrumb} class="shell pt-24 md:pt-28" />
 
-		<div class="shell pb-16 pt-8 md:pb-24 md:pt-10">
+		<div
+			class:list={[
+				"shell pb-16 pt-8 md:pb-24 md:pt-10",
+				hasAside && "grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,30rem)] lg:items-center lg:gap-16",
+			]}
+		>
+		<div class="min-w-0">
 			<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{eyebrow}</p>
 
 			<h1
@@ -75,6 +86,8 @@ const { eyebrow, title, lede, breadcrumb, signal } = Astro.props;
 					{m.cta_github()}
 				</a>
 			</div>
+		</div>
+		{hasAside && <div class="min-w-0"><slot name="aside" /></div>}
 		</div>
 	</div>
 </section>

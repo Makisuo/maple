@@ -14,6 +14,8 @@ import { MapleApiV2 } from "@maple/domain/http/v2"
 import { BucketCacheService } from "@maple/query-engine/caching"
 import { EdgeCacheService } from "@maple/cache"
 import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli"
+import { Stack } from "alchemy/Stack"
+import { Stage } from "alchemy/Stage"
 import {
 	AlertDestination,
 	AlertDestinationProvider,
@@ -214,7 +216,21 @@ const makeHarness = () => {
 			AlertDestinationProvider(),
 			AlertRuleProvider(),
 			ApiKeyProvider(),
-		).pipe(Layer.provideMerge(clientLive))
+		).pipe(
+			Layer.provideMerge(clientLive),
+			Layer.provideMerge(
+				Layer.mergeAll(
+					Layer.succeed(Stack, {
+						name: "api-integration",
+						stage: "test",
+						resources: {},
+						bindings: {},
+						actions: {},
+					}),
+					Layer.succeed(Stage, "test"),
+				),
+			),
+		)
 	}
 
 	return {
@@ -239,6 +255,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 
 				const created = yield* provider.reconcile({
 					id: "ops",
+					fqn: "ops",
 					instanceId: "i-1",
 					news: { name: "Operations", tags: ["production"] },
 					olds: undefined,
@@ -251,6 +268,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 				// Steady state: no drift, no mutation (updated name unchanged).
 				const steady = yield* provider.reconcile({
 					id: "ops",
+					fqn: "ops",
 					instanceId: "i-1",
 					news: { name: "Operations", tags: ["production"] },
 					olds: { name: "Operations", tags: ["production"] },
@@ -263,6 +281,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 				// Drift: rename via PATCH, id stable.
 				const renamed = yield* provider.reconcile({
 					id: "ops",
+					fqn: "ops",
 					instanceId: "i-1",
 					news: { name: "Operations v2", tags: ["production"] },
 					olds: { name: "Operations", tags: ["production"] },
@@ -275,6 +294,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 
 				const observed = yield* provider.read!({
 					id: "ops",
+					fqn: "ops",
 					instanceId: "i-1",
 					olds: { name: "Operations v2" },
 					output: renamed,
@@ -284,6 +304,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 				// Delete, then read sees nothing; second delete tolerates the 404.
 				yield* provider.delete({
 					id: "ops",
+					fqn: "ops",
 					instanceId: "i-1",
 					olds: { name: "Operations v2" },
 					output: renamed,
@@ -292,6 +313,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 				})
 				const gone = yield* provider.read!({
 					id: "ops",
+					fqn: "ops",
 					instanceId: "i-1",
 					olds: { name: "Operations v2" },
 					output: renamed,
@@ -299,6 +321,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 				expect(gone).toBeUndefined()
 				yield* provider.delete({
 					id: "ops",
+					fqn: "ops",
 					instanceId: "i-1",
 					olds: { name: "Operations v2" },
 					output: renamed,
@@ -310,7 +333,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 		await harness.dispose()
 	})
 
-	it("wires destination → rule, adopts rules by unique name, and deletes cleanly", async () => {
+	it("wires destination → rule, recovers owned rules, and deletes cleanly", async () => {
 		const harness = makeHarness()
 		const key = await harness.bootstrapKey()
 		const layers = harness.providerLayers(key.secret)
@@ -322,6 +345,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 
 				const dest = yield* destinations.reconcile({
 					id: "hook",
+					fqn: "hook",
 					instanceId: "i-1",
 					news: { type: "webhook", name: "Ops hook", url: "https://example.com/hooks/maple" },
 					olds: undefined,
@@ -330,6 +354,33 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 					bindings: [],
 				})
 				expect(dest.destinationId).toMatch(/^dest_/)
+				const destinationProps = {
+					type: "webhook" as const,
+					name: "Ops hook",
+					url: "https://example.com/hooks/maple",
+				}
+				const disabled = yield* destinations.reconcile({
+					id: "hook",
+					fqn: "hook",
+					instanceId: "i-1",
+					session,
+					bindings: [],
+					news: { ...destinationProps, enabled: false },
+					olds: destinationProps,
+					output: dest,
+				})
+				expect(disabled.enabled).toBe(false)
+				const restored = yield* destinations.reconcile({
+					id: "hook",
+					fqn: "hook",
+					instanceId: "i-1",
+					session,
+					bindings: [],
+					news: destinationProps,
+					olds: { ...destinationProps, enabled: false },
+					output: disabled,
+				})
+				expect(restored.enabled).toBe(true)
 
 				const ruleProps = {
 					name: "Checkout error rate",
@@ -342,6 +393,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 				}
 				const rule = yield* rules.reconcile({
 					id: "checkout-errors",
+					fqn: "checkout-errors",
 					instanceId: "i-1",
 					news: ruleProps,
 					olds: undefined,
@@ -350,10 +402,27 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 					bindings: [],
 				})
 				expect(rule.ruleId).toMatch(/^alrt_/)
+				expect(rule.configuration?.tags).toEqual([expect.stringMatching(/^alchemy:[a-f0-9]{24}$/)])
+				expect(rule.configuration?.threshold).toBe(0.05)
+				// A matching name alone does not authorize a different logical resource.
+				const collision = yield* Effect.flip(
+					rules.reconcile({
+						id: "foreign",
+						fqn: "foreign",
+						instanceId: "i-2",
+						session,
+						bindings: [],
+						news: { ...ruleProps, threshold: 0.9 },
+						olds: undefined,
+						output: undefined,
+					}),
+				)
+				expect(collision._tag).toBe("@maple/alchemy/errors/AlertRuleOwnershipError")
 
-				// Lost state (output undefined) → adopted by org-unique name, not duplicated.
+				// Lost state is recovered using the matching stack/stage/resource ownership tag.
 				const adopted = yield* rules.reconcile({
 					id: "checkout-errors",
+					fqn: "checkout-errors",
 					instanceId: "i-1",
 					news: ruleProps,
 					olds: undefined,
@@ -365,6 +434,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 
 				const updated = yield* rules.reconcile({
 					id: "checkout-errors",
+					fqn: "checkout-errors",
 					instanceId: "i-1",
 					news: { ...ruleProps, threshold: 0.1 },
 					olds: ruleProps,
@@ -373,10 +443,12 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 					bindings: [],
 				})
 				expect(updated.ruleId).toBe(rule.ruleId)
+				expect(updated.configuration?.threshold).toBe(0.1)
 
 				// Delete rule first (destination delete conflicts while referenced).
 				yield* rules.delete({
 					id: "checkout-errors",
+					fqn: "checkout-errors",
 					instanceId: "i-1",
 					olds: ruleProps,
 					output: updated,
@@ -385,6 +457,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 				})
 				yield* destinations.delete({
 					id: "hook",
+					fqn: "hook",
 					instanceId: "i-1",
 					news: undefined,
 					olds: { type: "webhook", name: "Ops hook", url: "https://example.com/hooks/maple" },
@@ -410,6 +483,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 
 				const created = yield* provider.reconcile({
 					id: "ci",
+					fqn: "ci",
 					instanceId: "i-1",
 					news: { name: "ci-pipeline", scopes: ["dashboards:write"] },
 					olds: undefined,
@@ -423,6 +497,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 				// Steady state preserves the secret (the API never returns it again).
 				const steady = yield* provider.reconcile({
 					id: "ci",
+					fqn: "ci",
 					instanceId: "i-1",
 					news: { name: "ci-pipeline", scopes: ["dashboards:write"] },
 					olds: { name: "ci-pipeline", scopes: ["dashboards:write"] },
@@ -436,6 +511,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 				// Rotate bump → roll: new id + secret, same name.
 				const rolled = yield* provider.reconcile({
 					id: "ci",
+					fqn: "ci",
 					instanceId: "i-1",
 					news: { name: "ci-pipeline", scopes: ["dashboards:write"], rotate: 1 },
 					olds: { name: "ci-pipeline", scopes: ["dashboards:write"] },
@@ -450,6 +526,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 				// Revoke; read reports it gone.
 				yield* provider.delete({
 					id: "ci",
+					fqn: "ci",
 					instanceId: "i-1",
 					olds: { name: "ci-pipeline", scopes: ["dashboards:write"], rotate: 1 },
 					output: rolled,
@@ -458,6 +535,7 @@ describe("@maple-dev/alchemy providers against the real v2 handlers", () => {
 				})
 				const gone = yield* provider.read!({
 					id: "ci",
+					fqn: "ci",
 					instanceId: "i-1",
 					olds: { name: "ci-pipeline", scopes: ["dashboards:write"], rotate: 1 },
 					output: rolled,

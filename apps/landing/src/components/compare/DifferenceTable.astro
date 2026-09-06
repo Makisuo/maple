@@ -1,0 +1,214 @@
+---
+/**
+ * DifferenceTable — the page's centrepiece, and a real `<table>`.
+ *
+ * The old ComparisonTable was a div grid of green ticks and red crosses:
+ * eleven ✓/✓ rows out of sixteen, the same rows for every vendor, and one
+ * row ("Proprietary agents required") whose polarity was inverted so green
+ * meant bad. This is the opposite construction on every axis:
+ *
+ * - every cell is a sentence, never an icon, so a row can be read without
+ *   decoding a legend, and a text extractor gets the argument verbatim;
+ * - the gutter names who has the edge on that row in words, not colour —
+ *   the Service-Color-Is-Categorical rule bans "green = good" anyway;
+ * - rows are grouped by outcome, and the second group is the honest one:
+ *   where the other tool is ahead. It is data in the registry, so it can't
+ *   be quietly dropped;
+ * - what both tools do equally well is one chip line at the end, not eight
+ *   rows of agreement.
+ *
+ * `<thead>` sticks under the in-page rail (4rem site nav + 2.75rem rail).
+ * Under 768px the table reflows into stacked cards via the scoped CSS at the
+ * bottom: each cell prints its column name from `data-label`, so nothing is
+ * lost when there is no room for four columns.
+ */
+import * as m from "../../paraglide/messages.js";
+import type { DifferenceRow, Edge, Source } from "../../lib/competitors";
+
+/** A registry row with its thunks already resolved by the template. */
+type Row = Omit<DifferenceRow, "topic" | "maple" | "competitor"> & {
+	topic: string;
+	maple: string;
+	competitor: string;
+};
+
+interface Props {
+	competitorName: string;
+	rows: Row[];
+	parity: string[];
+	sources: Source[];
+}
+
+const { competitorName, rows, parity, sources } = Astro.props;
+
+const differ = rows.filter((row) => row.edge !== "competitor");
+const ahead = rows.filter((row) => row.edge === "competitor");
+
+const groups = [
+	{ id: "differ", label: m.cmp_diff_group_differ(), rows: differ },
+	{ id: "ahead", label: m.cmp_diff_group_ahead({ name: competitorName }), rows: ahead },
+].filter((group) => group.rows.length > 0);
+
+const edgeLabel = (edge: Edge) =>
+	edge === "maple" ? "Maple" : edge === "competitor" ? competitorName : m.cmp_diff_edge_even();
+
+const topicLabel = m.cmp_diff_col_topic();
+const edgeCol = m.cmp_diff_col_edge();
+---
+
+<section id="differences" class="scroll-mt-28 bg-bg-deep">
+	<div class="shell py-16 md:py-24">
+		<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{m.cmp_diff_eyebrow()}</p>
+		<h2
+			class="mt-4 max-w-[22ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px]"
+		>
+			{m.cmp_diff_title({ name: competitorName })}
+		</h2>
+		<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-[15px]">{m.cmp_diff_lede()}</p>
+
+		{/* No overflow-hidden here: a clipping ancestor turns the sticky <thead>
+    into an element pinned 6.75rem below the wrapper's top, over the first
+    rows, instead of one that follows the viewport. */}
+		<div class="mt-10 rounded-xl border border-border bg-bg md:mt-14">
+			<table class="diff-table w-full border-collapse text-left">
+				<caption class="sr-only">{m.cmp_diff_title({ name: competitorName })}</caption>
+				<thead class="sticky top-[6.75rem] z-10 rounded-t-xl bg-bg">
+					<tr class="text-[10px] font-medium uppercase tracking-[0.14em] text-fg-muted">
+						<th scope="col" class="border-b border-border px-5 py-3 font-medium md:px-6">{topicLabel}</th>
+						<th scope="col" class="border-b border-border px-5 py-3 font-medium text-primary md:px-6">Maple</th>
+						<th scope="col" class="border-b border-border px-5 py-3 font-medium md:px-6">{competitorName}</th>
+						<th scope="col" class="border-b border-border px-5 py-3 font-medium md:px-6">{edgeCol}</th>
+					</tr>
+				</thead>
+
+				{
+					groups.map((group) => (
+						<tbody data-group={group.id}>
+							<tr class="diff-group">
+								<th
+									scope="rowgroup"
+									colspan="4"
+									class="border-b border-border bg-bg-elevated px-5 py-2.5 text-left text-[10px] font-medium uppercase tracking-[0.14em] text-fg-muted md:px-6"
+								>
+									{group.label}
+								</th>
+							</tr>
+							{group.rows.map((row) => (
+								<tr
+									id={`row-${row.id}`}
+									data-edge={row.edge}
+									class="scroll-mt-40 border-b border-border transition-colors last:border-b-0 hover:bg-bg-elevated"
+								>
+									<th scope="row" data-label={topicLabel} class="align-top px-5 py-5 font-normal md:px-6 md:py-6">
+										<span class="font-display text-[15px] leading-snug tracking-[-0.01em] text-fg">
+											{row.topic}
+										</span>
+									</th>
+									<td data-label="Maple" class="align-top px-5 py-5 text-[13.5px] leading-relaxed text-fg md:px-6 md:py-6">
+										{row.maple}
+									</td>
+									<td
+										data-label={competitorName}
+										class="align-top px-5 py-5 text-[13.5px] leading-relaxed text-fg-muted md:px-6 md:py-6"
+									>
+										{row.competitor}
+										{row.source !== undefined && sources[row.source] && (
+											<a
+												href={`#source-${row.source + 1}`}
+												class="ml-1 align-super text-[10px] tabular-nums text-fg-muted/70 hover:text-fg"
+												aria-label={`Source ${row.source + 1}: ${sources[row.source].label}`}
+											>
+												{row.source + 1}
+											</a>
+										)}
+									</td>
+									<td data-label={edgeCol} class="align-top px-5 py-5 md:px-6 md:py-6">
+										<span
+											class:list={[
+												"inline-block whitespace-nowrap font-mono text-[10px] font-medium uppercase tracking-[0.14em]",
+												row.edge === "maple" ? "text-primary" : row.edge === "competitor" ? "text-fg" : "text-fg-muted",
+											]}
+										>
+											{edgeLabel(row.edge)}
+										</span>
+										{row.roadmap && (
+											<a
+												href={row.roadmap}
+												class="mt-1.5 block text-[11px] text-fg-muted underline-offset-2 hover:text-fg hover:underline"
+											>
+												{m.cmp_diff_roadmap()}
+											</a>
+										)}
+									</td>
+								</tr>
+							))}
+						</tbody>
+					))
+				}
+			</table>
+
+			<div class="flex flex-wrap items-baseline gap-x-4 gap-y-2 border-t border-border px-5 py-4 md:px-6">
+				<span class="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-fg-muted">{m.cmp_parity_label()}</span>
+				<ul class="flex flex-wrap gap-1.5">
+					{
+						parity.map((item) => (
+							<li class="rounded-md border border-border bg-bg px-2 py-0.5 text-[12px] text-fg">{item}</li>
+						))
+					}
+				</ul>
+			</div>
+		</div>
+	</div>
+</section>
+
+<style>
+	/* Under 768px the four columns can't fit, so each row becomes a stacked
+	   card. The header row is hidden (it stays in the accessibility tree via
+	   the row-group headings) and every cell prints its own column name. */
+	@media (max-width: 767px) {
+		.diff-table thead {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			overflow: hidden;
+			clip: rect(0 0 0 0);
+		}
+		.diff-table,
+		.diff-table tbody,
+		.diff-table tr,
+		.diff-table th,
+		.diff-table td {
+			display: block;
+		}
+		.diff-table tr.diff-group th {
+			display: block;
+		}
+		.diff-table tr:not(.diff-group) {
+			padding: 1rem 1.25rem 1.25rem;
+		}
+		.diff-table tr:not(.diff-group) > th,
+		.diff-table tr:not(.diff-group) > td {
+			padding: 0;
+		}
+		.diff-table tr:not(.diff-group) > th {
+			margin-bottom: 0.75rem;
+		}
+		.diff-table tr:not(.diff-group) > td {
+			margin-top: 0.75rem;
+		}
+		.diff-table tr:not(.diff-group) > td::before {
+			content: attr(data-label);
+			display: block;
+			margin-bottom: 0.25rem;
+			font-family: var(--font-mono);
+			font-size: 10px;
+			font-weight: 500;
+			letter-spacing: 0.14em;
+			text-transform: uppercase;
+			color: var(--muted-foreground);
+		}
+		.diff-table tr:not(.diff-group) > td[data-label="Maple"]::before {
+			color: var(--primary);
+		}
+	}
+</style>

@@ -1,0 +1,47 @@
+---
+/**
+ * ComparePair — the two marks, side by side, in the hero's right-hand column.
+ *
+ * The hero copy takes half the row and left the other half to the dot grid.
+ * This fills it with the one thing a comparison page can show at a glance:
+ * who is being compared. Two hairline cells, each mark in its own brand
+ * colour (a vs-pairing is the one place two brand colours belong together),
+ * the name, and the vendor's domain as a literal — no claim, no tagline.
+ */
+import { MapleMark } from "@maple/ui/components/icons/maple-mark";
+import BrandMarkIcon from "../BrandMarkIcon.astro";
+import type { Competitor } from "../../lib/competitors";
+
+interface Props {
+	competitor: Competitor;
+}
+
+const { competitor } = Astro.props;
+---
+
+<div class="relative grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border">
+	<div class="flex flex-col items-center gap-4 bg-bg px-6 py-10 text-center md:py-12">
+		<span class="flex h-16 w-16 items-center justify-center rounded-xl border border-border bg-bg-elevated">
+			<MapleMark size={34} className="text-primary" />
+		</span>
+		<div>
+			<div class="font-display text-lg font-medium tracking-[-0.01em] text-fg md:text-xl">Maple</div>
+			<div class="mt-1 font-mono text-[11px] text-fg-muted">maple.dev</div>
+		</div>
+	</div>
+	<div class="flex flex-col items-center gap-4 bg-bg px-6 py-10 text-center md:py-12">
+		<span class="flex h-16 w-16 items-center justify-center rounded-xl border border-border bg-bg-elevated">
+			<BrandMarkIcon id={competitor.mark} class="h-8 w-8" />
+		</span>
+		<div>
+			<div class="font-display text-lg font-medium tracking-[-0.01em] text-fg md:text-xl">{competitor.name}</div>
+			<div class="mt-1 font-mono text-[11px] text-fg-muted">{competitor.site}</div>
+		</div>
+	</div>
+	<span
+		class="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-border bg-bg px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted"
+		aria-hidden="true"
+	>
+		vs
+	</span>
+</div>

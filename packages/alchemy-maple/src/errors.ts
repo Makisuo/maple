@@ -110,6 +110,16 @@ export class MapleApiProtocolError extends Schema.TaggedError<MapleApiProtocolEr
 	{ status: Schema.Number, message: Schema.String },
 ) {}
 
+export class MapleAlertRuleOwnershipError extends Schema.TaggedError<MapleAlertRuleOwnershipError>()(
+	"@maple/alchemy/errors/AlertRuleOwnershipError",
+	{ message: Schema.String, fqn: Schema.String, ruleName: Schema.String },
+) {}
+
+export class MapleAlertRuleTagsError extends Schema.TaggedError<MapleAlertRuleTagsError>()(
+	"@maple/alchemy/errors/AlertRuleTagsError",
+	{ message: Schema.String },
+) {}
+
 export type MapleClientError =
 	| MapleApiRequestEncodingError
 	| MapleApiTransportError

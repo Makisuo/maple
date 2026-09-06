@@ -8,15 +8,33 @@
  * exact pricing is in /pricing and /compare/* pages.
  */
 import * as m from "../paraglide/messages.js";
+
+interface Props {
+	/** The homepage passes nothing and gets its own chapter heading; /compare
+	 *  overrides the three lines and drops the link row it already is. */
+	eyebrow?: string;
+	title?: string;
+	lede?: string;
+	links?: boolean;
+	class?: string;
+}
+
+const {
+	eyebrow = m.bill_eyebrow(),
+	title = m.bill_title(),
+	lede = m.bill_lede(),
+	links = true,
+	class: className = "",
+} = Astro.props;
 ---
 
-<section class="relative bg-bg-deep">
+<section class={`relative bg-bg-deep ${className}`}>
 	<div class="shell py-16 md:py-32">
-		<div class="text-[10px] uppercase tracking-[0.18em] text-fg-muted mb-4">{m.bill_eyebrow()}</div>
+		<div class="text-[10px] uppercase tracking-[0.18em] text-fg-muted mb-4">{eyebrow}</div>
 		<h2 class="max-w-[20ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] md:text-[40px] lg:text-[54px]">
-			{m.bill_title()}
+			{title}
 		</h2>
-		<p class="mt-4 text-sm md:text-base text-fg-muted max-w-xl leading-relaxed">{m.bill_lede()}</p>
+		<p class="mt-4 text-sm md:text-base text-fg-muted max-w-xl leading-relaxed">{lede}</p>
 
 		<div class="mt-12 overflow-hidden rounded-xl border border-border bg-bg-elevated">
 			<div class="overflow-x-auto">
@@ -28,6 +46,7 @@ import * as m from "../paraglide/messages.js";
 							<th class="text-left font-medium px-4 py-3 border-b border-border">Datadog</th>
 							<th class="text-left font-medium px-4 py-3 border-b border-border">New Relic</th>
 							<th class="text-left font-medium px-4 py-3 border-b border-border">Grafana Cloud</th>
+							<th class="text-left font-medium px-4 py-3 border-b border-border">Dash0</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -37,6 +56,7 @@ import * as m from "../paraglide/messages.js";
 							<td class="px-4 py-3 border-b border-border text-foreground">$15+ / host / mo</td>
 							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_bundled()}</td>
 							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_bundled()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_none()}</td>
 						</tr>
 						<tr>
 							<td class="px-4 py-3 border-b border-border text-fg-muted">{m.bill_row_per_seat()}</td>
@@ -44,6 +64,7 @@ import * as m from "../paraglide/messages.js";
 							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_enterprise()}</td>
 							<td class="px-4 py-3 border-b border-border text-foreground">$99–349 / full-user / mo</td>
 							<td class="px-4 py-3 border-b border-border text-foreground">$8+ / active-user / mo</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_none()}</td>
 						</tr>
 						<tr>
 							<td class="px-4 py-3 border-b border-border text-fg-muted">{m.bill_row_ingest()}</td>
@@ -51,6 +72,7 @@ import * as m from "../paraglide/messages.js";
 							<td class="px-4 py-3 border-b border-border text-foreground">$0.10 / GB + $1.70 / M indexed</td>
 							<td class="px-4 py-3 border-b border-border text-foreground">$0.40 / GB</td>
 							<td class="px-4 py-3 border-b border-border text-foreground">$0.45 / GB</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">$0.60 / M spans or logs</td>
 						</tr>
 						<tr>
 							<td class="px-4 py-3 border-b border-border text-fg-muted">{m.bill_row_retention()}</td>
@@ -58,6 +80,7 @@ import * as m from "../paraglide/messages.js";
 							<td class="px-4 py-3 border-b border-border text-foreground">15d default</td>
 							<td class="px-4 py-3 border-b border-border text-foreground">30d logs · 8d traces</td>
 							<td class="px-4 py-3 border-b border-border text-foreground">30d logs/traces · 13mo metrics</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">Per plan tier</td>
 						</tr>
 						<tr>
 							<td class="px-4 py-3 border-b border-border text-fg-muted">{m.bill_row_otel()}</td>
@@ -65,6 +88,7 @@ import * as m from "../paraglide/messages.js";
 							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_partial()}</td>
 							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_yes()}</td>
 							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_yes()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_native()}</td>
 						</tr>
 						<tr>
 							<td class="px-4 py-3 border-b border-border text-fg-muted">{m.bill_row_oss()}</td>
@@ -72,6 +96,7 @@ import * as m from "../paraglide/messages.js";
 							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_proprietary()}</td>
 							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_proprietary()}</td>
 							<td class="px-4 py-3 border-b border-border text-foreground">AGPL components</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_proprietary()}</td>
 						</tr>
 						<tr>
 							<td class="px-4 py-3 border-b border-border text-fg-muted">{m.bill_row_selfhost()}</td>
@@ -79,10 +104,12 @@ import * as m from "../paraglide/messages.js";
 							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_no()}</td>
 							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_no()}</td>
 							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_oss_only()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_no()}</td>
 						</tr>
 						<tr>
 							<td class="px-4 py-3 text-fg-muted">{m.bill_row_mcp()}</td>
 							<td class="px-4 py-3 bg-primary/8 text-primary font-medium">{m.bill_v_first_class()}</td>
+							<td class="px-4 py-3 text-foreground">{m.bill_v_yes()}</td>
 							<td class="px-4 py-3 text-foreground">{m.bill_v_yes()}</td>
 							<td class="px-4 py-3 text-foreground">{m.bill_v_yes()}</td>
 							<td class="px-4 py-3 text-foreground">{m.bill_v_yes()}</td>
@@ -96,7 +123,7 @@ import * as m from "../paraglide/messages.js";
 			{m.bill_footnote()}
 		</p>
 
-		<div class="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
+		{links && <div class="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
 			<a href="/pricing" class="text-primary border-b border-primary/40 hover:border-primary pb-px transition-colors">
 				{m.bill_link_calculator()}
 			</a>
@@ -112,6 +139,6 @@ import * as m from "../paraglide/messages.js";
 			<a href="/compare/dash0" class="text-fg-muted hover:text-fg border-b border-border hover:border-foreground pb-px transition-colors">
 				{m.bill_link_vs_dash0()}
 			</a>
-		</div>
+		</div>}
 	</div>
 </section>

@@ -10,9 +10,21 @@ interface Props {
     url?: string;
     includeOrganization?: boolean;
     competitorName?: string;
+    /** ISO dates. Comparison pages pass them: dated claims outrank undated ones. */
+    datePublished?: string;
+    dateModified?: string;
 }
 
-const { title, description, type = "WebPage", url, includeOrganization = false, competitorName } = Astro.props;
+const {
+    title,
+    description,
+    type = "WebPage",
+    url,
+    includeOrganization = false,
+    competitorName,
+    datePublished,
+    dateModified,
+} = Astro.props;
 
 const siteUrl = Astro.site?.toString().replace(/\/$/, '') ?? 'https://maple.dev';
 // Same fix as Layout's canonical: Astro.url.pathname reports the English path
@@ -29,6 +41,8 @@ const jsonLd = {
     name: title,
     description,
     ...((resolvedUrl) ? ({ url: resolvedUrl }) : undefined),
+    ...((datePublished) ? ({ datePublished }) : undefined),
+    ...((dateModified) ? ({ dateModified }) : undefined),
     ...((type === "SoftwareApplication") ? ({
               applicationCategory: "DeveloperApplication",
               operatingSystem: "Web",

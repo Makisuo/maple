@@ -96,7 +96,11 @@ describe("DashboardProvider", () => {
 					})
 				}),
 			)
-			expect(attributes).toEqual({ dashboardId: "dash_abc", name: "Service health" })
+			expect(attributes).toEqual({
+				dashboardId: "dash_abc",
+				name: "Service health",
+				configuration: { name: "Service health" },
+			})
 			expect(stub.calls).toEqual(["POST /v2/dashboards"])
 		}),
 	)

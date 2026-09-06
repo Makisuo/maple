@@ -1,0 +1,173 @@
+---
+/**
+ * Receipts — one reference month, billed by Maple and by the vendor.
+ *
+ * The old pages said "complex per-host + per-GB" in a cell and put the first
+ * actual number five screens down, inside a React island. This prices the
+ * calculator's default workload at build time with the same functions the
+ * island uses (`lib/vendor-pricing.ts`), so the number is in the HTML for a
+ * reader with no JavaScript and for anything that extracts text. The
+ * calculator sits directly underneath for the visitor's own numbers.
+ *
+ * Two receipts, not a savings banner: line items with the arithmetic in the
+ * detail column, then the difference stated once as a sentence.
+ */
+import * as m from "../../paraglide/messages.js";
+import { PricingCalculator } from "../PricingCalculator";
+import {
+	defaultValues,
+	describeWorkload,
+	estimateMaple,
+	estimateVendor,
+	formatCurrency,
+	MAPLE_PRICING_NOTE,
+	PRICES_VERIFIED,
+	vendorCaveat,
+	vendorConfigs,
+	type Vendor,
+} from "../../lib/vendor-pricing";
+
+interface Props {
+	vendor: Vendor;
+	competitorName: string;
+}
+
+const { vendor, competitorName } = Astro.props;
+
+const values = defaultValues(vendor);
+const config = vendorConfigs[vendor];
+const workload = describeWorkload(vendor, values);
+
+const maple = estimateMaple(vendor, values);
+const theirs = estimateVendor(vendor, values);
+const delta = theirs.total - maple.total;
+
+const receipts = [
+	{ name: "Maple", estimate: maple, accent: true },
+	{ name: config.name, estimate: theirs, accent: false },
+];
+
+const verifiedLabel = new Date(`${PRICES_VERIFIED}-15T00:00:00Z`).toLocaleDateString("en-US", {
+	month: "long",
+	year: "numeric",
+	timeZone: "UTC",
+});
+
+const money = (amount: number) => (amount === 0 ? m.cmp_price_free() : `$${Math.round(amount).toLocaleString()}`);
+---
+
+<section id="price" class="scroll-mt-28 border-t border-border bg-bg">
+	<div class="shell py-16 md:py-24">
+		<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{m.cmp_price_eyebrow()}</p>
+		<h2
+			class="mt-4 max-w-[22ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px]"
+		>
+			{m.cmp_price_title()}
+		</h2>
+		<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-[15px]">{m.cmp_price_lede()}</p>
+
+		<p class="mt-8 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[12.5px]">
+			<span class="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-fg-muted">{m.cmp_price_workload()}</span>
+			<span class="font-mono text-fg">{workload}</span>
+		</p>
+
+		<div class="mt-6 grid gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-2">
+			{
+				receipts.map((receipt) => (
+					<article class="flex flex-col bg-bg p-6 md:p-8" aria-label={`${receipt.name} estimate`}>
+						<h3
+							class:list={[
+								"font-mono text-[10px] font-medium uppercase tracking-[0.14em]",
+								receipt.accent ? "text-primary" : "text-fg-muted",
+							]}
+						>
+							{receipt.name}
+						</h3>
+						<p class="mt-4 flex items-baseline gap-2">
+							<span
+								class:list={[
+									"font-mono text-4xl font-medium tabular-nums tracking-[-0.03em] md:text-5xl",
+									receipt.accent ? "text-primary" : "text-fg",
+								]}
+							>
+								{formatCurrency(receipt.estimate.total)}
+							</span>
+							<span class="text-[12px] text-fg-muted">{m.cmp_price_per_month()}</span>
+						</p>
+
+						<table class="mt-6 w-full border-collapse text-[12.5px]">
+							<tbody>
+								{receipt.estimate.breakdown.map((item) => (
+									<tr class="border-t border-border">
+										<th scope="row" class="py-2.5 pr-4 text-left font-normal align-top">
+											<span class="text-fg">{item.label}</span>
+											<span class="mt-0.5 block text-[11px] text-fg-muted">{item.detail}</span>
+										</th>
+										<td class="py-2.5 text-right align-top font-mono tabular-nums text-fg">{money(item.value)}</td>
+									</tr>
+								))}
+								<tr class="border-t border-border">
+									<th scope="row" class="pt-3 text-left text-[11px] font-medium uppercase tracking-[0.14em] text-fg-muted">
+										Total
+									</th>
+									<td class="pt-3 text-right font-mono tabular-nums text-fg">
+										{`$${Math.round(receipt.estimate.total).toLocaleString()}`}
+									</td>
+								</tr>
+							</tbody>
+						</table>
+					</article>
+				))
+			}
+		</div>
+
+		<p class="mt-5 text-[14px] text-fg md:text-[15px]">
+			{
+				delta >= 0
+					? m.cmp_price_less({ amount: formatCurrency(delta) })
+					: m.cmp_price_more({ amount: formatCurrency(-delta) })
+			}
+			<span class="text-fg-muted"> · {m.cmp_price_yearly({ amount: formatCurrency(Math.abs(delta) * 12) })}</span>
+		</p>
+
+		<div id="calculator" class="mt-14 scroll-mt-28 md:mt-16">
+			<p class="mb-4 text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{m.cmp_price_adjust()}</p>
+			<PricingCalculator competitor={vendor} compact client:visible />
+		</div>
+
+		<p class="mt-4 max-w-[90ch] text-[11.5px] leading-relaxed text-fg-muted">
+			{m.cmp_price_verified({ date: verifiedLabel })} {MAPLE_PRICING_NOTE} {vendorCaveat[vendor]}
+		</p>
+	</div>
+</section>
+
+<style is:global>
+	/* The calculator island's range inputs — same rules the pricing page carries. */
+	.slider-input::-webkit-slider-thumb {
+		-webkit-appearance: none;
+		appearance: none;
+		width: 14px;
+		height: 14px;
+		border-radius: 9999px;
+		background: var(--primary);
+		cursor: pointer;
+		position: relative;
+		z-index: 2;
+	}
+	.slider-input::-moz-range-thumb {
+		width: 14px;
+		height: 14px;
+		border-radius: 9999px;
+		border: none;
+		background: var(--primary);
+		cursor: pointer;
+		position: relative;
+		z-index: 2;
+	}
+	.slider-input:focus {
+		outline: none;
+	}
+	.slider-input:focus-visible::-webkit-slider-thumb {
+		box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 35%, transparent);
+	}
+</style>

@@ -1,0 +1,134 @@
+---
+/**
+ * ComparePage — the single template behind every `/compare/<slug>` route,
+ * in all three locales.
+ *
+ * The spine, and why it is in this order:
+ *
+ *   00  PageHero          bg-bg        the question: "Maple vs X"
+ *   01  CompareNav        sticky       five anchors, the page's wayfinding
+ *   02  DifferenceTable   bg-bg-deep   the evidence, difference-first
+ *   03  Receipts          bg-bg        the same month billed twice, then the
+ *                                      calculator for the visitor's numbers
+ *   04  Migration         bg-bg-deep   three steps + the exporter change
+ *   05  FAQ               bg-bg        only what the table didn't answer
+ *   06  Sources           bg-bg        the vendor pages, dated
+ *   07  CrossLinks        bg-bg-deep   the other comparisons
+ *   08  PageCta           amber        the one peak
+ *
+ * The previous pages carried a stats banner, a pain-point grid, a six-tile
+ * advantages grid, migration cards and an FAQ that between them made the
+ * same four claims six times. Each claim now lives in exactly one place:
+ * "how they differ" in the table, "what it costs" in the receipts. There is
+ * deliberately no "choose X when" verdict block — the table's edge column
+ * already says it row by row, and the user didn't want it said twice.
+ */
+import * as m from "../../paraglide/messages.js";
+import { comparePath, competitorBySlug } from "../../lib/competitors";
+import Layout from "../../layouts/Layout.astro";
+import FAQ from "../FAQ.astro";
+import Footer from "../Footer.astro";
+import Nav from "../Nav.astro";
+import SeoHead from "../SeoHead.astro";
+import CrossLinks from "../page/CrossLinks.astro";
+import PageCta from "../page/PageCta.astro";
+import PageHero from "../page/PageHero.astro";
+import CompareNav from "./CompareNav.astro";
+import ComparePair from "./ComparePair.astro";
+import DifferenceTable from "./DifferenceTable.astro";
+import Migration from "./Migration.astro";
+import Receipts from "./Receipts.astro";
+import Sources from "./Sources.astro";
+
+interface Props {
+	slug: string;
+}
+
+const { slug } = Astro.props;
+const competitor = competitorBySlug(slug);
+if (!competitor) throw new Error(`ComparePage: unknown competitor slug "${slug}"`);
+
+const locale = Astro.currentLocale ?? "en";
+
+// Messages are called HERE, during render — never at module scope and never
+// in getStaticPaths. Paraglide resolves the locale per call.
+const title = competitor.seoTitle();
+const description = competitor.seoDescription();
+
+const rows = competitor.differences.map((row) => ({
+	...row,
+	topic: row.topic(),
+	maple: row.maple(),
+	competitor: row.competitor(),
+}));
+
+const crossLinks = competitor.related.flatMap((related) => {
+	const entry = competitorBySlug(related);
+	return entry ? [{ href: comparePath(locale, entry.slug), name: entry.navLabel(), desc: entry.navDesc() }] : [];
+});
+
+const faqItems = competitor.faqs.map((faq) => ({ question: faq.question(), answer: faq.answer() }));
+
+// The latest month any source was checked doubles as the page's modified
+// date: the vendor claims are the part of the page that goes stale.
+const dateModified = competitor.sources.map((source) => source.checked).sort().at(-1);
+---
+
+<Layout
+	title={title}
+	description={description}
+	ogType="article"
+	alternates={competitor.locales}
+	mdHref={locale === "en" ? `/compare/${competitor.slug}.md` : undefined}
+>
+	<SeoHead
+		title={title}
+		description={description}
+		competitorName={competitor.name}
+		datePublished="2026-07-17"
+		dateModified={dateModified ? `${dateModified}-01` : undefined}
+	/>
+	<Nav />
+
+	<PageHero
+		eyebrow={m.cmp_eyebrow()}
+		title={competitor.heroTitle()}
+		lede={competitor.heroLede()}
+		breadcrumb={[
+			{ label: m.breadcrumb_home(), href: "/" },
+			{ label: m.breadcrumb_compare(), href: "/compare" },
+			{ label: competitor.name },
+		]}
+	>
+		<ComparePair slot="aside" competitor={competitor} />
+	</PageHero>
+
+	<CompareNav competitorName={competitor.name} />
+
+	<DifferenceTable
+		competitorName={competitor.name}
+		rows={rows}
+		parity={competitor.parity.map((item) => item())}
+		sources={competitor.sources}
+	/>
+
+	<Receipts vendor={competitor.vendor} competitorName={competitor.name} />
+
+	<Migration
+		competitorName={competitor.name}
+		steps={competitor.migration.map((step) => ({ title: step.title(), body: step.body() }))}
+		diff={competitor.migrationDiff}
+	/>
+
+	<div id="faq" class="scroll-mt-28">
+		<FAQ items={faqItems} shell />
+	</div>
+
+	<Sources competitorName={competitor.name} sources={competitor.sources} />
+
+	<CrossLinks eyebrow={m.cmp_related_eyebrow()} title={m.cmp_related_title()} links={crossLinks} />
+
+	<PageCta title={m.cmp_cta_title()} lede={m.cmp_cta_lede()} />
+
+	<Footer />
+</Layout>

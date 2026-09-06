@@ -1,9 +1,11 @@
 import { Schema } from "effect"
 import * as Effect from "effect/Effect"
+import * as Config from "effect/Config"
 import * as Redacted from "effect/Redacted"
 import { deepEqual, isResolved } from "alchemy/Diff"
 import * as Provider from "alchemy/Provider"
 import { Resource } from "alchemy/Resource"
+import { isOutput } from "alchemy/Output"
 import { listAll, MapleApi } from "./MapleApi"
 import { MapleErrorTags } from "./errors"
 import type { Providers } from "./Providers"
@@ -97,12 +99,15 @@ export const ApiKeyProvider = () =>
 			const api = yield* MapleApi
 			return {
 				diff: Effect.fn(function* ({ news, olds }) {
-					if (!isResolved(news)) return undefined
 					if (olds === undefined) return undefined
+					// Unknown immutable inputs may change at apply time. Falling back to
+					// an update would silently retain the old key and its permissions.
+					if (isOutput(news) || Effect.isEffect(news) || Config.isConfig(news))
+						return { action: "replace" } as const
 					const { rotate: oldRotate, ...oldRest } = olds
 					const { rotate: newRotate, ...newRest } = news
 					// No PATCH endpoint: any non-rotate change replaces the key.
-					if (!deepEqual(oldRest, newRest, { stripNullish: true })) {
+					if (!isResolved(newRest) || !deepEqual(oldRest, newRest, { stripNullish: true })) {
 						return { action: "replace" } as const
 					}
 					if (oldRotate !== newRotate) {

@@ -1,0 +1,53 @@
+---
+/**
+ * Sources — where the competitor cells came from, and when they were read.
+ *
+ * Numbered to match the superscripts in the difference table. A comparison
+ * that cites the other vendor's own pricing page, with a date, is one an
+ * answer engine can quote and a buyer can check; one that doesn't is an
+ * opinion with a table in it.
+ */
+import * as m from "../../paraglide/messages.js";
+import type { Source } from "../../lib/competitors";
+
+interface Props {
+	competitorName: string;
+	sources: Source[];
+}
+
+const { competitorName, sources } = Astro.props;
+
+const monthLabel = (checked: string) =>
+	new Date(`${checked}-15T00:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+---
+
+<section id="sources" class="scroll-mt-28 border-t border-border bg-bg">
+	<div class="shell py-14 md:py-20">
+		<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{m.cmp_sources_eyebrow()}</p>
+		<h2 class="mt-4 max-w-[24ch] font-display text-2xl font-medium leading-[1.08] tracking-[-0.02em] text-fg md:text-3xl">
+			{m.cmp_sources_title({ name: competitorName })}
+		</h2>
+		<p class="mt-4 max-w-[62ch] text-[13px] leading-relaxed text-fg-muted">{m.cmp_sources_lede()}</p>
+
+		<ol class="mt-8 max-w-3xl border-t border-border">
+			{
+				sources.map((source, i) => (
+					<li id={`source-${i + 1}`} class="grid scroll-mt-32 grid-cols-[2.5rem_1fr_auto] items-baseline gap-x-4 border-b border-border py-3 text-[13px]">
+						<span class="font-mono text-[11px] tabular-nums text-fg-muted">{i + 1}</span>
+						<a
+							href={source.url}
+							rel="noopener noreferrer nofollow"
+							target="_blank"
+							class="min-w-0 truncate text-fg underline-offset-2 hover:underline"
+						>
+							{source.label}
+						</a>
+						<span class="whitespace-nowrap text-[11px] text-fg-muted">
+							{m.cmp_sources_checked({ date: monthLabel(source.checked) })}
+						</span>
+					</li>
+				))
+			}
+		</ol>
+	</div>
+</section>

@@ -1,0 +1,72 @@
+---
+/**
+ * CompareNav — the in-page rail under the site nav.
+ *
+ * A comparison page is nine screens long and a visitor arrives with one
+ * question: price, or migration, or "what am I giving up". Four anchors,
+ * sticky under the 4rem site nav, on a solid ground (no blur — the live
+ * frames' rule applies to chrome too). The active anchor is set by an
+ * IntersectionObserver so the rail doubles as a progress indicator; without
+ * JavaScript it is still a working list of links.
+ */
+import * as m from "../../paraglide/messages.js";
+
+interface Props {
+	competitorName: string;
+}
+
+const { competitorName } = Astro.props;
+
+const items = [
+	{ href: "#differences", label: m.cmp_nav_differences() },
+	{ href: "#price", label: m.cmp_nav_price() },
+	{ href: "#migration", label: m.cmp_nav_migration() },
+	{ href: "#faq", label: m.cmp_nav_faq() },
+];
+---
+
+<div class="sticky top-16 z-40 border-b border-border bg-bg" data-compare-nav>
+	<nav aria-label="On this page" class="shell flex h-11 items-center gap-6 overflow-x-auto">
+		<span class="hidden shrink-0 text-[11px] text-fg-muted md:inline">Maple <span class="text-fg-muted/60">vs</span> {competitorName}</span>
+		<ul class="flex h-full items-center gap-5 text-[12.5px]">
+			{
+				items.map((item) => (
+					<li class="h-full">
+						<a
+							href={item.href}
+							class="flex h-full items-center whitespace-nowrap border-b border-transparent text-fg-muted transition-colors hover:text-fg aria-[current=true]:border-fg aria-[current=true]:text-fg"
+						>
+							{item.label}
+						</a>
+					</li>
+				))
+			}
+		</ul>
+	</nav>
+</div>
+
+<script>
+	const rail = document.querySelector("[data-compare-nav]");
+	if (rail) {
+		const links = Array.from(rail.querySelectorAll<HTMLAnchorElement>("a[href^='#']"));
+		const targets = links
+			.map((link) => document.getElementById(link.hash.slice(1)))
+			.filter((el): el is HTMLElement => el !== null);
+		const setCurrent = (id: string) => {
+			for (const link of links) {
+				if (link.hash === `#${id}`) link.setAttribute("aria-current", "true");
+				else link.removeAttribute("aria-current");
+			}
+		};
+		// The band just under the rail decides which section is "current", so
+		// the highlight moves when a heading crosses it rather than when a
+		// section's midpoint does.
+		const observer = new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries) if (entry.isIntersecting) setCurrent(entry.target.id);
+			},
+			{ rootMargin: "-112px 0px -70% 0px", threshold: 0 },
+		);
+		for (const target of targets) observer.observe(target);
+	}
+</script>

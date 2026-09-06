@@ -6,6 +6,13 @@ import { expect } from "vitest"
 import { Dashboard, type Dashboard as DashboardResource } from "../src/Dashboard"
 import { MapleEnvironment } from "../src/MapleEnvironment"
 import { Providers, providers, providersWithDependencies } from "../src/Providers"
+import { Stack } from "alchemy/Stack"
+import { Stage } from "alchemy/Stage"
+
+const stackLayer = Layer.mergeAll(
+	Layer.succeed(Stack, { name: "test", stage: "test", resources: {}, bindings: {}, actions: {} }),
+	Layer.succeed(Stage, "test"),
+)
 
 const session: ScopedPlanStatusSession = {
 	emit: () => Effect.void,
@@ -54,6 +61,7 @@ describe("Maple provider layers", () => {
 					}),
 				),
 				Layer.provide(Layer.succeed(HttpClient.HttpClient, httpClient)),
+				Layer.provide(stackLayer),
 			)
 
 			const attributes = yield* Effect.gen(function* () {
@@ -72,7 +80,11 @@ describe("Maple provider layers", () => {
 				})
 			}).pipe(Effect.provide(customProviders))
 
-			expect(attributes).toEqual({ dashboardId: "dash_override", name: "Override proof" })
+			expect(attributes).toEqual({
+				dashboardId: "dash_override",
+				name: "Override proof",
+				configuration: { name: "Override proof" },
+			})
 			expect(requests).toEqual([
 				{
 					url: "https://maple.override.test/v2/dashboards",
@@ -85,6 +97,7 @@ describe("Maple provider layers", () => {
 	it.live("keeps providers() as a closed env-backed default", () =>
 		Effect.gen(function* () {
 			const defaultProviders = providers().pipe(
+				Layer.provide(stackLayer),
 				Layer.provide(
 					ConfigProvider.layer(
 						ConfigProvider.fromUnknown({
