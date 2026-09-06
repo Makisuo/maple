@@ -1,0 +1,76 @@
+---
+title: "Instrument your application"
+description: "Setup guides for every language, framework and runtime Maple supports — pick yours and ship traces, logs and metrics in minutes."
+group: "Instrumentation"
+order: 0
+navLabel: "Overview"
+---
+
+import GuideFilter from "../../components/docs/GuideFilter.astro"
+import GuideGrid from "../../components/docs/GuideGrid.astro"
+
+Maple ingests OpenTelemetry, so any OTLP exporter works unmodified. Each guide below walks through installing the SDK, pointing it at `https://ingest.maple.dev` with your ingest key, and verifying the first trace arrives. Prefer to skip the reading? Run `maple-onboard` in Claude Code and it instruments every service in the repo for you — see [Getting started](/docs/getting-started/introduction#getting-started).
+
+<GuideFilter />
+
+<section data-guide-section="javascript">
+
+## JavaScript & TypeScript
+
+<GuideGrid section="javascript" />
+
+</section>
+
+<section data-guide-section="python">
+
+## Python
+
+<GuideGrid section="python" />
+
+</section>
+
+<section data-guide-section="jvm">
+
+## Java & Kotlin
+
+<GuideGrid section="jvm" />
+
+</section>
+
+<section data-guide-section="other">
+
+## Go, Rust, .NET & PHP
+
+<GuideGrid section="other" />
+
+</section>
+
+<section data-guide-section="frontend">
+
+## Frontend & product analytics
+
+<GuideGrid section="frontend" />
+
+</section>
+
+<section data-guide-section="infrastructure">
+
+## Infrastructure & data sources
+
+<GuideGrid section="infrastructure" />
+
+</section>
+
+## Anything that speaks OTLP
+
+If your language or framework is not listed, point its OpenTelemetry SDK (or an OpenTelemetry Collector) at the ingest endpoint with the standard environment variables. Ingest keys are project-scoped and write-only, so inlining them in your bootstrap source is fine too.
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT="https://ingest.maple.dev"
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer YOUR_INGEST_KEY"
+export OTEL_SERVICE_NAME="my-service"
+```
+
+Maple reads the standard semantic conventions; the attributes it relies on for the service map, error grouping and sampling-aware throughput are listed in [OpenTelemetry conventions](/docs/concepts/otel-conventions). To develop against a local sink instead of the cloud, run [Maple Local](/docs/local-mode) and point the endpoint at `http://localhost:4318`.
+
+Missing a guide for your stack? [Open an issue](https://github.com/MapleTechLabs/maple/issues) and tell us what you run.

@@ -1,64 +1,61 @@
 // Single source of truth for docs navigation ordering + the header category bar.
-// The sidebar (DocsSidebar), mobile nav (DocsMobileNav), index page, and the
-// header category bar (DocsCategoryNav) all read from here so group order and
-// icons never drift apart.
+// The sidebar (DocsSidebar), the index page, prev/next, search and the header
+// category bar (DocsCategoryNav) all read from here so group order and icons
+// never drift apart. Pure data — client islands import it.
 
-export const SDK_OVERVIEW_SLUG = "sdks/overview"
-
-/** Order of non-SDK ("universal") doc groups in the sidebar + index page. */
-export const UNIVERSAL_GROUP_ORDER = [
+/** Doc groups in sidebar order. Every doc's `group` must appear here. */
+export const GROUP_ORDER = [
 	"Getting Started",
+	"Instrumentation",
 	"Concepts",
 	"Session Replay",
 	"Infrastructure",
 	"Integrations",
 	"Alerting",
 	"Local Mode",
+	"Reference",
 ] as const
 
-/** Order of SDK-scoped groups (Effect SDK pages). */
-export const SDK_GROUP_ORDER = ["Effect SDK", "Platforms", "Instrumentation"] as const
+export type DocGroup = (typeof GROUP_ORDER)[number]
 
-/**
- * Universal groups omitted from the sidebar's "General" section when a language
- * (SDK) is selected — e.g. "Getting Started" is redundant on a language page.
- * They remain reachable via the header category bar and on non-SDK pages.
- */
-export const SDK_HIDDEN_UNIVERSAL_GROUPS = new Set<string>(["Getting Started"])
+export const isDocGroup = (group: string): group is DocGroup =>
+	GROUP_ORDER.some((known) => known === group)
 
-export type HeaderNavItem = {
-	/** Display label (also the icon id for `kind: "group"`). */
-	key: string
-	icon: string
-	kind: "group" | "sdks"
+export const groupRank = (group: string): number => {
+	const i = GROUP_ORDER.findIndex((known) => known === group)
+	return i === -1 ? GROUP_ORDER.length : i
 }
 
-/**
- * Left-to-right order of the header category bar. Each `group` entry links to
- * the first page of its universal group; the `sdks` entry links to the SDK
- * overview. `icon` maps to a glyph in DocsCategoryIcon.
- */
-export const HEADER_NAV: HeaderNavItem[] = [
-	{ key: "Getting Started", icon: "Getting Started", kind: "group" },
-	{ key: "SDKs", icon: "sdks", kind: "sdks" },
-	{ key: "Concepts", icon: "Concepts", kind: "group" },
-	{ key: "Session Replay", icon: "Session Replay", kind: "group" },
-	{ key: "Infrastructure", icon: "Infrastructure", kind: "group" },
-	{ key: "Integrations", icon: "Integrations", kind: "group" },
-	{ key: "Alerting", icon: "Alerting", kind: "group" },
-	{ key: "Local Mode", icon: "Local Mode", kind: "group" },
-]
+/** Slug of the instrumentation overview — the "SDKs" entry point everywhere. */
+export const INSTRUMENTATION_SLUG = "instrumentation"
 
-/** Group names (and the synthetic `sdks` key) that have a DocsCategoryIcon glyph. */
-const CATEGORY_ICON_KEYS = new Set<string>([
+/**
+ * Left-to-right order of the header category bar. Each entry links to the
+ * first page of its group; the group name doubles as the DocsCategoryIcon id.
+ */
+export const HEADER_NAV: readonly DocGroup[] = [
 	"Getting Started",
+	"Instrumentation",
 	"Concepts",
 	"Session Replay",
 	"Infrastructure",
 	"Integrations",
 	"Alerting",
 	"Local Mode",
-	"sdks",
-])
+	"Reference",
+]
 
-export const hasCategoryIcon = (name: string): boolean => CATEGORY_ICON_KEYS.has(name)
+/** One-line blurb per group for the docs index cards. */
+export const GROUP_BLURBS = {
+	"Getting Started": "What Maple is and the three steps to first data.",
+	Instrumentation: "Setup guides for every language, framework and runtime.",
+	Concepts: "How Maple reads OpenTelemetry data and what it expects from yours.",
+	"Session Replay": "Record browser sessions and product events alongside traces.",
+	Infrastructure: "Stream host, container and cluster metrics next to your services.",
+	Integrations: "Pull metrics and context from the services around your app.",
+	Alerting: "Route alerts to Slack, PagerDuty, Discord, Telegram or a webhook.",
+	"Local Mode": "The whole product as one binary on your machine.",
+	Reference: "The REST API and the MCP server for AI agents.",
+} satisfies Record<DocGroup, string>
+
+export const groupBlurb = (group: string): string => (isDocGroup(group) ? GROUP_BLURBS[group] : "")

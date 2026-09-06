@@ -143,6 +143,9 @@ export const BRAND_MARKS = {
 
 export type BrandMarkId = keyof typeof BRAND_MARKS
 
+/** A mark widened to the interface, so optional fields like `viewBox` are readable. */
+export const brandMark = (id: BrandMarkId): BrandMark => BRAND_MARKS[id]
+
 /**
  * The CSS colour to paint a mark with on Maple's dark surfaces. Brands whose
  * mark is (near) black would vanish, so those fall back to `currentColor` and

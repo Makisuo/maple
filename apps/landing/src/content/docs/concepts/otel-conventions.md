@@ -2,7 +2,7 @@
 title: "OpenTelemetry Conventions"
 description: "Maple's expected OpenTelemetry attributes, status codes, span kinds, and data model conventions."
 group: "Concepts"
-order: 2
+order: 1
 ---
 
 Maple is fully compatible with the OpenTelemetry Protocol (OTLP). This document describes the conventions and attributes that Maple uses to power its dashboards, service maps, and analytics.

@@ -1,8 +1,8 @@
 ---
 title: "Maple API"
 description: "The Maple REST API: base URL, API keys and scopes, conventions, the error envelope, rate limits, and where the OpenAPI specification lives."
-group: "Getting Started"
-order: 8
+group: "Reference"
+order: 1
 ---
 
 The Maple API is the public, stability-committed HTTP interface to everything in your Maple organisation: dashboards, alert rules and destinations, error issues and investigations, scrape targets, ingest and API keys, and read access to traces, logs, metrics, services, and session replays. The dashboard uses the same endpoints you do.

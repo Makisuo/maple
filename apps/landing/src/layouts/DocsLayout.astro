@@ -5,7 +5,6 @@ import DocsTableOfContents from "../components/docs/DocsTableOfContents.astro";
 import DocsPrevNext from "../components/docs/DocsPrevNext.astro";
 import DocsMobileNav from "../components/docs/DocsMobileNav.astro";
 import DocsCategoryNav from "../components/docs/DocsCategoryNav.astro";
-import AvailableSdks from "../components/docs/AvailableSdks.astro";
 import DocsSearch from "../components/docs/DocsSearch.tsx";
 import { getGitHubStars } from "../lib/github-stars";
 import { GithubStarButton } from "../components/GithubStarButton";
@@ -19,9 +18,11 @@ interface Props {
     image?: string;
     /** Path of this page's markdown twin — see the same prop on Layout.astro. */
     mdHref?: string;
+    /** Widen the column and drop the table-of-contents rail (index pages). */
+    wide?: boolean;
 }
 
-const { title, description, headings, currentSlug, image = "/og-docs.png", mdHref } = Astro.props;
+const { title, description, headings, currentSlug, image = "/og-docs.png", mdHref, wide = false } = Astro.props;
 const stars = await getGitHubStars();
 
 const pageTitle = currentSlug ? `${title} — Maple Docs` : "Maple Docs";
@@ -100,8 +101,8 @@ const absoluteImage = image.startsWith("http") ? image : new URL(image, Astro.si
             </aside>
 
             <!-- Main content -->
-            <main class="flex-1 min-w-0 lg:ml-60 xl:mr-52">
-                <div class="max-w-3xl mx-auto py-10 px-6">
+            <main class:list={["flex-1 min-w-0 lg:ml-60", !wide && "xl:mr-52"]}>
+                <div class:list={["mx-auto py-10 px-6", wide ? "max-w-4xl" : "max-w-3xl"]}>
                     <DocsMobileNav currentSlug={currentSlug} />
                     <slot />
                     {currentSlug && <DocsPrevNext currentSlug={currentSlug} />}
@@ -109,10 +110,11 @@ const absoluteImage = image.startsWith("http") ? image : new URL(image, Astro.si
             </main>
 
             <!-- Table of Contents -->
-            <aside class="hidden xl:block w-52 shrink-0 fixed top-[5.75rem] right-0 bottom-0 overflow-y-auto py-6 px-5 border-l border-border">
-                <DocsTableOfContents headings={headings} />
-                <AvailableSdks />
-            </aside>
+            {!wide && (
+                <aside class="hidden xl:block w-52 shrink-0 fixed top-[5.75rem] right-0 bottom-0 overflow-y-auto py-6 px-5 border-l border-border">
+                    <DocsTableOfContents headings={headings} />
+                </aside>
+            )}
         </div>
     </body>
 </html>

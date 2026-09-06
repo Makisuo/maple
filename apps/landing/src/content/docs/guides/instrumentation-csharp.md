@@ -2,7 +2,8 @@
 title: "C# / .NET Instrumentation"
 description: "Instrument a .NET application with OpenTelemetry and send traces, logs, and metrics to Maple."
 group: "Instrumentation"
-order: 9
+order: 12
+navLabel: "C# / .NET"
 sdk: "csharp"
 ---
 

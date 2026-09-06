@@ -2,7 +2,8 @@
 title: "Python Instrumentation"
 description: "Instrument a Python application with OpenTelemetry and send traces, logs, and metrics to Maple."
 group: "Instrumentation"
-order: 5
+order: 7
+navLabel: "Python"
 sdk: "python"
 ---
 

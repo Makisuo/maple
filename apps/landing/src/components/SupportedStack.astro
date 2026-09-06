@@ -17,7 +17,7 @@
  */
 import type { AstroComponentFactory } from "astro/runtime/server/index.js";
 import * as m from "../paraglide/messages.js";
-import { BRAND_MARKS, markColor, type BrandMarkId } from "../lib/brand-marks";
+import { BRAND_MARKS, brandMark, markColor, type BrandMarkId } from "../lib/brand-marks";
 import EffectLogo from "./icons/EffectLogo.astro";
 import NodeJsLogo from "./icons/NodeJsLogo.astro";
 import NextjsLogo from "./icons/NextjsLogo.astro";
@@ -39,7 +39,7 @@ const groups: { title: string; body: string; link: string; href: string; chips: 
 		title: m.stack_apm_title(),
 		body: m.stack_apm_body(),
 		link: m.stack_apm_link(),
-		href: "/docs/sdks/overview",
+		href: "/docs/instrumentation",
 		chips: [
 			{ name: "Effect", Icon: EffectLogo },
 			{ name: "Node.js", Icon: NodeJsLogo },
@@ -147,13 +147,13 @@ const groups: { title: string; body: string; link: string; href: string; chips: 
 										<c.Icon class="h-3.5 w-3.5 shrink-0" />
 									) : c.mark ? (
 										<svg
-											viewBox={BRAND_MARKS[c.mark].viewBox ?? "0 0 24 24"}
+											viewBox={brandMark(c.mark).viewBox ?? "0 0 24 24"}
 											class="h-3.5 w-3.5 shrink-0 text-fg"
-											style={`color:${markColor(BRAND_MARKS[c.mark])}`}
+											style={`color:${markColor(brandMark(c.mark))}`}
 											fill="currentColor"
 											aria-hidden="true"
 										>
-											<path d={BRAND_MARKS[c.mark].path} />
+											<path d={brandMark(c.mark).path} />
 										</svg>
 									) : null}
 									{c.name}

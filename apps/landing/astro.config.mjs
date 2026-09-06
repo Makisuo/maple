@@ -60,6 +60,9 @@ const telemetryEnv = {
 export default defineConfig({
 	site: "https://maple.dev",
 	trailingSlash: "ignore",
+	redirects: {
+		"/docs/sdks/overview": "/docs/instrumentation",
+	},
 	i18n: {
 		locales: ["en", "ja", "ko"],
 		defaultLocale: "en",

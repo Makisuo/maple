@@ -2,7 +2,8 @@
 title: "Go Instrumentation"
 description: "Instrument a Go application with OpenTelemetry and send traces, logs, and metrics to Maple."
 group: "Instrumentation"
-order: 6
+order: 8
+navLabel: "Go"
 sdk: "go"
 ---
 

@@ -1,8 +1,9 @@
 ---
-title: "Quick start"
+title: "Effect SDK"
 description: "OpenTelemetry traces, logs, and metrics for Effect applications across Node.js, Bun, Deno, browsers, and Cloudflare Workers."
-group: "Effect SDK"
-order: 2
+group: "Instrumentation"
+order: 1
+navLabel: "Effect"
 sdk: "effect"
 ---
 

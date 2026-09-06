@@ -23,7 +23,7 @@ const { Content, headings } = await render(doc);
     mdHref={`/docs/${doc.id}.md`}
 >
     <article class="docs-content max-w-none">
-        <Breadcrumb sdk={doc.data.sdk} group={doc.data.group} title={doc.data.title} />
+        <Breadcrumb group={doc.data.group} title={doc.data.title} />
         <h1 class="text-xl font-bold text-fg mb-1.5">{doc.data.title}</h1>
         <p class="text-xs text-fg-muted mb-8 leading-relaxed">{doc.data.description}</p>
         <div class="border-t border-border pt-8">

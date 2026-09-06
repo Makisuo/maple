@@ -1,8 +1,9 @@
 ---
-title: "Server"
+title: "Effect SDK on servers"
 description: "Set up the Effect SDK on Node.js, Bun, or Deno with environment-variable auto-detection."
-group: "Platforms"
-order: 3
+group: "Instrumentation"
+order: 2
+navLabel: "Server"
 sdk: "effect"
 ---
 

@@ -1,0 +1,23 @@
+---
+// One brand mark from `lib/brand-marks.ts`, in its brand colour (near-black
+// marks fall back to the foreground colour — see `markColor`).
+import { brandMark, markColor, type BrandMarkId } from "../lib/brand-marks";
+
+interface Props {
+    id: BrandMarkId;
+    class?: string;
+}
+
+const { id, class: className = "h-4 w-4" } = Astro.props;
+const mark = brandMark(id);
+---
+
+<svg
+    viewBox={mark.viewBox ?? "0 0 24 24"}
+    class={className}
+    style={`color:${markColor(mark)}`}
+    fill="currentColor"
+    aria-hidden="true"
+>
+    <path d={mark.path}></path>
+</svg>

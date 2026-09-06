@@ -1,0 +1,79 @@
+---
+// Ecosystem filter chips for /docs/instrumentation. Toggles `hidden` on every
+// `[data-guide-section]` in the page; "All" is the default and the page is
+// fully rendered without JavaScript.
+import { GUIDE_SECTIONS } from "../../lib/instrumentation-guides";
+
+const chips = [
+    { id: "all", label: "All" },
+    ...GUIDE_SECTIONS.map((s) => ({ id: s.id, label: s.chip ?? s.title })),
+];
+---
+
+<div class="guide-filter" role="group" aria-label="Filter guides by ecosystem">
+    {chips.map((chip) => (
+        <button
+            type="button"
+            class="guide-filter__chip"
+            data-guide-filter={chip.id}
+            aria-pressed={chip.id === "all" ? "true" : "false"}
+        >
+            {chip.label}
+        </button>
+    ))}
+</div>
+
+<style>
+    .guide-filter {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 4px 0 8px;
+    }
+    .guide-filter__chip {
+        height: 30px;
+        padding: 0 12px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--muted-foreground);
+        font: inherit;
+        font-size: 12.5px;
+        cursor: pointer;
+        transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
+    }
+    .guide-filter__chip:hover {
+        color: var(--foreground);
+        border-color: color-mix(in oklab, var(--muted-foreground) 50%, transparent);
+    }
+    .guide-filter__chip[aria-pressed="true"] {
+        color: var(--foreground);
+        background: var(--bg-elevated);
+        border-color: color-mix(in oklab, var(--muted-foreground) 50%, transparent);
+    }
+    .guide-filter__chip:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+    }
+</style>
+
+<script is:inline>
+    // Inline scripts run where they sit, before the sections below have been
+    // parsed — so the sections are looked up per click, not at load.
+    (() => {
+        const chips = Array.from(document.querySelectorAll("[data-guide-filter]"));
+
+        const apply = (key) => {
+            for (const chip of chips) {
+                chip.setAttribute("aria-pressed", chip.dataset.guideFilter === key ? "true" : "false");
+            }
+            for (const section of document.querySelectorAll("[data-guide-section]")) {
+                section.hidden = key !== "all" && section.dataset.guideSection !== key;
+            }
+        };
+
+        for (const chip of chips) {
+            chip.addEventListener("click", () => apply(chip.dataset.guideFilter));
+        }
+    })();
+</script>

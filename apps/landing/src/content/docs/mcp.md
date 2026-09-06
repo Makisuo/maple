@@ -1,8 +1,8 @@
 ---
 title: "Maple MCP server"
 description: "Connect Claude, Cursor, and other AI agents to your Maple telemetry over the Model Context Protocol — endpoint, authentication, manifest, and the tools it exposes."
-group: "Getting Started"
-order: 9
+group: "Reference"
+order: 2
 ---
 
 Maple ships a hosted **Model Context Protocol (MCP)** server, so an AI agent can investigate your production telemetry the way an engineer would: list services, search traces and logs, find and triage error issues, inspect dashboards, and create or update alert rules — all against your real data and scoped to your organisation.
