@@ -7,9 +7,14 @@
  * who is being compared. Two hairline cells, each mark in its own brand
  * colour (a vs-pairing is the one place two brand colours belong together),
  * the name, and the vendor's domain as a literal — no claim, no tagline.
+ * Each cell is washed in its side's colour: a flat tint from `.pair-cell`
+ * under a grainy gradient canvas (`PairGrainient`, React Bits' Grainient) in the same
+ * hue — the page's one animated moment.
  */
 import { MapleMark } from "@maple/ui/components/icons/maple-mark";
 import BrandMarkIcon from "../BrandMarkIcon.astro";
+import { brandMark, markTint } from "../../lib/brand-marks";
+import { PairGrainient } from "./PairGrainient";
 import type { Competitor } from "../../lib/competitors";
 
 interface Props {
@@ -17,10 +22,15 @@ interface Props {
 }
 
 const { competitor } = Astro.props;
+// The vendor's brand colour drives its cell's dither; near-black marks tint
+// with the muted foreground so the field stays visible on the dark ground.
+const vendorColor = markTint(brandMark(competitor.mark));
+const MAPLE_AMBER = "#e8872a"; // --primary on the dark theme, as hex
 ---
 
 <div class="relative grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border">
-	<div class="flex flex-col items-center gap-4 bg-bg px-6 py-10 text-center md:py-12">
+	<div class="pair-cell flex flex-col items-center gap-4 px-6 py-10 text-center md:py-12" style="--pair: var(--primary)">
+		<PairGrainient client:only="react" color={MAPLE_AMBER} />
 		<span class="flex h-16 w-16 items-center justify-center rounded-xl border border-border bg-bg-elevated">
 			<MapleMark size={34} className="text-primary" />
 		</span>
@@ -29,7 +39,8 @@ const { competitor } = Astro.props;
 			<div class="mt-1 font-mono text-[11px] text-fg-muted">maple.dev</div>
 		</div>
 	</div>
-	<div class="flex flex-col items-center gap-4 bg-bg px-6 py-10 text-center md:py-12">
+	<div class="pair-cell flex flex-col items-center gap-4 px-6 py-10 text-center md:py-12" style={`--pair: ${vendorColor}`}>
+		<PairGrainient client:only="react" color={vendorColor} />
 		<span class="flex h-16 w-16 items-center justify-center rounded-xl border border-border bg-bg-elevated">
 			<BrandMarkIcon id={competitor.mark} class="h-8 w-8" />
 		</span>

@@ -6,12 +6,14 @@
 import { MapleMark } from "@maple/ui/components/icons/maple-mark";
 import BrandMarkIcon from "../BrandMarkIcon.astro";
 import { comparePath, competitors } from "../../lib/competitors";
+import { PairGrainient } from "./PairGrainient";
 
 const locale = Astro.currentLocale ?? "en";
 ---
 
 <div class="relative grid grid-cols-[1fr_1.6fr] gap-px overflow-hidden rounded-xl border border-border bg-border">
-	<div class="flex flex-col items-center gap-4 bg-bg px-6 py-10 text-center md:py-12">
+	<div class="pair-cell flex flex-col items-center gap-4 px-6 py-10 text-center md:py-12" style="--pair: var(--primary)">
+		<PairGrainient client:only="react" color="#e8872a" />
 		<span class="flex h-16 w-16 items-center justify-center rounded-xl border border-border bg-bg-elevated">
 			<MapleMark size={34} className="text-primary" />
 		</span>
@@ -20,7 +22,7 @@ const locale = Astro.currentLocale ?? "en";
 			<div class="mt-1 font-mono text-[11px] text-fg-muted">maple.dev</div>
 		</div>
 	</div>
-	<ul class="grid grid-cols-2 gap-x-4 gap-y-6 bg-bg px-6 py-8 sm:grid-cols-4 sm:gap-x-2 md:py-10">
+	<ul class="pair-cell grid grid-cols-2 gap-x-4 gap-y-6 px-6 py-8 sm:grid-cols-4 sm:gap-x-2 md:py-10" style="--pair: var(--muted-foreground)">
 		{
 			competitors.map((competitor) => (
 				<li>

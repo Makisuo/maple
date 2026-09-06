@@ -179,3 +179,9 @@ export const markColor = (mark: BrandMark): string => {
 	const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
 	return luminance < 0.18 ? "currentColor" : mark.hex
 }
+
+/**
+ * The colour a mark tints a surface with, always a hex. Marks that `markColor`
+ * would render as `currentColor` tint with the muted foreground instead.
+ */
+export const markTint = (mark: BrandMark): string => (markColor(mark) === "currentColor" ? "#8a7f72" : mark.hex)

@@ -36,6 +36,7 @@
 		"effect": "catalog:effect",
 		"fuse.js": "^7.4.2",
 		"motion": "^12.40.0",
+		"ogl": "^1.0.11",
 		"react": "catalog:react",
 		"react-dom": "catalog:react",
 		"tailwindcss": "catalog:tailwind",

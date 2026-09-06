@@ -383,6 +383,40 @@
 }
 
 /* ──────────────────────────────────────────────────────────────
+   Pair cell dither (the /compare hero's logo pairing).
+   Each cell is washed in one brand colour: a faint flat tint plus an
+   ordered dot screen in the same hue, masked off toward the edges so
+   it reads as a halftone behind the mark rather than a filled card.
+   `--pair` is the brand colour, set inline per cell.
+   ────────────────────────────────────────────────────────────── */
+.pair-cell {
+	position: relative;
+	isolation: isolate;
+	background: color-mix(in oklab, var(--pair) 7%, var(--background));
+}
+.pair-cell::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	pointer-events: none;
+	background-image:
+		radial-gradient(var(--pair) 0.9px, transparent 1.1px),
+		radial-gradient(var(--pair) 0.9px, transparent 1.1px);
+	background-size: 6px 6px, 6px 6px;
+	background-position: 0 0, 3px 3px;
+	opacity: 0.42;
+	-webkit-mask-image: radial-gradient(ellipse 90% 85% at 50% 45%, black 20%, transparent 72%);
+	mask-image: radial-gradient(ellipse 90% 85% at 50% 45%, black 20%, transparent 72%);
+}
+.pair-cell > :not([aria-hidden="true"]) {
+	position: relative;
+}
+.pair-cell canvas {
+	display: block;
+}
+
+/* ──────────────────────────────────────────────────────────────
    Live artifact frame.
    Container around every live demo. Soft 1px border, no glass,
    no blur, deep-ink background, generous padding, monospace inset.

@@ -28,15 +28,15 @@
     "apps/alerting": {
       "name": "@maple/alerting",
       "dependencies": {
-        "@maple-dev/effect-sdk": "workspace:*",
         "@maple/api": "workspace:*",
+        "@maple/infra": "workspace:*",
         "effect": "catalog:effect",
       },
       "devDependencies": {
         "@cloudflare/workers-types": "4.20260603.1",
         "@effect/language-service": "catalog:effect",
         "@effect/vitest": "catalog:effect",
-        "@maple/infra": "workspace:*",
+        "@maple-dev/effect-sdk": "workspace:*",
         "@types/node": "catalog:tooling",
         "typescript": "catalog:tooling",
         "vitest": "catalog:",
@@ -155,6 +155,7 @@
         "effect": "catalog:effect",
         "fuse.js": "^7.4.2",
         "motion": "^12.40.0",
+        "ogl": "^1.0.11",
         "react": "catalog:react",
         "react-dom": "catalog:react",
         "tailwindcss": "catalog:tailwind",
@@ -3395,6 +3396,8 @@
     "obug": ["obug@2.1.4", "", {}, "sha512-4a+OsYv9UktOJKE+l1A4OufDgdRF9PifWj+tJnHURo/P+WOxpG4GzUFL9qCalmWauao6ogiG+QvnCovwPoyAWA=="],
 
     "ofetch": ["ofetch@1.5.1", "", { "dependencies": { "destr": "^2.0.5", "node-fetch-native": "^1.6.7", "ufo": "^1.6.1" } }, "sha512-2W4oUZlVaqAPAil6FUg/difl6YhqhUR7x2eZY4bQCko22UXg3hptq9KLQdqFClV+Wu85UX7hNtdGTngi/1BxcA=="],
+
+    "ogl": ["ogl@1.0.11", "", {}, "sha512-kUpC154AFfxi16pmZUK4jk3J+8zxwTWGPo03EoYA8QPbzikHoaC82n6pNTbd+oEaJonaE8aPWBlX7ad9zrqLsA=="],
 
     "ohash": ["ohash@2.0.11", "", {}, "sha512-RdR9FQrFwNBNXAr4GixM8YaRZRJ5PUWbKYbE5eOsrwAjJW0q2REGcf79oYPsLyskQCZG1PLN+S/K1V00joZAoQ=="],
 
