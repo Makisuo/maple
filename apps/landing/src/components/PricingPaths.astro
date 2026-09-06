@@ -1,0 +1,122 @@
+---
+/**
+ * Ways to run Maple.
+ *
+ * Maple sells one cloud plan, so a tier grid would manufacture a choice that
+ * doesn't exist. What does exist is four real doors into the same product —
+ * local binary, self-hosted source, managed cloud, enterprise — and a buyer
+ * who lands on /pricing usually wants to know which one is theirs before they
+ * read a rate. Four hairline cells, one "best when" line each, one link each.
+ * The cloud cell is the only one with a filled button: it is the thing the
+ * page sells.
+ */
+import * as m from "../paraglide/messages.js";
+import { APP_SIGN_UP_URL } from "../lib/app-urls";
+import { getOffer, money } from "../lib/pricing-offer";
+
+const offer = await getOffer();
+const RETENTION_DAYS = 30;
+
+const paths = [
+	{
+		name: m.pricing_path_local_name(),
+		price: m.pricing_path_local_price(),
+		body: m.pricing_path_local_body(),
+		when: m.pricing_path_local_when(),
+		cta: m.pricing_path_local_cta(),
+		href: "/docs/local-mode",
+		external: false,
+		primary: false,
+	},
+	{
+		name: m.pricing_path_selfhost_name(),
+		price: m.pricing_path_selfhost_price(),
+		body: m.pricing_path_selfhost_body(),
+		when: m.pricing_path_selfhost_when(),
+		cta: m.pricing_path_selfhost_cta(),
+		href: "https://github.com/MapleTechLabs/maple",
+		external: true,
+		primary: false,
+	},
+	{
+		name: m.pricing_path_cloud_name(),
+		price: m.pricing_path_cloud_price({ price: money(offer.price) }),
+		body: m.pricing_path_cloud_body({
+			retention: String(RETENTION_DAYS),
+			trial: String(offer.trialDuration ?? 14),
+		}),
+		when: m.pricing_path_cloud_when(),
+		cta: m.pricing_path_cloud_cta(),
+		href: APP_SIGN_UP_URL,
+		external: false,
+		primary: true,
+	},
+	{
+		name: m.pricing_path_enterprise_name(),
+		price: m.pricing_enterprise_price(),
+		body: m.pricing_path_enterprise_body(),
+		when: m.pricing_path_enterprise_when(),
+		cta: m.pricing_path_enterprise_cta(),
+		href: "https://cal.com/david-granzin/30min?overlayCalendar=true",
+		external: true,
+		primary: false,
+	},
+];
+---
+
+<section class="border-t border-border py-16 md:py-32">
+	<div class="mx-auto max-w-5xl px-6">
+		<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">
+			{m.pricing_paths_eyebrow()}
+		</p>
+		<h2
+			class="mt-4 max-w-[22ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-4xl"
+		>
+			{m.pricing_paths_heading()}
+		</h2>
+		<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-[15px]">
+			{m.pricing_paths_lede()}
+		</p>
+
+		<div
+			class="mt-10 grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-4 md:mt-14"
+		>
+			{
+				paths.map((p) => (
+					<div class={`flex flex-col p-6 ${p.primary ? "bg-primary/[0.06]" : "bg-bg"}`}>
+						<div class="text-[11px] uppercase tracking-widest text-fg-muted">{p.name}</div>
+						<div class="mt-3 font-mono text-xl tabular-nums tracking-[-0.02em] text-fg">{p.price}</div>
+						<p class="mt-4 text-[13px] leading-relaxed text-fg-muted">{p.body}</p>
+						<div class="mt-5 border-t border-border/60 pt-4">
+							<div class="text-[10px] uppercase tracking-[0.16em] text-fg-muted">
+								{m.pricing_paths_when()}
+							</div>
+							<p class="mt-1.5 text-[12.5px] leading-relaxed text-fg">{p.when}</p>
+						</div>
+						<div class="mt-auto pt-6">
+							{p.primary ? (
+								<a
+									href={p.href}
+									data-track="pricing_plan_selected"
+									data-track-plan={offer.name}
+									class="inline-flex h-10 items-center justify-center rounded-lg bg-primary px-4 text-[13px] font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+								>
+									{p.cta}
+								</a>
+							) : (
+								<a
+									href={p.href}
+									target={p.external ? "_blank" : undefined}
+									rel={p.external ? "noopener noreferrer" : undefined}
+									class="text-[12.5px] text-primary transition-colors hover:text-fg"
+								>
+									{p.cta}
+								</a>
+							)}
+						</div>
+					</div>
+				))
+			}
+		</div>
+	</div>
+</section>

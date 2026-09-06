@@ -1,4 +1,12 @@
 ---
+/**
+ * The calculator chapter: your volume, priced by Maple and by one other
+ * vendor, side by side. Each vendor gets its own sliders because none of them
+ * meter the same thing; the Maple column is always the Startup formula.
+ *
+ * `/compare/*` pages pass a fixed `competitor` and get the comparison headed
+ * by the vendor's name; `/pricing` passes nothing and gets the switcher.
+ */
 import { PricingCalculator } from "./PricingCalculator";
 import { PricingComparisonCalculator } from "./PricingComparisonCalculator";
 import * as m from "../paraglide/messages.js";
@@ -13,34 +21,36 @@ interface Props {
 
 const { competitor, competitorName } = Astro.props;
 
-const eyebrow = competitor ? "Pricing" : m.pricing_calc_label();
-const heading = competitor
+const compareEyebrow = competitor ? "Pricing" : m.pricing_calc_label();
+const compareHeading = competitor
     ? `Estimated monthly cost: Maple vs ${competitorName}`
     : m.pricing_calc_heading();
-const subtitle = competitor
+const compareSub = competitor
     ? "Drag the sliders to match your usage and see how the costs compare."
     : m.pricing_calc_sub();
 ---
 
-<section id="calculator" class="py-24 md:py-32">
+<section id="calculator" class="scroll-mt-20 border-t border-border py-16 md:py-32">
     <div class="mx-auto max-w-5xl px-6">
-        <div class="mb-10">
-            <span class="inline-flex items-center rounded-full border border-border bg-card px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary mb-4">
-                {eyebrow}
-            </span>
-            <h2 class="font-display text-2xl sm:text-3xl font-bold text-fg tracking-tight">
-                {heading}
+        <div>
+            <p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">
+                {compareEyebrow}
+            </p>
+            <h2 class="mt-4 max-w-[22ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-4xl">
+                {compareHeading}
             </h2>
-            <p class="mt-2 text-sm text-fg-muted max-w-2xl">
-                {subtitle}
+            <p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-[15px]">
+                {compareSub}
             </p>
         </div>
 
-        {competitor ? (
-            <PricingCalculator competitor={competitor} client:visible />
-        ) : (
-            <PricingComparisonCalculator client:visible />
-        )}
+        <div class="mt-10">
+            {competitor ? (
+                <PricingCalculator competitor={competitor} client:visible />
+            ) : (
+                <PricingComparisonCalculator client:visible />
+            )}
+        </div>
     </div>
 </section>
 
@@ -51,7 +61,7 @@ const subtitle = competitor
         width: 14px;
         height: 14px;
         border-radius: 9999px;
-        background: oklch(0.75 0.12 70);
+        background: var(--primary);
         cursor: pointer;
         position: relative;
         z-index: 2;
@@ -61,18 +71,19 @@ const subtitle = competitor
         height: 14px;
         border-radius: 9999px;
         border: none;
-        background: oklch(0.75 0.12 70);
+        background: var(--primary);
         cursor: pointer;
         position: relative;
         z-index: 2;
     }
-    .slider-input::-webkit-slider-thumb:hover {
-        background: oklch(0.8 0.14 70);
-    }
+    .slider-input::-webkit-slider-thumb:hover,
     .slider-input::-moz-range-thumb:hover {
-        background: oklch(0.8 0.14 70);
+        filter: brightness(1.1);
     }
     .slider-input:focus {
         outline: none;
+    }
+    .slider-input:focus-visible::-webkit-slider-thumb {
+        box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 35%, transparent);
     }
 </style>

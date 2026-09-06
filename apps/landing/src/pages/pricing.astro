@@ -1,56 +1,34 @@
 ---
 import Layout from "../layouts/Layout.astro";
 import Nav from "../components/Nav.astro";
-import FeatureHero from "../components/FeatureHero.astro";
+import PricingHero from "../components/PricingHero.astro";
 import PricingTable from "../components/PricingTable.astro";
 import PricingCalculatorSection from "../components/PricingCalculatorSection.astro";
+import SupportedStack from "../components/SupportedStack.astro";
+import PricingPaths from "../components/PricingPaths.astro";
+import CustomerLogos from "../components/CustomerLogos.astro";
 import FAQ from "../components/FAQ.astro";
 import BottomCTA from "../components/BottomCTA.astro";
 import Footer from "../components/Footer.astro";
 import SeoHead from "../components/SeoHead.astro";
 import * as m from "../paraglide/messages.js";
+import { pricingFaq } from "../lib/pricing-faq";
 
 const pageTitle = m.page_pricing_title();
 const pageDescription = m.page_pricing_desc();
 
-const faqItems = [
-    {
-        question: m.faq_ingestion_q(),
-        answer: m.faq_ingestion_a()
-    },
-    {
-        question: m.faq_limits_q(),
-        answer: m.faq_limits_a()
-    },
-    {
-        question: m.faq_retention_q(),
-        answer: m.faq_retention_a()
-    },
-    {
-        question: m.faq_otel_q(),
-        answer: m.faq_otel_a()
-    },
-    {
-        question: m.faq_selfhost_q(),
-        answer: m.faq_selfhost_a()
-    },
-    {
-        question: m.faq_trial_q(),
-        answer: m.faq_trial_a()
-    }
-];
+const faqItems = await pricingFaq();
 ---
 
 <Layout title={pageTitle} description={pageDescription} mdHref="/pricing.md">
     <SeoHead title={pageTitle} description={pageDescription} />
     <Nav />
-    <FeatureHero
-        label={m.page_pricing_label()}
-        title={m.page_pricing_heading()}
-        subtitle={m.page_pricing_subtitle()}
-    />
+    <PricingHero />
     <PricingTable />
     <PricingCalculatorSection />
+    <SupportedStack />
+    <PricingPaths />
+    <CustomerLogos />
     <FAQ items={faqItems} />
     <BottomCTA />
     <Footer />

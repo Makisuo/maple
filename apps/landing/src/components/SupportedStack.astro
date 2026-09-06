@@ -1,0 +1,197 @@
+---
+/**
+ * What Maple works with.
+ *
+ * The question under every pricing page is "fine, but will it take my stack?"
+ * Six cells answer it: languages, frontend and mobile, logs and infra, cloud
+ * sources, alert destinations, agents. Each is a one-line claim, a row of
+ * marks, and one link into the docs or the feature page that proves it. The
+ * band underneath states the rule that makes the list open-ended: if it emits
+ * OTLP, Maple takes it.
+ *
+ * Every entry here has a shipping doc page, SDK, integration or channel behind
+ * it — this is an inventory, not a roadmap. Marks are shared with the home
+ * runtime band via `lib/brand-marks.ts`; the language marks are the same Astro
+ * components the docs SDK picker uses. Every chip carries a mark: a naked text
+ * chip in a row of marked ones reads as "we forgot", not "no logo exists".
+ */
+import * as m from "../paraglide/messages.js";
+import { BRAND_MARKS, markColor, type BrandMarkId } from "../lib/brand-marks";
+import EffectLogo from "./icons/EffectLogo.astro";
+import NodeJsLogo from "./icons/NodeJsLogo.astro";
+import NextjsLogo from "./icons/NextjsLogo.astro";
+import PythonLogo from "./icons/PythonLogo.astro";
+import GoLogo from "./icons/GoLogo.astro";
+import RustLogo from "./icons/RustLogo.astro";
+import OpenJdkLogo from "./icons/OpenJdkLogo.astro";
+import CsharpLogo from "./icons/CsharpLogo.astro";
+import KotlinLogo from "./icons/KotlinLogo.astro";
+import LaravelLogo from "./icons/LaravelLogo.astro";
+import HazelLogo from "./icons/HazelLogo.astro";
+
+type Chip = { name: string; mark?: BrandMarkId; Icon?: (props: { class?: string }) => unknown };
+
+const mark = (id: BrandMarkId, name: string = BRAND_MARKS[id].name): Chip => ({ name, mark: id });
+
+const groups: { title: string; body: string; link: string; href: string; chips: Chip[] }[] = [
+	{
+		title: m.stack_apm_title(),
+		body: m.stack_apm_body(),
+		link: m.stack_apm_link(),
+		href: "/docs/sdks/overview",
+		chips: [
+			{ name: "Effect", Icon: EffectLogo },
+			{ name: "Node.js", Icon: NodeJsLogo },
+			{ name: "Next.js", Icon: NextjsLogo },
+			{ name: "Python", Icon: PythonLogo },
+			{ name: "Go", Icon: GoLogo },
+			{ name: "Rust", Icon: RustLogo },
+			{ name: "Java", Icon: OpenJdkLogo },
+			{ name: "C#", Icon: CsharpLogo },
+			{ name: "Kotlin", Icon: KotlinLogo },
+			{ name: "Laravel", Icon: LaravelLogo },
+		],
+	},
+	{
+		title: m.stack_frontend_title(),
+		body: m.stack_frontend_body(),
+		link: m.stack_frontend_link(),
+		href: "/features/browser-sessions",
+		chips: [mark("javascript", m.stack_chip_browser()), mark("swift", m.stack_chip_ios())],
+	},
+	{
+		title: m.stack_infra_title(),
+		body: m.stack_infra_body(),
+		link: m.stack_infra_link(),
+		href: "/features/kubernetes-monitoring",
+		chips: [
+			mark("opentelemetry", m.stack_chip_collector()),
+			mark("kubernetes"),
+			mark("docker"),
+			mark("prometheus"),
+			mark("cloudflare"),
+		],
+	},
+	{
+		title: m.stack_cloud_title(),
+		body: m.stack_cloud_body(),
+		link: m.stack_cloud_link(),
+		href: "/docs/integrations/github",
+		chips: [
+			mark("cloudflare"),
+			mark("planetscale"),
+			mark("github"),
+			mark("warpstream"),
+			{ name: "Hazel", Icon: HazelLogo },
+		],
+	},
+	{
+		title: m.stack_alerts_title(),
+		body: m.stack_alerts_body(),
+		link: m.stack_alerts_link(),
+		href: "/features/alerts",
+		chips: [
+			mark("slack"),
+			mark("pagerduty"),
+			mark("discord"),
+			mark("telegram"),
+			mark("email", m.stack_chip_email()),
+			mark("webhooks", m.stack_chip_webhooks()),
+			{ name: "Hazel", Icon: HazelLogo },
+		],
+	},
+	{
+		title: m.stack_agents_title(),
+		body: m.stack_agents_body(),
+		link: m.stack_agents_link(),
+		href: "/features/ai-mcp-integration",
+		chips: [
+			mark("claude", m.stack_chip_claude_code()),
+			mark("cursor", m.stack_chip_cursor()),
+			mark("mcp", m.stack_chip_any_mcp()),
+		],
+	},
+];
+---
+
+<section class="border-t border-border py-16 md:py-32">
+	<div class="mx-auto max-w-5xl px-6">
+		<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">
+			{m.stack_eyebrow()}
+		</p>
+		<h2
+			class="mt-4 max-w-[24ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-4xl"
+		>
+			{m.stack_heading()}
+		</h2>
+		<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-[15px]">
+			{m.stack_lede()}
+		</p>
+
+		<div
+			class="mt-10 grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-border bg-border md:mt-14 md:grid-cols-2 lg:grid-cols-3"
+		>
+			{
+				groups.map((g) => (
+					<div class="flex flex-col bg-bg p-6">
+						<h3 class="text-[13px] font-medium text-fg">{g.title}</h3>
+						<p class="mt-2 text-[12.5px] leading-relaxed text-fg-muted">{g.body}</p>
+
+						{/* Marks carry their brand colour; the name is always printed too — a
+						    mark alone is ambiguous at 14px. */}
+						<ul class="mt-5 flex flex-wrap gap-1.5">
+							{g.chips.map((c) => (
+								<li class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-bg-elevated px-2 text-[11.5px] text-fg">
+									{c.Icon ? (
+										<c.Icon class="h-3.5 w-3.5 shrink-0" />
+									) : c.mark ? (
+										<svg
+											viewBox={BRAND_MARKS[c.mark].viewBox ?? "0 0 24 24"}
+											class="h-3.5 w-3.5 shrink-0 text-fg"
+											style={`color:${markColor(BRAND_MARKS[c.mark])}`}
+											fill="currentColor"
+											aria-hidden="true"
+										>
+											<path d={BRAND_MARKS[c.mark].path} />
+										</svg>
+									) : null}
+									{c.name}
+								</li>
+							))}
+						</ul>
+
+						<div class="mt-auto pt-5">
+							<a href={g.href} class="text-[12.5px] text-primary transition-colors hover:text-fg">
+								{g.link}
+							</a>
+						</div>
+					</div>
+				))
+			}
+		</div>
+
+		{/* The rule that makes the grid open-ended. */}
+		<div
+			class="mt-4 flex flex-col gap-4 rounded-xl border border-border bg-bg-elevated px-6 py-5 sm:flex-row sm:items-center sm:justify-between"
+		>
+			<div class="flex items-start gap-3">
+				<svg
+					viewBox="0 0 24 24"
+					class="mt-0.5 h-4 w-4 shrink-0"
+					style={`color:${markColor(BRAND_MARKS.opentelemetry)}`}
+					fill="currentColor"
+					aria-hidden="true"
+				>
+					<path d={BRAND_MARKS.opentelemetry.path} />
+				</svg>
+				<div>
+					<div class="text-[13px] font-medium text-fg">{m.stack_otel_title()}</div>
+					<p class="mt-1 max-w-[70ch] text-[12.5px] leading-relaxed text-fg-muted">{m.stack_otel_body()}</p>
+				</div>
+			</div>
+			<a href="/docs" class="shrink-0 text-[12.5px] text-primary transition-colors hover:text-fg">
+				{m.stack_otel_link()}
+			</a>
+		</div>
+	</div>
+</section>
