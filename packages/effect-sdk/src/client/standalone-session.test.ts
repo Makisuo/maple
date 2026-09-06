@@ -43,8 +43,11 @@ const setupFetch = () => {
 }
 
 const stubWindow = () => {
+	vi.stubGlobal("document", new EventTarget())
 	const store = new Map<string, string>()
 	vi.stubGlobal("window", {
+		addEventListener: vi.fn(),
+		removeEventListener: vi.fn(),
 		sessionStorage: {
 			getItem: (k: string) => store.get(k) ?? null,
 			setItem: (k: string, v: string) => void store.set(k, v),
@@ -60,6 +63,7 @@ const baseConfig = {
 	ingestKey: "secret",
 	environment: "test",
 	serviceVersion: "63c0c0321644dce742e92dfd09fb96e907649bc4",
+	replay: { enabled: false },
 	autoFlushInterval: false as const,
 	flushOnUnload: false as const,
 }

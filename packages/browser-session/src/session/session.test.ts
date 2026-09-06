@@ -32,6 +32,7 @@ const STORAGE_KEY = "maple.session"
 let storage: FakeStorage
 
 beforeEach(() => {
+	vi.stubGlobal("document", {})
 	vi.useFakeTimers()
 	vi.setSystemTime(new Date("2026-05-22T12:00:00Z"))
 	storage = new FakeStorage()
@@ -43,6 +44,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+	vi.unstubAllGlobals()
 	vi.useRealTimers()
 	delete (globalThis as { window?: unknown }).window
 })
@@ -111,6 +113,13 @@ describe("getSession", () => {
 })
 
 describe("getSessionId", () => {
+	it("returns undefined when window exists without a document (React Native)", () => {
+		vi.stubGlobal("document", undefined)
+		vi.stubGlobal("crypto", undefined)
+		expect(getSessionId()).toBeUndefined()
+		expect(storage.getItem(STORAGE_KEY)).toBeNull()
+	})
+
 	it("returns undefined outside a browser (SSR)", () => {
 		delete (globalThis as { window?: unknown }).window
 		expect(getSessionId()).toBeUndefined()

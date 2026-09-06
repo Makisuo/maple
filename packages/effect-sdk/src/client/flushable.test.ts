@@ -273,7 +273,10 @@ describe("MapleFlush.make (client)", () => {
 		// sessionStorage. The bundled @maple/browser-session core must mint a
 		// session and stamp its id on every span.
 		const store = new Map<string, string>()
+		vi.stubGlobal("document", new EventTarget())
 		vi.stubGlobal("window", {
+			addEventListener: vi.fn(),
+			removeEventListener: vi.fn(),
 			sessionStorage: {
 				getItem: (k: string) => store.get(k) ?? null,
 				setItem: (k: string, v: string) => void store.set(k, v),
@@ -283,7 +286,7 @@ describe("MapleFlush.make (client)", () => {
 			rf()
 			vi.unstubAllGlobals()
 		}
-		const telemetry = make(baseConfig)
+		const telemetry = make({ ...baseConfig, replay: { enabled: false } })
 
 		await Effect.runPromise(
 			Effect.succeed(undefined).pipe(Effect.withSpan("op-a"), Effect.provide(telemetry.layer)),

@@ -302,7 +302,7 @@ function touchSession(now: number): SessionRecord {
  * (SSR) so server renders never mint a session shared across requests.
  */
 export function getSessionId(): string | undefined {
-	if (typeof window === "undefined") return undefined
+	if (typeof window === "undefined" || typeof document === "undefined") return undefined
 	return touchSession(Date.now()).id
 }
 
