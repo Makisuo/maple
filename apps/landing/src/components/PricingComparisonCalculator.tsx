@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { competitorConfigs, PricingCalculator, type Competitor } from "./PricingCalculator"
 
-const COMPETITORS: Competitor[] = ["datadog", "grafana", "new-relic", "dash0", "openobserve"]
+const COMPETITORS: Competitor[] = ["datadog", "grafana", "new-relic", "dash0", "openobserve", "signoz"]
 
 /**
  * Wraps PricingCalculator with a competitor switcher so the /pricing page can

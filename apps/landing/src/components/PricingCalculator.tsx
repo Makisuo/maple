@@ -2,7 +2,7 @@ import { useState, useMemo, useRef } from "react"
 import { trackLanding } from "../lib/telemetry"
 import { APP_SIGN_UP_URL } from "../lib/app-urls"
 
-export type Competitor = "datadog" | "grafana" | "new-relic" | "dash0" | "openobserve"
+export type Competitor = "datadog" | "grafana" | "new-relic" | "dash0" | "openobserve" | "signoz"
 
 interface SliderConfig {
 	key: string
@@ -160,6 +160,38 @@ export const competitorConfigs: Record<Competitor, { name: string; sliders: Slid
 			},
 		],
 	},
+	signoz: {
+		name: "SigNoz",
+		sliders: [
+			{
+				key: "logVolume",
+				label: "Log volume",
+				min: 10,
+				max: 10000,
+				step: 50,
+				default: 100,
+				unit: "GB/mo",
+			},
+			{
+				key: "traceVolume",
+				label: "Trace volume",
+				min: 10,
+				max: 10000,
+				step: 50,
+				default: 100,
+				unit: "GB/mo",
+			},
+			{
+				key: "metricSamples",
+				label: "Metric samples / mo",
+				min: 10,
+				max: 20000,
+				step: 50,
+				default: 500,
+				unit: "M",
+			},
+		],
+	},
 } satisfies Record<Competitor, { name: string; sliders: SliderConfig[] }>
 
 function calculateDatadog(values: Record<string, number>) {
@@ -272,6 +304,40 @@ function calculateOpenObserve(values: Record<string, number>) {
 	}
 }
 
+function calculateSigNoz(values: Record<string, number>) {
+	// SigNoz Cloud (Teams) published pricing: logs & traces $0.30/GB ingested at
+	// the default 15-day retention, metrics $0.10 per million samples at the
+	// default 1-month retention, and a $49/mo minimum that *includes* $49 of
+	// usage — the bill is max($49, usage), matching SigNoz's own calculator.
+	// Longer retention costs more and is not modeled ($/GB: 15d 0.30, 30d 0.40,
+	// 90d 0.60, 180d 0.80, 1y 1.40; $/mn metric samples: 1mo 0.10, 3mo 0.12,
+	// 6mo 0.15, 13mo 0.18), which biases the estimate in SigNoz's favor.
+	const MINIMUM = 49
+	const logCost = values.logVolume * 0.3
+	const traceCost = values.traceVolume * 0.3
+	const metricCost = values.metricSamples * 0.1
+	const usage = logCost + traceCost + metricCost
+	const minimumTopUp = Math.max(0, MINIMUM - usage)
+
+	return {
+		total: Math.max(MINIMUM, usage),
+		breakdown: [
+			{ label: "Logs", value: logCost, detail: `${values.logVolume} GB × $0.30` },
+			{ label: "Traces", value: traceCost, detail: `${values.traceVolume} GB × $0.30` },
+			{ label: "Metrics", value: metricCost, detail: `${values.metricSamples}M samples × $0.10/M` },
+			...(minimumTopUp > 0
+				? [
+						{
+							label: "Minimum spend",
+							value: minimumTopUp,
+							detail: "$49/mo minimum includes $49 of usage",
+						},
+					]
+				: []),
+		].filter((item) => item.value > 0),
+	}
+}
+
 function calculateMaple(values: Record<string, number>, competitor: Competitor) {
 	// Maple Startup (autumn.config.ts): $39/mo with 100 GB included per signal
 	// (logs, traces, metrics) and $0.30/GB overage billed per signal — the
@@ -300,6 +366,15 @@ function calculateMaple(values: Record<string, number>, competitor: Competitor) 
 		logsGB = values.logVolume
 		tracesGB = values.traceVolume
 		metricsGB = values.metricVolume
+	} else if (competitor === "signoz") {
+		// SigNoz bills logs and traces per GB ingested, so those map across
+		// directly. Metrics are billed per sample (one data point of one time
+		// series); converting at ~0.1 KB per decoded metric data point gives
+		// 0.1 GB per million samples — the same ratio the Dash0 and Grafana
+		// branches use.
+		logsGB = values.logVolume
+		tracesGB = values.traceVolume
+		metricsGB = values.metricSamples * 0.1
 	} else if (competitor === "dash0") {
 		// Dash0 bills per item; convert counts to decoded OTLP volume at
 		// ~1 KB per span and per log record, ~0.1 KB per metric data point.
@@ -403,6 +478,7 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 		if (competitor === "grafana") return calculateGrafana(values)
 		if (competitor === "dash0") return calculateDash0(values)
 		if (competitor === "openobserve") return calculateOpenObserve(values)
+		if (competitor === "signoz") return calculateSigNoz(values)
 		return calculateNewRelic(values)
 	}, [competitor, values])
 
@@ -551,6 +627,8 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 					" New Relic modeled on Standard ($10 first user + $99/user, max 5) up to 5 full platform users and Pro ($349/user/mo, annual commitment) above, with the Original Data option ($0.40/GB beyond 100 GB free); data is assumed to split evenly across logs, traces, and metrics."}
 				{competitor === "dash0" &&
 					" Dash0 bills per data point (spans & logs $0.60/M, metrics $0.20/M); Maple bills per GB, so the Maple estimate converts at roughly 1 KB per span and log record and 0.1 KB per metric data point. Your real ratio depends on attribute and payload sizes."}
+				{competitor === "signoz" &&
+					" SigNoz modeled on the Teams plan at its default retention (logs and traces $0.30/GB at 15 days, metrics $0.10 per million samples at 1 month) with the $49/mo minimum that includes $49 of usage; longer retention costs more (up to $1.40/GB at 1 year) and is not included, which favors SigNoz. Maple bills per GB, so the Maple estimate converts metric samples at roughly 0.1 KB per data point (0.1 GB per million samples)."}
 				{competitor === "openobserve" &&
 					" OpenObserve modeled at its headline $0.50/GB ingestion rate, which already includes the 30% annual-commitment discount; query fees ($0.01/GB scanned) and extended retention beyond the included 30 days for logs and traces ($0.02/GB per additional 30 days) are not included, which favors OpenObserve."}
 			</p>
