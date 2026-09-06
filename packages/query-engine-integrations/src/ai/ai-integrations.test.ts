@@ -18,7 +18,6 @@ const row = (
 	statusMessage: "",
 	timestamp: "2026-08-12 15:18:42.207000000",
 	spanAttributes,
-	resourceAttributes: {},
 	...overrides,
 })
 
@@ -351,18 +350,6 @@ describe("span envelope", () => {
 		})
 	})
 
-	it("reads gen_ai keys from span attributes alone", () => {
-		// A resource-level `gen_ai.*` key describes the process, not the
-		// operation: honouring it would stamp every span of that service —
-		// Postgres, HTTP, everything — as an AI span.
-		const mapped = mapAiSpan(
-			row({}, { resourceAttributes: { "gen_ai.request.model": "resource-level" } }),
-		)
-
-		expect(mapped.genAi.requestModel).toBeUndefined()
-		expect(mapped.isAiSpan).toBe(false)
-	})
-
 	it("maps a whole trace's worth of spans in order", () => {
 		const mapped = mapAiSpans([
 			row(INVOKE_AGENT_ATTRS),
@@ -397,15 +384,6 @@ describe("resolveAiIntegration", () => {
 })
 
 describe("untrusted attribute keys", () => {
-	it("ignores a vendor stamp that arrives via a resource attribute", () => {
-		// The envelope is read from span attributes alone, so a resource-level
-		// stamp neither selects an integration nor marks the span.
-		const mapped = mapAiSpan(row({}, { resourceAttributes: { "maple_ai.vendor.id": "eve" } }))
-
-		expect(mapped.vendorId).toBeUndefined()
-		expect(mapped.isAiSpan).toBe(false)
-	})
-
 	it("keeps a prompt variable literally named __proto__ as AI signal", () => {
 		expect(mapAiSpan(row({ "gen_ai.prompt.variable.__proto__": "kept" })).isAiSpan).toBe(true)
 	})

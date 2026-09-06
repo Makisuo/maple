@@ -66,7 +66,6 @@ const spanRow = (index: number) => ({
 	statusMessage: "",
 	timestamp: "2026-08-19 10:00:00.000000000",
 	spanAttributes: { "gen_ai.operation.name": "chat", "maple_ai.session.id": SESSION_ID },
-	resourceAttributes: {},
 })
 
 const makeHarness = (overrides: Partial<WarehouseQueryServiceApi>) => {
@@ -230,7 +229,8 @@ describe("POST /internal/ai-sessions/spans", () => {
 			expect(windowSql).toContain(`TraceId = '${TRACE_ID}'`)
 			expect(windowSql).not.toContain("maple_ai.session.id")
 			expect(spansSql).toContain(`TraceId = '${TRACE_ID}'`)
-			expect(spansSql).not.toContain("maple_ai.session.id")
+			// The projection names the key; the predicate is what must be absent.
+			expect(spansSql).not.toContain("SpanAttributes['maple_ai.session.id']")
 			// The bounds the window read handed back still prune the span read.
 			expect(spansSql).toContain(`Timestamp >= '${resolved.startTime}'`)
 			expect(spansSql).not.toContain("__PARAM_")

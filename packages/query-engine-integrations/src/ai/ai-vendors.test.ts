@@ -15,7 +15,6 @@ const row = (vendorId: string, spanAttributes: Record<string, string>): AiSessio
 	statusMessage: "",
 	timestamp: "2026-08-12 15:19:41.626000000",
 	spanAttributes: { ...spanAttributes, "maple_ai.vendor.id": vendorId, "maple_ai.vendor.version": "0" },
-	resourceAttributes: {},
 })
 
 describe("vercel_ai_sdk", () => {
