@@ -107,7 +107,7 @@ export function AgentSessionsFilterSidebar({ facetsResult }: AgentSessionsFilter
 			navigate({ search: (prev) => ({ ...prev, [minKey]: min, [maxKey]: max }) })
 		}
 
-	// Everything the sidebar and the toolbar own; the window and the sort stay.
+	// Everything the sidebar and the toolbar own; the sort stays.
 	const clearAllFilters = () => {
 		navigate({
 			search: (prev) => ({
@@ -264,7 +264,7 @@ export function AgentSessionsFilterSidebar({ facetsResult }: AgentSessionsFilter
 
 						{vendors.length === 0 && services.length === 0 && (
 							<p className="py-4 text-sm text-muted-foreground">
-								No sessions in the selected time range
+								No sessions in the last 7 days
 							</p>
 						)}
 					</FilterSidebarBody>

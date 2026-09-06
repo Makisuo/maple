@@ -134,6 +134,8 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 									agentNames: ranked.agentNames,
 									llmCalls: ranked.llmCalls,
 									toolCalls: ranked.toolCalls,
+									toolErrorCount: ranked.toolErrors,
+									turnErrorCount: ranked.turnErrors,
 									totalTokens: ranked.totalTokens,
 									cost: ranked.cost,
 								}
@@ -229,7 +231,10 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 								? { startTime: bounds.startTime, endTime: bounds.endTime }
 								: undefined)
 						if (window === undefined) {
-							return new GetAiSessionSpansResponse({ data: [], truncated: false })
+							return new GetAiSessionSpansResponse({
+								data: [],
+								truncated: false,
+							})
 						}
 						// One row past the cap: the extra row is what distinguishes a
 						// session that exactly fills the cap from one whose tail was cut.
@@ -239,7 +244,11 @@ export const HttpAiSessionsInternalLive = HttpApiBuilder.group(
 										Integrations.aiSessionSpansQuery({
 											limit: AI_SESSION_SPANS_MAX_SPANS + 1,
 										}),
-										{ orgId: tenant.orgId, sessionId: payload.sessionId, ...window },
+										{
+											orgId: tenant.orgId,
+											sessionId: payload.sessionId,
+											...window,
+										},
 										{ rowSchema: Integrations.aiSessionSpansRowSchema },
 									)
 								: CH.compile(

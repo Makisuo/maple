@@ -87,7 +87,10 @@ describe("AgentSessionsFilterSidebar", () => {
 		cleanup()
 		render(<AgentSessionsFilterSidebar facetsResult={facets} />)
 		fireEvent.click(screen.getByText("Over $1"))
-		expect(nextSearch()).toMatchObject({ costMin: undefined, costMax: undefined })
+		expect(nextSearch()).toMatchObject({
+			costMin: undefined,
+			costMax: undefined,
+		})
 	})
 
 	it("clears every filter but leaves the window and the sort alone", () => {
@@ -128,22 +131,30 @@ describe("AgentSessionsToolbar", () => {
 
 	it("names the current sort and offers every measure", () => {
 		const onSortChange = vi.fn()
+		const onToggleErrorsOnly = vi.fn()
 		render(
 			<AgentSessionsToolbar
 				query=""
 				onSearch={vi.fn()}
 				errorsOnly={false}
-				onToggleErrorsOnly={vi.fn()}
+				onToggleErrorsOnly={onToggleErrorsOnly}
 				sortKey={sortOptionFor("cost", "desc").key}
 				onSortChange={onSortChange}
+				sessionCount={12}
 			/>,
 		)
 
-		// The menu itself is portal-rendered on open; jsdom sees the trigger.
-		expect(screen.getByRole("combobox", { name: "Sort sessions" })).toBeTruthy()
-		expect(screen.getByRole("button", { name: /with errors/i }).getAttribute("aria-pressed")).toBe(
-			"false",
-		)
+		// The menu itself is portal-rendered on open; jsdom sees the trigger,
+		// which names the sort it is set to.
+		const sort = screen.getByRole("combobox", { name: "Sort sessions" })
+		expect(sort.textContent).toContain("Most expensive")
+		// The error filter is a switch: on or off, never a button that looks
+		// like a warning about the list.
+		const errors = screen.getByRole("switch", { name: "With errors" })
+		expect(errors.getAttribute("aria-checked")).toBe("false")
+		fireEvent.click(errors)
+		expect(onToggleErrorsOnly).toHaveBeenCalledOnce()
+		expect(screen.getByText("12")).toBeTruthy()
 		expect(screen.getByPlaceholderText("Session or trace ID…")).toBeTruthy()
 	})
 

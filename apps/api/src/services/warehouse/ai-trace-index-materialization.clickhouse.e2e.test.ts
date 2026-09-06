@@ -289,7 +289,9 @@ const runJson = async (sql: string): Promise<ReadonlyArray<Record<string, unknow
 		default_format: "JSON",
 		output_format_json_quote_64bit_integers: "0",
 	})
-	const parsed = JSON.parse(body) as { readonly data?: ReadonlyArray<Record<string, unknown>> }
+	const parsed = JSON.parse(body) as {
+		readonly data?: ReadonlyArray<Record<string, unknown>>
+	}
 	return parsed.data ?? []
 }
 
@@ -443,7 +445,9 @@ describe.skipIf(!clickhouseE2eEnabled)("ai_trace_index materialization", () => {
 		// `orgId` and the page's two bounds — stage two takes no window param from
 		// the caller, so there is nothing else to pass.
 		const compiled = compileUnsafe(
-			Integrations.aiSessionListQuery({ sessionIds: page.map((row) => row.sessionId) }),
+			Integrations.aiSessionListQuery({
+				sessionIds: page.map((row) => row.sessionId),
+			}),
 			{ orgId: ORG_ID, fanOutStart, fanOutEnd },
 		)
 		const rows = Effect.runSync(compiled.decodeRows(await runJson(compiled.sql)))
@@ -467,6 +471,21 @@ describe.skipIf(!clickhouseE2eEnabled)("ai_trace_index materialization", () => {
 				// not among them.
 				[SESSION_ID, "eve", 2, 6],
 			],
+		)
+		// The buckets off the raw attributes, deepest reporter counted like the
+		// index's total: the turn span's roll-up of its chat call is not added
+		// again, and the Vercel dialect's prompt/completion spellings are read.
+		const buckets = (row: Integrations.AiSessionListOutput) => [
+			row.inputTokens,
+			row.cacheReadTokens,
+			row.cacheWriteTokens,
+			row.outputTokens,
+			row.reasoningTokens,
+		]
+		assert.deepStrictEqual(buckets(byId.get(SESSION_ID)!), [100, 0, 0, 50, 0])
+		assert.deepStrictEqual(
+			buckets(byId.get(`${MAPLE_AI_TRACE_SESSION_PREFIX}${SESSIONLESS_TRACE}`)!),
+			[10, 0, 0, 5, 0],
 		)
 	})
 
@@ -495,6 +514,8 @@ describe.skipIf(!clickhouseE2eEnabled)("ai_trace_index materialization", () => {
 		assert.strictEqual(sessionless!.totalTokens, 15)
 		assert.strictEqual(sessionless!.cost, 0)
 		assert.strictEqual(sessionless!.errorAgentSpans, 1)
+		// The one failed span is a model call: a turn failure, not a tool's.
+		assert.deepStrictEqual([sessionless!.toolErrors, sessionless!.turnErrors], [0, 1])
 		// One span of 1ms: the extent is its own duration.
 		assert.strictEqual(sessionless!.agentDurationMs, 1)
 
@@ -508,6 +529,9 @@ describe.skipIf(!clickhouseE2eEnabled)("ai_trace_index materialization", () => {
 		assert.strictEqual(session!.totalTokens, 150)
 		assert.strictEqual(session!.cost, 0.02)
 		assert.strictEqual(session!.errorAgentSpans, 1)
+		// The failed tool span under an `Ok` turn: one tool error, and no turn
+		// error echoed off it. The failure lambda is raw SQL too.
+		assert.deepStrictEqual([session!.toolErrors, session!.turnErrors], [1, 0])
 		// From the first turn span to the end of the second trace's turn span.
 		assert.strictEqual(session!.agentDurationMs, 30_001)
 	})
