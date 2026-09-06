@@ -461,6 +461,9 @@
     "packages/alchemy-maple": {
       "name": "@maple-dev/alchemy",
       "version": "0.1.0",
+      "dependencies": {
+        "@maple-dev/effect-sdk": "workspace:*",
+      },
       "devDependencies": {
         "@effect/language-service": "catalog:effect",
         "@effect/vitest": "catalog:effect",
@@ -612,7 +615,7 @@
       "name": "@maple/infra",
       "dependencies": {
         "@distilled.cloud/aws": "1.0.0-rc.6",
-        "@maple-dev/effect-sdk": "workspace:*",
+        "@maple-dev/alchemy": "workspace:*",
         "@maple/alchemy-portless": "workspace:*",
         "@maple/domain": "workspace:*",
         "alchemy": "2.0.0-beta.74",

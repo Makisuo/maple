@@ -1,8 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Fiber, Layer } from "effect"
+import { Duration, Effect, Exit, Fiber, Layer, Scope } from "effect"
 import { TestClock } from "effect/testing"
 import { afterEach, expect, vi } from "vitest"
-import { make } from "./index.js"
+import { make, WorkerEnvironment } from "./index.js"
 
 interface FetchCall {
 	readonly url: string
@@ -382,5 +382,36 @@ describe("MapleCloudflareSDK.make", () => {
 		const b = telemetry.layer
 		expect(a).toBe(b)
 		expect(Layer.isLayer(a)).toBe(true)
+	})
+})
+
+describe("MapleCloudflareSDK.make requestLayer", () => {
+	it("flushes with the Worker env once the scope it was built into closes", async () => {
+		const { calls, restore } = setupFetch()
+		try {
+			const telemetry = make({ serviceName: "unit-test" })
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const scope = yield* Scope.make()
+					const services = yield* Layer.buildWithScope(
+						telemetry.requestLayer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env))),
+						scope,
+					)
+					yield* Effect.succeed(undefined).pipe(Effect.withSpan("op-1"), Effect.provide(services))
+					// Nothing leaves the isolate while the event is still running.
+					expect(calls).toHaveLength(0)
+					yield* Scope.close(scope, Exit.void)
+				}),
+			)
+			const traces = calls.filter((call) => call.url === "https://collector.test/v1/traces")
+			expect(traces).toHaveLength(1)
+			expect(traces[0]?.headers.authorization).toBe("Bearer secret")
+			const body = traces[0]?.body as {
+				resourceSpans: Array<{ scopeSpans: Array<{ spans: Array<{ name: string }> }> }>
+			}
+			expect(body.resourceSpans[0]?.scopeSpans[0]?.spans.map((span) => span.name)).toEqual(["op-1"])
+		} finally {
+			restore()
+		}
 	})
 })

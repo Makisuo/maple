@@ -187,10 +187,13 @@ deployed isolate — and two rules keep it honest about which one it is in:
   OTEL semconv), so no `orDie` sits on the request path — the one that did turned every 404
   into an Error span. `apps/electric-sync/src/worker-bridge.test.ts` drives the real bridge
   path and pins all three outcomes. Telemetry is one line on init,
-  `Effect.provide(WorkerTelemetry({ serviceName }))` from `@maple/infra/worker-telemetry` —
-  Maple's counterpart of alchemy's `Axiom.Telemetry` sugar: it registers the SDK layer with
-  alchemy's `Telemetry.layer`, which builds it into each request scope, and a finalizer there
-  flushes after the response, so there is no hand-rolled tracer, `waitUntil`, or flush shim.
+  `Effect.provide(WorkerTelemetry({ serviceName }))` from `@maple/infra/worker-telemetry`: the
+  published `Maple.Telemetry` from `@maple-dev/alchemy/telemetry` (Maple's counterpart of
+  alchemy's `Axiom.Telemetry` sugar) with Maple's own defaults. It registers the SDK's
+  `requestLayer` with alchemy's `Telemetry.layer`, which builds it into each request scope
+  and flushes after the response — no hand-rolled tracer, `waitUntil`, or flush shim. The
+  key/endpoint bindings `Maple.Telemetry` can do stay off for our Workers:
+  `selfObservabilityEnv(stage)` owns those, with the PR-preview rules.
 
 What it costs: the root stack imports the worker module, so the Alchemy-entrypoints
 typecheck (`tsconfig.alchemy.json`) covers electric-sync's runtime graph and needs

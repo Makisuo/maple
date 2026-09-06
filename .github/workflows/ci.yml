@@ -340,11 +340,11 @@ jobs:
             # and CI calls turbo directly. Without this they ship unchecked.
             #
             # That program reaches the single-module Workers (electric-sync, alerting,
-            # landing, local-ui), whose `@maple-dev/effect-sdk` imports type from built
-            # dist, so the sdk builds first.
+            # landing, local-ui), whose `@maple-dev/effect-sdk` and `@maple-dev/alchemy`
+            # imports type from built dist, so both build first.
             - name: Build the libraries the Alchemy entrypoints import
               if: ${{ matrix.shard == 'quality' }}
-              run: bun turbo build --filter=@maple-dev/effect-sdk
+              run: bun turbo build --filter=@maple-dev/effect-sdk --filter=@maple-dev/alchemy
             - name: Typecheck Alchemy entrypoints
               if: ${{ matrix.shard == 'quality' }}
               run: bunx tsc -p tsconfig.alchemy.json

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
-import { WorkerEnvironment } from "@maple/infra/worker-runtime"
-import { requestTelemetryLayer, workerTelemetrySdk } from "@maple/infra/worker-telemetry"
+import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
+import { workerTelemetryConfig } from "@maple/infra/worker-telemetry"
 import * as Cloudflare from "alchemy/Cloudflare"
 import { Effect, Exit, Layer, Schema, Scope } from "effect"
 import { HttpRouter } from "effect/unstable/http"
@@ -85,9 +85,9 @@ const event = (path: string, app: ReturnType<typeof appLayer> = appLayer()) =>
 		const handler = yield* HttpRouter.toHttpEffect(app).pipe(Scope.provide(isolate))
 		const request = yield* Scope.make()
 		const services = yield* Layer.buildWithScope(
-			requestTelemetryLayer(workerTelemetrySdk({ serviceName: "electric-sync" })).pipe(
-				Layer.provide(Layer.succeed(WorkerEnvironment, env)),
-			),
+			MapleCloudflareSDK.make(
+				workerTelemetryConfig({ serviceName: "electric-sync" }),
+			).requestLayer.pipe(Layer.provide(Layer.succeed(MapleCloudflareSDK.WorkerEnvironment, env))),
 			request,
 		)
 		const fetchEvent: Effect.Effect<Response, unknown, Scope.Scope> | undefined =

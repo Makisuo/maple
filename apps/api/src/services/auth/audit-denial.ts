@@ -17,11 +17,6 @@ const MAX_TRACKED_DENIALS = 10_000
  */
 const recentDenials = new Map<string, number>()
 
-/** Test-only: clear the isolate-local coalescing state between cases. */
-export const resetAuditDenialCoalescing = (): void => {
-	recentDenials.clear()
-}
-
 /**
  * True when this signature has not been recorded within the window; marks it
  * recorded. The timestamp is not refreshed on suppression, so a sustained loop
