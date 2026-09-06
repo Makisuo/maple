@@ -110,14 +110,14 @@ const faqs = [
     <section class="border-t border-border bg-bg">
         <div class="mx-auto max-w-6xl px-6 py-24 md:py-32">
             <div class="mb-12 max-w-2xl">
-                <LocalEyebrow label="Instead of a compose file" />
+                <LocalEyebrow label="Replace the compose file" />
                 <h2 class="font-display text-3xl font-medium leading-[1.06] tracking-[-0.02em] text-fg md:text-4xl">
-                    Replace the compose file
+                    One process instead of five containers
                 </h2>
                 <p class="mt-5 text-base leading-relaxed text-fg-muted">
-                    The usual local setup is a collector, one backend per signal, and a dashboard on top —
-                    five containers, five config files, and a different UI for traces, metrics, and logs.
-                    Maple Local is one process that does all of it, started with one command, on one port.
+                    The usual local setup is a collector, one backend per signal, and a dashboard on top:
+                    five containers, five config files, and three different UIs. Maple Local is one process
+                    that does all of it, started with one command, on one port.
                 </p>
             </div>
             <LocalStackCompare />

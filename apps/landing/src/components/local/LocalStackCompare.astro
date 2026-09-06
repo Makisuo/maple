@@ -2,122 +2,183 @@
 /**
  * LocalStackCompare — the "replace the compose file" argument, made visible.
  *
- * Left: the stack most repos copy in for local telemetry — a collector plus one
- * backend per signal plus a dashboard, each with its own port and UI. Right:
- * `maple start`. Both cards share one row grammar (name · port · role) so the
- * reader compares like with like; the point is the height difference, and the
- * empty space on the right is left empty on purpose.
+ * One ruled plate, read left to right: what each part of a local telemetry
+ * stack is for, the container that usually does it (name, port, config), and
+ * the single `maple start` cell that covers every row at once. The Maple cell
+ * spans the full height on purpose — that span is the whole argument, so it is
+ * drawn rather than described. The last row counts both sides.
  *
  * The tools on the left are named factually — they are good software, and this
  * page never says otherwise. What we claim is only the shape: five containers
  * versus one process.
  */
 const usual = [
-	{ name: "otel-collector", port: ":4317 :4318", role: "Receive and route", note: "collector.yaml" },
-	{ name: "jaeger", port: ":16686", role: "Traces", note: "own UI" },
-	{ name: "prometheus", port: ":9090", role: "Metrics", note: "scrape config · own UI" },
-	{ name: "loki", port: ":3100", role: "Logs", note: "loki.yaml" },
-	{ name: "grafana", port: ":3000", role: "Dashboards", note: "datasources · provisioning · own UI" },
+	{ job: "Receive", name: "otel-collector", port: ":4317 :4318", note: "collector.yaml" },
+	{ job: "Traces", name: "jaeger", port: ":16686", note: "own UI" },
+	{ job: "Metrics", name: "prometheus", port: ":9090", note: "scrape config, own UI" },
+	{ job: "Logs", name: "loki", port: ":3100", note: "loki.yaml" },
+	{ job: "Dashboards", name: "grafana", port: ":3000", note: "datasources, provisioning, own UI" },
+];
+
+const usualStats = [
+	["5", "containers"],
+	["5", "config files"],
+	["3", "UIs"],
+];
+const mapleStats = [
+	["1", "process"],
+	["1", "port"],
+	["1", "UI"],
 ];
 ---
 
-<div class="grid gap-4 md:grid-cols-2">
-	<!-- The usual stack -->
-	<section class="lsc" aria-labelledby="lsc-usual">
-		<header class="lsc__head">
-			<h3 id="lsc-usual" class="lsc__title">docker-compose.yml</h3>
-			<span class="lsc__tag">The usual stack</span>
-		</header>
-		<ul class="lsc__rows" role="list">
-			{
-				usual.map((r) => (
-					<li class="lsc__row">
-						<code class="lsc__name">{r.name}</code>
-						<span class="lsc__port">{r.port}</span>
-						<span class="lsc__role">{r.role}</span>
-						<span class="lsc__note">{r.note}</span>
-					</li>
-				))
-			}
-		</ul>
-		<footer class="lsc__foot">5 containers · 3 UIs · a compose file to keep in sync</footer>
-	</section>
+<div class="lsc" role="table" aria-label="The usual local telemetry stack compared with Maple Local">
+	<div class="lsc__head lsc__head--job" role="columnheader" aria-hidden="true"></div>
+	<div class="lsc__head lsc__head--usual" role="columnheader">
+		<span class="lsc__eyebrow">The usual stack</span>
+		<code class="lsc__file">docker-compose.yml</code>
+	</div>
+	<div class="lsc__head lsc__head--maple" role="columnheader">
+		<span class="lsc__eyebrow">Maple Local</span>
+		<code class="lsc__file">one process</code>
+	</div>
 
-	<!-- Maple Local -->
-	<section class="lsc" aria-labelledby="lsc-maple">
-		<header class="lsc__head">
-			<h3 id="lsc-maple" class="lsc__title">Maple Local</h3>
-			<span class="lsc__tag">One process</span>
-		</header>
-		<ul class="lsc__rows" role="list">
-			<li class="lsc__row">
-				<code class="lsc__name lsc__name--on">maple start</code>
-				<span class="lsc__port">:4318</span>
-				<span class="lsc__role">Traces, logs, metrics, errors, sessions, service map</span>
-				<span class="lsc__note">one UI · no config</span>
-			</li>
-		</ul>
-		<footer class="lsc__foot">1 process · 1 port · 1 UI · no Docker</footer>
-	</section>
+	{
+		usual.map((r, i) => (
+			<Fragment>
+				<div class="lsc__job" role="rowheader" style={`grid-row: ${i + 2}`}>
+					{r.job}
+				</div>
+				<div class="lsc__cell" role="cell" style={`grid-row: ${i + 2}`}>
+					<code class="lsc__name">{r.name}</code>
+					<span class="lsc__port">{r.port}</span>
+					<span class="lsc__note">{r.note}</span>
+				</div>
+			</Fragment>
+		))
+	}
+
+	<div class="lsc__maple" role="cell">
+		<code class="lsc__cmd">maple start</code>
+		<span class="lsc__cmdmeta">:4318, one UI, no config file</span>
+		<p class="lsc__covers">
+			Every row on the left, plus errors, sessions, and a service map, from a single process.
+		</p>
+	</div>
+
+	<div class="lsc__foot lsc__foot--job" role="cell" aria-hidden="true"></div>
+	<div class="lsc__foot lsc__foot--usual" role="cell">
+		{
+			usualStats.map(([n, label]) => (
+				<span class="lsc__stat">
+					<span class="lsc__num">{n}</span>
+					<span class="lsc__lbl">{label}</span>
+				</span>
+			))
+		}
+	</div>
+	<div class="lsc__foot lsc__foot--maple" role="cell">
+		{
+			mapleStats.map(([n, label]) => (
+				<span class="lsc__stat">
+					<span class="lsc__num lsc__num--on">{n}</span>
+					<span class="lsc__lbl">{label}</span>
+				</span>
+			))
+		}
+	</div>
 </div>
 
 <p class="mt-5 max-w-[66ch] text-[13px] leading-relaxed text-fg-muted">
-	Light means the running footprint: one process, one port, nothing to orchestrate before your app starts.
-	The download is not small — the embedded database engine is a few hundred megabytes on disk.
+	Light describes the running footprint: one process, one port, nothing to orchestrate before your app
+	starts. The download itself is not small; the embedded database engine is a few hundred megabytes on
+	disk.
 </p>
 
 <style>
 	.lsc {
-		display: flex;
-		flex-direction: column;
+		--lsc-maple-bg: color-mix(in oklab, var(--primary) 6%, var(--background));
+		display: grid;
+		grid-template-columns:
+			minmax(112px, 0.55fr) minmax(0, 1.1fr) auto minmax(0, 1.2fr)
+			minmax(240px, 1.35fr);
+		grid-template-rows: auto repeat(5, auto) auto;
+		gap: 1px;
+		overflow: hidden;
 		border: 1px solid var(--border);
 		border-radius: var(--radius-xl);
-		background: var(--bg-elevated);
-		overflow: hidden;
+		background: var(--border);
 	}
-	.lsc__head {
-		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		gap: 8px;
-		padding: 14px 20px;
-		border-bottom: 1px solid var(--border);
-	}
-	.lsc__title {
-		margin: 0;
-		font-family: var(--font-mono);
-		font-size: 13px;
-		font-weight: 500;
-		color: var(--foreground);
-	}
-	.lsc__tag {
-		font-size: 12px;
-		color: var(--muted-foreground);
+	/* Astro scoping widens `.lsc > *` past the cell classes, so each cell paints itself. */
+	.lsc__head,
+	.lsc__job,
+	.lsc__cell,
+	.lsc__maple,
+	.lsc__foot {
+		min-width: 0;
+		background: var(--background);
 	}
 
-	.lsc__rows {
-		list-style: none;
-		margin: 0;
+	/* Header row: column labels in the page's eyebrow style */
+	.lsc__head {
+		grid-row: 1;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 4px 12px;
+		padding: 14px 20px 12px;
+	}
+	.lsc__head--job {
+		grid-column: 1;
+	}
+	.lsc__head--usual {
+		grid-column: 2 / span 3;
+	}
+	.lsc__head--maple {
+		grid-column: 5;
+		background: var(--lsc-maple-bg);
+	}
+	.lsc__eyebrow {
+		font-size: 10px;
+		letter-spacing: 0.18em;
+		text-transform: uppercase;
+		color: var(--foreground);
+	}
+	.lsc__file {
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--muted-foreground);
+		background: none;
+		border: 0;
+		padding: 0;
+	}
+
+	/* Row header: what this part of the stack is for. Display face, so it reads
+	   as a label rather than as another mono value. */
+	.lsc__job {
+		grid-column: 1;
+		display: flex;
+		align-items: center;
 		padding: 0 20px;
+		font-family: var(--font-display);
+		font-size: 15px;
+		font-weight: 500;
+		letter-spacing: -0.01em;
+		color: var(--foreground);
 	}
-	.lsc__row {
+
+	/* The usual stack: container, port, config — three aligned columns per row */
+	.lsc__cell {
+		grid-column: 2 / span 3;
 		display: grid;
-		grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.8fr) minmax(0, 1.4fr);
-		grid-template-areas:
-			"name port role"
-			"note note note";
-		column-gap: 16px;
-		row-gap: 3px;
-		padding: 13px 0;
-		border-bottom: 1px solid var(--border);
-	}
-	.lsc__row:last-child {
-		border-bottom: 0;
+		grid-template-columns: subgrid;
+		align-items: center;
+		column-gap: 24px;
+		padding: 16px 20px;
 	}
 	.lsc__name {
-		grid-area: name;
 		font-family: var(--font-mono);
-		font-size: 13px;
+		font-size: 14px;
 		color: var(--foreground);
 		background: none;
 		border: 0;
@@ -126,42 +187,148 @@ const usual = [
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	.lsc__name--on {
-		color: var(--primary);
-	}
 	.lsc__port {
-		grid-area: port;
 		font-family: var(--font-mono);
 		font-size: 12px;
+		font-variant-numeric: tabular-nums;
 		color: var(--muted-foreground);
 		white-space: nowrap;
 	}
-	.lsc__role {
-		grid-area: role;
-		font-size: 13px;
-		line-height: 1.45;
-		color: var(--foreground);
-	}
 	.lsc__note {
-		grid-area: note;
+		font-size: 12px;
+		line-height: 1.5;
+		color: var(--muted-foreground);
+	}
+
+	/* Maple Local: one cell for all five rows */
+	.lsc__maple {
+		grid-column: 5;
+		grid-row: 2 / span 5;
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		padding: 24px;
+		background: var(--lsc-maple-bg);
+	}
+	.lsc__cmd {
+		font-family: var(--font-mono);
+		font-size: 18px;
+		font-weight: 500;
+		color: var(--primary);
+		background: none;
+		border: 0;
+		padding: 0;
+	}
+	.lsc__cmdmeta {
+		margin-top: 4px;
+		font-family: var(--font-mono);
 		font-size: 12px;
 		color: var(--muted-foreground);
 	}
+	.lsc__covers {
+		margin: 14px 0 0;
+		max-width: 34ch;
+		font-size: 13px;
+		line-height: 1.55;
+		color: var(--foreground);
+	}
+
+	/* Footer row: the count on each side */
 	.lsc__foot {
-		margin-top: auto;
-		padding: 12px 20px;
-		border-top: 1px solid var(--border);
+		grid-row: 7;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 6px 24px;
+		padding: 14px 20px;
+	}
+	.lsc__foot--job {
+		grid-column: 1;
+	}
+	.lsc__foot--usual {
+		grid-column: 2 / span 3;
+	}
+	.lsc__foot--maple {
+		grid-column: 5;
+		background: var(--lsc-maple-bg);
+	}
+	.lsc__stat {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 6px;
+		white-space: nowrap;
+	}
+	.lsc__num {
+		font-family: var(--font-display);
+		font-size: 20px;
+		font-weight: 500;
+		letter-spacing: -0.02em;
+		color: var(--foreground);
+	}
+	.lsc__num--on {
+		color: var(--primary);
+	}
+	.lsc__lbl {
 		font-size: 12px;
 		color: var(--muted-foreground);
 	}
 
-	@media (max-width: 640px) {
-		.lsc__row {
-			grid-template-columns: minmax(0, 1fr) auto;
-			grid-template-areas:
-				"name port"
-				"role role"
-				"note note";
+	/* Narrow: the usual stack first as a two-column list, then Maple Local as its own block. */
+	@media (max-width: 960px) {
+		.lsc {
+			grid-template-columns: minmax(96px, 0.4fr) minmax(0, 1fr);
+			grid-template-rows: none;
+			grid-auto-rows: auto;
+		}
+		.lsc__head,
+		.lsc__job,
+		.lsc__cell,
+		.lsc__maple,
+		.lsc__foot {
+			grid-row: auto !important;
+		}
+		.lsc__head--job,
+		.lsc__foot--job {
+			display: none;
+		}
+		.lsc__head--usual,
+		.lsc__foot--usual,
+		.lsc__head--maple,
+		.lsc__maple,
+		.lsc__foot--maple {
+			grid-column: 1 / -1;
+		}
+		.lsc__job {
+			grid-column: 1;
+			padding: 16px 20px;
+			font-size: 14px;
+		}
+		.lsc__cell {
+			grid-column: 2;
+			display: flex;
+			flex-wrap: wrap;
+			align-items: baseline;
+			gap: 3px 12px;
+		}
+		.lsc__name {
+			white-space: normal;
+			overflow-wrap: anywhere;
+		}
+		.lsc__note {
+			flex-basis: 100%;
+		}
+		.lsc__foot--usual {
+			order: 1;
+		}
+		.lsc__head--maple {
+			order: 2;
+		}
+		.lsc__maple {
+			order: 3;
+			padding: 20px;
+		}
+		.lsc__foot--maple {
+			order: 4;
 		}
 	}
 </style>
