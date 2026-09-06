@@ -102,6 +102,10 @@ export const AiSessionListItem = Schema.Struct({
 	/** All spans of all the session's traces, including non-AI infrastructure spans. */
 	spanCount: Schema.Number,
 	errorSpanCount: Schema.Number,
+	/** Failed tool calls, one per failure rather than per span that echoed it. */
+	toolErrorCount: Schema.Number,
+	/** Failed model calls and turn spans that failed on their own. */
+	turnErrorCount: Schema.Number,
 	/** Every service touched by the session's traces. */
 	serviceNames: Schema.Array(Schema.String),
 	/** Every model any agent span of the session ran on, dialects coalesced. */
@@ -113,6 +117,13 @@ export const AiSessionListItem = Schema.Struct({
 	/** Tokens across every bucket, deepest reporter counted, so the number
 	 *  agrees with the detail page's header. */
 	totalTokens: Schema.Number,
+	/** The five disjoint buckets the detail page's Tokens rail draws, summed
+	 *  the same way; the row draws their shares. */
+	inputTokens: Schema.Number,
+	cacheReadTokens: Schema.Number,
+	cacheWriteTokens: Schema.Number,
+	outputTokens: Schema.Number,
+	reasoningTokens: Schema.Number,
 	/** USD as the instrumentation priced it; 0 where nothing reported a cost. */
 	cost: Schema.Number,
 	/** Warehouse datetime literals, e.g. `2026-08-19 10:33:25.825000000`. */

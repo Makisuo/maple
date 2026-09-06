@@ -43,7 +43,11 @@ const FAN_OUT_START = "2026-08-18 10:00:00"
 const FAN_OUT_END = "2026-08-18 12:00:00"
 
 /** Stage 2's ENTIRE param set — the caller's window is not among them. */
-const listParams = { orgId: params.orgId, fanOutStart: FAN_OUT_START, fanOutEnd: FAN_OUT_END }
+const listParams = {
+	orgId: params.orgId,
+	fanOutStart: FAN_OUT_START,
+	fanOutEnd: FAN_OUT_END,
+}
 
 /** A page of two sessions, one of each kind — the list never runs without one. */
 const listOpts = {
@@ -120,7 +124,10 @@ describe("aiSessionPageQuery", () => {
 
 	it("applies both filters as trace-level existence tests, after the grouping", () => {
 		const { sql } = compileUnsafe(
-			aiSessionPageQuery({ vendorIds: ["eve"], serviceNames: ["maple-slack-agent"] }),
+			aiSessionPageQuery({
+				vendorIds: ["eve"],
+				serviceNames: ["maple-slack-agent"],
+			}),
 			params,
 		)
 
@@ -136,7 +143,10 @@ describe("aiSessionPageQuery", () => {
 
 	it("tests each filter dimension separately, not one row against both", () => {
 		const { sql } = compileUnsafe(
-			aiSessionPageQuery({ vendorIds: ["eve"], serviceNames: ["maple-slack-agent"] }),
+			aiSessionPageQuery({
+				vendorIds: ["eve"],
+				serviceNames: ["maple-slack-agent"],
+			}),
 			params,
 		)
 		const [where] = sql.split("GROUP BY traceId")
@@ -202,6 +212,8 @@ describe("aiSessionPageQuery", () => {
 					llmCalls: "12",
 					toolCalls: "7",
 					errorAgentSpans: "1",
+					toolErrors: 1,
+					turnErrors: 0,
 					totalTokens: 184_320,
 					cost: 0.4125,
 					agentDurationMs: "10417",
@@ -217,6 +229,8 @@ describe("aiSessionPageQuery", () => {
 				llmCalls: 12,
 				toolCalls: 7,
 				errorAgentSpans: 1,
+				toolErrors: 1,
+				turnErrors: 0,
 				totalTokens: 184_320,
 				cost: 0.4125,
 				agentDurationMs: 10_417,
@@ -284,6 +298,23 @@ describe("aiSessionPageQuery", () => {
 		)
 		// Still index-only: none of it reaches for the fan-out table.
 		expect(sql).not.toContain("trace_detail_spans")
+	})
+
+	it("splits the failures into tool and turn, deepest failed span counted", () => {
+		const { sql } = compileUnsafe(aiSessionPageQuery(), params)
+		const [outer, inner] = sql.split("FROM (SELECT")
+
+		expect(inner).toContain(
+			"groupArrayIf(2000)(tuple(SpanId, ParentSpanId, IsToolCall), IsError = 1) AS failedSpans",
+		)
+		// A failed span whose own child also failed is the child's echo, not a
+		// second failure — the turn span a framework fails alongside its call.
+		expect(outer).toContain(
+			"sum(arrayCount(f -> f.3 = 1 AND NOT arrayExists(c -> c.2 = f.1, failedSpans), failedSpans)) AS toolErrors",
+		)
+		expect(outer).toContain(
+			"sum(arrayCount(f -> f.3 != 1 AND NOT arrayExists(c -> c.2 = f.1, failedSpans), failedSpans)) AS turnErrors",
+		)
 	})
 
 	it("filters the ranked row with HAVING, after the session grouping", () => {
@@ -390,7 +421,9 @@ describe("aiSessionListQuery", () => {
 
 	it("restricts both index reads to the page's sessions, escaping the ids", () => {
 		const { sql } = compileUnsafe(
-			aiSessionListQuery({ sessionIds: ["wrun_01M0CSAEW96BH2W9185XZPRPKH", "sess'evil"] }),
+			aiSessionListQuery({
+				sessionIds: ["wrun_01M0CSAEW96BH2W9185XZPRPKH", "sess'evil"],
+			}),
 			listParams,
 		)
 
@@ -578,6 +611,30 @@ describe("aiSessionListQuery", () => {
 		expect(compileUnsafe(aiSessionListQuery(listOpts), listParams).sql).not.toContain("__PARAM_")
 	})
 
+	it("splits the usage into the detail page's five buckets, deepest reporter counted", () => {
+		const { sql } = compileUnsafe(aiSessionListQuery(listOpts), listParams)
+
+		// Per trace: the reporters with their buckets, `input` carved of the
+		// cache under the inclusive convention and left whole under Anthropic's.
+		expect(sql).toContain("groupArrayIf(2000)(tuple(SpanId, ParentSpanId, if(")
+		expect(sql).toContain("IN ('anthropic')")
+		expect(sql).toContain("NOT (SpanAttributes['maple_ai.vendor.id'] IN ('vercel_ai_sdk', 'maple'))")
+		expect(sql).toContain("greatest(0, ")
+		expect(sql).toContain(") AS usageBuckets")
+		// Per session: one deepest-reporter sum per bucket.
+		for (const [element, name] of [
+			[3, "inputTokens"],
+			[4, "cacheReadTokens"],
+			[5, "cacheWriteTokens"],
+			[6, "outputTokens"],
+			[7, "reasoningTokens"],
+		] as const) {
+			expect(sql).toContain(
+				`sum(arraySum(r -> greatest(0., r.${element} - arraySum(c -> if(c.2 = r.1, c.${element}, 0.), usageBuckets)), usageBuckets)) AS ${name}`,
+			)
+		}
+	})
+
 	it("decodes quoted 64-bit aggregates and the service-name array", () => {
 		const compiled = compileUnsafe(aiSessionListQuery(listOpts), listParams)
 
@@ -590,6 +647,11 @@ describe("aiSessionListQuery", () => {
 				spanCount: "250",
 				errorSpanCount: "4",
 				serviceNames: ["maple-slack-agent", "maple-api"],
+				inputTokens: 120_000,
+				cacheReadTokens: 60_000,
+				cacheWriteTokens: 0,
+				outputTokens: 4_000,
+				reasoningTokens: 320,
 				startTime: "2026-08-19 10:33:25.825000000",
 				endTime: "2026-08-19 10:33:36.242000000",
 				durationMs: "10417",
@@ -604,6 +666,11 @@ describe("aiSessionListQuery", () => {
 			spanCount: 250,
 			errorSpanCount: 4,
 			serviceNames: ["maple-slack-agent", "maple-api"],
+			inputTokens: 120_000,
+			cacheReadTokens: 60_000,
+			cacheWriteTokens: 0,
+			outputTokens: 4_000,
+			reasoningTokens: 320,
 			startTime: "2026-08-19 10:33:25.825000000",
 			endTime: "2026-08-19 10:33:36.242000000",
 			durationMs: 10_417,
@@ -727,7 +794,10 @@ describe("aiSessionSpansQuery", () => {
 		const { sql } = compileUnsafe(aiSessionSpansQuery(), spanParams)
 		expect(sql).toContain("SpanAttributes['maple_ai.session.id'] = 'wrun_01M0CSAEW96BH2W9185XZPRPKH'")
 
-		const escaped = compileUnsafe(aiSessionSpansQuery(), { ...spanParams, sessionId: "sess'evil" })
+		const escaped = compileUnsafe(aiSessionSpansQuery(), {
+			...spanParams,
+			sessionId: "sess'evil",
+		})
 		expect(escaped.sql).toContain("SpanAttributes['maple_ai.session.id'] = 'sess\\'evil'")
 	})
 
@@ -778,7 +848,9 @@ describe("aiSessionSpansQuery", () => {
 			"maple_ai.vendor.id": "eve",
 			"maple_ai.session.id": "wrun_01M0CSAEW96BH2W9185XZPRPKH",
 		})
-		expect(row?.resourceAttributes).toEqual({ "service.name": "maple-slack-agent" })
+		expect(row?.resourceAttributes).toEqual({
+			"service.name": "maple-slack-agent",
+		})
 	})
 })
 
@@ -812,7 +884,10 @@ describe("aiSessionWindowQuery", () => {
 			"(mapContains(SpanAttributes, 'maple_ai.session.id') AND SpanAttributes['maple_ai.session.id'] != '')",
 		)
 
-		const escaped = compileUnsafe(aiSessionWindowQuery(), { ...windowParams, sessionId: "sess'evil" })
+		const escaped = compileUnsafe(aiSessionWindowQuery(), {
+			...windowParams,
+			sessionId: "sess'evil",
+		})
 		expect(escaped.sql).toContain("SpanAttributes['maple_ai.session.id'] = 'sess\\'evil'")
 	})
 
@@ -948,7 +1023,10 @@ describe("aiTraceSpansQuery", () => {
 		expect(compiled.tenantScope).toBe("single-tenant")
 		expect(orgPredicateCount(compiled.sql)).toBe(1)
 
-		const escaped = compileUnsafe(aiTraceSpansQuery(), { ...traceParams, traceId: "trace'evil" })
+		const escaped = compileUnsafe(aiTraceSpansQuery(), {
+			...traceParams,
+			traceId: "trace'evil",
+		})
 		expect(escaped.sql).toContain("TraceId = 'trace\\'evil'")
 	})
 

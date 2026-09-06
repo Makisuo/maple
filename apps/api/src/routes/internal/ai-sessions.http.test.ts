@@ -36,7 +36,10 @@ class AiSessionsOnlyApi extends HttpApi.make("MapleInternalApi")
 
 const SESSION_ID = "wrun_01KZTEST"
 const TRACE_ID = "7f3a4b5c6d7e8f901234567890abcdef"
-const WINDOW = { startTime: "2026-08-19 09:00:00", endTime: "2026-08-19 11:00:00" }
+const WINDOW = {
+	startTime: "2026-08-19 09:00:00",
+	endTime: "2026-08-19 11:00:00",
+}
 const SPANS_BODY = { sessionId: SESSION_ID, ...WINDOW }
 
 const TENANT = new CurrentTenant.TenantSchema({
@@ -65,7 +68,10 @@ const spanRow = (index: number) => ({
 	statusCode: "Unset",
 	statusMessage: "",
 	timestamp: "2026-08-19 10:00:00.000000000",
-	spanAttributes: { "gen_ai.operation.name": "chat", "maple_ai.session.id": SESSION_ID },
+	spanAttributes: {
+		"gen_ai.operation.name": "chat",
+		"maple_ai.session.id": SESSION_ID,
+	},
 	resourceAttributes: {},
 })
 
@@ -76,7 +82,9 @@ const makeHarness = (overrides: Partial<WarehouseQueryServiceApi>) => {
 		Layer.provideMerge(AuthorizationStubLayer),
 		Layer.provideMerge(Layer.succeed(WarehouseQueryService, makeWarehouseServiceStub(overrides))),
 	)
-	const { handler, dispose } = HttpRouter.toWebHandler(routes as never, { disableLogger: true })
+	const { handler, dispose } = HttpRouter.toWebHandler(routes as never, {
+		disableLogger: true,
+	})
 
 	const post = async (path: string, body: unknown) => {
 		// SAFETY: the handler's second argument is the Worker environment context,
@@ -84,13 +92,19 @@ const makeHarness = (overrides: Partial<WarehouseQueryServiceApi>) => {
 		const response = await handler(
 			new Request(`http://maple.test${path}`, {
 				method: "POST",
-				headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+				headers: {
+					authorization: "Bearer test-token",
+					"content-type": "application/json",
+				},
 				body: JSON.stringify(body),
 			}),
 			Context.empty() as never,
 		)
 		const text = await response.text()
-		return { status: response.status, body: JSON.parse(text) as Record<string, unknown> }
+		return {
+			status: response.status,
+			body: JSON.parse(text) as Record<string, unknown>,
+		}
 	}
 
 	return { post, dispose }
@@ -101,7 +115,10 @@ describe("POST /internal/ai-sessions/spans", () => {
 		const harness = makeHarness({
 			compiledQueryBounded: () =>
 				Effect.fail(
-					new WarehouseResponseLimitError({ kind: "bytes", message: "response too large" }),
+					new WarehouseResponseLimitError({
+						kind: "bytes",
+						message: "response too large",
+					}),
 				),
 		})
 
@@ -179,7 +196,9 @@ describe("POST /internal/ai-sessions/spans", () => {
 		})
 
 		try {
-			const response = await harness.post("/internal/ai-sessions/spans", { sessionId: SESSION_ID })
+			const response = await harness.post("/internal/ai-sessions/spans", {
+				sessionId: SESSION_ID,
+			})
 			expect(response.status).toBe(200)
 			expect(response.body.data).toHaveLength(2)
 			// The bloom-indexed detection scan, unbounded on purpose.
@@ -304,7 +323,9 @@ describe("POST /internal/ai-sessions/spans", () => {
 		})
 
 		try {
-			const response = await harness.post("/internal/ai-sessions/spans", { sessionId: SESSION_ID })
+			const response = await harness.post("/internal/ai-sessions/spans", {
+				sessionId: SESSION_ID,
+			})
 			expect(response.status).toBe(200)
 			expect(response.body).toMatchObject({ data: [], truncated: false })
 			expect(spansRead).toBe(false)
@@ -377,6 +398,8 @@ describe("POST /internal/ai-sessions/list", () => {
 		llmCalls: "4",
 		toolCalls: "2",
 		errorAgentSpans: "0",
+		toolErrors: 0,
+		turnErrors: 0,
 		totalTokens: 18_400,
 		cost: 0.12,
 		agentDurationMs: "600000",
@@ -391,6 +414,11 @@ describe("POST /internal/ai-sessions/list", () => {
 		spanCount: "12",
 		errorSpanCount: "0",
 		serviceNames: ["agent-runner"],
+		inputTokens: 12_000,
+		cacheReadTokens: 4_000,
+		cacheWriteTokens: 0,
+		outputTokens: 2_000,
+		reasoningTokens: 400,
 		startTime,
 		endTime: "2026-08-19 10:45:00.000000000",
 		durationMs: "1000",
@@ -665,13 +693,28 @@ describe("POST /internal/ai-sessions/list", () => {
 
 		try {
 			expect(
-				(await harness.post("/internal/ai-sessions/list", { ...WINDOW, costMin: -1 })).status,
+				(
+					await harness.post("/internal/ai-sessions/list", {
+						...WINDOW,
+						costMin: -1,
+					})
+				).status,
 			).toBe(400)
 			expect(
-				(await harness.post("/internal/ai-sessions/list", { ...WINDOW, sortBy: "spanCount" })).status,
+				(
+					await harness.post("/internal/ai-sessions/list", {
+						...WINDOW,
+						sortBy: "spanCount",
+					})
+				).status,
 			).toBe(400)
 			expect(
-				(await harness.post("/internal/ai-sessions/list", { ...WINDOW, tokensMin: 1.5 })).status,
+				(
+					await harness.post("/internal/ai-sessions/list", {
+						...WINDOW,
+						tokensMin: 1.5,
+					})
+				).status,
 			).toBe(400)
 		} finally {
 			await harness.dispose()

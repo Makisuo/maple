@@ -107,6 +107,7 @@
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import * as T from "@maple-dev/clickhouse-builder/types"
+import { compile } from "@maple-dev/clickhouse-builder/sql"
 import {
 	compileFnCall,
 	from,
@@ -128,7 +129,12 @@ import {
 	MAPLE_AI_VENDOR_ID_ATTR,
 	MAPLE_AI_VENDOR_VERSION_ATTR,
 } from "@maple/domain/gen-ai"
-import { deepestReporterSum, usageReportersExpr } from "./ai-span-columns"
+import {
+	GENAI_USAGE_KEYS,
+	firstNonEmptyAttr,
+	type MapColumnLike,
+} from "@maple/domain/tinybird/gen-ai-columns"
+import { deepestReporterSum, MAX_USAGE_REPORTERS_PER_TRACE, usageReportersExpr } from "./ai-span-columns"
 
 const SESSION_ID_ATTR = MAPLE_AI_SESSION_ID_ATTR
 const VENDOR_ID_ATTR = MAPLE_AI_VENDOR_ID_ATTR
@@ -203,6 +209,111 @@ const sessionKey = (rawSessionId: CH.Expr<string>, traceId: CH.Expr<string>): CH
 	CH.if_(rawSessionId.eq(""), CH.concat(MAPLE_AI_TRACE_SESSION_PREFIX, traceId), rawSessionId)
 
 /**
+ * One trace's failed agent spans — `(SpanId, ParentSpanId, IsToolCall)` per
+ * failed index row — for the tool/turn split one level up, which needs the
+ * whole trace's failures in hand at once. Same shape and cap as
+ * `usageReportersExpr`, for the same reason: a framework that fails the turn
+ * span because the call beneath it failed reports one failure as two, and
+ * only the deepest span carrying the failure counts — `failureEvents` in
+ * `apps/web/src/lib/agent-sessions/session-summary.ts`, one level deep.
+ */
+const failedSpansExpr = ($: {
+	readonly SpanId: CH.Expr<string>
+	readonly ParentSpanId: CH.Expr<string>
+	readonly IsToolCall: CH.Expr<number>
+	readonly IsError: CH.Expr<number>
+}): CH.Expr<unknown> =>
+	CH.untypedExpr(
+		`groupArrayIf(${MAX_USAGE_REPORTERS_PER_TRACE})(tuple(SpanId, ParentSpanId, IsToolCall), IsError = 1)`,
+	)
+
+/**
+ * Failed spans of one kind, summed over the traces' `failedSpans`, with a
+ * failed span whose own child also failed left out: the child is the failure,
+ * the parent its echo. `tool` counts the failed tool calls; the rest — failed
+ * model calls and turn spans that failed on their own — are the turn's.
+ */
+const deepestFailureCount = (failedSpans: string, kind: "tool" | "turn"): CH.Expr<number> =>
+	CH.rawExpr(
+		`sum(arrayCount(f -> f.3 ${kind === "tool" ? "=" : "!="} 1 AND NOT arrayExists(c -> c.2 = f.1, ${failedSpans}), ${failedSpans}))`,
+		T.float64,
+	)
+
+/** The provider that served the call, under the spellings the integration
+ *  layer decodes `providerName` from. */
+const PROVIDER_NAME_KEYS = [
+	"gen_ai.provider.name",
+	"gen_ai.system",
+	"ai.model.provider",
+	"llm.provider",
+	"llm.system",
+]
+
+/**
+ * Providers whose prompt figure EXCLUDES the cache buckets reported beside it,
+ * and vendors that re-sum usage so the provider's convention no longer applies
+ * — `PROVIDER_CACHE_CONVENTION` / `VENDOR_CACHE_CONVENTION` in
+ * `apps/web/src/lib/agent-sessions/session-summary.ts`, which is where the
+ * reasoning lives. Everyone else is inclusive, so the cache is carved back out
+ * of the prompt figure rather than billed twice.
+ */
+const CACHE_EXCLUSIVE_PROVIDERS = ["anthropic"]
+const CACHE_INCLUSIVE_VENDORS = ["vercel_ai_sdk", "maple"]
+
+/**
+ * One trace's usage reporters with their buckets —
+ * `(SpanId, ParentSpanId, input, cacheRead, cacheWrite, output, reasoning)`
+ * per span that reported any — the five disjoint buckets `spanTokenBuckets`
+ * sums, read off the raw attributes because the index carries only the total.
+ * `input` is the uncached prompt under either cache convention, clamped at
+ * zero like the detail page clamps it.
+ */
+const usageBucketsExpr = ($: {
+	readonly SpanId: CH.Expr<string>
+	readonly ParentSpanId: CH.Expr<string>
+	readonly SpanAttributes: MapColumnLike
+}): CH.Expr<unknown> => {
+	const attrs = $.SpanAttributes
+	const bucket = (keys: ReadonlyArray<string>) => CH.toFloat64OrZero(firstNonEmptyAttr(attrs, keys))
+	const reportedInput = bucket(GENAI_USAGE_KEYS.input)
+	const cacheRead = bucket(GENAI_USAGE_KEYS.cacheRead)
+	const cacheWrite = bucket(GENAI_USAGE_KEYS.cacheWrite)
+	const output = bucket(GENAI_USAGE_KEYS.output)
+	const reasoning = bucket(GENAI_USAGE_KEYS.reasoning)
+	const exclusive = CH.inList(firstNonEmptyAttr(attrs, PROVIDER_NAME_KEYS), CACHE_EXCLUSIVE_PROVIDERS).and(
+		CH.not(CH.inList(attrs.get(MAPLE_AI_VENDOR_ID_ATTR), CACHE_INCLUSIVE_VENDORS)),
+	)
+	const input = CH.if_(
+		exclusive,
+		reportedInput,
+		compileFnCall<number>("greatest", CH.lit(0), reportedInput.sub(cacheRead).sub(cacheWrite)),
+	)
+	const reporter = compileFnCall<unknown>(
+		"tuple",
+		$.SpanId,
+		$.ParentSpanId,
+		input,
+		cacheRead,
+		cacheWrite,
+		output,
+		reasoning,
+	)
+	const reports = reportedInput.add(cacheRead).add(cacheWrite).add(output).add(reasoning).gt(0)
+	return CH.untypedExpr(
+		`groupArrayIf(${MAX_USAGE_REPORTERS_PER_TRACE})(${compile(reporter.toFragment())}, ${compile(
+			reports.toFragment(),
+		)})`,
+	)
+}
+
+/** `deepestReporterSum` over a bucket of `usageBucketsExpr` (elements 3–7). */
+const deepestBucketSum = (reporters: string, element: 3 | 4 | 5 | 6 | 7): CH.Expr<number> =>
+	CH.rawExpr(
+		`sum(arraySum(r -> greatest(0., r.${element} - arraySum(c -> if(c.2 = r.1, c.${element}, 0.), ${reporters})), ${reporters}))`,
+		T.float64,
+	)
+
+/**
  * The filters the page and the list share; both apply them on `ai_trace_index`,
  * each as a per-trace existence test — see `indexTraces`. One per index
  * column, so each selects exactly the population `aiSessionFacetsQuery`
@@ -269,6 +380,10 @@ export interface AiSessionPageOutput {
 	readonly toolCalls: number
 	/** Failed agent spans — what `hasErrors` tests; not the row's all-span count. */
 	readonly errorAgentSpans: number
+	/** Failed tool calls, deepest failure counted — see `deepestFailureCount`. */
+	readonly toolErrors: number
+	/** Failed model calls and turn spans that failed on their own — the rest. */
+	readonly turnErrors: number
 	/** Tokens across every bucket, deepest reporter counted — see `deepestReporterSum`. */
 	readonly totalTokens: number
 	/** USD as the instrumentation priced it; 0 where nothing reported a cost. */
@@ -302,6 +417,14 @@ export interface AiSessionListOutput {
 	readonly spanCount: number
 	readonly errorSpanCount: number
 	readonly serviceNames: readonly string[]
+	// The five token buckets, deepest reporter counted like `totalTokens` —
+	// which is the index's figure and can differ by a rounding of convention;
+	// the buckets are what the row draws, the total what it sorts on.
+	readonly inputTokens: number
+	readonly cacheReadTokens: number
+	readonly cacheWriteTokens: number
+	readonly outputTokens: number
+	readonly reasoningTokens: number
 	/** ClickHouse datetime literal, e.g. `2026-08-19 10:33:25.825000000`. */
 	readonly startTime: string
 	readonly endTime: string
@@ -389,6 +512,7 @@ const indexTraces = (opts: AiSessionFilterOpts, bounds: IndexBounds) => {
 			llmCalls: CH.sum($.IsLlmCall),
 			toolCalls: CH.sum($.IsToolCall),
 			errorAgentSpans: CH.sum($.IsError),
+			failedSpans: failedSpansExpr($),
 			usageReporters: usageReportersExpr($),
 		}))
 		.where(($) => [
@@ -493,6 +617,8 @@ export function aiSessionPageQuery(opts: AiSessionPageOpts = {}) {
 			llmCalls: CH.sum($.llmCalls),
 			toolCalls: CH.sum($.toolCalls),
 			errorAgentSpans: CH.sum($.errorAgentSpans),
+			toolErrors: deepestFailureCount("failedSpans", "tool"),
+			turnErrors: deepestFailureCount("failedSpans", "turn"),
 			totalTokens: deepestReporterSum("usageReporters", 3),
 			cost: deepestReporterSum("usageReporters", 4),
 			// Nanoseconds first, wrapped in `intDiv` — see `durationMs` in
@@ -635,6 +761,7 @@ export function aiSessionListQuery(opts: AiSessionListOpts) {
 					),
 				),
 				serviceNames: CH.groupUniqArray($.ServiceName),
+				usageBuckets: usageBucketsExpr($),
 				// Named apart from the outer `startTime`/`endTime` on purpose: an
 				// outer alias shadows the derived table's column of the same name,
 				// so `min(startTime)` would resolve to the outer `toString(…)` String
@@ -674,6 +801,11 @@ export function aiSessionListQuery(opts: AiSessionListOpts) {
 			spanCount: CH.sum($.spanCount),
 			errorSpanCount: CH.sum($.errorSpanCount),
 			serviceNames: CH.groupUniqArrayArray($.serviceNames),
+			inputTokens: deepestBucketSum("usageBuckets", 3),
+			cacheReadTokens: deepestBucketSum("usageBuckets", 4),
+			cacheWriteTokens: deepestBucketSum("usageBuckets", 5),
+			outputTokens: deepestBucketSum("usageBuckets", 6),
+			reasoningTokens: deepestBucketSum("usageBuckets", 7),
 			startTime: CH.toString_(CH.min_($.traceStart)),
 			endTime: CH.toString_(fromUnixTimestamp64Nano(CH.max_($.traceEndNanos))),
 			// Nanoseconds first: `Timestamp` is DateTime64(9), and subtracting two

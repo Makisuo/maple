@@ -16,15 +16,19 @@ import { QueryErrorState } from "@/components/common/query-error-state"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { BooleanFromStringParam, NumberFromStringParam, OptionalStringArrayParam } from "@/lib/search-params"
 import { aiSessionsFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { TimeRangeSearchFields, applyTimeRangeSearch } from "@/components/time-range-picker/search"
-import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
-import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
-import type { TimeRange } from "@/components/time-range-picker/types"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useInfiniteAiSessions } from "@/hooks/use-infinite-ai-sessions"
 import { useOrganizationFeatureFlags } from "@/hooks/use-organization-feature-flags"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { ToolbarStat } from "@maple/ui/components/toolbar"
+
+/**
+ * The list's window. There is no picker: sessions are read newest-first over
+ * the last week and paged from there, and the sidebar counts the same week.
+ * A wider window would only move the point the infinite scroll ends at, and
+ * the counted filters have to describe the population the list pages — see
+ * `aiSessionFacetsQuery`.
+ */
+export const AGENT_SESSIONS_WINDOW = "7d"
 
 const BooleanParam = Schema.optional(Schema.Union([Schema.Boolean, BooleanFromStringParam]))
 const NumberParam = Schema.optional(Schema.Union([Schema.Number, NumberFromStringParam]))
@@ -55,7 +59,6 @@ const agentSessionsSearchSchema = Schema.Struct({
 	toolCallsMax: NumberParam,
 	sortBy: Schema.optional(AiSessionSortKey),
 	sortDir: Schema.optional(AiSessionSortDir),
-	...TimeRangeSearchFields,
 })
 
 export const Route = createFileRoute("/agent-sessions/")({
@@ -82,48 +85,23 @@ function AgentSessionsPage() {
 }
 
 function AgentSessionsPageContent() {
-	const search = Route.useSearch()
-	const navigate = useNavigate({ from: Route.fullPath })
-
-	const handleTimeChange = (range: TimeRange, options?: { replace?: boolean }) => {
-		navigate({
-			replace: options?.replace,
-			search: (prev) => applyTimeRangeSearch(prev, range),
-		})
-	}
-
 	return (
-		// No preset default while an absolute range is active — mirrors the
-		// picker's own presetValue expression below.
-		<PageRefreshProvider timePreset={search.timePreset ?? (search.startTime ? undefined : "24h")}>
-			<DashboardLayout.Root>
-				<DashboardLayout.Breadcrumbs items={[{ label: "Agent Sessions" }]} />
-				<DashboardLayout.Body>
-					<AgentSessionsBody onTimeChange={handleTimeChange} />
-				</DashboardLayout.Body>
-			</DashboardLayout.Root>
-		</PageRefreshProvider>
+		<DashboardLayout.Root>
+			<DashboardLayout.Breadcrumbs items={[{ label: "Agent Sessions" }]} />
+			<DashboardLayout.Body>
+				<AgentSessionsBody />
+			</DashboardLayout.Body>
+		</DashboardLayout.Root>
 	)
 }
 
-/**
- * Split from the page so `useEffectiveTimeRange` runs inside
- * `PageRefreshProvider` — the refresh button re-resolves a preset window only
- * for hooks that can see the provider's refresh version. Renders the
- * `Filters | Content` siblings, so both share one resolved window.
- */
-function AgentSessionsBody({
-	onTimeChange,
-}: {
-	onTimeChange: (range: TimeRange, options?: { replace?: boolean }) => void
-}) {
+/** The `Filters | Content` siblings, so both share one resolved window. */
+function AgentSessionsBody() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
-	const { startTime, endTime } = useEffectiveTimeRange(
-		search.startTime,
-		search.endTime,
-		search.timePreset ?? "24h",
-	)
+	// Resolved once per mount and snapped to the cache grid, so the atom key
+	// holds still between navigations.
+	const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, AGENT_SESSIONS_WINDOW)
 	// Memoized on the search by VALUE, not by the reference the router hands
 	// back: the hook keys its accumulated pages on these inputs, and a fresh
 	// object per render would reset them every time.
@@ -142,28 +120,19 @@ function AgentSessionsBody({
 	const sessions = allData
 	const sortOption = sortOptionFor(search.sortBy, search.sortDir)
 
-	const headerActions = (
-		<div className="flex flex-wrap items-center gap-2">
-			<div className="hidden items-center gap-4 sm:flex">
-				<ToolbarStat value={sessions.length} label="sessions" />
-			</div>
-			<TimeRangeHeaderControls
-				startTime={search.startTime ?? startTime}
-				endTime={search.endTime ?? endTime}
-				presetValue={search.timePreset ?? (search.startTime ? undefined : "24h")}
-				defaultPreset="24h"
-				onTimeChange={onTimeChange}
-			/>
-		</div>
-	)
-
 	const toolbar = (
 		<AgentSessionsToolbar
+			sessionCount={sessions.length}
 			query={search.q ?? ""}
 			onSearch={(value) => navigate({ search: (prev) => ({ ...prev, q: value }) })}
 			errorsOnly={search.hasErrors === true}
 			onToggleErrorsOnly={() =>
-				navigate({ search: (prev) => ({ ...prev, hasErrors: prev.hasErrors ? undefined : true }) })
+				navigate({
+					search: (prev) => ({
+						...prev,
+						hasErrors: prev.hasErrors ? undefined : true,
+					}),
+				})
 			}
 			sortKey={sortOption.key}
 			// The default sort leaves the URL clean, so a shared link only carries
@@ -193,15 +162,7 @@ function AgentSessionsBody({
 				<AgentSessionsFilterSidebar facetsResult={facetsResult} />
 			</DashboardLayout.Filters>
 			<DashboardLayout.Content>
-				<DashboardLayout.Sticky>
-					<DashboardLayout.Header
-						title="Agent Sessions"
-						description="Follow what your AI agents did, session by session."
-					>
-						{headerActions}
-					</DashboardLayout.Header>
-					{toolbar}
-				</DashboardLayout.Sticky>
+				<DashboardLayout.Sticky>{toolbar}</DashboardLayout.Sticky>
 				<DashboardLayout.Scroll>
 					{Result.builder(firstPageResult)
 						.onInitial(() => (
