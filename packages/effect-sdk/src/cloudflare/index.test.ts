@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Exit, Fiber, Layer, Scope } from "effect"
+import { Duration, Effect, Exit, Fiber, Layer, Logger, Scope } from "effect"
 import { TestClock } from "effect/testing"
 import { afterEach, expect, vi } from "vitest"
 import { make, WorkerEnvironment } from "./index.js"
@@ -382,6 +382,32 @@ describe("MapleCloudflareSDK.make", () => {
 		const b = telemetry.layer
 		expect(a).toBe(b)
 		expect(Layer.isLayer(a)).toBe(true)
+	})
+
+	// Native mode never touches the network: Cloudflare exports the spans. Off
+	// Workers (here: Node, no `cloudflare:workers`) the layer must still build
+	// and keep spans Effect-local rather than fail the host.
+	it("native mode: no fetch, flush resolves, and spans fall back to Effect-local off Workers", async () => {
+		const { calls, restore: r } = setupFetch()
+		restore = r
+		const notices: Array<string> = []
+		const capture = Logger.make<unknown, void>(({ message }) => {
+			notices.push(Array.isArray(message) ? message.join(" ") : String(message))
+		})
+		const telemetry = make({ serviceName: "unit-test", tracer: "native" })
+
+		const span = await Effect.runPromise(
+			Effect.currentSpan.pipe(
+				Effect.withSpan("op"),
+				Effect.provide(telemetry.layer.pipe(Layer.provide(Logger.layer([capture])))),
+			),
+		)
+		await telemetry.flush(env)
+
+		expect(span.name).toBe("op")
+		expect(calls.length).toBe(0)
+		expect(notices).toHaveLength(1)
+		expect(notices[0]).toContain("native tracing unavailable")
 	})
 })
 

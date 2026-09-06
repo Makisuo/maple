@@ -4,10 +4,10 @@
 // resource, and headers are NOT baked in here — the caller (the Cloudflare,
 // server, or client flushable preset) resolves them and POSTs the drained
 // buffer on `flush`, so the layer itself can be constructed without I/O.
-import { Cause, Context, Exit, Layer, Option, Predicate, Tracer } from "effect"
-import * as ErrorReporter from "effect/ErrorReporter"
+import { Cause, Context, Exit, Layer, Option, Tracer } from "effect"
 import * as OtlpResource from "effect/unstable/observability/OtlpResource"
 import type { ExtractTag } from "effect/Types"
+import { classifySpanExit, HTTP_SERVER_ERROR_RESPONSE, type SpanOutcome } from "./span-exit.js"
 
 export interface CaptureExceptionOptions {
 	/** Span name. Default `"exception"`. */
@@ -71,25 +71,6 @@ export interface SpanBufferOptions {
 	readonly anticipatedErrorTags?: ReadonlySet<string> | undefined
 }
 
-// Errors carrying Effect's `[ErrorReporter.ignore]` flag are benign by design —
-// Effect's own "don't report this failure" signal. The canonical case is
-// `HttpServerError { reason: RouteNotFound }` (unmatched routes → 404), which
-// would otherwise surface as an Error-status span. We key off the annotation
-// rather than concrete error tags so the check stays robust and HTTP-agnostic;
-// genuine failures (400 parse errors, 500s) keep `ignore = false` and trace.
-const isIgnoredFailure = (error: unknown): boolean =>
-	Predicate.hasProperty(error, ErrorReporter.ignore) && error[ErrorReporter.ignore] === true
-
-const isIgnoredSpan = (span: SpanImpl): boolean => {
-	const status = span.status
-	if (status._tag !== "Ended") return false
-	const exit = status.exit
-	if (exit._tag !== "Failure") return false
-	if (exit.cause.reasons.some(Cause.isDieReason)) return false
-	const failures = exit.cause.reasons.filter(Cause.isFailReason)
-	return failures.length > 0 && failures.every((reason) => isIgnoredFailure(reason.error))
-}
-
 export const makeSpanBuffer = (options: SpanBufferOptions = {}): SpanBuffer => {
 	let buffer: Array<OtlpSpan> = []
 	let disabled = false
@@ -100,9 +81,16 @@ export const makeSpanBuffer = (options: SpanBufferOptions = {}): SpanBuffer => {
 		if (disabled) return
 		if (!span.sampled) return
 		if (dropSpan !== undefined && dropSpan(span.name)) return
-		if (isIgnoredSpan(span)) return
+		if (span.status._tag !== "Ended") return
+		const outcome = classifySpanExit(
+			{ exit: span.status.exit, kind: span.kind, attributes: span.attributes },
+			anticipatedErrorIdentifiers,
+		)
+		// Benign by Effect's own reckoning (`[ErrorReporter.ignore]`, e.g. a
+		// RouteNotFound 404): never exported, unlike the `Anticipated` case below.
+		if (outcome._tag === "Ignored") return
 		if (buffer.length >= MAX_BUFFER) return
-		buffer.push(makeOtlpSpan(span, anticipatedErrorIdentifiers))
+		buffer.push(makeOtlpSpan(span, outcome))
 	}
 
 	const tracer = Tracer.make({
@@ -210,52 +198,7 @@ const generateId = (len: number): string => {
 	return result
 }
 
-// A failure is "anticipated" when its `_tag` is in the configured set. A span
-// whose failure is caused *entirely* by anticipated errors (no defects/Die)
-// records OTLP status `Ok` and emits no `exception` event.
-const failureIdentifier = (error: unknown): string | undefined => {
-	if (Predicate.hasProperty(error, "_tag") && typeof error._tag === "string") return error._tag
-	if (Predicate.hasProperty(error, "name") && typeof error.name === "string") return error.name
-	// An error that crossed an HTTP boundary arrives as a decoded *body*, not as
-	// the class that raised it. An API that wraps its bodies in `{ error: … }` —
-	// a common envelope convention — therefore hands the failure channel a plain
-	// object with no identifier of its own, and every identifier a caller
-	// configured goes unmatched: expected 4xx answers record as `Error` spans
-	// whose entire message is the JSON-stringified envelope. Unwrap one level, and
-	// only for the body's own tag.
-	const body = Predicate.hasProperty(error, "error") ? error.error : undefined
-	if (Predicate.hasProperty(body, "_tag") && typeof body._tag === "string") return body._tag
-	return undefined
-}
-
-const isAnticipatedFailure = (error: unknown, identifiers: ReadonlySet<string>): boolean => {
-	const identifier = failureIdentifier(error)
-	return identifier !== undefined && identifiers.has(identifier)
-}
-
-const isFullyAnticipated = (
-	cause: Cause.Cause<unknown>,
-	identifiers: ReadonlySet<string> | undefined,
-): boolean => {
-	if (identifiers === undefined || identifiers.size === 0) return false
-	if (cause.reasons.some(Cause.isDieReason)) return false
-	const failErrors = cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error)
-	return failErrors.length > 0 && failErrors.every((error) => isAnticipatedFailure(error, identifiers))
-}
-
-// OTEL HTTP semconv for SERVER spans: a 5xx response is an error even when the
-// handler rendered it as a plain response — exactly what the HTTP boundaries
-// (`HttpRouter.toWebHandler`, alchemy's Worker bridge) do with a defect, so the
-// span would otherwise reach the warehouse as `Ok` and the crash never reach
-// error tracking. A 4xx is a rejection the service handled and stays `Ok`.
-const renderedServerError = (self: SpanImpl): number | undefined => {
-	if (self.kind !== "server") return undefined
-	const raw = self.attributes.get("http.response.status_code")
-	const code = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : Number.NaN
-	return Number.isInteger(code) && code >= 500 ? code : undefined
-}
-
-const makeOtlpSpan = (self: SpanImpl, anticipatedErrorIdentifiers?: ReadonlySet<string>): OtlpSpan => {
+const makeOtlpSpan = (self: SpanImpl, outcome: SpanOutcome): OtlpSpan => {
 	const status = self.status as ExtractTag<Tracer.SpanStatus, "Ended">
 	const attributes = OtlpResource.entriesToAttributes(self.attributes.entries())
 	const events = self.events.map(([name, startTime, attrs]) => ({
@@ -266,38 +209,29 @@ const makeOtlpSpan = (self: SpanImpl, anticipatedErrorIdentifiers?: ReadonlySet<
 	}))
 
 	let otelStatus: Status
-	const serverError = status.exit._tag === "Success" ? renderedServerError(self) : undefined
-	if (serverError !== undefined) {
-		const method = self.attributes.get("http.request.method")
-		const path = self.attributes.get("url.path")
-		const message =
-			typeof method === "string" && typeof path === "string"
-				? `HTTP ${serverError} (${method} ${path})`
-				: `HTTP ${serverError}`
-		otelStatus = { code: StatusCode.Error, message }
+	if (outcome._tag === "ServerError") {
+		otelStatus = { code: StatusCode.Error, message: outcome.message }
 		events.push({
 			name: "exception",
 			timeUnixNano: String(status.endTime),
 			droppedAttributesCount: 0,
 			attributes: [
-				{ key: ATTR_EXCEPTION_TYPE, value: { stringValue: "HttpServerErrorResponse" } },
-				{ key: ATTR_EXCEPTION_MESSAGE, value: { stringValue: message } },
+				{ key: ATTR_EXCEPTION_TYPE, value: { stringValue: HTTP_SERVER_ERROR_RESPONSE } },
+				{ key: ATTR_EXCEPTION_MESSAGE, value: { stringValue: outcome.message } },
 			],
 		})
-	} else if (status.exit._tag === "Success") {
-		otelStatus = constOtelStatusSuccess
-	} else if (Cause.hasInterruptsOnly(status.exit.cause)) {
+	} else if (outcome._tag === "Interrupted") {
 		otelStatus = { code: StatusCode.Ok, message: "Interrupted" }
 		attributes.push(
 			{ key: "span.label", value: { stringValue: "⚠︎ Interrupted" } },
 			{ key: "status.interrupted", value: { boolValue: true } },
 		)
-	} else if (isFullyAnticipated(status.exit.cause, anticipatedErrorIdentifiers)) {
-		// Expected business outcome (4xx). Keep the span (latency / status code
-		// stay visible) but don't flag it as an error or fingerprint it.
+	} else if (outcome._tag !== "Failed") {
+		// Success, or an expected business outcome (4xx): keep the span (latency /
+		// status code stay visible) but don't flag it as an error or fingerprint it.
 		otelStatus = constOtelStatusSuccess
 	} else {
-		const errors = Cause.prettyErrors(status.exit.cause)
+		const errors = outcome.errors
 		otelStatus = { code: StatusCode.Error }
 		const firstError = errors[0]
 		if (firstError) {
