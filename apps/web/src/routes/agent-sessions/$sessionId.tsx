@@ -5,17 +5,15 @@ import { Schema } from "effect"
 import type { AiSessionSpan } from "@maple/domain/http"
 import { formatWarehouseDateTime } from "@maple/query-engine"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { formatRelativeTimeOrDate } from "@maple/ui/lib/time-format"
 
 import { SquareSparkleIcon } from "@/components/icons"
-import { CopyableValue } from "@/components/attributes"
 import { Alert, AlertDescription } from "@maple/ui/components/ui/alert"
-import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { NotFoundError } from "@/components/route-error"
 import { QueryErrorState } from "@/components/common/query-error-state"
+import { SessionHeader } from "@/components/agent-sessions/session-detail/session-header"
 import {
 	isSessionView,
 	SessionViews,
@@ -27,10 +25,8 @@ import {
 	buildBackToSessionsHref,
 	resolveWindow,
 } from "@/lib/agent-sessions/session-window"
-import { buildSessionSummary, type SessionSummary } from "@/lib/agent-sessions/session-summary"
+import { buildSessionSummary } from "@/lib/agent-sessions/session-summary"
 import { buildSessionTurns } from "@/lib/agent-sessions/session-turns"
-import { vendorIcon } from "@/lib/agent-sessions/vendor-icon"
-import { vendorLabel } from "@/lib/agent-sessions/vendor-label"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { displayError } from "@/lib/error-messages"
 import { aiSessionSpansResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
@@ -223,47 +219,12 @@ function SessionDetailBody({
 		[navigate, search.span],
 	)
 
-	// Message content is opt-in and off by default, so most sessions have no
-	// opening user message to title the page with.
-	const title = summary.title ?? breadcrumbSessionId(sessionId)
-	// The framework that emitted the session, as its mark — the subtitle names it.
-	const VendorIcon = vendorIcon(summary.vendorIds[0] ?? "")
-
 	return (
 		<SessionShell sessionId={sessionId}>
 			<DashboardLayout.Content>
 				<DashboardLayout.Sticky>
 					<DashboardLayout.Header
-						titleContent={
-							<div className="flex min-w-0 items-center gap-2">
-								<VendorIcon
-									size={16}
-									className="shrink-0 text-muted-foreground"
-									aria-hidden
-								/>
-								<DashboardLayout.Title title={title}>
-									{summary.title === undefined ? (
-										// The id fallback title copies the full session id.
-										<CopyableValue value={sessionId} label="Session ID">
-											{title}
-										</CopyableValue>
-									) : (
-										title
-									)}
-								</DashboardLayout.Title>
-								{summary.failed && <Badge variant="error">Failed</Badge>}
-								{summary.title !== undefined && (
-									<CopyableValue
-										value={sessionId}
-										label="Session ID"
-										className="shrink-0 font-mono font-normal text-muted-foreground text-xs"
-									>
-										{breadcrumbSessionId(sessionId)}
-									</CopyableValue>
-								)}
-							</div>
-						}
-						description={sessionSubtitle(summary)}
+						titleContent={<SessionHeader sessionId={sessionId} summary={summary} turns={turns} />}
 					/>
 				</DashboardLayout.Sticky>
 				{/* `py-0` (the content blocks carry the padding instead) so the views'
@@ -353,15 +314,4 @@ function EmptySession({ sessionId, windowed }: { sessionId: string; windowed: bo
 			</Button>
 		</Empty>
 	)
-}
-
-/** The identifying facts the list row carried and this page had dropped. The
- *  trace count is not one of them — the views below count what they draw. */
-function sessionSubtitle(summary: SessionSummary): string {
-	return [primaryVendorLabel(summary.vendorIds), formatRelativeTimeOrDate(summary.startMs)].join(" · ")
-}
-
-function primaryVendorLabel(vendorIds: readonly string[]): string {
-	const vendorId = vendorIds[0]
-	return vendorId === undefined ? "Agent session" : vendorLabel(vendorId)
 }
