@@ -580,7 +580,7 @@
     },
     "packages/effect-sdk": {
       "name": "@maple-dev/effect-sdk",
-      "version": "0.8.0",
+      "version": "0.8.1",
       "dependencies": {
         "std-env": "^4.0.0",
       },
