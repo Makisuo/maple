@@ -7,6 +7,7 @@ import {
 	WarehouseQueryService,
 	type WarehouseQueryServiceApi,
 } from "@/services/warehouse/WarehouseQueryService"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import type { TenantContext } from "@/services/auth/tenant-context"
 
 const tenant = { orgId: "org_test" } as TenantContext
@@ -30,7 +31,11 @@ const makeStub = (
 		},
 	}) as WarehouseQueryServiceApi
 
-const provide = (stub: WarehouseQueryServiceApi) => Layer.succeed(WarehouseQueryService, stub)
+// `runRawSql` records `telemetry.sql_executed` on every path, rejections
+// included, so the audit service is part of every harness here — the in-memory
+// one, since what is asserted below is the SQL, not the audit row.
+const provide = (stub: WarehouseQueryServiceApi) =>
+	Layer.merge(Layer.succeed(WarehouseQueryService, stub), AuditLogService.layerMemory)
 
 const range = { startTime: "2026-04-01 00:00:00", endTime: "2026-04-01 01:00:00" }
 

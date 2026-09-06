@@ -19,6 +19,8 @@ import type {
 import { MapleApiV2, paginateArray, scopeAllows, timestamp, V2ParameterInvalid } from "@maple/domain/http/v2"
 import { AlertForbiddenError } from "@maple/domain/http"
 import { Effect, Encoding, Result, Schema } from "effect"
+import { auditDiff } from "@/routes/v2/audit-changes"
+import { recordHttpAudit } from "@/services/audit/AuditLogService"
 import { AlertsService } from "@/services/alerts/AlertsService"
 import { AlertReadModelsService } from "@/services/alerts/AlertReadModelsService"
 import { AlertRulesService } from "@/services/alerts/AlertRulesService"
@@ -92,6 +94,38 @@ const toV2Rule = (doc: AlertRuleDocument): V2AlertRule => ({
 	updated_at: doc.updatedAt,
 	created_by: doc.createdBy,
 	updated_by: doc.updatedBy,
+})
+
+/** Update-payload fields diffable through the wire shape (drafts get summarized). */
+const ruleAuditDiff = auditDiff<keyof V2AlertRuleUpdateParams & keyof V2AlertRule>({
+	fields: [
+		"name",
+		"notes",
+		"notification_template",
+		"enabled",
+		"severity",
+		"service_names",
+		"exclude_service_names",
+		"environments",
+		"tags",
+		"group_by",
+		"signal_type",
+		"comparator",
+		"threshold",
+		"threshold_upper",
+		"window_minutes",
+		"minimum_sample_count",
+		"consecutive_breaches_required",
+		"consecutive_healthy_required",
+		"renotify_interval_minutes",
+		"apdex_threshold_ms",
+		"query_builder_draft",
+		"raw_query_sql",
+		"raw_query_reducer",
+		"destination_ids",
+	],
+	// Query drafts and raw SQL are config blobs — audit that they changed, not their bodies.
+	summarize: { query_builder_draft: "<updated>", raw_query_sql: "<updated>" },
 })
 
 const toV2RuleMutationResponse = (doc: AlertRuleDocument): V2AlertRuleMutationResponse => ({
@@ -345,6 +379,11 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 						request,
 					)
 
+					yield* recordHttpAudit("alert_rule.created", {
+						resourceId: created.id,
+						metadata: { name: created.name },
+					})
+
 					return toV2RuleMutationResponse(created)
 				}),
 			)
@@ -361,6 +400,12 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 						request,
 					)
 
+					yield* recordHttpAudit("alert_rule.updated", {
+						resourceId: updated.id,
+						changes: ruleAuditDiff(payload, toV2Rule(current), toV2Rule(updated)),
+						metadata: { name: updated.name },
+					})
+
 					return toV2RuleMutationResponse(updated)
 				}),
 			)
@@ -368,6 +413,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const deleted = yield* rules.deleteRule(tenant.orgId, tenant.roles, params.id)
+					yield* recordHttpAudit("alert_rule.deleted", { resourceId: deleted.id })
 
 					return {
 						id: deleted.id,

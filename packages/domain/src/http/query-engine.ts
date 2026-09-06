@@ -20,6 +20,7 @@ import {
 	QueryEngineExecuteResponse,
 	TinybirdDateTime,
 } from "../query-engine"
+import { AuditedRead } from "./audit-log"
 import { SessionAuthorization } from "./current-tenant"
 import { HttpTaggedError } from "./error-policy"
 import { warehouseHttpErrors } from "./warehouse"
@@ -39,6 +40,22 @@ const BucketSeconds = Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0
 	Schema.annotate({
 		identifier: "BucketSeconds",
 		description: "Timeseries bucket width in whole seconds, greater than zero.",
+	}),
+)
+
+/**
+ * A `LIMIT` a client may ask for. The builder INLINES it into the SQL text, so
+ * `-1` or `1e21` would be a syntax error (a 500) and `1e9` an unbounded scan;
+ * the ceiling lives here because the internal API is reachable by any client.
+ */
+const RowLimit = Schema.Number.check(
+	Schema.isInt(),
+	Schema.isGreaterThan(0),
+	Schema.isLessThanOrEqualTo(1000),
+).pipe(
+	Schema.annotate({
+		identifier: "RowLimit",
+		description: "Maximum rows to return: a whole number between 1 and 1000.",
 	}),
 )
 
@@ -721,6 +738,86 @@ export class ServiceDetailOverviewResponse extends Schema.Class<ServiceDetailOve
 	// window — feeds the environment switcher dropdown (previously an all-services
 	// overview scan).
 	environments: Schema.Array(Schema.String),
+}) {}
+
+// Releases
+//
+// A release is a commit the moment it starts serving traffic: the
+// service-overview rollups key on `vcs.ref.head.revision`, and the first bucket
+// a commit appears in is its deploy time. Both endpoints read those rollups; the
+// detail additionally bridges to the errors tables through `service.version`.
+
+const ReleaseRow = Schema.Struct({
+	serviceName: ServiceName,
+	environment: Schema.String,
+	commitSha: CommitSha,
+	/** Warehouse datetime of the earliest span this version served in the window. */
+	firstSeen: Schema.String,
+	spanCount: Schema.Number,
+	errorCount: Schema.Number,
+	p50LatencyMs: Schema.Number,
+	p95LatencyMs: Schema.Number,
+	p99LatencyMs: Schema.Number,
+	apdexScore: Schema.Number,
+})
+export type ReleaseRow = Schema.Schema.Type<typeof ReleaseRow>
+
+const ReleaseTimelinePoint = Schema.Struct({
+	bucket: Schema.String,
+	serviceName: ServiceName,
+	commitSha: CommitSha,
+	count: Schema.Number,
+})
+export type ReleaseTimelinePoint = Schema.Schema.Type<typeof ReleaseTimelinePoint>
+
+export class ReleasesListRequest extends Schema.Class<ReleasesListRequest>("ReleasesListRequest")({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	environments: OptionalDeploymentEnvs,
+	namespaces: OptionalServiceNamespaces,
+	services: OptionalServiceNames,
+	excludedEnvironments: OptionalDeploymentEnvs,
+	// Bucket for the swimlane timeline. Whole minutes at least: the rollup tiers
+	// cannot place a row inside a minute, and the list is org-wide.
+	bucketSeconds: BucketSeconds,
+}) {}
+
+export class ReleasesListResponse extends Schema.Class<ReleasesListResponse>("ReleasesListResponse")({
+	/** One row per (service, environment, commit), newest first. */
+	releases: Schema.Array(ReleaseRow),
+	timeline: Schema.Array(ReleaseTimelinePoint),
+	/** True when the row cap cut older releases off the end. */
+	truncated: Schema.Boolean,
+}) {}
+
+export class ReleaseDetailRequest extends Schema.Class<ReleaseDetailRequest>("ReleaseDetailRequest")({
+	serviceName: ServiceName,
+	commitSha: CommitSha,
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	environments: OptionalDeploymentEnvs,
+	// Pre-built all-metrics timeseries for this version and for every other
+	// version of the service, forwarded verbatim to `queryEngine.execute` like
+	// the service-detail bundle does.
+	timeseries: QueryEngineExecuteRequest,
+	baselineTimeseries: QueryEngineExecuteRequest,
+	bucketSeconds: BucketSeconds,
+}) {}
+
+export class ReleaseDetailResponse extends Schema.Class<ReleaseDetailResponse>("ReleaseDetailResponse")({
+	/** Every version of this service in the window, this one included. */
+	versions: Schema.Array(ReleaseRow),
+	timeline: Schema.Array(ReleaseTimelinePoint),
+	timeseries: QueryEngineExecuteResponse,
+	baselineTimeseries: QueryEngineExecuteResponse,
+	/** Error fingerprints whose occurrences carried this version as `service.version`. */
+	errorFingerprints: Schema.Array(
+		Schema.Struct({
+			fingerprintHash: FingerprintHash,
+			count: Schema.Number,
+			firstSeen: Schema.String,
+		}),
+	),
 }) {}
 
 export class ServiceDependenciesBundleRequest extends Schema.Class<ServiceDependenciesBundleRequest>(
@@ -1752,6 +1849,66 @@ export class ProductEventNamesResponse extends Schema.Class<ProductEventNamesRes
 	),
 }) {}
 
+/**
+ * The product events one trace produced. `traceId` is the branded `TraceId`:
+ * it rejects `""`, which would otherwise match every non-trace row in the window.
+ */
+export class ProductEventsForTraceRequest extends Schema.Class<ProductEventsForTraceRequest>(
+	"ProductEventsForTraceRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	traceId: TraceId,
+	/** Default 50, max 1000. */
+	limit: Schema.optional(RowLimit),
+}) {}
+
+export class ProductEventsForTraceResponse extends Schema.Class<ProductEventsForTraceResponse>(
+	"ProductEventsForTraceResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			timestamp: Schema.String,
+			eventName: Schema.String,
+			/** The annotated span within the trace. */
+			spanId: Schema.String,
+			serviceName: Schema.String,
+			userId: Schema.String,
+			groupId: Schema.String,
+			visitorId: Schema.String,
+			sessionId: Schema.String,
+			/** The span's attributes as projected by `maple.product_event.include` / `prop.*`. */
+			attributes: Schema.Record(Schema.String, Schema.String),
+		}),
+	),
+}) {}
+
+/** Recent traces behind one event name — the analytics side of the same link. */
+export class ProductEventTraceSamplesRequest extends Schema.Class<ProductEventTraceSamplesRequest>(
+	"ProductEventTraceSamplesRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	eventName: Schema.String,
+	/** Default 20, max 1000. */
+	limit: Schema.optional(RowLimit),
+}) {}
+
+export class ProductEventTraceSamplesResponse extends Schema.Class<ProductEventTraceSamplesResponse>(
+	"ProductEventTraceSamplesResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			traceId: Schema.String,
+			spanId: Schema.String,
+			timestamp: Schema.String,
+			serviceName: Schema.String,
+			userId: Schema.String,
+			visitorId: Schema.String,
+		}),
+	),
+}) {}
+
 export class PodFacetsRequest extends Schema.Class<PodFacetsRequest>("PodFacetsRequest")({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
@@ -2400,6 +2557,21 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		}),
 	)
 	.add(
+		HttpApiEndpoint.post("releasesList", "/releases", {
+			payload: ReleasesListRequest,
+			success: ReleasesListResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("releaseDetail", "/release-detail", {
+			payload: ReleaseDetailRequest,
+			success: ReleaseDetailResponse,
+			// Embeds `execute` sub-queries, so it can also surface QueryEngineValidationError.
+			error: validatedQueryEndpointErrors,
+		}),
+	)
+	.add(
 		HttpApiEndpoint.post("serviceDependenciesBundle", "/service-dependencies-bundle", {
 			payload: ServiceDependenciesBundleRequest,
 			success: ServiceDependenciesBundleResponse,
@@ -2710,6 +2882,20 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		}),
 	)
 	.add(
+		HttpApiEndpoint.post("productEventsForTrace", "/product-events-for-trace", {
+			payload: ProductEventsForTraceRequest,
+			success: ProductEventsForTraceResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("productEventTraceSamples", "/product-event-trace-samples", {
+			payload: ProductEventTraceSamplesRequest,
+			success: ProductEventTraceSamplesResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
 		HttpApiEndpoint.post("executeRawSql", "/execute-raw-sql", {
 			payload: RawSqlExecuteRequest,
 			success: RawSqlExecuteResponse,
@@ -2722,4 +2908,6 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		}),
 	)
 	.prefix("/internal/query-engine")
-	.middleware(SessionAuthorization) {}
+	.middleware(SessionAuthorization)
+	// Every endpoint here reads telemetry for the dashboard.
+	.annotate(AuditedRead, "telemetry.read") {}

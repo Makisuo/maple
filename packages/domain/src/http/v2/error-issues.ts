@@ -10,6 +10,7 @@ import {
 	WorkflowState,
 } from "../errors"
 import { SpanId, TraceId, UserId } from "../../primitives"
+import { AuditedRead } from "../audit-log"
 import { AuthorizationV2 } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2CursorInvalid, V2CursorSortMismatch } from "./errors"
@@ -242,6 +243,7 @@ export class V2ErrorIssuesApiGroup extends HttpApiGroup.make("errorIssues")
 	)
 	.prefix("/v2/error_issues")
 	.middleware(AuthorizationV2)
+	.annotate(AuditedRead, "telemetry.read")
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Error Issues",

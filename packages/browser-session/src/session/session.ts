@@ -299,10 +299,10 @@ function touchSession(now: number): SessionRecord {
 /**
  * Resolve the active session id, minting/rotating as needed. Safe to call per
  * span: the activity touch is throttled. Returns `undefined` outside a browser
- * (SSR) so server renders never mint a session shared across requests.
+ * DOM (SSR, React Native), where browser sessions must not be minted.
  */
 export function getSessionId(): string | undefined {
-	if (typeof window === "undefined") return undefined
+	if (typeof window === "undefined" || typeof document === "undefined") return undefined
 	return touchSession(Date.now()).id
 }
 

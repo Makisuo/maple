@@ -4,6 +4,9 @@ import { CurrentTenant } from "@maple/domain/http"
 import { Effect, Layer } from "effect"
 import { makeResolveTenant } from "./AuthService"
 import { annotateAuthSpan } from "@/services/auth/auth-span"
+import { CurrentAuditActor } from "@/services/auth/audit-actor"
+import { AuditLogService } from "@/services/audit/AuditLogService"
+import { withAuditedRead } from "@/services/audit/audit-access"
 import { Env } from "@/platform/Env"
 
 const getBearerToken = (headers: Record<string, string | undefined>): string | undefined => {
@@ -31,10 +34,11 @@ export const SessionAuthorizationLayer = Layer.effect(
 	CurrentTenant.SessionAuthorization,
 	Effect.gen(function* () {
 		const env = yield* Env
+		const audit = yield* AuditLogService
 		const resolveTenant = makeResolveTenant(env)
 
 		return CurrentTenant.SessionAuthorization.of({
-			bearer: (httpEffect) =>
+			bearer: (httpEffect, options) =>
 				Effect.gen(function* () {
 					const request = yield* HttpServerRequest.HttpServerRequest
 
@@ -47,10 +51,16 @@ export const SessionAuthorizationLayer = Layer.effect(
 
 					const tenant = yield* resolveTenant(request.headers)
 					yield* annotateAuthSpan("session", { orgId: tenant.orgId, userId: tenant.userId })
-					return yield* Effect.provideService(
-						httpEffect,
-						CurrentTenant.Context,
-						new CurrentTenant.TenantSchema(tenant),
+					const actor = { type: "user", source: "dashboard" } as const
+					return yield* httpEffect.pipe(
+						Effect.provideService(CurrentTenant.Context, new CurrentTenant.TenantSchema(tenant)),
+						Effect.provideService(CurrentAuditActor, actor),
+						// Telemetry and replay reads are recorded (see `AuditedRead`).
+						withAuditedRead(audit, request, options, {
+							orgId: tenant.orgId,
+							actor: { type: "user", userId: tenant.userId },
+							source: actor.source,
+						}),
 					)
 				}),
 		})

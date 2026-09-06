@@ -4,6 +4,7 @@ export { AlertDestinationsService } from "./services/alerts/AlertDestinationsSer
 export { AlertReadModelsService } from "./services/alerts/AlertReadModelsService"
 export { AlertRulesService } from "./services/alerts/AlertRulesService"
 export { AnomalyDetectionService } from "./services/alerts/AnomalyDetectionService"
+export { AuditLogService } from "./services/audit/AuditLogService"
 export { BucketCacheService } from "@maple/query-engine/caching"
 export { CacheBackendLive } from "@/platform/CacheBackendLive"
 export { CloudflareAnalyticsService } from "./services/integrations/CloudflareAnalyticsService"

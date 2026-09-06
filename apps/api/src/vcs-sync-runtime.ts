@@ -3,7 +3,13 @@ import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { WorkerConfigProviderLayer, workerEnvironmentLayer } from "@maple/infra/worker-runtime"
 import { Cause, Effect, Layer, Option } from "effect"
+import { EdgeCacheService } from "@maple/cache"
+import { CacheBackendLive } from "@/platform/CacheBackendLive"
 import { layerPg } from "@/platform/DatabasePgLive"
+import { TinybirdOrgTokenService } from "@/services/integrations/TinybirdOrgTokenService"
+import { OrgClickHouseSettingsService } from "@/services/org/OrgClickHouseSettingsService"
+import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
+import { AuditLogService } from "@/services/audit/AuditLogService"
 import { Env } from "@/platform/Env"
 import { GithubAppClient } from "./services/integrations/vcs/vendor/github/GithubAppClient"
 import { GithubHttp } from "./services/integrations/vcs/vendor/github/GithubHttp"
@@ -57,8 +63,21 @@ export const buildVcsSyncLayer = (_env: Record<string, unknown>) => {
 	// the scheduled producer below never sees a PR event — so it is built here
 	// rather than in `Base`, keeping the cron layer as light as it was.
 	const ErrorActorsServiceLive = ErrorActorsService.layer.pipe(Layer.provide(Base))
+	// Issue events from a PR webhook are audited, and audit entries are warehouse
+	// rows — so the consumer carries the (Tinybird-pinned) ingest path as well.
+	const EdgeCacheServiceLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
+	const OrgClickHouseSettingsLive = OrgClickHouseSettingsService.layer.pipe(
+		Layer.provide(Layer.mergeAll(Base, EdgeCacheServiceLive)),
+	)
+	const TinybirdOrgTokenLive = TinybirdOrgTokenService.layer.pipe(Layer.provide(EnvLive))
+	const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(
+		Layer.provide(Layer.mergeAll(EnvLive, OrgClickHouseSettingsLive, TinybirdOrgTokenLive)),
+	)
+	const AuditLogServiceLive = AuditLogService.layer.pipe(
+		Layer.provide(Layer.mergeAll(WarehouseQueryServiceLive, workerEnvironmentLayer)),
+	)
 	const ErrorIssueWorkflowServiceLive = ErrorIssueWorkflowService.layer.pipe(
-		Layer.provide(Layer.mergeAll(Base, ErrorActorsServiceLive)),
+		Layer.provide(Layer.mergeAll(Base, ErrorActorsServiceLive, AuditLogServiceLive)),
 	)
 	const IssueFixVerificationServiceLive = IssueFixVerificationService.layer.pipe(
 		Layer.provide(

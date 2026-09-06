@@ -122,7 +122,7 @@ Cloudflare spans carry no events, so a failure is recorded as attributes rather 
 
 Resource attributes (`serviceName`, `environment`, `attributes`) are not applied in native mode; the export carries Cloudflare's own resource attributes for the Worker.
 
-## Client (Browser)
+## Client (Browser and React Native)
 
 All configuration must be provided programmatically since browsers don't have access to environment variables.
 
@@ -140,6 +140,24 @@ const program = Effect.log("Hello!").pipe(Effect.withSpan("hello"))
 
 Effect.runPromise(program.pipe(Effect.provide(TracerLive)))
 ```
+
+### React Native
+
+Use the explicit `@maple-dev/effect-sdk/client` entry point with a compatible
+Effect 4 version (see `peerDependencies`). `Maple.layer` and `MapleFlush.make`
+can export Effect traces, logs, and metrics using the runtime's `fetch`,
+`TextEncoder`, and `TextDecoder`. `identify()` and `clearIdentity()` still
+control `user.id` on Effect spans.
+
+React Native's `window` does not imply a browser DOM. Browser sessions, replay,
+and automatic `session.id` linking are skipped when `document` is absent;
+browser session events (`track`) are not exported in this environment. Native
+app lifecycle flushing and global native error capture require integration by
+the host app; the browser handlers below do not provide those integrations.
+
+Regression coverage uses React Native-shaped globals and the real OTLP layers
+with a mocked HTTP transport. It does not certify a particular Expo, Hermes,
+or device version.
 
 ### Uncaught errors (built in)
 

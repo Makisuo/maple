@@ -19,7 +19,7 @@ colors:
     severity-trace: "oklch(0.603 0.023 72)"
     severity-debug: "oklch(0.693 0.165 254)"
     severity-info: "oklch(0.658 0.134 151)"
-    severity-warn: "oklch(0.714 0.154 59)"
+    severity-warn: "oklch(0.8 0.15 84)"
     severity-error: "oklch(0.654 0.176 30)"
     severity-fatal: "oklch(0.555 0.174 30)"
     service-1: "oklch(0.68 0.17 250)"
@@ -155,7 +155,7 @@ All shared design tokens (color, radius, fonts, severity/service/chart palettes,
 
 ### Primary
 
-- **Amber Signal** (`oklch(0.714 0.154 59)`, dark canonical): the accent used on primary actions, the active sidebar item, `chart-1` / `chart-p95`, and severity-warn. Warm enough to read at low ambient light without burning. (Note: `chart-throughput` used to share this hue, but was split to purple — `oklch(0.66 0.14 290)` — so the built-in alert signal chips can distinguish throughput from p95.)
+- **Amber Signal** (`oklch(0.714 0.154 59)`, dark canonical): the accent used on primary actions, the active sidebar item, `chart-1` / `chart-p95`. Severity-warn is a separate yellow-amber (`oklch(0.8 0.15 84)`) so a WARN chip never reads as an action or a selected row. Warm enough to read at low ambient light without burning. (Note: `chart-throughput` used to share this hue, but was split to purple — `oklch(0.66 0.14 290)` — so the built-in alert signal chips can distinguish throughput from p95.)
 - **Amber Signal, daylight cut** (`oklch(0.66 0.16 59)`, light counterpart): the same role and hue under light theme, a touch deeper and more chromatic so it holds contrast on white. (An earlier draft used a blue light primary; it shipped briefly as stale shadcn tokens and was rebased to amber.)
 
 ### Secondary: Severity Ramp (the system's loudest semantic color)

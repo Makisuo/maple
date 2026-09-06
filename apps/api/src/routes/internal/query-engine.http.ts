@@ -31,6 +31,9 @@ import {
 	CloudflareInfraWorkersResponse,
 	ServiceDbQuerySummaryResponse,
 	ServiceDetailOverviewResponse,
+	ReleasesListResponse,
+	ReleaseDetailResponse,
+	type ReleaseRow,
 	ServiceDependenciesBundleResponse,
 	ServiceMapBundleResponse,
 	ServiceWorkloadsResponse,
@@ -77,6 +80,8 @@ import {
 	ProductEventsFunnelResponse,
 	ProductEventsFunnelBreakdownResponse,
 	ProductEventNamesResponse,
+	ProductEventsForTraceResponse,
+	ProductEventTraceSamplesResponse,
 	CommitSha,
 	FingerprintHash,
 	ServiceName,
@@ -90,6 +95,7 @@ import { Clock, Effect, Match, Option, Schema } from "effect"
 import { QueryEngineService } from "@/services/warehouse/QueryEngineService"
 import { isMissingProductEvents, isMissingServiceOperationsRollup } from "@/services/warehouse/missing-table"
 import { makeDirectRouteCachePolicy, makeExecuteRawSql } from "@maple/query-engine/runtime"
+import { describeFailure, recordRawSqlAudit } from "@/services/audit/audit-access"
 import { WarehouseQueryService } from "@/services/warehouse/WarehouseQueryService"
 import { traceCacheTtlSeconds } from "@/services/warehouse/trace-detail-cache"
 import {
@@ -246,6 +252,32 @@ const toServicePlatformRow = (row: CH.ServicePlatformsOutput) => {
 		processRuntimeName,
 	}
 }
+
+const toReleaseRow = (row: CH.ReleasesListOutput): ReleaseRow => {
+	const spanCount = Number(row.spanCount)
+	const satisfied = Number(row.apdexSatisfiedCount)
+	const tolerating = Number(row.apdexToleratingCount)
+	return {
+		serviceName: decodeServiceName(String(row.serviceName ?? "")),
+		environment: String(row.environment ?? ""),
+		commitSha: decodeCommitSha(row.commitSha),
+		firstSeen: String(row.firstSeen),
+		spanCount,
+		errorCount: Number(row.errorCount),
+		p50LatencyMs: Number(row.p50LatencyMs),
+		p95LatencyMs: Number(row.p95LatencyMs),
+		p99LatencyMs: Number(row.p99LatencyMs),
+		apdexScore:
+			spanCount > 0 ? Math.round(((satisfied + tolerating * 0.5) / spanCount) * 10_000) / 10_000 : 0,
+	}
+}
+
+const toReleaseTimelinePoint = (row: CH.ReleasesTimelineOutput) => ({
+	bucket: String(row.bucket),
+	serviceName: decodeServiceName(String(row.serviceName ?? "")),
+	commitSha: decodeCommitSha(row.commitSha),
+	count: Number(row.count),
+})
 
 const toServiceWorkloadRow = (row: CH.ServiceWorkloadsOutput) => ({
 	serviceName: decodeServiceName(String(row.serviceName ?? "")),
@@ -1030,6 +1062,54 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 							environments: environmentRows
 								.map((row) => String(row.environment ?? ""))
 								.filter((env) => env !== ""),
+						})
+					}),
+				)
+				.handle("releasesList", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						// One Worker invocation for the page: the per-commit rows and the
+						// swimlane timeline share a config resolution and run concurrently.
+						yield* warehouse.warmRoute(tenant)
+						const [rows, timelineRows] = yield* Effect.all(
+							[
+								runQuery(Queries.releasesList, tenant, payload),
+								runQuery(Queries.releasesTimeline, tenant, payload),
+							],
+							{ concurrency: 2 },
+						)
+						return new ReleasesListResponse({
+							releases: rows.map(toReleaseRow),
+							timeline: timelineRows.map(toReleaseTimelinePoint),
+							truncated: rows.length >= CH.RELEASES_LIST_CAP,
+						})
+					}),
+				)
+				.handle("releaseDetail", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* warehouse.warmRoute(tenant)
+						const [versionRows, timelineRows, timeseries, baselineTimeseries, fingerprintRows] =
+							yield* Effect.all(
+								[
+									runQuery(Queries.releaseVersions, tenant, payload),
+									runQuery(Queries.releaseTimeline, tenant, payload),
+									queryEngine.execute(tenant, payload.timeseries),
+									queryEngine.execute(tenant, payload.baselineTimeseries),
+									runQuery(Queries.releaseErrorFingerprints, tenant, payload),
+								],
+								{ concurrency: 5 },
+							)
+						return new ReleaseDetailResponse({
+							versions: versionRows.map(toReleaseRow),
+							timeline: timelineRows.map(toReleaseTimelinePoint),
+							timeseries,
+							baselineTimeseries,
+							errorFingerprints: fingerprintRows.map((row) => ({
+								fingerprintHash: decodeFingerprintHash(row.fingerprintHash),
+								count: Number(row.count),
+								firstSeen: String(row.firstSeen),
+							})),
 						})
 					}),
 				)
@@ -2071,6 +2151,43 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 						})
 					}),
 				)
+				// Both directions of the trace ↔ product-event link.
+				.handle("productEventsForTrace", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const rows = yield* runQuery(Queries.productEventsForTrace, tenant, payload)
+						return new ProductEventsForTraceResponse({
+							data: rows.map((row) => ({
+								timestamp: String(row.timestamp),
+								eventName: String(row.eventName),
+								spanId: String(row.spanId),
+								serviceName: String(row.serviceName),
+								userId: String(row.userId),
+								groupId: String(row.groupId),
+								visitorId: String(row.visitorId),
+								sessionId: String(row.sessionId),
+								// Already decoded as Record<string, string> by the derived row schema.
+								attributes: row.attributes,
+							})),
+						})
+					}),
+				)
+				.handle("productEventTraceSamples", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const rows = yield* runQuery(Queries.productEventTraceSamples, tenant, payload)
+						return new ProductEventTraceSamplesResponse({
+							data: rows.map((row) => ({
+								traceId: String(row.traceId),
+								spanId: String(row.spanId),
+								timestamp: String(row.timestamp),
+								serviceName: String(row.serviceName),
+								userId: String(row.userId),
+								visitorId: String(row.visitorId),
+							})),
+						})
+					}),
+				)
 				.handle("executeRawSql", ({ payload }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
@@ -2078,6 +2195,15 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 						const autoBucketSeconds = computeAutoBucketSeconds(payload.startTime, payload.endTime)
 						const granularitySeconds = payload.granularitySeconds ?? autoBucketSeconds
 
+						const audit = (result: Parameters<typeof recordRawSqlAudit>[0]["result"]) =>
+							recordRawSqlAudit({
+								tenant,
+								sql: payload.sql,
+								context: "rawSql",
+								startTime: payload.startTime,
+								endTime: payload.endTime,
+								result,
+							})
 						const result = yield* mapExecError(
 							executeRawSql(tenant, {
 								sql: payload.sql,
@@ -2087,7 +2213,19 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleInternalApi, "query
 								granularitySeconds,
 								workload: "interactive",
 								context: "rawSql",
-							}),
+							}).pipe(
+								// Every statement is audited, however it ended: a refused one as `denied`.
+								Effect.tap((executed) =>
+									audit({ _tag: "rows", rowCount: executed.rowCount }),
+								),
+								Effect.tapError((error) =>
+									audit(
+										error._tag === "@maple/http/errors/RawSqlValidationError"
+											? { _tag: "rejected", reason: error.message }
+											: { _tag: "failed", error: describeFailure(error) },
+									),
+								),
+							),
 							"rawSql query failed",
 						)
 

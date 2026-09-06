@@ -311,10 +311,83 @@ const productEventsFixtures: ReadonlyArray<BuilderFixture> = [
 				window,
 			),
 	},
+	// The two directions of the trace ↔ product-event link. Both are
+	// single-predicate lookups on `TraceId`, so what the sweep is watching for is
+	// that neither grows a `Map` read or loses its `OrgId`/time bounds.
+	{
+		module: "product-events",
+		name: "productEventsForTraceQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(CH.productEventsForTraceQuery({ limit: 50 }), {
+				...window,
+				traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+			}),
+	},
+	{
+		module: "product-events",
+		name: "productEventTraceSamplesQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(CH.productEventTraceSamplesQuery({ limit: 20 }), {
+				...window,
+				eventName: "checkout_completed",
+			}),
+	},
 ]
 
 export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 	...productEventsFixtures,
+	// Audit log listing (apps/api/src/services/audit/AuditLogService.ts `list`).
+	{
+		module: "audit-log",
+		name: "auditLogEntriesQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(CH.auditLogEntriesQuery({ limit: 50, offset: 0 }), { orgId: ORG_ID }),
+	},
+	{
+		// Every optional filter bound at once, including the raw `has(...)` clause.
+		module: "audit-log",
+		name: "auditLogEntriesQuery",
+		label: "filtered",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.auditLogEntriesQuery({
+					actorType: true,
+					userId: true,
+					apiKeyId: true,
+					actorId: true,
+					affectedUserId: true,
+					action: true,
+					outcome: true,
+					resourceType: true,
+					resourceId: true,
+					changedField: true,
+					requestId: true,
+					since: true,
+					until: true,
+					limit: 50,
+					offset: 50,
+				}),
+				{
+					orgId: ORG_ID,
+					actorType: "user",
+					userId: "user_1",
+					apiKeyId: "key_1",
+					actorId: "actor_1",
+					affectedUserId: "user_2",
+					action: "dashboard.updated",
+					outcome: "allowed",
+					resourceType: "dashboard",
+					resourceId: "dash_1",
+					changedField: "name",
+					requestId: "ray",
+					since: START_TIME,
+					until: END_TIME,
+				},
+			),
+	},
 	// Session replay fixtures used by the replay routes.
 	{
 		module: "session-replays",
@@ -625,6 +698,70 @@ export const builderFixtures: ReadonlyArray<BuilderFixture> = [
 					spanNames: ["GET /v2/services", "POST /v2/alerts"],
 				}),
 				{ ...window, bucketSeconds: 300 },
+			),
+	},
+
+	// Releases page — routes/internal/query-engine.http.ts `releasesList` and
+	// `releaseDetail`. Same splice as the services list, grouped one level
+	// finer (per commit), plus the error-events bridge keyed on the version.
+	{
+		module: "releases",
+		name: "releasesListQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.releasesListQuery({ environments: ["production"], serviceNames: ["api", "web"] }),
+				window,
+			),
+	},
+	{
+		module: "releases",
+		name: "releasesListQuery",
+		label: "singleService",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.releasesListQuery({ serviceName: "api", environments: ["production"], limit: 100 }),
+				window,
+			),
+	},
+	{
+		module: "releases",
+		name: "releasesTimelineQuery",
+		label: "minutely",
+		compile: () =>
+			CH.compileUnsafe(CH.releasesTimelineQuery({ environments: ["production"], bucketSeconds: 300 }), {
+				...window,
+				bucketSeconds: 300,
+			}),
+	},
+	{
+		module: "releases",
+		name: "releasesTimelineQuery",
+		label: "hourly",
+		compile: () =>
+			CH.compileUnsafe(CH.releasesTimelineQuery({ serviceName: "api", bucketSeconds: 3600 }), {
+				...window,
+				bucketSeconds: 3600,
+			}),
+	},
+	{
+		module: "releases",
+		name: "releasesTimelineQuery",
+		label: "raw",
+		compile: () =>
+			CH.compileUnsafe(CH.releasesTimelineQuery({ serviceName: "api", bucketSeconds: 30 }), {
+				...window,
+				bucketSeconds: 30,
+			}),
+	},
+	{
+		module: "releases",
+		name: "releaseErrorFingerprintsQuery",
+		label: "default",
+		compile: () =>
+			CH.compileUnsafe(
+				CH.releaseErrorFingerprintsQuery({ serviceName: "api", environments: ["production"] }),
+				{ ...window, serviceVersion: "0af7651916cd43dd8448eb211c80319c0af76519" },
 			),
 	},
 

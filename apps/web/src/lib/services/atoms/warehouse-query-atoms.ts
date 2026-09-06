@@ -15,6 +15,7 @@ import {
 	getServiceDetailThroughputRefinement,
 } from "@/api/warehouse/custom-charts"
 import { getErrorsByType, getErrorsFacets, getErrorsSpark, getErrorsSummary } from "@/api/warehouse/errors"
+import { getReleaseDetail, getReleases } from "@/api/warehouse/releases"
 import {
 	getLog,
 	getLogAttributeKeys,
@@ -123,7 +124,11 @@ import {
 	getWebAnalyticsSummary,
 	getWebAnalyticsTimeseries,
 } from "@/api/warehouse/web-analytics"
-import { getProductEventNames } from "@/api/warehouse/product-events"
+import {
+	getProductEventNames,
+	getProductEventsForTrace,
+	getProductEventTraceSamples,
+} from "@/api/warehouse/product-events"
 
 /**
  * The error union every warehouse server function fails with: the structured
@@ -385,6 +390,16 @@ export const productEventNamesResultAtom = makeQueryAtomFamily(getProductEventNa
 	staleTime: 60_000,
 })
 
+// A completed trace's product events never change, so this is only ever refetched
+// because the trace is still open. 60s matches the route cache behind it.
+export const productEventsForTraceResultAtom = makeQueryAtomFamily(getProductEventsForTrace, {
+	staleTime: 60_000,
+})
+
+export const productEventTraceSamplesResultAtom = makeQueryAtomFamily(getProductEventTraceSamples, {
+	staleTime: 60_000,
+})
+
 export const getReplayResultAtom = makeQueryAtomFamily(getReplay, {
 	staleTime: 60_000,
 })
@@ -627,6 +642,18 @@ export const cloudflareTopTrafficResultAtom = makeQueryAtomFamily(getCloudflareT
 // environments in one fetch. The chart grid and the environment switcher read
 // this atom with the same input key, so they share a single round-trip.
 export const getServiceDetailOverviewResultAtom = makeQueryAtomFamily(getServiceDetailOverview, {
+	staleTime: 30_000,
+})
+
+// Releases page: per-commit rows + swimlane timeline in one fetch. The list
+// takes `namespaces`, so the org-global pin lands in its key; the detail is
+// scoped to one service and needs no pin.
+export const getReleasesResultAtom = makeQueryAtomFamily(getReleases, {
+	staleTime: 30_000,
+	globalNamespace: "top",
+})
+
+export const getReleaseDetailResultAtom = makeQueryAtomFamily(getReleaseDetail, {
 	staleTime: 30_000,
 })
 

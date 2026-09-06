@@ -57,10 +57,7 @@ function MetricsPage() {
 				<DashboardLayout.Body>
 					<DashboardLayout.Content>
 						<DashboardLayout.Sticky>
-							<DashboardLayout.Header
-								title="Metrics"
-								description="Explore and analyze OpenTelemetry metrics from your services."
-							>
+							<DashboardLayout.Header title="Metrics">
 								<TimeRangeHeaderControls
 									startTime={search.startTime}
 									endTime={search.endTime}

@@ -31,7 +31,7 @@ export interface MapleClientConfig {
 	 * Post session metadata rows for the standalone session so it appears in
 	 * Maple's Sessions UI (list entry + linked traces, no replay recording).
 	 * Default `true`; no-ops when `@maple-dev/browser` is on the page (it owns
-	 * the session rows), during SSR, or without an ingest key.
+	 * the session rows), without a browser DOM, or without an ingest key.
 	 */
 	readonly emitSessionMeta?: boolean | undefined
 	/**

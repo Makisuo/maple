@@ -125,10 +125,7 @@ function ServicesPage() {
 					</DashboardLayout.Filters>
 					<DashboardLayout.Content>
 						<DashboardLayout.Sticky>
-							<DashboardLayout.Header
-								title="Services"
-								description="Overview of all services with key metrics."
-							>
+							<DashboardLayout.Header title="Services">
 								<TimeRangeHeaderControls
 									startTime={search.startTime ?? effectiveStartTime}
 									endTime={search.endTime ?? effectiveEndTime}

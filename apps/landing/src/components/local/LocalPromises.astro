@@ -1,0 +1,60 @@
+---
+/**
+ * LocalPromises — the standalone guarantees, stated as facts a reader can check.
+ *
+ * Each item is a promise plus the mechanism that makes it true, including the
+ * two places where "standalone" needs a qualifier: the dashboard page loads
+ * from local.maple.dev by default (data never goes there; `--offline` removes
+ * even that), and manual installs check GitHub for a newer release once a day
+ * (opt out with an env var). Saying both up front is what makes the rest
+ * believable.
+ */
+const promises: Array<{ title: string; body: string }> = [
+	{
+		title: "No account, ever",
+		body: "There is no sign-up, login, or license key. `maple start` is the whole onboarding, and nothing in the binary asks you to create anything.",
+	},
+	{
+		title: "Your telemetry stays on loopback",
+		body: "Ingest, storage, and every query run on 127.0.0.1. The dashboard page loads from local.maple.dev by default so UI fixes ship without a new binary — your data never goes there. Pass `--offline` and the UI is served from the binary too.",
+	},
+	{
+		title: "Works with no internet",
+		body: "With `--offline` everything, including the UI, comes out of the binary. The only other network call is a once-a-day check for a newer release — skipped for Homebrew installs, off with `MAPLE_NO_UPDATE_CHECK=1`.",
+	},
+	{
+		title: "You own the files",
+		body: "Everything lives under ~/.maple. Seal a day into Parquet with `maple archive` and query it with DuckDB; uninstalling removes the binary and leaves your data directory alone.",
+	},
+	{
+		title: "The full product, not a viewer",
+		body: "The same engine and views that run the hosted service: traces with correlated logs, log patterns, metrics, errors grouped by fingerprint, browser sessions, and a service map.",
+	},
+	{
+		title: "Source-available",
+		body: "The whole platform is on GitHub under the Functional Source License, converting to Apache 2.0. Read the ingest path, the schema, and the installer before you trust them.",
+	},
+];
+
+/** Render `code` spans from backtick pairs without pulling in a markdown parser. */
+const parts = (s: string) => s.split(/(`[^`]+`)/g).filter(Boolean);
+---
+
+<ul class="grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-3" role="list">
+	{
+		promises.map((p) => (
+			<li class="bg-bg p-6 md:p-7">
+				<h3 class="text-[15px] font-medium tracking-[-0.01em] text-fg">{p.title}</h3>
+				<p class="mt-2.5 text-[13px] leading-relaxed text-fg-muted">
+					{parts(p.body).map((t) =>
+						t.startsWith("`") ? (
+							<code class="rounded bg-bg-elevated px-1 py-0.5 font-mono text-[0.9em] text-fg">{t.slice(1, -1)}</code>
+						) : (
+							t
+						),
+					)}
+				</p>
+			</li>
+		))
+	}
+</ul>

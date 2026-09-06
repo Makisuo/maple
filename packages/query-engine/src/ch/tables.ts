@@ -620,6 +620,31 @@ export const AlertChecks = table("alert_checks", {
 	ErrorCategory: T.string,
 })
 
+export const AuditLog = table("audit_log", {
+	OrgId: orgId,
+	Id: T.string,
+	OccurredAt: dateTime64,
+	RecordedAt: dateTime64,
+	ActorType: T.string,
+	UserId: T.string,
+	ApiKeyId: T.string,
+	ActorId: T.string,
+	ActorLabel: T.string,
+	AffectedUserId: T.string,
+	Source: T.string,
+	Action: T.string,
+	Outcome: T.string,
+	DenialReason: T.string,
+	ResourceType: T.string,
+	ResourceId: T.string,
+	ChangedFields: T.array(T.string),
+	Changes: T.string,
+	Metadata: T.string,
+	RequestId: T.string,
+	OriginIp: T.string,
+	OriginCountry: T.string,
+})
+
 export const SessionReplays = table("session_replays", {
 	OrgId: orgId,
 	SessionId: T.string,
@@ -780,6 +805,13 @@ export const ProductEvents = table("product_events", {
 	ServiceName: T.string,
 	// track() props.
 	Attributes: T.map(T.string, T.string),
+	// The trace this event was derived from — non-empty only on Source='trace'
+	// rows, i.e. spans the customer annotated with `maple.product_event.name`.
+	// The link in both directions: trace view → its product events, funnel row →
+	// the trace that performed the step.
+	TraceId: T.string,
+	// The annotated span within TraceId. '' on every other source.
+	SpanId: T.string,
 })
 
 // (VisitorId, UserId) pairs observed together on a session_replays row.

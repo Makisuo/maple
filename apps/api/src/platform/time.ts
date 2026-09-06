@@ -32,3 +32,4 @@ export function dateToMs(date: Date | null | undefined): number | null
 export function dateToMs(date: Date | null | undefined): number | null {
 	return date === null || date === undefined ? null : date.getTime()
 }
+

@@ -99,6 +99,22 @@ describe("navGroups", () => {
 		}
 	})
 
+	it("shows Releases only behind the releases flag", () => {
+		for (const off of [undefined, DISABLED_ORGANIZATION_FEATURE_FLAGS]) {
+			expect(
+				navGroups(off)
+					.flatMap((group) => group.items)
+					.map((item) => item.href),
+			).not.toContain("/releases")
+			expect(paletteNavItems(off).map((entry) => entry.href)).not.toContain("/releases")
+		}
+		const on = navGroups(ENABLED_ORGANIZATION_FEATURE_FLAGS).flatMap((group) => group.items)
+		expect(on.map((item) => item.title)).toContain("Releases")
+		expect(paletteNavItems(ENABLED_ORGANIZATION_FEATURE_FLAGS).map((entry) => entry.href)).toContain(
+			"/releases",
+		)
+	})
+
 	it("shows Agent Sessions only behind the agentTracing flag", () => {
 		// The off state is asserted with the shape production actually passes: a
 		// fully-populated all-false object (what the hook returns while Clerk

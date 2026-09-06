@@ -1,13 +1,12 @@
 ---
 /**
- * LocalProductHero — marketing-scale hero for the /local product page.
+ * LocalProductHero — hero for the /local product page.
  *
- * Distinct from the docs-tuned `LocalHero.astro` (which renders inside the
- * docs article column): this leads with a headline + install CTA on the left
- * and a *streaming* `maple start` banner on the right — the banner output
- * reveals line-by-line on load, the single most on-theme moment for a local
- * CLI product. Atmosphere is built from global tokens only: an amber glow
- * behind the terminal, a fine grain overlay, and a staggered entrance cascade.
+ * Positions Maple Local as a standalone dev tool: a replacement for the local
+ * compose stack, not a mode of the hosted product. Headline + install command
+ * on the left; on the right the real `maple start` banner streams in line by
+ * line, which is the one animated moment the page keeps. No glow, grain, or
+ * badge pulses — the terminal is the atmosphere.
  */
 const INSTALL = "brew install Makisuo/tap/maple";
 
@@ -23,95 +22,65 @@ const banner: Array<{ key?: string; value: string; tone?: "amber" | "green" | "d
 	{ key: "pid", value: "48213  · stop with `maple stop`", tone: "dim" },
 ];
 
-const stats = [
-	{ cap: "port", val: ":4318" },
-	{ cap: "store", val: "chDB" },
-	{ cap: "signals", val: "traces · logs · metrics" },
-	{ cap: "deps", val: "none" },
-];
+const facts = ["1 process", "1 port", "0 containers", "0 accounts"];
 ---
 
-<section class="lph relative overflow-hidden">
-	<!-- Grid background -->
-	<div
-		class="absolute inset-0 pointer-events-none"
-		aria-hidden="true"
-		style="
-			background-image:
-				linear-gradient(to right, oklch(1 0 0 / 4%) 1px, transparent 1px),
-				linear-gradient(to bottom, oklch(1 0 0 / 4%) 1px, transparent 1px);
-			background-size: 60px 60px;
-			mask-image: radial-gradient(ellipse 78% 60% at 60% 28%, black, transparent);
-		"
-	>
-	</div>
-	<!-- Amber glow, anchored behind the terminal -->
-	<div class="lph__glow" aria-hidden="true"></div>
-	<!-- Fine grain overlay -->
-	<div class="lph__grain" aria-hidden="true"></div>
-
-	<div class="relative mx-auto max-w-6xl px-6 pt-24 md:pt-32 pb-16 md:pb-24">
-		<div class="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,540px)] gap-12 lg:gap-16 items-center">
-			<!-- Left: headline + CTAs -->
-			<div>
-				<div class="lph-rise mb-6" style="--d:0ms">
-					<span class="lph__badge">
-						<span class="lph__badge-dot" aria-hidden="true"></span>
-						Maple Local
-					</span>
-				</div>
-
-				<h1
-					class="lph-rise font-display text-4xl sm:text-5xl md:text-6xl font-bold text-fg leading-[1.02] max-w-2xl tracking-tight"
-					style="--d:70ms"
-				>
-					Observability that runs on <span class="lph__hl-word">localhost</span>
-				</h1>
-
-				<p class="lph-rise mt-6 text-sm md:text-base text-fg-muted max-w-xl leading-relaxed" style="--d:150ms">
-					One Bun-compiled binary — OTLP ingest, an embedded ClickHouse, a query API, and the
-					dashboard — running on <span class="lph__hl">127.0.0.1</span>. The same query engine and UI
-					as hosted Maple, with no cloud, no Tinybird, and no auth.
+<section class="lph">
+	<div class="mx-auto max-w-6xl px-6 pt-24 md:pt-32 pb-20 md:pb-28">
+		<div class="grid items-center gap-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,520px)] lg:gap-16">
+			<!-- Left: headline + install -->
+			<div class="lph-rise">
+				<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">
+					Maple Local · free · works offline
 				</p>
 
-				<!-- Copyable install one-liner -->
-				<div class="lph-rise lph__install" data-copy={INSTALL} style="--d:230ms">
-					<span class="lph__prompt" aria-hidden="true">$</span>
+				<h1
+					class="mt-6 max-w-[16ch] font-display text-4xl font-semibold leading-[1.04] tracking-[-0.025em] text-fg sm:text-5xl md:text-6xl"
+				>
+					The local observability stack, in one command.
+				</h1>
+
+				<p class="mt-6 max-w-[54ch] text-base leading-relaxed text-fg-muted">
+					Point any OpenTelemetry exporter at localhost and see traces, logs, metrics, errors, sessions,
+					and a service map while you build. One process instead of a compose file. No containers, no
+					account, no cloud — and nothing to sign up for, ever.
+				</p>
+
+				<div class="lph__install mt-8" data-copy={INSTALL}>
+					<span class="text-fg-muted select-none" aria-hidden="true">$</span>
 					<code>{INSTALL}</code>
-					<button class="lph__copy" type="button" aria-label="Copy install command">copy</button>
+					<button class="lph__copy" type="button" aria-label="Copy install command">Copy</button>
 				</div>
 
-				<!-- CTAs -->
-				<div class="lph-rise mt-6 flex flex-wrap items-center gap-3" style="--d:300ms">
+				<div class="mt-6 flex flex-wrap items-center gap-3">
+					<a
+						href="/docs/local-mode"
+						class="inline-flex h-10 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+					>
+						Read the docs
+					</a>
 					<a
 						href="https://github.com/MapleTechLabs/maple"
 						target="_blank"
 						rel="noopener noreferrer"
-						class="inline-flex h-9 items-center justify-center rounded-lg border border-input bg-input/30 px-3 text-xs font-medium text-fg transition-all hover:bg-input/50"
+						class="inline-flex h-10 items-center justify-center rounded-lg border border-border px-4 text-sm font-medium text-fg transition-colors hover:bg-bg-elevated"
 					>
 						View on GitHub
-					</a>
-					<a
-						href="/docs/local-mode"
-						class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/80"
-					>
-						Read the docs
 					</a>
 				</div>
 			</div>
 
-			<!-- Right: maple start terminal (streams in on load) -->
-			<div class="lph__aside">
-				<div class="lph__frame live-frame">
-					<div class="lph__head live-frame__head">
-						<span class="lph__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+			<!-- Right: maple start, streaming in -->
+			<div class="lph-rise" style="--d:120ms">
+				<div class="live-frame">
+					<div class="live-frame__head">
 						<span>~/your-app</span>
 						<span class="live-frame__live"><span class="live-frame__live-dot"></span>local</span>
 					</div>
 
 					<div class="lph__body">
 						<div class="lph__cmd">
-							<span class="lph__prompt" aria-hidden="true">$</span>
+							<span class="text-fg-muted select-none" aria-hidden="true">$</span>
 							<code>maple start</code>
 						</div>
 
@@ -129,14 +98,9 @@ const stats = [
 					</div>
 				</div>
 
-				<ul class="lph__stats" aria-label="Local mode at a glance">
-					{stats.map((s, i) => (
-						<li style={`--i:${i}`}>
-							<span class="lph__stat-cap">{s.cap}</span>
-							<span class="lph__stat-val">{s.val}</span>
-						</li>
-					))}
-				</ul>
+				<p class="mt-4 flex flex-wrap gap-x-5 gap-y-1 px-1 font-mono text-[12px] text-fg-muted" aria-label="Local mode at a glance">
+					{facts.map((f) => <span>{f}</span>)}
+				</p>
 			</div>
 		</div>
 	</div>
@@ -144,113 +108,34 @@ const stats = [
 
 <script>
 	import { bindCopyButtons } from "../../lib/copy-to-clipboard";
-	// Progressive enhancement: wire copy buttons. Without JS the command is still
-	// fully visible and selectable — the button just does nothing.
 	bindCopyButtons({ hostSelector: ".lph__install[data-copy]", buttonSelector: ".lph__copy" });
 </script>
 
 <style>
 	.lph {
-		/* Timeline: the terminal output streams in after the frame settles. */
-		--stream-lead: 640ms;
-		--stream-step: 95ms;
+		--stream-lead: 560ms;
+		--stream-step: 90ms;
 	}
 
-	/* ── Atmosphere ─────────────────────────────────────────── */
-	.lph__glow {
-		position: absolute;
-		top: -8%;
-		right: -6%;
-		width: 58%;
-		height: 80%;
-		z-index: 0;
-		pointer-events: none;
-		background: radial-gradient(
-			ellipse at center,
-			color-mix(in oklab, var(--amber-deep) 26%, transparent) 0%,
-			color-mix(in oklab, var(--amber-deep) 9%, transparent) 38%,
-			transparent 70%
-		);
-		filter: blur(20px);
-		opacity: 0;
-		animation: lph-glow 1200ms ease-out 200ms forwards;
-	}
-	.lph__grain {
-		position: absolute;
-		inset: 0;
-		z-index: 0;
-		pointer-events: none;
-		opacity: 0.04;
-		mix-blend-mode: overlay;
-		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-	}
-
-	/* ── Entrance cascade ───────────────────────────────────── */
 	.lph-rise {
 		opacity: 0;
-		transform: translateY(10px);
-		animation: lph-rise 620ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+		transform: translateY(8px);
+		animation: lph-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 		animation-delay: var(--d, 0ms);
 	}
 
-	/* ── Badge ──────────────────────────────────────────────── */
-	.lph__badge {
+	/* Install command: a quiet chip with the copy control inside it. */
+	.lph__install {
 		display: inline-flex;
 		align-items: center;
-		gap: 7px;
-		border: 1px solid color-mix(in oklab, var(--primary) 35%, var(--border));
-		background: color-mix(in oklab, var(--primary) 8%, var(--card));
-		border-radius: 999px;
-		padding: 3px 11px 3px 9px;
-		font-family: var(--font-mono);
-		font-size: 10px;
-		font-weight: 500;
-		letter-spacing: 0.14em;
-		text-transform: uppercase;
-		color: var(--primary);
-	}
-	.lph__badge-dot {
-		width: 6px;
-		height: 6px;
-		border-radius: 999px;
-		background: var(--primary);
-		box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 60%, transparent);
-		animation: lph-ping 2.4s ease-out infinite;
-	}
-
-	.lph__hl-word {
-		color: var(--primary);
-		font-style: italic;
-	}
-	.lph__hl {
-		font-family: var(--font-mono);
-		color: var(--primary);
-	}
-
-	/* ── Copyable install one-liner ─────────────────────────── */
-	.lph__install {
-		display: flex;
-		align-items: center;
-		gap: 9px;
-		margin-top: 30px;
+		gap: 12px;
 		max-width: 100%;
-		width: fit-content;
-		padding: 9px 9px 9px 13px;
+		padding: 6px 6px 6px 14px;
 		border: 1px solid var(--border);
-		background: color-mix(in oklab, var(--bg-elevated) 60%, transparent);
+		border-radius: var(--radius-lg);
+		background: var(--bg-elevated);
 		font-family: var(--font-mono);
-		font-size: 12.5px;
-		position: relative;
-	}
-	/* Left accent tick on the install pill. */
-	.lph__install::before {
-		content: "";
-		position: absolute;
-		left: 0;
-		top: 0;
-		bottom: 0;
-		width: 2px;
-		background: var(--primary);
+		font-size: 13px;
 	}
 	.lph__install code {
 		font-family: var(--font-mono);
@@ -261,66 +146,32 @@ const stats = [
 		overflow-x: auto;
 		white-space: nowrap;
 	}
-	.lph__prompt {
-		color: var(--primary);
-		user-select: none;
-	}
 	.lph__copy {
 		flex: none;
-		font-family: var(--font-mono);
-		font-size: 10px;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
+		font-size: 12px;
+		font-family: var(--font-sans);
 		color: var(--muted-foreground);
-		background: color-mix(in oklab, var(--bg-elevated) 70%, transparent);
-		border: 1px solid var(--border);
-		padding: 4px 9px;
+		background: none;
+		border: 1px solid transparent;
+		border-radius: calc(var(--radius-lg) - 4px);
+		padding: 5px 10px;
 		cursor: pointer;
-		transition: color 140ms ease, border-color 140ms ease;
+		transition: color 140ms ease, background-color 140ms ease;
 	}
 	.lph__copy:hover {
-		color: var(--primary);
-		border-color: color-mix(in oklab, var(--primary) 50%, var(--border));
+		color: var(--foreground);
+		background: var(--bg);
 	}
 	.lph__copy.is-done {
 		color: var(--chart-3);
-		border-color: color-mix(in oklab, var(--chart-3) 55%, var(--border));
 	}
 
-	/* ── Terminal frame ─────────────────────────────────────── */
-	.lph__frame {
-		position: relative;
-		z-index: 1;
-		opacity: 0;
-		transform: translateY(10px) scale(0.99);
-		animation: lph-frame 560ms cubic-bezier(0.22, 1, 0.36, 1) 120ms forwards;
-		box-shadow:
-			0 1px 0 0 color-mix(in oklab, var(--foreground) 6%, transparent) inset,
-			0 30px 60px -30px color-mix(in oklab, black 70%, transparent);
-	}
-	.lph__head {
-		gap: 10px;
-		justify-content: flex-start;
-	}
-	.lph__dots {
-		display: inline-flex;
-		gap: 5px;
-	}
-	.lph__dots i {
-		width: 8px;
-		height: 8px;
-		border-radius: 999px;
-		background: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
-	}
-	.lph__head .live-frame__live {
-		margin-left: auto;
-	}
-
+	/* Terminal body */
 	.lph__body {
 		padding: 16px 16px 18px;
 		font-family: var(--font-mono);
 		font-size: 12.5px;
-		line-height: 1.5;
+		line-height: 1.55;
 	}
 	.lph__cmd {
 		display: flex;
@@ -340,50 +191,44 @@ const stats = [
 		padding: 12px 0 0;
 		background: none;
 		border: 0;
-		border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+		border-top: 1px solid var(--border);
 		overflow-x: auto;
-		position: relative;
 	}
 
-	/* Each output line streams in on a stagger. */
 	.lph__row {
 		display: flex;
 		gap: 12px;
-		min-height: 1.5em;
+		min-height: 1.55em;
 		color: var(--muted-foreground);
 		white-space: nowrap;
 		opacity: 0;
-		transform: translateY(3px);
-		animation: lph-line 320ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+		animation: lph-line 280ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 		animation-delay: calc(var(--stream-lead) + var(--i) * var(--stream-step));
 	}
 	.lph__row-key {
 		flex: none;
 		width: 9ch;
-		color: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
+		color: var(--muted-foreground);
 	}
 	.lph__row-val {
 		color: var(--foreground);
 	}
-	.lph__row--amber .lph__row-val,
-	.lph__row--amber {
+	.lph__row--amber .lph__row-val {
 		color: var(--primary);
 	}
-	.lph__row--green .lph__row-val,
-	.lph__row--green {
+	.lph__row--green .lph__row-val {
 		color: var(--chart-3);
 	}
 	.lph__row--dim .lph__row-val {
 		color: var(--muted-foreground);
 	}
 
-	/* Blinking caret, appears once the stream finishes. */
 	.lph__caret {
 		display: inline-block;
 		width: 7px;
 		height: 1em;
 		margin-top: 4px;
-		background: var(--primary);
+		background: var(--foreground);
 		vertical-align: -0.15em;
 		opacity: 0;
 		animation:
@@ -391,8 +236,22 @@ const stats = [
 			lph-caret-blink 1.05s steps(1) calc(var(--stream-lead) + 8 * var(--stream-step)) infinite;
 	}
 
-	/* Terminal-style 50/50 blink — scoped so it can't bind to the shared
-	   @theme caret-blink (which eases with a different rhythm). */
+	@keyframes lph-rise {
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+	@keyframes lph-line {
+		to {
+			opacity: 1;
+		}
+	}
+	@keyframes lph-caret-in {
+		to {
+			opacity: 1;
+		}
+	}
 	@keyframes lph-caret-blink {
 		0%,
 		49% {
@@ -404,105 +263,21 @@ const stats = [
 		}
 	}
 
-	/* ── Stat strip ─────────────────────────────────────────── */
-	.lph__stats {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0;
-		list-style: none;
-		margin: 16px 0 0;
-		padding: 0;
-		border: 1px solid var(--border);
-		background: color-mix(in oklab, var(--bg-elevated) 55%, transparent);
-	}
-	.lph__stats li {
-		display: flex;
-		flex: 1 1 auto;
-		flex-direction: column;
-		gap: 2px;
-		padding: 8px 14px;
-		border-right: 1px solid var(--border);
-		opacity: 0;
-		animation: lph-line 320ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
-		animation-delay: calc(var(--stream-lead) + 220ms + var(--i) * 70ms);
-	}
-	.lph__stats li:last-child {
-		border-right: 0;
-	}
-	.lph__stat-cap {
-		font-family: var(--font-mono);
-		font-size: 9px;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
-		color: var(--muted-foreground);
-	}
-	.lph__stat-val {
-		font-family: var(--font-mono);
-		font-size: 12.5px;
-		color: var(--foreground);
-	}
-
-	/* ── Keyframes ──────────────────────────────────────────── */
-	@keyframes lph-rise {
-		to {
-			opacity: 1;
-			transform: translateY(0);
-		}
-	}
-	@keyframes lph-frame {
-		to {
-			opacity: 1;
-			transform: translateY(0) scale(1);
-		}
-	}
-	@keyframes lph-line {
-		to {
-			opacity: 1;
-			transform: translateY(0);
-		}
-	}
-	@keyframes lph-glow {
-		to {
-			opacity: 1;
-		}
-	}
-	@keyframes lph-caret-in {
-		to {
-			opacity: 1;
-		}
-	}
-	@keyframes lph-ping {
-		0% {
-			box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 55%, transparent);
-		}
-		70%,
-		100% {
-			box-shadow: 0 0 0 6px transparent;
-		}
-	}
-
 	@media (max-width: 640px) {
 		.lph__body {
 			font-size: 11.5px;
 		}
 	}
 
-	/* Everything resolves to its final state immediately when motion is off. */
 	@media (prefers-reduced-motion: reduce) {
-		.lph__glow,
 		.lph-rise,
-		.lph__frame,
-		.lph__row,
-		.lph__stats li {
+		.lph__row {
 			opacity: 1 !important;
 			transform: none !important;
 			animation: none !important;
 		}
-		.lph__badge-dot,
 		.lph__caret {
 			animation: none !important;
-		}
-		.lph__caret {
 			opacity: 0.4 !important;
 		}
 	}

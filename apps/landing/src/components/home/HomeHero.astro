@@ -61,11 +61,15 @@ const stats = [
 			</span>
 		</a>
 
+		<!-- Three claims, one per line. Each is a block so the accent never
+		     splits across a break in any locale — the second line used to run
+		     "Built for you. Native / to AI." on a phone. -->
 		<h1
 			class="mt-8 max-w-4xl font-display text-[2.375rem] font-semibold leading-[1.02] tracking-[-0.025em] text-fg sm:text-6xl lg:text-7xl"
 		>
-			{m.hero_title()}<br />
-			{m.hero_title_sub()} <span class="text-primary">{m.hero_title_accent()}</span>
+			<span class="block">{m.hero_title()}</span>
+			<span class="block">{m.hero_title_sub()}</span>
+			<span class="block text-primary">{m.hero_title_accent()}</span>
 		</h1>
 
 		<p class="mt-6 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-base">

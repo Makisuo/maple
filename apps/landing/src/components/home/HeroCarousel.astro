@@ -45,8 +45,10 @@ const slides = [
 	},
 	{
 		key: "services",
-		tab: m.features_col_services(),
-		line: m.features_service_heading(),
+		tab: m.hero_shot_services(),
+		// Its own line: the catalog plate used to borrow the services-column
+		// heading, which said the same thing as slide 1's caption.
+		line: m.hero_shot_services_line(),
 		label: "The service catalog comparing latency percentiles, error-rate trends and throughput across production services",
 		src: "/screenshots/hero-services.webp",
 	},

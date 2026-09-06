@@ -23,6 +23,7 @@ import {
 import { builderFixtures } from "./builders"
 import * as activityQueries from "../ch/queries/activity"
 import * as alertCheckQueries from "../ch/queries/alert-checks"
+import * as auditLogQueries from "../ch/queries/audit-log"
 import * as anomalyQueries from "../ch/queries/anomaly"
 import * as attributeKeyQueries from "../ch/queries/attribute-keys"
 import * as containerQueries from "../ch/queries/containers"
@@ -37,6 +38,7 @@ import * as serviceMapQueries from "../ch/queries/service-map"
 import * as serviceEndpointQueries from "../ch/queries/service-endpoints"
 import * as serviceOperationQueries from "../ch/queries/service-operations"
 import * as serviceQueries from "../ch/queries/services"
+import * as releaseQueries from "../ch/queries/releases"
 import * as sessionEventQueries from "../ch/queries/session-events"
 import * as sessionReplayQueries from "../ch/queries/session-replays"
 import * as webAnalyticsQueries from "../ch/queries/web-analytics"
@@ -253,6 +255,7 @@ describe("sql catalog", () => {
 const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 	activity: activityQueries,
 	"alert-checks": alertCheckQueries,
+	"audit-log": auditLogQueries,
 	anomaly: anomalyQueries,
 	"attribute-keys": attributeKeyQueries,
 	containers: containerQueries,
@@ -267,6 +270,7 @@ const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 	"service-endpoints": serviceEndpointQueries,
 	"service-operations": serviceOperationQueries,
 	services: serviceQueries,
+	releases: releaseQueries,
 	"session-events": sessionEventQueries,
 	"session-replays": sessionReplayQueries,
 	"top-operations": topOperationQueries,

@@ -15,6 +15,7 @@ import {
 import { MapleApiV2, paginateOffsetQuery, timestamp } from "@maple/domain/http/v2"
 import type { V2AnomalyIncident, V2AnomalyIncidentTimeseries, V2AnomalySettings } from "@maple/domain/http/v2"
 import { Effect } from "effect"
+import { recordHttpAudit } from "@/services/audit/AuditLogService"
 import { requireAdmin } from "@/services/auth/auth"
 import { AnomalyDetectionService } from "@/services/alerts/AnomalyDetectionService"
 import { ErrorsService } from "@/services/errors/ErrorsService"
@@ -188,6 +189,13 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const incident = yield* anomalies.resolveIncidentManually(tenant.orgId, params.id)
+					yield* recordHttpAudit("anomaly_incident.resolved", {
+						resourceId: incident.id,
+						metadata: {
+							signal_type: incident.signalType,
+							service_name: incident.serviceName,
+						},
+					})
 
 					return toV2Incident(incident)
 				}),
@@ -245,6 +253,10 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 								: undefined),
 						}),
 					)
+
+					yield* recordHttpAudit("anomaly_settings.updated", {
+						metadata: { enabled: settings.enabled, sensitivity: settings.sensitivity },
+					})
 
 					return toV2Settings(settings)
 				}),
