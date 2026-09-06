@@ -1,6 +1,15 @@
 import { useMemo, useState, type ReactNode } from "react"
 
-import { ArrowRightIcon, ChevronRightIcon, CircleXmarkIcon } from "@/components/icons"
+import {
+	ArrowRightIcon,
+	ChatBubbleIcon,
+	ChatBubbleSparkleIcon,
+	ChevronRightIcon,
+	CircleXmarkIcon,
+	DatabaseIcon,
+	FloppyDiskIcon,
+	PaperPlaneIcon,
+} from "@/components/icons"
 import { Button } from "@maple/ui/components/ui/button"
 import { formatNumber, formatPercent } from "@maple/ui/lib/format"
 import { formatSessionDuration } from "@maple/ui/lib/replay-format"
@@ -27,12 +36,27 @@ import type { SpanDetailTab } from "./span-expansion"
 import { SpanPopover } from "./span-popover"
 import { OCCUPANCY_DOT_FILL, OCCUPANCY_FILL, OCCUPANCY_LABEL } from "./span-visuals"
 
+// Each bucket carries a glyph in its own colour: what the tokens WERE — sent,
+// replayed from cache, written to it, replied, thought — rather than a swatch
+// that only says which stripe of the bar is which.
 const TOKEN_BUCKETS = [
-	{ key: "input", label: "Input", fill: "bg-chart-2" },
-	{ key: "cacheRead", label: "Cache read", fill: "bg-chart-4" },
-	{ key: "cacheWrite", label: "Cache write", fill: "bg-chart-5" },
-	{ key: "output", label: "Output", fill: "bg-chart-1" },
-	{ key: "reasoning", label: "Reasoning", fill: "bg-chart-3" },
+	{ key: "input", label: "Input", fill: "bg-chart-2", text: "text-chart-2", icon: PaperPlaneIcon },
+	{ key: "cacheRead", label: "Cache read", fill: "bg-chart-4", text: "text-chart-4", icon: DatabaseIcon },
+	{
+		key: "cacheWrite",
+		label: "Cache write",
+		fill: "bg-chart-5",
+		text: "text-chart-5",
+		icon: FloppyDiskIcon,
+	},
+	{ key: "output", label: "Output", fill: "bg-chart-1", text: "text-chart-1", icon: ChatBubbleIcon },
+	{
+		key: "reasoning",
+		label: "Reasoning",
+		fill: "bg-chart-3",
+		text: "text-chart-3",
+		icon: ChatBubbleSparkleIcon,
+	},
 ] as const
 
 const SEVERITY_DOT = {
@@ -503,7 +527,7 @@ function Rail({ summary }: { summary: SessionSummary }) {
 						</div>
 						{tokenBuckets.map((bucket) => (
 							<div key={bucket.key} className="flex items-center gap-2.5">
-								<span aria-hidden className={cn("size-1.5 rounded-xs", bucket.fill)} />
+								<bucket.icon aria-hidden size={13} className={cn("shrink-0", bucket.text)} />
 								<span className="min-w-0 flex-1 truncate text-xs">{bucket.label}</span>
 								<span className="font-mono text-muted-foreground text-xs tabular-nums">
 									{formatNumber(summary.tokens[bucket.key])}

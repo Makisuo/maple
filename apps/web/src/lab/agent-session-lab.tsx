@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 
+import { SessionHeader } from "@/components/agent-sessions/session-detail/session-header"
 import { SessionViews, type SessionView } from "@/components/agent-sessions/session-detail/session-views"
 import { Toggle } from "@maple/ui/components/ui/toggle"
 import { buildAgentSessionFixture, buildCaptureOffFixture } from "@/lab/agent-session-fixture"
@@ -36,13 +37,13 @@ export function AgentSessionLab({ initialView }: { initialView?: SessionView }) 
 
 	return (
 		<div className="flex h-screen flex-col bg-background">
-			<div className="flex shrink-0 items-center gap-4 border-border border-b px-4 py-3">
-				<div className="min-w-0">
-					<h1 className="font-semibold text-sm">{summary.title ?? "Agent session"}</h1>
-					<p className="text-muted-foreground text-xs">
-						{summary.spanCount} spans · {turns.length} turns
-						{selectedSpanId !== undefined && ` · selected ${selectedSpanId}`}
-					</p>
+			{/* The page's own header, over the fixture — the one place to eyeball it. */}
+			<div className="flex shrink-0 items-start gap-4 border-border border-b px-4 py-3">
+				<div className="min-w-0 flex-1">
+					<SessionHeader sessionId="lab-session-0f3c9a1e2b7d" summary={summary} turns={turns} />
+					{selectedSpanId !== undefined && (
+						<p className="mt-1 text-muted-foreground text-xs">selected {selectedSpanId}</p>
+					)}
 				</div>
 				<div className="ml-auto flex shrink-0 items-center gap-2">
 					<Toggle

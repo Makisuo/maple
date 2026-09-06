@@ -46,10 +46,12 @@ vi.mock("@/lib/services/atoms/warehouse-query-atoms", async (importOriginal) => 
 })
 
 import type { AiSessionSpan } from "@maple/domain/http"
+import { formatSessionDuration } from "@maple/ui/lib/replay-format"
 import { agentSpan, llmSpan, makeSpan, toolSpan, userMessages } from "@/lib/agent-sessions/span-test-support"
 import { buildSessionSummary, type SessionSummary } from "@/lib/agent-sessions/session-summary"
 import { buildSessionTurns, type SessionTurn } from "@/lib/agent-sessions/session-turns"
 import { SessionFlow } from "./session-flow"
+import { SessionHeader, sessionIdentity } from "./session-header"
 import { SessionOverview } from "./session-overview"
 import { SessionViews, type SessionView } from "./session-views"
 import { SessionWaterfall } from "./session-waterfall"
@@ -1249,5 +1251,53 @@ describe("SessionViews", () => {
 		expect(
 			within(spanPopover()).getByRole("button", { name: "Details" }).getAttribute("aria-pressed"),
 		).toBe("true")
+	})
+})
+
+describe("SessionHeader", () => {
+	it("names the session after its agent, with the framework as a fact beside it", () => {
+		const { turns: vendorTurns, summary: vendorSummary } = sessionOf([
+			agentSpan({ spanId: "v-agent", startMs: 0, durationMs: SECOND, vendorId: "langchain" }),
+		])
+		render(<SessionHeader sessionId="sess-1" summary={vendorSummary} turns={vendorTurns} />)
+		expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("billing-agent")
+		expect(screen.getByText("Framework").nextElementSibling?.textContent).toBe("LangChain")
+	})
+
+	it("demotes the opening prompt to a quoted line rather than making it the title", () => {
+		render(<SessionHeader sessionId="sess-1" summary={summary} turns={turns} />)
+		expect(screen.getByText("“fix the webhook retry backoff”")).toBeTruthy()
+		expect(screen.getByRole("heading", { level: 1 }).textContent).not.toContain("webhook")
+	})
+
+	it("shows the full session id as a copyable fact, never as the heading", () => {
+		render(<SessionHeader sessionId="0f3c9a1e-long-session-id" summary={summary} turns={turns} />)
+		const copy = screen.getByRole("button", { name: "Copy Session ID" })
+		expect(copy.textContent).toBe("0f3c9a1e-long-session-id")
+		expect(screen.getByRole("heading", { level: 1 }).textContent).not.toContain("0f3c9a1e")
+	})
+
+	it("counts turns and names the model beside the duration", () => {
+		render(<SessionHeader sessionId="sess-1" summary={summary} turns={turns} />)
+		expect(screen.getByText("Turns").nextElementSibling?.textContent).toBe("2")
+		expect(screen.getByText("Model").nextElementSibling?.textContent).toBe("claude-sonnet-4-5")
+		expect(screen.getByText("Duration").nextElementSibling?.textContent).toBe(
+			formatSessionDuration(summary.wallClockMs),
+		)
+	})
+
+	it("falls back to the framework, then to a generic name, when no agent is named", () => {
+		expect(sessionIdentity({ agentNames: [], vendorIds: ["claude_agent_sdk"] })).toEqual({
+			heading: "Claude Agent SDK session",
+			framework: undefined,
+		})
+		expect(sessionIdentity({ agentNames: [], vendorIds: ["unknown:foo"] })).toEqual({
+			heading: "Agent session",
+			framework: undefined,
+		})
+		expect(sessionIdentity({ agentNames: ["planner"], vendorIds: [] })).toEqual({
+			heading: "planner",
+			framework: undefined,
+		})
 	})
 })
