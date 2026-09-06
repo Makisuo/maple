@@ -6,12 +6,11 @@ SELECT
         FROM (SELECT
           TraceId AS traceId,
           max(SessionId) AS rawSessionId,
-          groupUniqArray(VendorId) AS names
+          groupUniqArrayIf(20)(VendorId, VendorId != '') AS names
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND VendorId != ''
         GROUP BY traceId) AS facet_traces
         GROUP BY name
         ORDER BY count DESC
@@ -24,12 +23,11 @@ SELECT
         FROM (SELECT
           TraceId AS traceId,
           max(SessionId) AS rawSessionId,
-          groupUniqArray(ServiceName) AS names
+          groupUniqArrayIf(20)(ServiceName, ServiceName != '') AS names
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND ServiceName != ''
         GROUP BY traceId) AS facet_traces
         GROUP BY name
         ORDER BY count DESC
@@ -42,12 +40,11 @@ SELECT
         FROM (SELECT
           TraceId AS traceId,
           max(SessionId) AS rawSessionId,
-          groupUniqArray(DeploymentEnv) AS names
+          groupUniqArrayIf(20)(DeploymentEnv, DeploymentEnv != '') AS names
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND DeploymentEnv != ''
         GROUP BY traceId) AS facet_traces
         GROUP BY name
         ORDER BY count DESC
@@ -60,12 +57,11 @@ SELECT
         FROM (SELECT
           TraceId AS traceId,
           max(SessionId) AS rawSessionId,
-          groupUniqArray(Model) AS names
+          groupUniqArrayIf(20)(Model, Model != '') AS names
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND Model != ''
         GROUP BY traceId) AS facet_traces
         GROUP BY name
         ORDER BY count DESC
@@ -78,12 +74,11 @@ SELECT
         FROM (SELECT
           TraceId AS traceId,
           max(SessionId) AS rawSessionId,
-          groupUniqArray(AgentName) AS names
+          groupUniqArrayIf(20)(AgentName, AgentName != '') AS names
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND AgentName != ''
         GROUP BY traceId) AS facet_traces
         GROUP BY name
         ORDER BY count DESC
@@ -96,12 +91,11 @@ SELECT
         FROM (SELECT
           TraceId AS traceId,
           max(SessionId) AS rawSessionId,
-          groupUniqArray(ToolName) AS names
+          groupUniqArrayIf(20)(ToolName, ToolName != '') AS names
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
           AND Timestamp <= '2026-01-03 14:15:00'
-          AND ToolName != ''
         GROUP BY traceId) AS facet_traces
         GROUP BY name
         ORDER BY count DESC
@@ -144,10 +138,9 @@ SELECT
           max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
           groupUniqArrayIf(20)(Model, Model != '') AS models,
           groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
-          sum(IsLlmCall) AS llmCalls,
           sum(IsToolCall) AS toolCalls,
           sum(IsError) AS errorAgentSpans,
-          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost, ResponseId, IsLlmCall), ((Tokens > 0 OR Cost > 0) OR IsLlmCall = 1)) AS usageReporters
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-02 10:30:00'
@@ -166,10 +159,9 @@ SELECT
           max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
           groupUniqArrayIf(20)(Model, Model != '') AS models,
           groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
-          sum(IsLlmCall) AS llmCalls,
           sum(IsToolCall) AS toolCalls,
           sum(IsError) AS errorAgentSpans,
-          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost, ResponseId, IsLlmCall), ((Tokens > 0 OR Cost > 0) OR IsLlmCall = 1)) AS usageReporters
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-02 10:30:00'
@@ -216,10 +208,9 @@ SELECT
           max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
           groupUniqArrayIf(20)(Model, Model != '') AS models,
           groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
-          sum(IsLlmCall) AS llmCalls,
           sum(IsToolCall) AS toolCalls,
           sum(IsError) AS errorAgentSpans,
-          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost, ResponseId, IsLlmCall), ((Tokens > 0 OR Cost > 0) OR IsLlmCall = 1)) AS usageReporters
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-02 10:30:00'
@@ -243,10 +234,9 @@ SELECT
           max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
           groupUniqArrayIf(20)(Model, Model != '') AS models,
           groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
-          sum(IsLlmCall) AS llmCalls,
           sum(IsToolCall) AS toolCalls,
           sum(IsError) AS errorAgentSpans,
-          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost, ResponseId, IsLlmCall), ((Tokens > 0 OR Cost > 0) OR IsLlmCall = 1)) AS usageReporters
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-02 10:30:00'
@@ -298,10 +288,9 @@ SELECT
           max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
           groupUniqArrayIf(20)(Model, Model != '') AS models,
           groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
-          sum(IsLlmCall) AS llmCalls,
           sum(IsToolCall) AS toolCalls,
           sum(IsError) AS errorAgentSpans,
-          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost, ResponseId, IsLlmCall), ((Tokens > 0 OR Cost > 0) OR IsLlmCall = 1)) AS usageReporters
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-02 10:30:00'
@@ -322,10 +311,9 @@ SELECT
           max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
           groupUniqArrayIf(20)(Model, Model != '') AS models,
           groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
-          sum(IsLlmCall) AS llmCalls,
           sum(IsToolCall) AS toolCalls,
           sum(IsError) AS errorAgentSpans,
-          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost, ResponseId, IsLlmCall), ((Tokens > 0 OR Cost > 0) OR IsLlmCall = 1)) AS usageReporters
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-02 10:30:00'
@@ -345,11 +333,11 @@ SELECT
           toString(max(traceAgentEnd)) AS agentEnd,
           groupUniqArrayArray(models) AS models,
           groupUniqArrayArray(agentNames) AS agentNames,
-          sum(llmCalls) AS llmCalls,
+          toFloat64(arraySum(n -> if(n.2 AND n.1 = '', 1, 0), arrayMap(r -> tuple(r.5, r.6 = 1 AND if((r.3 > 0 OR r.4 > 0), greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), arrayFlatten(groupArray(usageReporters)))) > 0 OR greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), arrayFlatten(groupArray(usageReporters)))) > 0, NOT arrayExists(p -> p.1 = r.2 AND (p.3 > 0 OR p.4 > 0), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))) + length(arrayDistinct(arrayFilter(id -> id != '', arrayMap(n -> if(n.2, n.1, ''), arrayMap(r -> tuple(r.5, r.6 = 1 AND if((r.3 > 0 OR r.4 > 0), greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), arrayFlatten(groupArray(usageReporters)))) > 0 OR greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), arrayFlatten(groupArray(usageReporters)))) > 0, NOT arrayExists(p -> p.1 = r.2 AND (p.3 > 0 OR p.4 > 0), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))))))) AS llmCalls,
           sum(toolCalls) AS toolCalls,
           sum(errorAgentSpans) AS errorAgentSpans,
-          sum(arraySum(r -> greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), usageReporters)), usageReporters)) AS totalTokens,
-          sum(arraySum(r -> greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), usageReporters)), usageReporters)) AS cost,
+          arraySum(n -> if(n.1 = '', n.2, 0.), arrayMap(r -> tuple(r.5, greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))) + arraySum(id -> arrayMax(n -> if(n.1 = id, n.2, 0.), arrayMap(r -> tuple(r.5, greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))), arrayDistinct(arrayFilter(id -> id != '', arrayMap(n -> n.1, arrayMap(r -> tuple(r.5, greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters))))))) AS totalTokens,
+          arraySum(n -> if(n.1 = '', n.2, 0.), arrayMap(r -> tuple(r.5, greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))) + arraySum(id -> arrayMax(n -> if(n.1 = id, n.2, 0.), arrayMap(r -> tuple(r.5, greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))), arrayDistinct(arrayFilter(id -> id != '', arrayMap(n -> n.1, arrayMap(r -> tuple(r.5, greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters))))))) AS cost,
           intDiv(max(traceAgentEndNanos) - toUnixTimestamp64Nano(min(traceAgentStart)), 1000000) AS agentDurationMs
         FROM (SELECT
           TraceId AS traceId,
@@ -359,10 +347,9 @@ SELECT
           max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
           groupUniqArrayIf(20)(Model, Model != '') AS models,
           groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
-          sum(IsLlmCall) AS llmCalls,
           sum(IsToolCall) AS toolCalls,
           sum(IsError) AS errorAgentSpans,
-          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost, ResponseId, IsLlmCall), ((Tokens > 0 OR Cost > 0) OR IsLlmCall = 1)) AS usageReporters
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
@@ -380,11 +367,11 @@ SELECT
           toString(max(traceAgentEnd)) AS agentEnd,
           groupUniqArrayArray(models) AS models,
           groupUniqArrayArray(agentNames) AS agentNames,
-          sum(llmCalls) AS llmCalls,
+          toFloat64(arraySum(n -> if(n.2 AND n.1 = '', 1, 0), arrayMap(r -> tuple(r.5, r.6 = 1 AND if((r.3 > 0 OR r.4 > 0), greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), arrayFlatten(groupArray(usageReporters)))) > 0 OR greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), arrayFlatten(groupArray(usageReporters)))) > 0, NOT arrayExists(p -> p.1 = r.2 AND (p.3 > 0 OR p.4 > 0), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))) + length(arrayDistinct(arrayFilter(id -> id != '', arrayMap(n -> if(n.2, n.1, ''), arrayMap(r -> tuple(r.5, r.6 = 1 AND if((r.3 > 0 OR r.4 > 0), greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), arrayFlatten(groupArray(usageReporters)))) > 0 OR greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), arrayFlatten(groupArray(usageReporters)))) > 0, NOT arrayExists(p -> p.1 = r.2 AND (p.3 > 0 OR p.4 > 0), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))))))) AS llmCalls,
           sum(toolCalls) AS toolCalls,
           sum(errorAgentSpans) AS errorAgentSpans,
-          sum(arraySum(r -> greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), usageReporters)), usageReporters)) AS totalTokens,
-          sum(arraySum(r -> greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), usageReporters)), usageReporters)) AS cost,
+          arraySum(n -> if(n.1 = '', n.2, 0.), arrayMap(r -> tuple(r.5, greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))) + arraySum(id -> arrayMax(n -> if(n.1 = id, n.2, 0.), arrayMap(r -> tuple(r.5, greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))), arrayDistinct(arrayFilter(id -> id != '', arrayMap(n -> n.1, arrayMap(r -> tuple(r.5, greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters))))))) AS totalTokens,
+          arraySum(n -> if(n.1 = '', n.2, 0.), arrayMap(r -> tuple(r.5, greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))) + arraySum(id -> arrayMax(n -> if(n.1 = id, n.2, 0.), arrayMap(r -> tuple(r.5, greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))), arrayDistinct(arrayFilter(id -> id != '', arrayMap(n -> n.1, arrayMap(r -> tuple(r.5, greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters))))))) AS cost,
           intDiv(max(traceAgentEndNanos) - toUnixTimestamp64Nano(min(traceAgentStart)), 1000000) AS agentDurationMs
         FROM (SELECT
           TraceId AS traceId,
@@ -394,10 +381,9 @@ SELECT
           max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
           groupUniqArrayIf(20)(Model, Model != '') AS models,
           groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
-          sum(IsLlmCall) AS llmCalls,
           sum(IsToolCall) AS toolCalls,
           sum(IsError) AS errorAgentSpans,
-          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost, ResponseId, IsLlmCall), ((Tokens > 0 OR Cost > 0) OR IsLlmCall = 1)) AS usageReporters
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'
@@ -435,11 +421,11 @@ SELECT
           toString(max(traceAgentEnd)) AS agentEnd,
           groupUniqArrayArray(models) AS models,
           groupUniqArrayArray(agentNames) AS agentNames,
-          sum(llmCalls) AS llmCalls,
+          toFloat64(arraySum(n -> if(n.2 AND n.1 = '', 1, 0), arrayMap(r -> tuple(r.5, r.6 = 1 AND if((r.3 > 0 OR r.4 > 0), greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), arrayFlatten(groupArray(usageReporters)))) > 0 OR greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), arrayFlatten(groupArray(usageReporters)))) > 0, NOT arrayExists(p -> p.1 = r.2 AND (p.3 > 0 OR p.4 > 0), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))) + length(arrayDistinct(arrayFilter(id -> id != '', arrayMap(n -> if(n.2, n.1, ''), arrayMap(r -> tuple(r.5, r.6 = 1 AND if((r.3 > 0 OR r.4 > 0), greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), arrayFlatten(groupArray(usageReporters)))) > 0 OR greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), arrayFlatten(groupArray(usageReporters)))) > 0, NOT arrayExists(p -> p.1 = r.2 AND (p.3 > 0 OR p.4 > 0), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))))))) AS llmCalls,
           sum(toolCalls) AS toolCalls,
           sum(errorAgentSpans) AS errorAgentSpans,
-          sum(arraySum(r -> greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), usageReporters)), usageReporters)) AS totalTokens,
-          sum(arraySum(r -> greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), usageReporters)), usageReporters)) AS cost,
+          arraySum(n -> if(n.1 = '', n.2, 0.), arrayMap(r -> tuple(r.5, greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))) + arraySum(id -> arrayMax(n -> if(n.1 = id, n.2, 0.), arrayMap(r -> tuple(r.5, greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))), arrayDistinct(arrayFilter(id -> id != '', arrayMap(n -> n.1, arrayMap(r -> tuple(r.5, greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters))))))) AS totalTokens,
+          arraySum(n -> if(n.1 = '', n.2, 0.), arrayMap(r -> tuple(r.5, greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))) + arraySum(id -> arrayMax(n -> if(n.1 = id, n.2, 0.), arrayMap(r -> tuple(r.5, greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters)))), arrayDistinct(arrayFilter(id -> id != '', arrayMap(n -> n.1, arrayMap(r -> tuple(r.5, greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), arrayFlatten(groupArray(usageReporters))))), arrayFlatten(groupArray(usageReporters))))))) AS cost,
           intDiv(max(traceAgentEndNanos) - toUnixTimestamp64Nano(min(traceAgentStart)), 1000000) AS agentDurationMs
         FROM (SELECT
           TraceId AS traceId,
@@ -449,10 +435,9 @@ SELECT
           max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos,
           groupUniqArrayIf(20)(Model, Model != '') AS models,
           groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames,
-          sum(IsLlmCall) AS llmCalls,
           sum(IsToolCall) AS toolCalls,
           sum(IsError) AS errorAgentSpans,
-          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters
+          groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost, ResponseId, IsLlmCall), ((Tokens > 0 OR Cost > 0) OR IsLlmCall = 1)) AS usageReporters
         FROM ai_trace_index
         WHERE OrgId = 'org_sql_catalog'
           AND Timestamp >= '2026-01-01 10:30:00'

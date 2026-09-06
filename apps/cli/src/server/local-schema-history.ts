@@ -210,4 +210,20 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		manifestDigest: "2a7d05f4fb19422404264521f06ea9ca2f2106cdce2165899f00433215aca8b0",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
+	Object.freeze({
+		// v19: `ai_trace_index` gains `ResponseId`, and `ai_trace_index_mv` is
+		// recreated to fill it and to count `Tokens` under the reporter's usage
+		// convention (ClickHouse migration 0029). Nothing is rewritten and no
+		// row moves; rows materialized under v18 keep their over-counted
+		// `Tokens` and an empty `ResponseId` until raw retention ages them out.
+		//
+		// projectRevision is carried forward deliberately — it is a hardcoded
+		// constant that no longer tracks the generator's header, and the identity
+		// this gate compares is the fingerprint/digest pair.
+		version: 19,
+		fingerprint: "778888eceae9d6b7",
+		digest: "778888eceae9d6b717004bf2b7cf8b0db84fb0d65c81e2cb72d7cb39a9c3bd74",
+		manifestDigest: "7887f63cadd66a33e495dc3277dc55059285799a1d044a1f1d9bb614f38af3bd",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
 ] as const)

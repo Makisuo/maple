@@ -96,6 +96,90 @@ export const MAPLE_GENAI_INPUT_MESSAGES_DROPPED_ATTR = "maple_ai.input_messages_
  */
 export const MAPLE_GENAI_MODEL_DURATION_MS_ATTR = "maple_ai.model_duration_ms"
 
+// Usage conventions — which of a reporter's token figures already contain
+// which others.
+//
+// The five `gen_ai.usage.*` buckets are not disjoint on every wire. OpenAI's
+// `prompt_tokens` contains `prompt_tokens_details.cached_tokens` and its
+// `completion_tokens` contains `completion_tokens_details.reasoning_tokens`;
+// Anthropic's `input_tokens` EXCLUDES `cache_read_input_tokens` and
+// `cache_creation_input_tokens`; Gemini's `candidatesTokenCount` EXCLUDES
+// `thoughtsTokenCount`. A total that adds the five as if they were disjoint
+// bills a cache-heavy or reasoning-heavy call nearly twice. Both readers of
+// usage — `spanTokenBuckets` in the web app and `genAiTokensExpr` behind
+// `ai_trace_index` — resolve the reporter's convention here first and carve
+// the contained buckets back out, so `input` always means the uncached prompt,
+// `output` the visible completion, and a total is always the plain sum.
+
+export interface GenAiUsageConvention {
+	/** The prompt figure already contains the cache-read and cache-write buckets. */
+	readonly inputIncludesCache: boolean
+	/** The completion figure already contains the reasoning bucket. */
+	readonly outputIncludesReasoning: boolean
+}
+
+const NESTED: GenAiUsageConvention = { inputIncludesCache: true, outputIncludesReasoning: true }
+
+/**
+ * `gen_ai.provider.name` → the convention that provider's raw API reports
+ * under. Only providers whose wire shape was checked are listed; anything else
+ * takes {@link GENAI_DEFAULT_USAGE_CONVENTION}.
+ */
+export const GENAI_PROVIDER_USAGE_CONVENTIONS: ReadonlyMap<string, GenAiUsageConvention> = new Map([
+	// Messages API: `input_tokens` excludes both cache buckets and is billed
+	// beside them; `output_tokens` includes the thinking tokens.
+	["anthropic", { inputIncludesCache: false, outputIncludesReasoning: true }],
+	["openai", NESTED],
+	// `promptTokenCount` contains `cachedContentTokenCount`, but
+	// `candidatesTokenCount` excludes `thoughtsTokenCount` — the total is the
+	// sum of the three.
+	["gcp.gemini", { inputIncludesCache: true, outputIncludesReasoning: false }],
+	["gcp.vertex_ai", { inputIncludesCache: true, outputIncludesReasoning: false }],
+	// OpenAI-shaped: `total_tokens` is `prompt_tokens + completion_tokens`, with
+	// the cache and reasoning counts reported as details of those two.
+	["openrouter", NESTED],
+])
+
+/**
+ * Vendors that re-normalise usage before emitting it, whichever provider ran
+ * the call — so the vendor, not the provider, decides.
+ */
+export const GENAI_VENDOR_USAGE_CONVENTIONS: ReadonlyMap<string, GenAiUsageConvention> = new Map([
+	// The Vercel AI SDK emits `gen_ai.usage.input_tokens` as
+	// `usage.inputTokens.total` and the output as `outputTokens.total`, and its
+	// providers build both totals as the sum of their parts (`@ai-sdk/anthropic`
+	// sums noCache + cacheRead + cacheWrite): an Anthropic call made through the
+	// SDK nests even though the raw API does not. Verified against the installed
+	// packages — `ai/dist/index.mjs` for the attribute and `@ai-sdk/anthropic`
+	// (vendored under `eve`) for the sum.
+	["vercel_ai_sdk", NESTED],
+	// `@opencode-ai/ai` normalises `inputTokens` to the inclusive total for every
+	// provider (see `sumTokens` in its anthropic-messages/bedrock-converse
+	// protocols) and reports reasoning as a detail of the completion count, so
+	// Maple's own spans nest even when the provider's raw API does not — pinning
+	// it here keeps totals right the day a direct anthropic/bedrock provider is
+	// wired.
+	["maple", NESTED],
+])
+
+/** What most of the field does, and the side that errs toward the smaller
+ *  number rather than inventing tokens. */
+export const GENAI_DEFAULT_USAGE_CONVENTION: GenAiUsageConvention = NESTED
+
+/**
+ * The convention a span's usage was reported under. The vendor is asked first
+ * — a framework that re-summed the buckets before emitting them has
+ * overwritten whatever its provider's own API said — then the provider, then
+ * the default.
+ */
+export const genAiUsageConvention = (
+	vendorId: string | undefined,
+	providerName: string | undefined,
+): GenAiUsageConvention =>
+	GENAI_VENDOR_USAGE_CONVENTIONS.get(vendorId ?? "") ??
+	GENAI_PROVIDER_USAGE_CONVENTIONS.get(providerName ?? "") ??
+	GENAI_DEFAULT_USAGE_CONVENTION
+
 export interface AiFieldDef {
 	/** Primary source attribute key (the semconv key where one exists). */
 	readonly key: string

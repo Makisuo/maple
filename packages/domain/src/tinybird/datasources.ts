@@ -1140,6 +1140,12 @@ export const aiTraceIndex = defineDatasource("ai_trace_index", {
 		IsToolCall: t.uint8(),
 		Tokens: t.float64(),
 		Cost: t.float64(),
+		// Migration 0027 — the provider's id for the response (`gen_ai.response.id`
+		// and its Vercel spelling), so two observations of one model call — the
+		// app's own span and a gateway's mirror of it (OpenRouter Broadcast,
+		// Helicone, …), which land in the same session as separate traces — are
+		// counted once. '' where the span carries none.
+		ResponseId: t.string(),
 	},
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",
