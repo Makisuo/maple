@@ -171,7 +171,7 @@ for (const [field, aliases] of Object.entries(GENAI_LEGACY_ALIASES)) {
  * `gen_ai.provider.name`. Values not listed here (`openai`, `anthropic`, …)
  * survived the rename unchanged.
  */
-const LEGACY_SYSTEM_VALUES = new Map([
+export const LEGACY_SYSTEM_VALUES: ReadonlyMap<string, string> = new Map([
 	["vertex_ai", "gcp.vertex_ai"],
 	["gemini", "gcp.gemini"],
 	["az.ai.inference", "azure.ai.inference"],

@@ -22,6 +22,13 @@
 import type { Condition, Expr } from "@maple-dev/clickhouse-builder/expr"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { compile } from "@maple-dev/clickhouse-builder/sql"
+import {
+	GENAI_DEFAULT_USAGE_CONVENTION,
+	GENAI_PROVIDER_USAGE_CONVENTIONS,
+	GENAI_VENDOR_USAGE_CONVENTIONS,
+	MAPLE_AI_VENDOR_ID_ATTR,
+	type GenAiUsageConvention,
+} from "../gen-ai"
 
 /** A `$.SpanAttributes`-shaped accessor: the builder's own, or the bare-column
  *  stand-in the SQL text below is compiled from. */
@@ -101,6 +108,15 @@ export function genAiAgentNameExpr(spanAttributes: MapColumnLike): Expr<string> 
 
 export function genAiToolNameExpr(spanAttributes: MapColumnLike): Expr<string> {
 	return firstNonEmptyAttr(spanAttributes, GENAI_TOOL_NAME_KEYS)
+}
+
+/** The provider's id for the response — the one fact two observations of the
+ *  same model call share (an app's span and a gateway's mirror of it), and so
+ *  the key the session sums dedupe on. */
+export const GENAI_RESPONSE_ID_KEYS = ["gen_ai.response.id", "ai.response.id"] as const
+
+export function genAiResponseIdExpr(spanAttributes: MapColumnLike): Expr<string> {
+	return firstNonEmptyAttr(spanAttributes, GENAI_RESPONSE_ID_KEYS)
 }
 
 // Operation and kind — is this span a model call, a tool call?
@@ -206,8 +222,8 @@ export function genAiIsErrorCond($: Pick<GenAiSpanColumnsLike, "StatusCode" | "S
 		.or(CH.inList(attrs.get("gen_ai.response.status"), GENAI_FAILED_RESPONSE_STATUSES))
 }
 
-// Usage — the five disjoint token buckets `spanTokenBuckets` sums, each under
-// its canonical key, its legacy `gen_ai.*` alias, and the Vercel AI SDK and
+// Usage — the five token buckets `spanTokenBuckets` sums, each under its
+// canonical key, its legacy `gen_ai.*` alias, and the Vercel AI SDK and
 // OpenInference spellings. Canonical first: a span carrying both spellings is
 // read the way the integration layer reads it.
 
@@ -249,15 +265,89 @@ export const GENAI_USAGE_KEYS = {
 
 export const GENAI_COST_KEYS = ["gen_ai.usage.cost", "gen_ai.usage.total_cost", "llm.cost.total"] as const
 
+/** The provider that served the call, which decides the usage convention: the
+ *  semconv key, its pre-rename spelling, then the Vercel AI SDK and
+ *  OpenInference dialects — the sources the integration layer decodes
+ *  `providerName` from. */
+export const GENAI_PROVIDER_NAME_KEYS = [
+	"gen_ai.provider.name",
+	"gen_ai.system",
+	"ai.model.provider",
+	"llm.provider",
+	"llm.system",
+] as const
+
+/** Pre-rename `gen_ai.system` spellings of the providers the convention table
+ *  names. The read side canonicalises them before its lookup
+ *  (`LEGACY_SYSTEM_VALUES` in `ai-integrations.ts`); the view has to match
+ *  them as written. */
+export const GENAI_PROVIDER_LEGACY_VALUES = [
+	["gcp.gemini", "gemini"],
+	["gcp.vertex_ai", "vertex_ai"],
+] as const
+
+export function genAiProviderNameExpr(attrs: MapColumnLike): Expr<string> {
+	return firstNonEmptyAttr(attrs, GENAI_PROVIDER_NAME_KEYS)
+}
+
 const tokenBucket = (attrs: MapColumnLike, keys: ReadonlyArray<string>): Expr<number> =>
 	CH.toFloat64OrZero(firstNonEmptyAttr(attrs, keys))
 
-/** Every token the span reported, across the five buckets. `toFloat64OrZero`
- *  rather than a UInt64 parse: a dialect that writes `1234.0` still counts, and
- *  the sums never approach 2^53. */
+const greatest = (a: Expr<number>, b: Expr<number>): Expr<number> =>
+	CH.compileFnCall<number>("greatest", a, b)
+
+/**
+ * `nested` where the span's convention says the containing figure already
+ * holds the contained bucket, `apart` where it reports them separately —
+ * `genAiUsageConvention` as a `multiIf`: the vendor's verdict first, then the
+ * provider's under its current and its legacy spelling, then the default.
+ */
+const byConvention = (
+	attrs: MapColumnLike,
+	axis: keyof GenAiUsageConvention,
+	nested: Expr<number>,
+	apart: Expr<number>,
+): Expr<number> => {
+	const branches: Array<[Condition, Expr<number>]> = []
+	const split = (
+		column: Expr<string>,
+		table: ReadonlyMap<string, GenAiUsageConvention>,
+		spellings: (name: string) => ReadonlyArray<string>,
+	) => {
+		const names = (holds: boolean) =>
+			[...table].filter(([, convention]) => convention[axis] === holds).flatMap(([name]) => spellings(name))
+		const yes = names(true)
+		const no = names(false)
+		if (yes.length > 0) branches.push([CH.inList(column, yes), nested])
+		if (no.length > 0) branches.push([CH.inList(column, no), apart])
+	}
+	split(attrs.get(MAPLE_AI_VENDOR_ID_ATTR), GENAI_VENDOR_USAGE_CONVENTIONS, (name) => [name])
+	split(genAiProviderNameExpr(attrs), GENAI_PROVIDER_USAGE_CONVENTIONS, (name) => [
+		name,
+		...GENAI_PROVIDER_LEGACY_VALUES.filter(([canonical]) => canonical === name).map(([, legacy]) => legacy),
+	])
+	return CH.multiIf(branches, GENAI_DEFAULT_USAGE_CONVENTION[axis] ? nested : apart)
+}
+
+/**
+ * Every token the span reported, with the buckets its convention nests carved
+ * back out — the sum `spanTokenBuckets` reaches. The prompt is
+ * `greatest(input, cacheRead + cacheWrite)` where the prompt figure already
+ * contains the cache buckets (OpenAI, OpenRouter, Gemini, every vendor that
+ * re-sums) and `input + cacheRead + cacheWrite` where it excludes them
+ * (Anthropic); the completion the same against the reasoning bucket.
+ * `toFloat64OrZero` rather than a UInt64 parse: a dialect that writes `1234.0`
+ * still counts, and the sums never approach 2^53.
+ */
 export function genAiTokensExpr(attrs: MapColumnLike): Expr<number> {
-	const buckets = Object.values(GENAI_USAGE_KEYS).map((keys) => tokenBucket(attrs, keys))
-	return buckets.reduce((sum, bucket) => sum.add(bucket))
+	const bucket = (name: keyof typeof GENAI_USAGE_KEYS) => tokenBucket(attrs, GENAI_USAGE_KEYS[name])
+	const input = bucket("input")
+	const cache = bucket("cacheRead").add(bucket("cacheWrite"))
+	const output = bucket("output")
+	const reasoning = bucket("reasoning")
+	return byConvention(attrs, "inputIncludesCache", greatest(input, cache), input.add(cache)).add(
+		byConvention(attrs, "outputIncludesReasoning", greatest(output, reasoning), output.add(reasoning)),
+	)
 }
 
 /** USD as the instrumentation priced the call; 0 where nothing did. */
@@ -277,6 +367,7 @@ const flag = (cond: Condition): Expr<number> => CH.compileFnCall<number>("toUInt
 export const GENAI_MODEL_SQL = sql(genAiModelExpr(rawSpan.SpanAttributes))
 export const GENAI_AGENT_NAME_SQL = sql(genAiAgentNameExpr(rawSpan.SpanAttributes))
 export const GENAI_TOOL_NAME_SQL = sql(genAiToolNameExpr(rawSpan.SpanAttributes))
+export const GENAI_RESPONSE_ID_SQL = sql(genAiResponseIdExpr(rawSpan.SpanAttributes))
 export const GENAI_IS_LLM_CALL_SQL = sql(flag(genAiIsLlmCallCond(rawSpan)))
 export const GENAI_IS_TOOL_CALL_SQL = sql(flag(genAiIsToolCallCond(rawSpan)))
 export const GENAI_IS_ERROR_SQL = sql(flag(genAiIsErrorCond(rawSpan)))

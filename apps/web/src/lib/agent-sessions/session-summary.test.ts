@@ -190,7 +190,10 @@ describe("buildSessionSummary — failed", () => {
 })
 
 describe("buildSessionSummary — tokens and models", () => {
-	it("reports the five usage buckets as the spans reported them", () => {
+	it("reports the five usage buckets, disjoint, summed across the spans", () => {
+		// Anthropic: the prompt excludes the cache buckets, the completion
+		// includes the thinking — so `input` is taken as reported and the
+		// reasoning comes out of `output`.
 		const summary = summarize([
 			llmSpan({
 				spanId: "a",
@@ -201,7 +204,7 @@ describe("buildSessionSummary — tokens and models", () => {
 					usageInputTokens: 100,
 					usageCacheReadInputTokens: 2000,
 					usageCacheCreationInputTokens: 300,
-					usageOutputTokens: 40,
+					usageOutputTokens: 45,
 					usageReasoningOutputTokens: 5,
 				},
 			}),
@@ -214,7 +217,7 @@ describe("buildSessionSummary — tokens and models", () => {
 					usageInputTokens: 10,
 					usageCacheReadInputTokens: 20,
 					usageCacheCreationInputTokens: 30,
-					usageOutputTokens: 4,
+					usageOutputTokens: 9,
 					usageReasoningOutputTokens: 5,
 				},
 			}),
@@ -402,6 +405,144 @@ describe("buildSessionSummary — cache accounting", () => {
 		])
 
 		expect(summary.tokens.total).toBe(1100)
+	})
+
+	it("carves the reasoning out of the completion for OpenAI, which counts it inside", () => {
+		// `completion_tokens` contains `completion_tokens_details.reasoning_tokens`:
+		// 100 visible + 900 reasoning is a 1000-token completion, not 1900.
+		const summary = summarize([
+			llmSpan({
+				spanId: "a",
+				startMs: 0,
+				durationMs: SECOND,
+				genAi: {
+					providerName: "openai",
+					usageInputTokens: 10,
+					usageOutputTokens: 1000,
+					usageReasoningOutputTokens: 900,
+				},
+			}),
+		])
+
+		expect(summary.tokens.output).toBe(100)
+		expect(summary.tokens.reasoning).toBe(900)
+		expect(summary.tokens.total).toBe(1010)
+	})
+
+	it("keeps the reasoning beside the completion for Gemini, which counts it apart", () => {
+		// `candidatesTokenCount` excludes `thoughtsTokenCount`, while
+		// `promptTokenCount` still contains `cachedContentTokenCount`.
+		const summary = summarize([
+			llmSpan({
+				spanId: "a",
+				startMs: 0,
+				durationMs: SECOND,
+				genAi: {
+					providerName: "gcp.gemini",
+					usageInputTokens: 1000,
+					usageCacheReadInputTokens: 900,
+					usageOutputTokens: 100,
+					usageReasoningOutputTokens: 900,
+				},
+			}),
+		])
+
+		expect(summary.tokens).toEqual({
+			input: 100,
+			cacheRead: 900,
+			cacheWrite: 0,
+			output: 100,
+			reasoning: 900,
+			total: 2000,
+		})
+	})
+
+	it("counts a call observed by the app and by a gateway once, at the larger claim", () => {
+		// OpenRouter Broadcast forwards its own trace of the call into the same
+		// session: same response id, the gateway pricing what the app could not.
+		const summary = summarize([
+			llmSpan({
+				spanId: "app",
+				startMs: 0,
+				durationMs: SECOND,
+				vendorId: "maple",
+				genAi: {
+					requestModel: "z-ai/glm-5.3-flash:nitro",
+					responseId: "gen-1",
+					usageInputTokens: 100,
+					usageOutputTokens: 10,
+				},
+			}),
+			llmSpan({
+				spanId: "gateway",
+				traceId: "trace-gateway",
+				startMs: 500,
+				durationMs: SECOND,
+				vendorId: "openrouter",
+				genAi: {
+					requestModel: "z-ai/glm-5.3-flash",
+					responseId: "gen-1",
+					usageInputTokens: 100,
+					usageOutputTokens: 10,
+					usageCost: 0.01,
+				},
+			}),
+			// The gateway's provider attempt under its own span: a model span that
+			// reports nothing while its parent does — the same call, not another.
+			llmSpan({
+				spanId: "attempt",
+				traceId: "trace-gateway",
+				parentSpanId: "gateway",
+				startMs: 600,
+				durationMs: 100,
+				vendorId: "openrouter",
+				genAi: { responseId: "gen-1:attempt-0" },
+			}),
+		])
+
+		expect(summary.tokens.total).toBe(110)
+		expect(summary.cost).toBe(0.01)
+		expect(summary.work.llmCalls).toBe(1)
+		expect(summary.models.map((model) => [model.model, model.llmCalls, model.tokens.total])).toEqual([
+			["z-ai/glm-5.3-flash:nitro", 1, 110],
+		])
+	})
+
+	it("counts a failed call that reported no usage, and not a wrapper over calls that did", () => {
+		const summary = summarize([
+			// The SDK's `generateText` reporting the sum of its two steps.
+			llmSpan({
+				spanId: "wrapper",
+				startMs: 0,
+				durationMs: 3 * SECOND,
+				genAi: { requestModel: "gpt-5", usageInputTokens: 20, usageOutputTokens: 2 },
+			}),
+			llmSpan({
+				spanId: "step-1",
+				parentSpanId: "wrapper",
+				startMs: 0,
+				durationMs: SECOND,
+				genAi: { requestModel: "gpt-5", usageInputTokens: 10, usageOutputTokens: 1 },
+			}),
+			llmSpan({
+				spanId: "step-2",
+				parentSpanId: "wrapper",
+				startMs: SECOND,
+				durationMs: SECOND,
+				genAi: { requestModel: "gpt-5", usageInputTokens: 10, usageOutputTokens: 1 },
+			}),
+			// A call that died before usage came back.
+			llmSpan({
+				spanId: "failed",
+				startMs: 5 * SECOND,
+				durationMs: SECOND,
+				statusCode: "Error",
+				genAi: { requestModel: "gpt-5" },
+			}),
+		])
+
+		expect(summary.work.llmCalls).toBe(3)
+		expect(summary.tokens.total).toBe(22)
 	})
 
 	it("subtracts a roll-up's children bucket by bucket, in normalised buckets", () => {

@@ -34,6 +34,7 @@ import { migration_0025_commit_sha_vcs_revision } from "./0025_commit_sha_vcs_re
 import { migration_0026_ai_trace_index_filter_columns } from "./0026_ai_trace_index_filter_columns"
 import { migration_0027_audit_log } from "./0027_audit_log"
 import { migration_0028_product_events_from_traces } from "./0028_product_events_from_traces"
+import { migration_0029_ai_trace_index_usage_conventions } from "./0029_ai_trace_index_usage_conventions"
 import { migration_0021_product_events } from "./0021_product_events"
 import { clickHouseSchemaVersion, latestMigrationVersion, migrations } from "./index"
 
@@ -51,10 +52,10 @@ describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
 		expect(migrations.map((m) => m.version)).toEqual([
 			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
-			27, 28,
+			27, 28, 29,
 		])
-		expect(migrations.at(-1)).toBe(migration_0028_product_events_from_traces)
-		expect(latestMigrationVersion).toBe(28)
+		expect(migrations.at(-1)).toBe(migration_0029_ai_trace_index_usage_conventions)
+		expect(latestMigrationVersion).toBe(29)
 		// 0010 and 0014-0020 are read-path only and skipped by the ingest-gating
 		// version; 0021 is not — the gateway writes `session_events`' new identity
 		// columns and `product_events` directly, so a BYO-CH org must apply it
@@ -688,5 +689,33 @@ describe("migration 0026 — ai_trace_index filter columns", () => {
 
 	it("does not backfill", () => {
 		expect(statements.some((stmt) => typeof stmt !== "string" || stmt.includes("INSERT"))).toBe(false)
+	})
+})
+describe("migration 0029 — ai_trace_index usage conventions", () => {
+	const migration = migrations.find((entry) => entry.version === 29)!
+
+	it("adds ResponseId and recreates the view with the convention-aware token sum", () => {
+		const [alter, drop, create, ...rest] = migration.statements as ReadonlyArray<string>
+		expect(rest).toEqual([])
+		expect(alter).toBe("ALTER TABLE ai_trace_index ADD COLUMN IF NOT EXISTS ResponseId String")
+		expect(drop).toBe("DROP VIEW IF EXISTS ai_trace_index_mv")
+		expect(create).toContain("coalesce(nullIf(SpanAttributes['gen_ai.response.id'], ''), SpanAttributes['ai.response.id']) AS ResponseId")
+		expect(create).toMatch(/^CREATE MATERIALIZED VIEW IF NOT EXISTS ai_trace_index_mv TO ai_trace_index AS/)
+		// The prompt half nests the cache for the re-summing vendors and the
+		// OpenAI-shaped providers, and adds it beside the prompt for Anthropic.
+		expect(create).toContain(
+			"multiIf(SpanAttributes['maple_ai.vendor.id'] IN ('vercel_ai_sdk', 'maple'), greatest(",
+		)
+		expect(create).toContain("IN ('anthropic'), toFloat64OrZero(coalesce(nullIf(SpanAttributes['gen_ai.usage.input_tokens']")
+		// The completion half sets reasoning beside the completion for Gemini alone.
+		expect(create).toContain(
+			"IN ('gcp.gemini', 'gemini', 'gcp.vertex_ai', 'vertex_ai'), toFloat64OrZero(coalesce(nullIf(SpanAttributes['gen_ai.usage.output_tokens']",
+		)
+		expect(create).toContain(") AS Tokens")
+	})
+
+	it("does not backfill and does not gate ingest", () => {
+		expect(migration.requiredForIngest).toBe(false)
+		expect(migration.statements.some(isBackfill)).toBe(false)
 	})
 })

@@ -128,7 +128,7 @@ import {
 	MAPLE_AI_VENDOR_ID_ATTR,
 	MAPLE_AI_VENDOR_VERSION_ATTR,
 } from "@maple/domain/gen-ai"
-import { deepestReporterSum, usageReportersExpr } from "./ai-span-columns"
+import { sessionLlmCalls, sessionUsageSum, usageReportersExpr } from "./ai-span-columns"
 
 const SESSION_ID_ATTR = MAPLE_AI_SESSION_ID_ATTR
 const VENDOR_ID_ATTR = MAPLE_AI_VENDOR_ID_ATTR
@@ -386,9 +386,10 @@ const indexTraces = (opts: AiSessionFilterOpts, bounds: IndexBounds) => {
 			// names more models than that is not one the cell can show anyway.
 			models: CH.groupUniqArrayIf(MAX_NAMES_PER_TRACE)($.Model, $.Model.neq("")),
 			agentNames: CH.groupUniqArrayIf(MAX_NAMES_PER_TRACE)($.AgentName, $.AgentName.neq("")),
-			llmCalls: CH.sum($.IsLlmCall),
 			toolCalls: CH.sum($.IsToolCall),
 			errorAgentSpans: CH.sum($.IsError),
+			// Usage AND model calls travel as reporters: both are counted one level
+			// up, where every trace of the session is in hand — see `ai-span-columns`.
 			usageReporters: usageReportersExpr($),
 		}))
 		.where(($) => [
@@ -490,11 +491,11 @@ export function aiSessionPageQuery(opts: AiSessionPageOpts = {}) {
 			agentEnd: CH.toString_(CH.max_($.traceAgentEnd)),
 			models: CH.groupUniqArrayArray($.models),
 			agentNames: CH.groupUniqArrayArray($.agentNames),
-			llmCalls: CH.sum($.llmCalls),
+			llmCalls: sessionLlmCalls("usageReporters"),
 			toolCalls: CH.sum($.toolCalls),
 			errorAgentSpans: CH.sum($.errorAgentSpans),
-			totalTokens: deepestReporterSum("usageReporters", 3),
-			cost: deepestReporterSum("usageReporters", 4),
+			totalTokens: sessionUsageSum("usageReporters", 3),
+			cost: sessionUsageSum("usageReporters", 4),
 			// Nanoseconds first, wrapped in `intDiv` — see `durationMs` in
 			// `aiSessionListQuery` for both.
 			agentDurationMs: CH.intDiv(
@@ -734,8 +735,15 @@ export function aiSessionFacetsQuery(): CHUnionQuery<AiSessionFacetsOutput> {
 		const perTrace = from(AiTraceIndex)
 			.select(($) => ({
 				traceId: $.TraceId,
+				// Over EVERY span of the trace, not only those carrying the value:
+				// the session id sits on the turn-owning span and the model on the
+				// chat span beneath it, so keying the trace off the value-bearing
+				// rows alone would file it as a sessionless trace of its own — and
+				// count a session once per trace that names the value. A blank
+				// option filters nothing and is not offered, hence the `If`; a trace
+				// naming nothing yields no row from the `arrayJoin` below.
 				rawSessionId: CH.max_($.SessionId),
-				names: CH.groupUniqArray(name($)),
+				names: CH.groupUniqArrayIf(MAX_NAMES_PER_TRACE)(name($), name($).neq("")),
 			}))
 			.where(($) => [
 				// Every UNION ALL branch reads a table, so every branch carries the org
@@ -743,8 +751,6 @@ export function aiSessionFacetsQuery(): CHUnionQuery<AiSessionFacetsOutput> {
 				$.OrgId.eq(param.string("orgId")),
 				$.Timestamp.gte(param.dateTimeString("startTime")),
 				$.Timestamp.lte(param.dateTimeString("endTime")),
-				// A blank option filters nothing and is not offered.
-				name($).neq(""),
 			])
 			.groupBy("traceId")
 

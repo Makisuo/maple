@@ -6,10 +6,12 @@
 // deepest span that reports them, because frameworks that also roll usage up to
 // the agent span would otherwise double the bill. And token buckets are
 // normalised to be disjoint at the point they are read off a span: a provider
-// that counts cached tokens inside its prompt figure has them carved back out
-// (see `cacheInclusiveInput`), so `input` always means the uncached prompt and
-// a total is always the plain sum of the buckets.
+// that counts cached tokens inside its prompt figure, or reasoning inside its
+// completion figure, has them carved back out (see `genAiUsageConvention`), so
+// `input` always means the uncached prompt, `output` the visible completion,
+// and a total is always the plain sum of the buckets.
 
+import { genAiUsageConvention } from "@maple/domain/gen-ai"
 import type { AiSessionSpan } from "@maple/domain/http"
 import { formatDuration, formatNumber } from "@maple/ui/lib/format"
 
@@ -57,10 +59,12 @@ export interface OccupancyInterval {
 
 export interface SessionTokenTotals {
 	/** Uncached prompt tokens: providers whose prompt figure contains the cache
-	 *  buckets have them carved back out. See `cacheInclusiveInput`. */
+	 *  buckets have them carved back out. See `spanTokenBuckets`. */
 	readonly input: number
 	readonly cacheRead: number
 	readonly cacheWrite: number
+	/** Visible completion tokens: providers whose completion figure contains
+	 *  the reasoning have it carved back out, the same way. */
 	readonly output: number
 	readonly reasoning: number
 	/** The buckets are disjoint after normalisation, so this is their sum. */
@@ -202,6 +206,8 @@ export function buildSessionSummary({
 	const idleMs = idleGaps.reduce((total, gap) => total + gap.durationMs, 0)
 
 	const usage = countableUsageSpans(ordered, byId)
+	const costs = costBySpan(ordered, byId)
+	const calls = countedLlmCalls(ordered, byId, usage.bySpan, costs)
 	const occupancyTimeline = computeOccupancyTimeline(ordered, startMs, endMs, idleGaps)
 
 	return {
@@ -218,13 +224,14 @@ export function buildSessionSummary({
 		agentNames: distinctInOrder(ordered.map((span) => span.genAi.agentName)),
 		vendorIds: distinctInOrder(ordered.map((span) => span.vendorId)),
 		serviceNames: byFrequency(ordered.map((span) => span.serviceName)),
-		models: modelUsage(ordered, usage.bySpan, costBySpan(ordered, byId)),
+		models: modelUsage(calls, usage.bySpan, costs),
 		tokens: sumTokens([...usage.bySpan.values()]),
 		tokenReporting: classifyTokenReporting(usage, byId, turns),
-		cost: sessionCost(ordered, byId),
+		// An empty map means nothing reported at all — "not measured", not "free".
+		cost: costs.size === 0 ? undefined : sumCosts(costs.values()),
 		work: {
 			turns: turns.length,
-			llmCalls: ordered.filter(isLlmCall).length,
+			llmCalls: calls.length,
 			toolCalls: ordered.filter((span) => classifyAiSpan(span) === "tool").length,
 		},
 		failures: countFailures(ordered),
@@ -398,77 +405,18 @@ const EMPTY_TOKENS: SessionTokenTotals = {
 	total: 0,
 }
 
-/** Whether a reporter's `input` bucket already contains its cache buckets. */
-type CacheConvention = "inclusive" | "exclusive"
-
-/**
- * `gen_ai.provider.name` → whether that provider's prompt count already
- * CONTAINS the cached tokens reported beside it.
- *
- * Anthropic's Messages API bills the three separately: `input_tokens` excludes
- * both `cache_read_input_tokens` and `cache_creation_input_tokens`, so its
- * total really is the sum of the buckets. Everyone else folds the cache into
- * the prompt figure — OpenAI's `prompt_tokens` contains
- * `prompt_tokens_details.cached_tokens`, Gemini's `promptTokenCount` contains
- * `cachedContentTokenCount`, OpenRouter is OpenAI-shaped — and adding the cache
- * on top of that bills those tokens twice, which on a cache-heavy agent loop is
- * a near-doubling rather than a rounding error.
- *
- * Only providers whose wire shape was checked are listed. Anything else takes
- * the dominant convention, `"inclusive"`: it is what most of the field does,
- * and it errs toward the smaller number rather than inventing tokens.
- */
-const PROVIDER_CACHE_CONVENTION = new Map<string, CacheConvention>([
-	["anthropic", "exclusive"],
-	["openai", "inclusive"],
-	["gcp.gemini", "inclusive"],
-	["gcp.vertex_ai", "inclusive"],
-	["openrouter", "inclusive"],
-])
-
-/**
- * Vendors that re-normalise usage before emitting it, whichever provider ran
- * the call — so the vendor, not the provider, decides.
- *
- * The Vercel AI SDK emits `gen_ai.usage.input_tokens` as
- * `result.usage.inputTokens.total`, and its Anthropic provider builds that
- * total as `noCache + cacheRead + cacheWrite`: an Anthropic call made through
- * the SDK is inclusive even though the raw API is not. Verified against the
- * installed packages — `ai/dist/index.mjs` for the attribute and
- * `@ai-sdk/anthropic` (vendored under `eve`) for the sum.
- */
-const VENDOR_CACHE_CONVENTION = new Map<string, CacheConvention>([
-	["vercel_ai_sdk", "inclusive"],
-	// `@opencode-ai/ai` normalises `inputTokens` to the inclusive total for every
-	// provider (see `sumTokens` in its anthropic-messages/bedrock-converse
-	// protocols), so Maple's own spans are inclusive even when the provider's
-	// raw API is not — pinning it here keeps totals right the day a direct
-	// anthropic/bedrock provider is wired.
-	["maple", "inclusive"],
-])
-
-/**
- * True when the span's reported `input` figure already covers its cache
- * buckets, so `spanTokenBuckets` subtracts them back out — counting them both
- * inside `input` and beside it would bill the same tokens twice.
- *
- * The vendor is asked first: a framework that re-added the buckets before
- * emitting them has overwritten whatever its provider's own API said.
- */
-function cacheInclusiveInput(span: AiSessionSpan): boolean {
-	const vendor = VENDOR_CACHE_CONVENTION.get(span.vendorId ?? "")
-	const provider = PROVIDER_CACHE_CONVENTION.get(span.genAi.providerName ?? "")
-	return (vendor ?? provider ?? "inclusive") === "inclusive"
-}
-
 /**
  * The five `gen_ai.usage.*` buckets a span reports, normalised to disjoint
- * buckets — or nothing when it reports none. A provider whose prompt figure
- * already contains its cache buckets has them subtracted back out, so `input`
- * is always the uncached prompt and the total is always the sum, whichever
- * convention the reporter billed under. Exported so the waterfall and the flow
- * split a span's usage the same way the header does rather than re-deriving
- * the prompt/completion halves.
+ * buckets — or nothing when it reports none. A reporter whose prompt figure
+ * already contains its cache buckets, or whose completion figure contains its
+ * reasoning, has them carved back out (`genAiUsageConvention` says which), so
+ * `input` is always the uncached prompt, `output` the visible completion, and
+ * the total is always the sum, whichever convention the reporter billed under.
+ * `ai_trace_index`'s `Tokens` column reaches the same sum at insert
+ * (`genAiTokensExpr`), which is what keeps the list's usage equal to the
+ * detail page's. Exported so the waterfall and the flow split a span's usage
+ * the same way the header does rather than re-deriving the prompt/completion
+ * halves.
  */
 export function spanTokenBuckets(span: AiSessionSpan): SessionTokenTotals | undefined {
 	const { usageInputTokens, usageCacheReadInputTokens, usageCacheCreationInputTokens } = span.genAi
@@ -482,19 +430,25 @@ export function spanTokenBuckets(span: AiSessionSpan): SessionTokenTotals | unde
 	) {
 		return undefined
 	}
+	const convention = genAiUsageConvention(span.vendorId, span.genAi.providerName)
 	const cacheRead = usageCacheReadInputTokens ?? 0
 	const cacheWrite = usageCacheCreationInputTokens ?? 0
+	const reasoning = usageReasoningOutputTokens ?? 0
 	const reportedInput = usageInputTokens ?? 0
+	const reportedOutput = usageOutputTokens ?? 0
 	return tokenTotals({
-		// Clamped: a reporter whose cache figures exceed its own prompt figure is
-		// mis-stamped, and a negative bucket would be a worse lie than a zero.
-		input: cacheInclusiveInput(span)
+		// Clamped: a reporter whose nested figures exceed the figure that is
+		// supposed to contain them is mis-stamped, and a negative bucket would be
+		// a worse lie than a zero.
+		input: convention.inputIncludesCache
 			? Math.max(0, reportedInput - cacheRead - cacheWrite)
 			: reportedInput,
 		cacheRead,
 		cacheWrite,
-		output: usageOutputTokens ?? 0,
-		reasoning: usageReasoningOutputTokens ?? 0,
+		output: convention.outputIncludesReasoning
+			? Math.max(0, reportedOutput - reasoning)
+			: reportedOutput,
+		reasoning,
 	})
 }
 
@@ -540,7 +494,85 @@ function countableUsageSpans(
 		const tokens = excessTokens(reported.get(spanId)!, sumTokens(beneath))
 		if (tokens.total > 0) bySpan.set(spanId, tokens)
 	}
-	return { bySpan, rolledUp }
+	return { bySpan: collapseObservations(bySpan, byId, (tokens) => tokens.total), rolledUp }
+}
+
+/**
+ * Reporters sharing a `gen_ai.response.id` are one model call observed twice —
+ * the app's own span and a gateway's mirror of it (OpenRouter Broadcast,
+ * Helicone, …), which lands in the same session as a separate trace, out of
+ * reach of the parent/child netting above. The provider's response id is the
+ * one fact both observations carry, so the call is counted once, at the
+ * larger of the two claims: a gateway prices a call the app's SDK could not.
+ * Reporters without an id are kept as they are — the page does not guess. The
+ * first claim wins a tie, so `bySpan`'s start order decides.
+ */
+function collapseObservations<T>(
+	bySpan: ReadonlyMap<string, T>,
+	byId: ReadonlyMap<string, AiSessionSpan>,
+	claim: (value: T) => number,
+): ReadonlyMap<string, T> {
+	const kept = new Map<string, T>()
+	const keptByResponse = new Map<string, string>()
+	for (const [spanId, value] of bySpan) {
+		const responseId = byId.get(spanId)?.genAi.responseId
+		if (responseId === undefined || responseId === "") {
+			kept.set(spanId, value)
+			continue
+		}
+		const current = keptByResponse.get(responseId)
+		if (current !== undefined && claim(kept.get(current)!) >= claim(value)) continue
+		if (current !== undefined) kept.delete(current)
+		keptByResponse.set(responseId, spanId)
+		kept.set(spanId, value)
+	}
+	return kept
+}
+
+/**
+ * The model calls the session made, each counted once. A model span counts
+ * when it is the deepest account of its call: it reported usage its children
+ * do not already cover, or it reported none and neither did any span above it
+ * — so a failed call still counts, while a gateway's provider attempt under
+ * the call that reports (OpenRouter's `provider attempt N`) and an SDK's
+ * `generateText` over its `doGenerate` do not. Calls sharing a response id
+ * are one call, represented by the observation whose usage claim was kept so
+ * the per-model table finds its tokens.
+ */
+function countedLlmCalls(
+	spans: readonly AiSessionSpan[],
+	byId: ReadonlyMap<string, AiSessionSpan>,
+	tokensBySpan: ReadonlyMap<string, SessionTokenTotals>,
+	costsBySpan: ReadonlyMap<string, number>,
+): readonly AiSessionSpan[] {
+	const reportsUsage = (span: AiSessionSpan) =>
+		(spanTokenBuckets(span)?.total ?? 0) > 0 || (span.genAi.usageCost ?? 0) > 0
+	const claimed = (span: AiSessionSpan) =>
+		tokensBySpan.has(span.spanId) || (costsBySpan.get(span.spanId) ?? 0) > 0
+	const deepest = spans.filter((span) => {
+		if (!isLlmCall(span)) return false
+		if (reportsUsage(span)) return claimed(span)
+		const seen = new Set<string>([span.spanId])
+		let parent = byId.get(span.parentSpanId)
+		while (parent !== undefined && !seen.has(parent.spanId)) {
+			if (reportsUsage(parent)) return false
+			seen.add(parent.spanId)
+			parent = byId.get(parent.parentSpanId)
+		}
+		return true
+	})
+	const byResponse = new Map<string, AiSessionSpan>()
+	const unkeyed: AiSessionSpan[] = []
+	for (const span of deepest) {
+		const responseId = span.genAi.responseId
+		if (responseId === undefined || responseId === "") {
+			unkeyed.push(span)
+			continue
+		}
+		const current = byResponse.get(responseId)
+		if (current === undefined || (!claimed(current) && claimed(span))) byResponse.set(responseId, span)
+	}
+	return [...unkeyed, ...byResponse.values()].sort((a, b) => spanStartMs(a) - spanStartMs(b))
 }
 
 /**
@@ -589,21 +621,13 @@ function costBySpan(
 	for (const [spanId, beneath] of chargeToNearestReporter(byId, reported)) {
 		bySpan.set(spanId, Math.max(0, reported.get(spanId)! - beneath.reduce((sum, c) => sum + c, 0)))
 	}
-	return bySpan
+	return collapseObservations(bySpan, byId, (cost) => cost)
 }
 
 function sumCosts(costs: Iterable<number>): number {
 	let usd = 0
 	for (const cost of costs) usd += cost
 	return usd
-}
-
-function sessionCost(
-	spans: readonly AiSessionSpan[],
-	byId: ReadonlyMap<string, AiSessionSpan>,
-): number | undefined {
-	const bySpan = costBySpan(spans, byId)
-	return bySpan.size === 0 ? undefined : sumCosts(bySpan.values())
 }
 
 /** Per bucket, what `reported` claims over `counted`. Never negative: a wrapper
@@ -680,19 +704,19 @@ function sumTokens(totals: readonly SessionTokenTotals[]): SessionTokenTotals {
 }
 
 /**
- * Tokens and calls per model, over the model calls alone. A span that reported
- * usage without naming a model gets no row — its tokens are in the session
- * total, which is where a number with no model belongs.
+ * Tokens and calls per model, over the counted model calls alone
+ * (`countedLlmCalls`). A call that reported usage without naming a model gets
+ * no row — its tokens are in the session total, which is where a number with
+ * no model belongs.
  */
 function modelUsage(
-	spans: readonly AiSessionSpan[],
+	calls: readonly AiSessionSpan[],
 	tokensBySpan: ReadonlyMap<string, SessionTokenTotals>,
 	costsBySpan: ReadonlyMap<string, number>,
 ): readonly SessionModelUsage[] {
 	const byModel = new Map<string, { llmCalls: number; tokens: SessionTokenTotals[]; costs: number[] }>()
 
-	for (const span of spans) {
-		if (!isLlmCall(span)) continue
+	for (const span of calls) {
 		const model = spanModel(span)
 		if (model === undefined) continue
 		let entry = byModel.get(model)

@@ -56,6 +56,7 @@ import {
 	GENAI_IS_LLM_CALL_SQL,
 	GENAI_IS_TOOL_CALL_SQL,
 	GENAI_MODEL_SQL,
+	GENAI_RESPONSE_ID_SQL,
 	GENAI_TOKENS_SQL,
 	GENAI_TOOL_NAME_SQL,
 } from "./gen-ai-columns"
@@ -991,7 +992,9 @@ export const traceDetailSpansMv = defineMaterializedView("trace_detail_spans_mv"
  * the SQL comes from `gen-ai-columns.ts`, so a raw-table read of the same fact
  * is the same expression. Migration 0026 added them; rows materialized before
  * it carry `''`/0 throughout, which the facets drop, the filters never match
- * and the sums count as nothing.
+ * and the sums count as nothing. Migration 0027 changed `Tokens` to count a
+ * nested cache or reasoning bucket once, under the reporter's usage
+ * convention; rows materialized between the two keep the over-count.
  */
 export const aiTraceIndexMv = defineMaterializedView("ai_trace_index_mv", {
 	description:
@@ -1025,7 +1028,8 @@ export const aiTraceIndexMv = defineMaterializedView("ai_trace_index_mv", {
           ${GENAI_IS_LLM_CALL_SQL} AS IsLlmCall,
           ${GENAI_IS_TOOL_CALL_SQL} AS IsToolCall,
           ${GENAI_TOKENS_SQL} AS Tokens,
-          ${GENAI_COST_SQL} AS Cost
+          ${GENAI_COST_SQL} AS Cost,
+          ${GENAI_RESPONSE_ID_SQL} AS ResponseId
         FROM traces
         WHERE SpanAttributes['${MAPLE_AI_VENDOR_ID_ATTR}'] != ''
       `,

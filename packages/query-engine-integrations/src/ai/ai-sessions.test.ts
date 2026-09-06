@@ -259,26 +259,32 @@ describe("aiSessionPageQuery", () => {
 
 		expect(inner).toContain("groupUniqArrayIf(20)(Model, Model != '') AS models")
 		expect(inner).toContain("groupUniqArrayIf(20)(AgentName, AgentName != '') AS agentNames")
-		expect(inner).toContain("sum(IsLlmCall) AS llmCalls")
 		expect(inner).toContain("sum(IsToolCall) AS toolCalls")
 		expect(inner).toContain("sum(IsError) AS errorAgentSpans")
+		// Model calls travel as reporters too: they are counted one level up.
+		expect(inner).not.toContain("AS llmCalls")
 		expect(inner).toContain(
-			"groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost), (Tokens > 0 OR Cost > 0)) AS usageReporters",
+			"groupArrayIf(2000)(tuple(SpanId, ParentSpanId, Tokens, Cost, ResponseId, IsLlmCall), ((Tokens > 0 OR Cost > 0) OR IsLlmCall = 1)) AS usageReporters",
 		)
 		expect(inner).toContain(
 			"max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS traceAgentEndNanos",
 		)
 
 		expect(outer).toContain("groupUniqArrayArray(models) AS models")
-		expect(outer).toContain("sum(llmCalls) AS llmCalls")
 		expect(outer).toContain("sum(errorAgentSpans) AS errorAgentSpans")
-		// Deepest reporter: a parent keeps only its excess over its reporting children.
+		// The session's reporters, every trace's flattened, so a gateway's mirror
+		// trace of a call is in hand next to the app's own span of it.
+		const all = "arrayFlatten(groupArray(usageReporters))"
+		// Deepest reporter: a parent keeps only its excess over its reporting
+		// children; then one claim per response id.
 		expect(outer).toContain(
-			"sum(arraySum(r -> greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), usageReporters)), usageReporters)) AS totalTokens",
+			`arrayMap(r -> tuple(r.5, greatest(0., r.3 - arraySum(c -> if(c.2 = r.1, c.3, 0.), ${all}))), ${all})`,
 		)
-		expect(outer).toContain(
-			"sum(arraySum(r -> greatest(0., r.4 - arraySum(c -> if(c.2 = r.1, c.4, 0.), usageReporters)), usageReporters)) AS cost",
-		)
+		expect(outer).toContain("arrayDistinct(arrayFilter(id -> id != '', arrayMap(n -> n.1,")
+		expect(outer).toContain(") AS totalTokens")
+		expect(outer).toContain(") AS cost")
+		expect(outer).toContain("toFloat64(arraySum(n -> if(n.2 AND n.1 = '', 1, 0),")
+		expect(outer).toContain(") AS llmCalls")
 		expect(outer).toContain(
 			"intDiv(max(traceAgentEndNanos) - toUnixTimestamp64Nano(min(traceAgentStart)), 1000000) AS agentDurationMs",
 		)
@@ -634,7 +640,8 @@ describe("aiSessionFacetsQuery", () => {
 			["tool", "ToolName"],
 		] as const
 		for (const [facetType, column] of dimensions) {
-			expect(sql).toContain(`groupUniqArray(${column}) AS names`)
+			// Keyed over every span of the trace; the value filter is on the array.
+			expect(sql).toContain(`groupUniqArrayIf(20)(${column}, ${column} != '') AS names`)
 			expect(sql).toContain(`'${facetType}' AS facetType`)
 		}
 		expect(sql.split("arrayJoin(names) AS name").length - 1).toBe(dimensions.length)

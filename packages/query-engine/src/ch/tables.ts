@@ -135,6 +135,7 @@ export const AiTraceIndex = table("ai_trace_index", {
 	IsToolCall: T.uint8,
 	Tokens: T.float64,
 	Cost: T.float64,
+	ResponseId: T.string,
 })
 
 export const TraceListMv = table("trace_list_mv", {
