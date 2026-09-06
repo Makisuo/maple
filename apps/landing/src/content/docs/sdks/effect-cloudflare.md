@@ -1,8 +1,9 @@
 ---
-title: "Cloudflare Workers"
+title: "Effect SDK on Cloudflare Workers"
 description: "Set up the Effect SDK on Cloudflare Workers with explicit flush() in ctx.waitUntil and in-isolate buffering."
-group: "Platforms"
-order: 5
+group: "Instrumentation"
+order: 4
+navLabel: "Cloudflare Workers"
 sdk: "effect"
 ---
 

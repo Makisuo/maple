@@ -15,19 +15,8 @@ import { MagnifierIcon } from "@maple/ui/components/icons/magnifier"
 import Fuse, { type IFuseOptions } from "fuse.js"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { SearchDoc } from "../../lib/docs-search"
+import { groupRank } from "../../lib/docs-nav"
 import { trackLanding } from "../../lib/telemetry"
-
-/** Flat browse order — mirrors the sidebar group order (DocsSidebar.astro). */
-const GROUP_ORDER = [
-	"Getting Started",
-	"Concepts",
-	"Infrastructure",
-	"Integrations",
-	"Local Mode",
-	"Effect SDK",
-	"Platforms",
-	"Instrumentation",
-]
 
 const MAX_RESULTS = 8
 
@@ -59,11 +48,6 @@ function loadIndex() {
 	return indexPromise
 }
 
-function groupOrder(group: string): number {
-	const i = GROUP_ORDER.indexOf(group)
-	return i === -1 ? 999 : i
-}
-
 function groupDocs(docs: SearchDoc[]): [string, SearchDoc[]][] {
 	const groups = new Map<string, SearchDoc[]>()
 	for (const doc of docs) {
@@ -71,7 +55,7 @@ function groupDocs(docs: SearchDoc[]): [string, SearchDoc[]][] {
 		if (list) list.push(doc)
 		else groups.set(doc.group, [doc])
 	}
-	return [...groups.entries()].sort((a, b) => groupOrder(a[0]) - groupOrder(b[0]))
+	return [...groups.entries()].sort((a, b) => groupRank(a[0]) - groupRank(b[0]))
 }
 
 function ResultItem({ doc }: { doc: SearchDoc }) {

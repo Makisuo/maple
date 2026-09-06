@@ -23,9 +23,9 @@ const { Content, headings } = await render(doc);
     mdHref={`/docs/${doc.id}.md`}
 >
     <article class="docs-content max-w-none">
-        <Breadcrumb sdk={doc.data.sdk} group={doc.data.group} title={doc.data.title} />
-        <h1 class="text-xl font-bold text-fg mb-1.5">{doc.data.title}</h1>
-        <p class="text-xs text-fg-muted mb-8 leading-relaxed">{doc.data.description}</p>
+        <Breadcrumb group={doc.data.group} title={doc.data.title} />
+        <h1 class="font-display text-2xl md:text-3xl font-medium tracking-[-0.02em] text-fg mb-2">{doc.data.title}</h1>
+        <p class="text-sm text-fg-muted mb-8 leading-relaxed max-w-[64ch]">{doc.data.description}</p>
         <div class="border-t border-border pt-8">
             <Content />
         </div>

@@ -2,7 +2,8 @@
 title: "Laravel Instrumentation"
 description: "Instrument a Laravel application with OpenTelemetry and send traces, logs, and metrics to Maple."
 group: "Instrumentation"
-order: 11
+order: 13
+navLabel: "Laravel"
 sdk: "laravel"
 ---
 

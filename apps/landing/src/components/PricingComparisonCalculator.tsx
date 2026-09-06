@@ -14,10 +14,8 @@ export function PricingComparisonCalculator() {
 
 	return (
 		<div>
-			<div className="mb-px flex flex-wrap items-center gap-x-4 gap-y-2 border border-[oklch(0.3_0.02_60)] px-4 py-3">
-				<span className="text-[10px] uppercase tracking-wider text-[oklch(0.5_0.02_60)]">
-					Compare against
-				</span>
+			<div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+				<span className="text-[10px] uppercase tracking-wider text-fg-muted">Compare against</span>
 				<div role="tablist" aria-label="Compare against" className="inline-flex flex-wrap gap-1">
 					{COMPETITORS.map((c) => {
 						const active = c === competitor
@@ -28,10 +26,10 @@ export function PricingComparisonCalculator() {
 								role="tab"
 								aria-selected={active}
 								onClick={() => setCompetitor(c)}
-								className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+								className={`h-8 rounded-lg px-3 text-xs font-medium transition-colors ${
 									active
-										? "bg-[oklch(0.75_0.12_70)] text-[oklch(0.15_0.02_60)]"
-										: "border border-[oklch(0.3_0.02_60)] text-[oklch(0.65_0.02_60)] hover:border-[oklch(0.45_0.02_60)] hover:text-[oklch(0.9_0.02_60)]"
+										? "bg-primary text-primary-foreground"
+										: "border border-border bg-bg text-fg-muted hover:bg-bg-elevated hover:text-fg"
 								}`}
 							>
 								{competitorConfigs[c].name}

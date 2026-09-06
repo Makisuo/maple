@@ -2,7 +2,8 @@
 title: "Sampling & Throughput Estimation"
 description: "How Maple detects trace sampling and extrapolates throughput metrics."
 group: "Concepts"
-order: 1
+navLabel: "Sampling & Throughput"
+order: 2
 ---
 
 Maple automatically detects trace sampling and extrapolates throughput metrics so you see realistic request rates even when only a fraction of traces are collected.

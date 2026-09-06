@@ -6,7 +6,7 @@
 // browsers, and a JSON import would force every consuming bundler to handle
 // JSON modules. `version.test.ts` asserts this stays in sync with
 // `package.json`, so a hand-bump that forgets it fails CI instead of shipping.
-export const SDK_VERSION = "0.8.0"
+export const SDK_VERSION = "0.8.2"
 
 /**
  * `x-maple-sdk` value for the browser client entry — the header equivalent of

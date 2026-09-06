@@ -124,7 +124,7 @@ export const GET: APIRoute = ({ site }) => {
 		"",
 		"Maple ingests OpenTelemetry, so any OTel SDK works unmodified. The Effect SDK and the per-language guides are documented here.",
 		"",
-		`- [SDK overview](${url("/docs/sdks/overview.md")})`,
+		`- [Instrumentation overview](${url("/docs/instrumentation.md")})`,
 		`- [Effect SDK](${url("/docs/sdks/effect.md")})`,
 		`- [Repository](${GITHUB_URL})`,
 		"",

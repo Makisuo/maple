@@ -1,25 +1,31 @@
 ---
+// "On this page" for one article. In the desktop rail (`spy`) the entry for
+// the section under the reader is highlighted as they scroll; the same list
+// also renders inside the mobile disclosure, where a live marker would only
+// be visible with the disclosure open.
 interface Props {
     headings: Array<{ depth: number; slug: string; text: string }>;
+    spy?: boolean;
 }
 
-const { headings } = Astro.props;
+const { headings, spy = true } = Astro.props;
 const tocHeadings = headings.filter((h) => h.depth >= 2 && h.depth <= 3);
 ---
 
 {tocHeadings.length > 0 && (
-    <nav aria-label="Table of contents">
+    <nav aria-label="Table of contents" data-toc-spy={spy ? "" : undefined}>
         <h4 class="text-[10px] text-fg-muted uppercase tracking-wider font-medium mb-3">
             On this page
         </h4>
-        <ul class="space-y-1">
+        <ul class="border-l border-border">
             {tocHeadings.map((heading) => (
                 <li>
                     <a
                         href={`#${heading.slug}`}
+                        data-toc-link
                         class:list={[
-                            "block text-xs text-fg-muted hover:text-fg transition-colors leading-snug",
-                            heading.depth === 3 && "pl-3",
+                            "toc-link block -ml-px border-l border-transparent py-1 text-xs text-fg-muted leading-snug transition-colors hover:text-fg",
+                            heading.depth === 3 ? "pl-6" : "pl-3",
                         ]}
                     >
                         {heading.text}
@@ -29,3 +35,59 @@ const tocHeadings = headings.filter((h) => h.depth >= 2 && h.depth <= 3);
         </ul>
     </nav>
 )}
+
+<style>
+    .toc-link[aria-current="true"] {
+        color: var(--foreground);
+        border-color: var(--primary);
+    }
+</style>
+
+<script>
+    // Scroll spy: the current section is the last heading that has passed the
+    // fixed header. Cheaper and steadier than IntersectionObserver for
+    // reference pages with forty short sections.
+    const nav = document.querySelector<HTMLElement>("nav[data-toc-spy]");
+    if (nav) {
+        const links = [...nav.querySelectorAll<HTMLAnchorElement>("a[data-toc-link]")];
+        const targets = links.flatMap((link) => {
+            const id = decodeURIComponent(link.hash.slice(1));
+            const el = document.getElementById(id);
+            return el ? [{ link, el }] : [];
+        });
+        const OFFSET = 6.75 * 16 + 24; // html.docs scroll-padding-top + breathing room
+
+        let current: HTMLAnchorElement | null = null;
+        let ticking = false;
+
+        const update = () => {
+            ticking = false;
+            const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+            let next = targets[0]?.link ?? null;
+            if (atBottom) {
+                next = targets[targets.length - 1]?.link ?? null;
+            } else {
+                for (const { link, el } of targets) {
+                    if (el.getBoundingClientRect().top <= OFFSET) next = link;
+                    else break;
+                }
+            }
+            if (next === current) return;
+            current?.removeAttribute("aria-current");
+            next?.setAttribute("aria-current", "true");
+            current = next;
+        };
+
+        const onScroll = () => {
+            if (ticking) return;
+            ticking = true;
+            requestAnimationFrame(update);
+        };
+
+        if (targets.length > 0) {
+            window.addEventListener("scroll", onScroll, { passive: true });
+            window.addEventListener("resize", onScroll, { passive: true });
+            update();
+        }
+    }
+</script>

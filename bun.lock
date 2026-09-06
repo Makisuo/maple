@@ -580,7 +580,7 @@
     },
     "packages/effect-sdk": {
       "name": "@maple-dev/effect-sdk",
-      "version": "0.8.0",
+      "version": "0.8.2",
       "dependencies": {
         "std-env": "^4.0.0",
       },
@@ -612,7 +612,9 @@
       "name": "@maple/infra",
       "dependencies": {
         "@distilled.cloud/aws": "1.0.0-rc.6",
+        "@maple-dev/effect-sdk": "workspace:*",
         "@maple/alchemy-portless": "workspace:*",
+        "@maple/domain": "workspace:*",
         "alchemy": "2.0.0-beta.74",
         "effect": "catalog:effect",
       },

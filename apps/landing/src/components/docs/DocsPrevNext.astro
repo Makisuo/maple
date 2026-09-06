@@ -1,5 +1,7 @@
 ---
-import { getCollection } from "astro:content";
+// Previous / next across the whole docs tree in sidebar order, so reading
+// straight through follows the same path the sidebar shows.
+import { getDocGroups } from "../../lib/docs-order";
 
 interface Props {
     currentSlug: string;
@@ -7,56 +9,25 @@ interface Props {
 
 const { currentSlug } = Astro.props;
 
-const allDocs = await getCollection("docs", ({ data }) => !data.draft);
-
-const currentDoc = allDocs.find((d) => d.id === currentSlug);
-const activeSdk: string | null = currentDoc?.data.sdk ?? null;
-
-const sdkGroupOrder = ["Effect SDK", "Platforms"];
-const universalGroupOrder = ["Getting Started", "Concepts", "Infrastructure", "Integrations"];
-
-const groupSort = (groupOrder: string[]) =>
-    (a: typeof allDocs[number], b: typeof allDocs[number]) => {
-        const ga = groupOrder.indexOf(a.data.group);
-        const gb = groupOrder.indexOf(b.data.group);
-        if (ga !== gb) return (ga === -1 ? 999 : ga) - (gb === -1 ? 999 : gb);
-        return a.data.order - b.data.order;
-    };
-
-// Walk siblings within the current "section":
-// - Effect doc → Effect SDK chain
-// - Other-language guide → all other-language guides
-// - Conceptual doc (no sdk) → conceptual chain
-let sorted: typeof allDocs;
-if (activeSdk === "effect") {
-    sorted = allDocs.filter((d) => d.data.sdk === "effect").sort(groupSort(sdkGroupOrder));
-} else if (activeSdk) {
-    sorted = allDocs
-        .filter((d) => d.data.sdk && d.data.sdk !== "effect")
-        .sort((a, b) => {
-            if (a.data.order !== b.data.order) return a.data.order - b.data.order;
-            return (a.data.sdk ?? "").localeCompare(b.data.sdk ?? "");
-        });
-} else {
-    sorted = allDocs.filter((d) => !d.data.sdk).sort(groupSort(universalGroupOrder));
-}
-
-const currentIndex = sorted.findIndex((d) => d.id === currentSlug);
-const prev = currentIndex > 0 ? sorted[currentIndex - 1] : null;
-const next = currentIndex >= 0 && currentIndex < sorted.length - 1 ? sorted[currentIndex + 1] : null;
+const flat = (await getDocGroups()).flatMap((g) => g.docs);
+const i = flat.findIndex((d) => d.id === currentSlug);
+const prev = i > 0 ? flat[i - 1] : null;
+const next = i >= 0 && i < flat.length - 1 ? flat[i + 1] : null;
 ---
 
-<nav class="mt-12 pt-8 border-t border-border flex items-stretch gap-4" aria-label="Page navigation">
+<nav class="mt-12 pt-8 border-t border-border grid grid-cols-1 sm:grid-cols-2 gap-3" aria-label="Page navigation">
     {prev ? (
-        <a href={`/docs/${prev.id}`} class="flex-1 border border-border p-4 hover:border-primary/50 transition-colors group">
-            <span class="text-[9px] text-fg-muted uppercase tracking-wider">Previous</span>
-            <span class="block text-sm text-fg group-hover:text-primary transition-colors mt-1">{prev.data.title}</span>
+        <a href={`/docs/${prev.id}`} class="group rounded-lg border border-border p-4 hover:bg-bg-elevated transition-colors">
+            <span class="block text-[10px] text-fg-muted uppercase tracking-wider">Previous</span>
+            <span class="block text-sm text-fg mt-1">{prev.data.title}</span>
+            <span class="block text-[11px] text-fg-muted mt-0.5">{prev.data.group}</span>
         </a>
-    ) : <div class="flex-1" />}
+    ) : <div />}
     {next ? (
-        <a href={`/docs/${next.id}`} class="flex-1 border border-border p-4 hover:border-primary/50 transition-colors group text-right">
-            <span class="text-[9px] text-fg-muted uppercase tracking-wider">Next</span>
-            <span class="block text-sm text-fg group-hover:text-primary transition-colors mt-1">{next.data.title}</span>
+        <a href={`/docs/${next.id}`} class="group rounded-lg border border-border p-4 hover:bg-bg-elevated transition-colors sm:text-right">
+            <span class="block text-[10px] text-fg-muted uppercase tracking-wider">Next</span>
+            <span class="block text-sm text-fg mt-1">{next.data.title}</span>
+            <span class="block text-[11px] text-fg-muted mt-0.5">{next.data.group}</span>
         </a>
-    ) : <div class="flex-1" />}
+    ) : <div />}
 </nav>

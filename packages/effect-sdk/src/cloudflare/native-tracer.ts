@@ -22,12 +22,13 @@
 // Scalars are forwarded as they are set; everything else stays on the Effect
 // span. A failed exit is mirrored as `exception.type` / `exception.message` /
 // `exception.stacktrace` / `error.type` attributes in place of the OTLP
-// `exception` event. Effect trace and span ids are independent of
+// `exception` event, and a server span that answered 5xx gets the same
+// treatment (OTEL HTTP semconv, shared with the OTLP path). Effect trace and span ids are independent of
 // Cloudflare's — `Effect.currentSpan` keeps working, but its ids are not the
 // ones in the exported trace.
 
 import { Effect, Layer, Option, Predicate, Schema, Tracer } from "effect"
-import { classifySpanExit } from "../shared/span-exit.js"
+import { classifySpanExit, HTTP_SERVER_ERROR_RESPONSE } from "../shared/span-exit.js"
 
 /**
  * Structural view of the span `tracing.startActiveSpan` hands its callback.
@@ -108,8 +109,15 @@ class MirroredSpan extends Tracer.NativeSpan {
 		super.end(endTime, exit)
 		const handle = this.handle
 		if (handle === undefined) return
-		const outcome = classifySpanExit(exit, this.#anticipated)
-		if (outcome._tag === "Interrupted") {
+		const outcome = classifySpanExit(
+			{ exit, kind: this.kind, attributes: this.attributes },
+			this.#anticipated,
+		)
+		if (outcome._tag === "ServerError") {
+			handle.setAttribute(ATTR_EXCEPTION_TYPE, HTTP_SERVER_ERROR_RESPONSE)
+			handle.setAttribute(ATTR_EXCEPTION_MESSAGE, outcome.message)
+			handle.setAttribute(ATTR_ERROR_TYPE, HTTP_SERVER_ERROR_RESPONSE)
+		} else if (outcome._tag === "Interrupted") {
 			handle.setAttribute(ATTR_STATUS_INTERRUPTED, true)
 		} else if (outcome._tag === "Failed") {
 			// One scalar per key: the first error is the one Maple fingerprints on,

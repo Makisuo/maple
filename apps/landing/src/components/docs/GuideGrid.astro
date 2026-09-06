@@ -1,0 +1,106 @@
+---
+// One ecosystem's cards on /docs/instrumentation. Styled with scoped CSS on
+// purpose: the page sits inside `.docs-content`, whose descendant rules for
+// `a`/`p` beat plain Tailwind utilities (see `local/InstallTabs.astro`).
+import { GUIDE_SECTIONS } from "../../lib/instrumentation-guides";
+import BrandMarkIcon from "../BrandMarkIcon.astro";
+import LanguageLogo from "./LanguageLogo.astro";
+
+interface Props {
+    section: string;
+}
+
+const { section } = Astro.props;
+const data = GUIDE_SECTIONS.find((s) => s.id === section);
+if (!data) throw new Error(`Unknown guide section: ${section}`);
+---
+
+<ul class="guide-grid" role="list">
+    {data.cards.map((card) => (
+        <li class="guide-grid__cell">
+            <a href={card.href} class="guide-card">
+                <span class="guide-card__icon" aria-hidden="true">
+                    {"lang" in card.icon ? (
+                        <LanguageLogo id={card.icon.lang} class="h-4 w-4" />
+                    ) : (
+                        <BrandMarkIcon id={card.icon.mark} class="h-4 w-4" />
+                    )}
+                </span>
+                <span class="guide-card__text">
+                    <span class="guide-card__name">{card.name}</span>
+                    <span class="guide-card__hint">{card.hint}</span>
+                </span>
+            </a>
+        </li>
+    ))}
+</ul>
+
+<style>
+    .guide-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1px;
+        margin: 0 0 8px;
+        padding: 0;
+        list-style: none;
+        overflow: hidden;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: var(--background);
+    }
+    @media (min-width: 640px) {
+        .guide-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+    }
+    /* Each cell draws its own frame so a short last row reads as empty
+       cells rather than a block of border colour. */
+    .guide-grid__cell {
+        margin: 0;
+        padding: 0;
+        line-height: normal;
+        box-shadow: 0 0 0 1px var(--border);
+    }
+    .guide-card {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        height: 100%;
+        padding: 14px 16px;
+        background: var(--background);
+        color: var(--foreground);
+        text-decoration: none;
+        transition: background-color 150ms ease;
+    }
+    .guide-card:hover {
+        background: var(--bg-elevated);
+    }
+    .guide-card__icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--bg-elevated);
+    }
+    .guide-card__text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+    }
+    .guide-card__name {
+        font-size: 13px;
+        font-weight: 500;
+        line-height: 1.3;
+        color: var(--foreground);
+    }
+    .guide-card__hint {
+        font-size: 11.5px;
+        line-height: 1.45;
+        color: var(--muted-foreground);
+    }
+</style>

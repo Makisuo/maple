@@ -13,6 +13,7 @@
 		"./env": "./src/env.ts",
 		"./r2": "./src/cloudflare/r2.ts",
 		"./worker-runtime": "./src/cloudflare/worker-runtime.ts",
+		"./worker-telemetry": "./src/cloudflare/worker-telemetry.ts",
 		"./workers-cache": "./src/cloudflare/workers-cache.ts"
 	},
 	"scripts": {
@@ -21,7 +22,9 @@
 	},
 	"dependencies": {
 		"@distilled.cloud/aws": "1.0.0-rc.6",
+		"@maple-dev/effect-sdk": "workspace:*",
 		"@maple/alchemy-portless": "workspace:*",
+		"@maple/domain": "workspace:*",
 		"alchemy": "2.0.0-beta.74",
 		"effect": "catalog:effect"
 	},

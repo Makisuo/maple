@@ -4,6 +4,10 @@ interface Props {
 }
 
 const { class: className = "w-3.5 h-3.5" } = Astro.props;
+// A gradient is looked up by id document-wide, and a `display: none` copy
+// (the desktop sidebar below `lg`) wins that lookup and renders nothing —
+// so every instance gets its own id.
+const gradientId = `kotlin-gradient-${crypto.randomUUID().slice(0, 8)}`;
 ---
 
 <svg
@@ -13,11 +17,11 @@ const { class: className = "w-3.5 h-3.5" } = Astro.props;
 >
     <title>Kotlin</title>
     <defs>
-        <linearGradient id="kotlinGradient" x1="0%" y1="100%" x2="100%" y2="0%">
+        <linearGradient id={gradientId} x1="0%" y1="100%" x2="100%" y2="0%">
             <stop offset="0%" stop-color="#0095D5" />
             <stop offset="50%" stop-color="#7F52FF" />
             <stop offset="100%" stop-color="#E44857" />
         </linearGradient>
     </defs>
-    <path d="M24 24H0V0h24L12 12Z" fill="url(#kotlinGradient)" />
+    <path d="M24 24H0V0h24L12 12Z" fill={`url(#${gradientId})`} />
 </svg>

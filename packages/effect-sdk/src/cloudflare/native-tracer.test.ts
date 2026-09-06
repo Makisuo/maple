@@ -240,6 +240,27 @@ describe("makeNativeTracer", () => {
 		}),
 	)
 
+	it.effect("mirrors a rendered 5xx on a server span as an HttpServerErrorResponse exception", () =>
+		Effect.gen(function* () {
+			const host = makeFakeHost()
+			const respond = (name: string, status: number, kind: "server" | "internal") =>
+				Effect.annotateCurrentSpan({
+					"http.request.method": "GET",
+					"url.path": "/api/items",
+					"http.response.status_code": status,
+				}).pipe(Effect.withSpan(name, { kind }), withTracer(host))
+			yield* respond("server-500", 500, "server")
+			yield* respond("server-404", 404, "server")
+			yield* respond("internal-503", 503, "internal")
+			const failed = host.byName("server-500")?.attributes ?? {}
+			assert.strictEqual(failed["exception.type"], "HttpServerErrorResponse")
+			assert.strictEqual(failed["exception.message"], "HTTP 500 (GET /api/items)")
+			assert.strictEqual(failed["error.type"], "HttpServerErrorResponse")
+			assert.isUndefined(host.byName("server-404")?.attributes["exception.type"])
+			assert.isUndefined(host.byName("internal-503")?.attributes["exception.type"])
+		}),
+	)
+
 	it.effect("cascades Cloudflare's isTraced=false into Effect's sampled and opens no descendants", () =>
 		Effect.gen(function* () {
 			const host = makeFakeHost({ isTraced: false })

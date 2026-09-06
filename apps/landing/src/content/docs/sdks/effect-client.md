@@ -1,8 +1,9 @@
 ---
-title: "Browser"
+title: "Effect SDK in the browser"
 description: "Set up the Effect SDK in browser environments with explicit configuration and auto-captured browser metadata."
-group: "Platforms"
-order: 4
+group: "Instrumentation"
+order: 3
+navLabel: "Browser"
 sdk: "effect"
 ---
 

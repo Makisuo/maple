@@ -1,22 +1,15 @@
 /**
  * Docs in reading order, grouped.
  *
- * `/docs.md` and `/llms-full.txt` both need "every doc, in the order the
- * sidebar shows them". Kept out of `docs-nav.ts` on purpose: that module is
- * imported by client islands, and `astro:content` must not follow it into a
- * browser bundle.
+ * `/docs.md`, `/llms-full.txt` and prev/next all need "every doc, in the
+ * order the sidebar shows them". Kept out of `docs-nav.ts` on purpose: that
+ * module is imported by client islands, and `astro:content` must not follow
+ * it into a browser bundle.
  */
 import { getCollection, type CollectionEntry } from "astro:content"
-import { SDK_GROUP_ORDER, UNIVERSAL_GROUP_ORDER } from "./docs-nav"
+import { groupRank } from "./docs-nav"
 
 export type Doc = CollectionEntry<"docs">
-
-const GROUP_ORDER: string[] = [...UNIVERSAL_GROUP_ORDER, ...SDK_GROUP_ORDER]
-
-const groupRank = (group: string) => {
-	const i = GROUP_ORDER.indexOf(group)
-	return i === -1 ? GROUP_ORDER.length : i
-}
 
 /** Every non-draft doc, grouped and ordered the way the sidebar orders them. */
 export async function getDocGroups(): Promise<{ group: string; docs: Doc[] }[]> {

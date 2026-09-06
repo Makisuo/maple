@@ -7,7 +7,7 @@
 import { Cause, Context, Exit, Layer, Option, Tracer } from "effect"
 import * as OtlpResource from "effect/unstable/observability/OtlpResource"
 import type { ExtractTag } from "effect/Types"
-import { classifySpanExit, type SpanOutcome } from "./span-exit.js"
+import { classifySpanExit, HTTP_SERVER_ERROR_RESPONSE, type SpanOutcome } from "./span-exit.js"
 
 export interface CaptureExceptionOptions {
 	/** Span name. Default `"exception"`. */
@@ -82,7 +82,10 @@ export const makeSpanBuffer = (options: SpanBufferOptions = {}): SpanBuffer => {
 		if (!span.sampled) return
 		if (dropSpan !== undefined && dropSpan(span.name)) return
 		if (span.status._tag !== "Ended") return
-		const outcome = classifySpanExit(span.status.exit, anticipatedErrorIdentifiers)
+		const outcome = classifySpanExit(
+			{ exit: span.status.exit, kind: span.kind, attributes: span.attributes },
+			anticipatedErrorIdentifiers,
+		)
 		// Benign by Effect's own reckoning (`[ErrorReporter.ignore]`, e.g. a
 		// RouteNotFound 404): never exported, unlike the `Anticipated` case below.
 		if (outcome._tag === "Ignored") return
@@ -206,7 +209,18 @@ const makeOtlpSpan = (self: SpanImpl, outcome: SpanOutcome): OtlpSpan => {
 	}))
 
 	let otelStatus: Status
-	if (outcome._tag === "Interrupted") {
+	if (outcome._tag === "ServerError") {
+		otelStatus = { code: StatusCode.Error, message: outcome.message }
+		events.push({
+			name: "exception",
+			timeUnixNano: String(status.endTime),
+			droppedAttributesCount: 0,
+			attributes: [
+				{ key: ATTR_EXCEPTION_TYPE, value: { stringValue: HTTP_SERVER_ERROR_RESPONSE } },
+				{ key: ATTR_EXCEPTION_MESSAGE, value: { stringValue: outcome.message } },
+			],
+		})
+	} else if (outcome._tag === "Interrupted") {
 		otelStatus = { code: StatusCode.Ok, message: "Interrupted" }
 		attributes.push(
 			{ key: "span.label", value: { stringValue: "⚠︎ Interrupted" } },

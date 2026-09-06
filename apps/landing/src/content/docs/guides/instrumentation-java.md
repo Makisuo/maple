@@ -2,7 +2,8 @@
 title: "Java Instrumentation"
 description: "Instrument a Java application with OpenTelemetry and send traces, logs, and metrics to Maple."
 group: "Instrumentation"
-order: 8
+order: 10
+navLabel: "Java"
 sdk: "java"
 ---
 

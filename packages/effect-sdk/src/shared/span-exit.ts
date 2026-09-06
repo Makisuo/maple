@@ -4,7 +4,7 @@
 // counts as an error: Maple's error tracking reads the verdict either as an
 // `exception` event (OTLP) or as `exception.*` attributes (native). One
 // classification keeps the two from drifting.
-import { Cause, type Exit, Predicate } from "effect"
+import { Cause, type Exit, Predicate, type Tracer } from "effect"
 import * as ErrorReporter from "effect/ErrorReporter"
 
 export type SpanOutcome =
@@ -19,6 +19,17 @@ export type SpanOutcome =
 	/** Every failure is in the caller's `anticipatedErrorIdentifiers` (an expected 4xx). */
 	| { readonly _tag: "Anticipated" }
 	| { readonly _tag: "Failed"; readonly errors: ReadonlyArray<Error> }
+	/** A SERVER span that succeeded but answered 5xx — an error by OTEL HTTP semconv. */
+	| { readonly _tag: "ServerError"; readonly statusCode: number; readonly message: string }
+
+/** `exception.type` recorded for a rendered 5xx response, on both tracers. */
+export const HTTP_SERVER_ERROR_RESPONSE = "HttpServerErrorResponse"
+
+export interface EndedSpan {
+	readonly exit: Exit.Exit<unknown, unknown>
+	readonly kind: Tracer.SpanKind
+	readonly attributes: ReadonlyMap<string, unknown>
+}
 
 const isIgnoredFailure = (error: unknown): boolean =>
 	Predicate.hasProperty(error, ErrorReporter.ignore) && error[ErrorReporter.ignore] === true
@@ -40,16 +51,43 @@ const isAnticipatedFailure = (error: unknown, identifiers: ReadonlySet<string>):
 	return identifier !== undefined && identifiers.has(identifier)
 }
 
+// OTEL HTTP semconv for SERVER spans: a 5xx response is an error even when the
+// handler rendered it as a plain response — exactly what the HTTP boundaries
+// (`HttpRouter.toWebHandler`, a Worker bridge) do with a defect, so the span
+// would otherwise reach the warehouse as `Ok` and the crash never reach error
+// tracking. A 4xx is a rejection the service handled and stays `Ok`.
+const renderedServerError = (span: EndedSpan): number | undefined => {
+	if (span.kind !== "server") return undefined
+	const raw = span.attributes.get("http.response.status_code")
+	const code = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : Number.NaN
+	return Number.isInteger(code) && code >= 500 ? code : undefined
+}
+
+const serverErrorMessage = (span: EndedSpan, statusCode: number): string => {
+	const method = span.attributes.get("http.request.method")
+	const path = span.attributes.get("url.path")
+	return typeof method === "string" && typeof path === "string"
+		? `HTTP ${statusCode} (${method} ${path})`
+		: `HTTP ${statusCode}`
+}
+
 /**
- * Classify a span's exit. A cause that mixes an ignored or anticipated failure
- * with a defect (`Die`) is a real failure — only causes made entirely of
- * benign failures are downgraded.
+ * Classify how a span ended. A cause that mixes an ignored or anticipated
+ * failure with a defect (`Die`) is a real failure — only causes made entirely
+ * of benign failures are downgraded. A successful SERVER span still classifies
+ * as `ServerError` when it answered 5xx.
  */
 export const classifySpanExit = (
-	exit: Exit.Exit<unknown, unknown>,
+	span: EndedSpan,
 	anticipatedErrorIdentifiers: ReadonlySet<string> | undefined,
 ): SpanOutcome => {
-	if (exit._tag === "Success") return { _tag: "Success" }
+	const exit = span.exit
+	if (exit._tag === "Success") {
+		const statusCode = renderedServerError(span)
+		return statusCode === undefined
+			? { _tag: "Success" }
+			: { _tag: "ServerError", statusCode, message: serverErrorMessage(span, statusCode) }
+	}
 	const cause = exit.cause
 	if (Cause.hasInterruptsOnly(cause)) return { _tag: "Interrupted" }
 	if (!cause.reasons.some(Cause.isDieReason)) {

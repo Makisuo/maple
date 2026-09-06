@@ -88,6 +88,8 @@ When `MAPLE_INGEST_KEY` is unset, the SDK runs in no-op mode: buffers are draine
 
 The same `MAPLE_ENDPOINT` / `MAPLE_INGEST_KEY` / `MAPLE_ENVIRONMENT` env vars apply, read from the Workers `env` binding.
 
+Server spans follow the OTEL HTTP semantic conventions for status: a 5xx response marks the span `Error` (with an `HttpServerErrorResponse` exception event) even when the handler returned it as a plain response — which is what `HttpRouter.toWebHandler` and alchemy's Worker bridge do with a defect — while 4xx responses stay `Ok`.
+
 ### Native tracing (experimental)
 
 `tracer: "native"` hands span export to Cloudflare instead of the OTLP buffer. Every Effect span is mirrored onto `tracing.startActiveSpan` from `cloudflare:workers`, so it lands in the same trace as Cloudflare's own fetch / KV / R2 / D1 spans, and the whole trace reaches Maple through the Worker's [ObservabilityDestination](https://developers.cloudflare.com/workers/observability/exporting-opentelemetry-data/). Nothing is buffered in the isolate, no ingest key is read, and it works from Durable Object and Workflow isolates, where a `ctx.waitUntil` flush is unreliable.
@@ -101,16 +103,17 @@ Requirements: `compatibility_date >= 2026-07-28` (for `startActiveSpan`), the `n
 
 What is mirrored:
 
-| Effect                                                            | Cloudflare span                                                                           |
-| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| span name, nesting                                                | span name, parent — including across `sleep`s, forks and other fiber yields               |
-| string / number / boolean attributes                              | forwarded as they are set                                                                 |
-| object / array / bigint attributes, events, links                 | Effect-local only                                                                         |
-| failed exit                                                       | `exception.type`, `exception.message`, `exception.stacktrace`, `error.type` (first error) |
-| interrupt                                                         | `status.interrupted = true`                                                               |
-| `anticipatedErrorIdentifiers` / `[ErrorReporter.ignore]` failures | no exception attributes                                                                   |
-| `dropSpanNames` match                                             | no Cloudflare span; its children attach to the nearest mirrored ancestor                  |
-| Cloudflare `isTraced = false`                                     | the span and its descendants are unsampled — no `startActiveSpan` calls at all            |
+| Effect                                                            | Cloudflare span                                                                                                       |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| span name, nesting                                                | span name, parent — including across `sleep`s, forks and other fiber yields                                           |
+| string / number / boolean attributes                              | forwarded as they are set                                                                                             |
+| object / array / bigint attributes, events, links                 | Effect-local only                                                                                                     |
+| failed exit                                                       | `exception.type`, `exception.message`, `exception.stacktrace`, `error.type` (first error)                             |
+| interrupt                                                         | `status.interrupted = true`                                                                                           |
+| `anticipatedErrorIdentifiers` / `[ErrorReporter.ignore]` failures | no exception attributes                                                                                               |
+| `dropSpanNames` match                                             | no Cloudflare span; its children attach to the nearest mirrored ancestor                                              |
+| server span answering 5xx (`http.response.status_code`)           | `exception.type` = `HttpServerErrorResponse`, `exception.message`, `error.type` — the same OTEL rule as the OTLP path |
+| Cloudflare `isTraced = false`                                     | the span and its descendants are unsampled — no `startActiveSpan` calls at all                                        |
 
 Cloudflare spans carry no events, so a failure is recorded as attributes rather than as the OTLP `exception` event. Maple's error tracking reads both shapes.
 
