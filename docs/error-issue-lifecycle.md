@@ -17,6 +17,12 @@ This is the flow both humans and agents are meant to follow. If you are changing
 | Investigation | `investigations`                        | One AI diagnostic run. Zero or more per issue.          |
 | Verification  | `error_issue_verifications`             | One post-merge "did that actually work?" check.         |
 
+The exception an occurrence records comes from the span's first OTel `exception` event; a span
+without one (Cloudflare's native Workers tracing cannot record events) is read from its
+`exception.*` span attributes, then `error.type` / `error.message`, then the status message, and
+only then labelled `Unknown Error`. The precedence lives in `error_events_mv`
+(`packages/domain/src/tinybird/materializations.ts`) and its TypeScript mirror `fingerprint.ts`.
+
 The distinction that matters: **an incident is a flare-up, an issue is the bug**. An issue can flare
 up ten times; it gets fixed once.
 

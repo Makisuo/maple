@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
 	chPattern,
 	computeFingerprintInputs,
+	resolveErrorSource,
 	FRAME_LINE_PATTERN,
 	FRAME_REDACTIONS,
 	JSON_VALUE_REDACTIONS,
@@ -573,6 +574,94 @@ describe("error fingerprint normalization", () => {
 	})
 })
 
+describe("error source resolution", () => {
+	const cfWorkerAttributes = {
+		"error.type": "TypeError",
+		"error.message": "Cannot read properties of undefined (reading 'id')",
+		"http.request.method": "GET",
+	}
+
+	it("takes the exception event verbatim when there is one, even over attributes", () => {
+		const source = resolveErrorSource({
+			exceptionEvent: { type: "", message: "", stacktrace: "" },
+			spanAttributes: { "exception.type": "AttrError", ...cfWorkerAttributes },
+			statusMessage: "status text",
+		})
+
+		// Empty event values stay empty: a span with an event must hash exactly
+		// as it did before the attribute tiers existed.
+		expect(source).toEqual({ type: "", message: "", stacktrace: "", messageText: "status text" })
+	})
+
+	it("reads exception.* attributes ahead of error.*", () => {
+		const source = resolveErrorSource({
+			exceptionEvent: undefined,
+			spanAttributes: {
+				"exception.type": "RangeError",
+				"exception.message": "out of range",
+				"exception.stacktrace": "    at f (/a.ts:1:1)",
+				...cfWorkerAttributes,
+			},
+			statusMessage: "",
+		})
+
+		expect(source).toEqual({
+			type: "RangeError",
+			message: "out of range",
+			stacktrace: "    at f (/a.ts:1:1)",
+			messageText: "out of range",
+		})
+	})
+
+	it("labels a Cloudflare-native span from error.type and error.message", () => {
+		const source = resolveErrorSource({
+			exceptionEvent: undefined,
+			spanAttributes: cfWorkerAttributes,
+			statusMessage: "",
+		})
+		const inputs = computeFingerprintInputs({
+			exceptionType: source.type,
+			exceptionStacktrace: source.stacktrace,
+			statusMessage: source.messageText,
+		})
+
+		expect(source.type).toBe("TypeError")
+		expect(source.messageText).toBe("Cannot read properties of undefined (reading 'id')")
+		expect(inputs.label).toBe("TypeError")
+		// The attribute message reaches the signature, so two different bugs in
+		// the same Worker no longer share one hash. A short quoted identifier is
+		// kept on purpose — naming the property is the signal.
+		expect(inputs.msgSignature).toBe("Cannot read properties of undefined (reading 'id')")
+	})
+
+	it("keeps StatusMessage as the message text whenever it is set", () => {
+		// Only the rows that used to land in the "Unknown Error" bucket change
+		// text; an event-less span that already had a StatusMessage keeps its hash.
+		const source = resolveErrorSource({
+			exceptionEvent: undefined,
+			spanAttributes: { "error.type": "Timeout", "error.message": "attribute message" },
+			statusMessage: "status message",
+		})
+
+		expect(source.type).toBe("Timeout")
+		expect(source.message).toBe("attribute message")
+		expect(source.messageText).toBe("status message")
+	})
+
+	it("still lands on Unknown Error when nothing carries an exception", () => {
+		const source = resolveErrorSource({
+			exceptionEvent: undefined,
+			spanAttributes: { "http.request.method": "GET" },
+			statusMessage: "",
+		})
+
+		expect(source).toEqual({ type: "", message: "", stacktrace: "", messageText: "" })
+		expect(
+			computeFingerprintInputs({ exceptionType: "", exceptionStacktrace: "", statusMessage: "" }).label,
+		).toBe("Unknown Error")
+	})
+})
+
 describe("SQL parity", () => {
 	// These tests exercise the TypeScript mirror, but production hashes come from
 	// the `error_events_mv` SQL. That only proves anything if the SQL is built
@@ -594,9 +683,33 @@ describe("SQL parity", () => {
 	it("truncates by character in both implementations, not by byte", () => {
 		// ClickHouse `substring` counts bytes while JS `slice` counts UTF-16 units,
 		// so a non-ASCII message would truncate at a different point on each side.
-		expect(sql).toContain(`substringUTF8(StatusMessage, 1, ${MSG_SCAN_CHARS})`)
+		expect(sql).toContain(`substringUTF8(_msgText, 1, ${MSG_SCAN_CHARS})`)
 		expect(sql).toContain(`1, ${MSG_SIGNATURE_CHARS}`)
-		expect(sql).not.toMatch(/substring\(StatusMessage/)
+		expect(sql).not.toMatch(/substring\((StatusMessage|_msgText)/)
+	})
+
+	it("falls back to span attributes when a span has no exception event", () => {
+		// Cloudflare's native Workers tracing cannot record span events, so the
+		// exception has to be read off the attributes or every error span in a
+		// Worker collapses into one "Unknown Error" issue.
+		expect(sql).toContain("SpanAttributes['exception.type']")
+		expect(sql).toContain("SpanAttributes['exception.message']")
+		expect(sql).toContain("SpanAttributes['exception.stacktrace']")
+		expect(sql).toContain("SpanAttributes['error.type']")
+		expect(sql).toContain("SpanAttributes['error.message']")
+		// The event still wins outright when there is one.
+		expect(sql).toContain("_ei > 0, EventsAttributes[_ei]['exception.type']")
+		// The signature and label are cut from the resolved text, never from the
+		// raw column directly — otherwise an attribute-only span has no message.
+		expect(sql).toContain("if(_ei > 0 OR StatusMessage != '', StatusMessage, _exMsg) AS _msgText")
+		expect(sql).toContain("JSONExtractKeysAndValuesRaw(_msgText)")
+		expect(sql).toContain("_msgText = '', 'Unknown Error'")
+	})
+
+	it("keeps dropping 4xx spans whose only error.type is the status code", () => {
+		// HTTP semconv sets error.type to the bare status on a non-2xx response;
+		// treating that as an exception would re-admit the bot 404s 0016 removed.
+		expect(sql).toContain("SpanAttributes['error.type'] = toString(_httpStatus)")
 	})
 
 	it("keeps the frame limit in step", () => {

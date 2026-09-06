@@ -210,4 +210,19 @@ export const LOCAL_SCHEMA_HISTORY: ReadonlyArray<LocalSchemaHistoryEntry> = Obje
 		manifestDigest: "2a7d05f4fb19422404264521f06ea9ca2f2106cdce2165899f00433215aca8b0",
 		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
 	}),
+	Object.freeze({
+		// v19 rebuilds error_events_mv / error_events_by_time_mv so a span with
+		// no `exception` event is labelled from its exception.* / error.* span
+		// attributes (ClickHouse migration 0029). No part is rewritten and no row
+		// moves; rows already materialized keep their 'Unknown Error' label.
+		//
+		// projectRevision is carried forward deliberately — it is a hardcoded
+		// constant that no longer tracks the generator's header, and the identity
+		// this gate compares is the fingerprint/digest pair.
+		version: 19,
+		fingerprint: "de0230b6f51e34a6",
+		digest: "de0230b6f51e34a6a9ae3ae74c900aaa21f882b10edc24b91e146c7b5c11272e",
+		manifestDigest: "e7cc767b9971a1078514fda972c7b1608272a2cef76f29dd51bc5263912891bf",
+		projectRevision: "ed74788ef292834069e0ea6ee3b22d68fc604fb66cb54d2d551db67ce8d20b3a",
+	}),
 ] as const)

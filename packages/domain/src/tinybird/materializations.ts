@@ -699,8 +699,9 @@ export const servicePlatformsHourlyMv = defineMaterializedView("service_platform
 
 /**
  * Materialized view populating error_events from traces where StatusCode='Error'.
- * Unwraps the first OTel `exception` event and computes a cityHash64
- * FingerprintHash used to group occurrences into Issues.
+ * Unwraps the first OTel `exception` event — or, when a span has none, the
+ * `exception.*` span attributes, then `error.type` / `error.message` — and
+ * computes a cityHash64 FingerprintHash used to group occurrences into Issues.
  *
  * Fingerprint inputs: (OrgId, ServiceName, ExceptionType, top-3 normalized frames,
  * message signature).
@@ -745,9 +746,34 @@ export { errorEventsSelectSql as ERROR_EVENTS_MV_SQL }
 const errorEventsSelectSql = `
         WITH
           arrayFirstIndex(n -> n = 'exception', EventsName) AS _ei,
-          if(_ei > 0, EventsAttributes[_ei]['exception.type'], '') AS _exType,
-          if(_ei > 0, EventsAttributes[_ei]['exception.message'], StatusMessage) AS _exMsg,
-          if(_ei > 0, EventsAttributes[_ei]['exception.stacktrace'], '') AS _exStack,
+          -- Where the exception comes from, in order: the first OTel \`exception\`
+          -- span event; the same three keys carried as span ATTRIBUTES; then the
+          -- semconv \`error.type\` / \`error.message\` pair. Cloudflare's native
+          -- Workers tracing has no span events, no status description and no
+          -- outcome setter — a custom span can only setAttribute() — so without
+          -- the attribute tiers every one of its error spans hashed to a single
+          -- "Unknown Error" issue per service. A span WITH an event keeps the
+          -- precedence it always had: the event's values are taken verbatim,
+          -- empty or not, so no existing hash rotates.
+          if(
+            _ei > 0, EventsAttributes[_ei]['exception.type'],
+            if(SpanAttributes['exception.type'] != '', SpanAttributes['exception.type'], SpanAttributes['error.type'])
+          ) AS _exType,
+          if(
+            _ei > 0, EventsAttributes[_ei]['exception.message'],
+            multiIf(
+              SpanAttributes['exception.message'] != '', SpanAttributes['exception.message'],
+              SpanAttributes['error.message'] != '', SpanAttributes['error.message'],
+              StatusMessage
+            )
+          ) AS _exMsg,
+          if(_ei > 0, EventsAttributes[_ei]['exception.stacktrace'], SpanAttributes['exception.stacktrace']) AS _exStack,
+          -- The text the message signature and the display label are cut from.
+          -- StatusMessage whenever it is set or an event exists, exactly as
+          -- before; the attribute-carried message stands in only for an
+          -- event-less span whose StatusMessage is empty — the rows that used to
+          -- share the "Unknown Error" bucket — so no other hash rotates.
+          if(_ei > 0 OR StatusMessage != '', StatusMessage, _exMsg) AS _msgText,
           -- Frame lines are matched by SHAPE, not by "contains :NUMBER". The old
           -- rule accepted any line with a colon-digit, which let non-frame lines
           -- in: Drizzle's \`params: <row values>\` line, and the \`Type: message\`
@@ -780,8 +806,8 @@ const errorEventsSelectSql = `
           if(length(_topFrames) > 0, _topFrames[1], '') AS _topFrame,
           arrayStringConcat(_topFrames, '\\n') AS _fpFrames,
           -- JSON detection for the message signature below.
-          isValidJSON(StatusMessage) AS _isJson,
-          _isJson AND JSONType(StatusMessage) = 'Object' AS _isJsonObj,
+          isValidJSON(_msgText) AS _isJson,
+          _isJson AND JSONType(_msgText) = 'Object' AS _isJsonObj,
           -- General, KEY-NAME-AGNOSTIC canonical signature: iterate ALL top-level
           -- keys, redact volatile tokens (long hex / numbers) in each raw value, then
           -- sort by "key=value" so key order & whitespace don't matter. No assumption
@@ -791,7 +817,7 @@ const errorEventsSelectSql = `
             arraySort(
               arrayMap(
                 kv -> concat(kv.1, '=', ${chRedactChain("kv.2", JSON_VALUE_REDACTIONS)}),
-                JSONExtractKeysAndValuesRaw(StatusMessage)
+                JSONExtractKeysAndValuesRaw(_msgText)
               )
             ),
             '|'
@@ -809,7 +835,7 @@ const errorEventsSelectSql = `
           multiIf(
             _isJsonObj, _jsonSig,
             substringUTF8(
-              ${chRedactChain(`substringUTF8(StatusMessage, 1, ${MSG_SCAN_CHARS})`, MSG_TEXT_REDACTIONS)},
+              ${chRedactChain(`substringUTF8(_msgText, 1, ${MSG_SCAN_CHARS})`, MSG_TEXT_REDACTIONS)},
               1, ${MSG_SIGNATURE_CHARS}
             )
           ) AS _msgSig,
@@ -817,29 +843,29 @@ const errorEventsSelectSql = `
           -- many labels may map to one hash). The broad key list here is a DISPLAY
           -- heuristic only; the fingerprint above makes no key-name assumption.
           multiIf(
-            JSONExtractString(StatusMessage, 'title')   != '', JSONExtractString(StatusMessage, 'title'),
-            JSONExtractString(StatusMessage, 'message') != '', JSONExtractString(StatusMessage, 'message'),
-            JSONExtractString(StatusMessage, 'error')   != '', JSONExtractString(StatusMessage, 'error'),
-            JSONExtractString(StatusMessage, '_tag')    != '', JSONExtractString(StatusMessage, '_tag'),
-            JSONExtractString(StatusMessage, 'reason')  != '', JSONExtractString(StatusMessage, 'reason'),
-            JSONExtractString(StatusMessage, 'name')    != '', JSONExtractString(StatusMessage, 'name'),
-            JSONExtractString(StatusMessage, 'type')    != '', extract(JSONExtractString(StatusMessage, 'type'), '([^/]+)$'),
+            JSONExtractString(_msgText, 'title')   != '', JSONExtractString(_msgText, 'title'),
+            JSONExtractString(_msgText, 'message') != '', JSONExtractString(_msgText, 'message'),
+            JSONExtractString(_msgText, 'error')   != '', JSONExtractString(_msgText, 'error'),
+            JSONExtractString(_msgText, '_tag')    != '', JSONExtractString(_msgText, '_tag'),
+            JSONExtractString(_msgText, 'reason')  != '', JSONExtractString(_msgText, 'reason'),
+            JSONExtractString(_msgText, 'name')    != '', JSONExtractString(_msgText, 'name'),
+            JSONExtractString(_msgText, 'type')    != '', extract(JSONExtractString(_msgText, 'type'), '([^/]+)$'),
             'JSON error'
           ) AS _jsonLabel,
           multiIf(
-            StatusMessage = '', 'Unknown Error',
-            position(StatusMessage, '{ readonly') = 1 OR position(StatusMessage, '└─') > 0,
+            _msgText = '', 'Unknown Error',
+            position(_msgText, '{ readonly') = 1 OR position(_msgText, '└─') > 0,
               if(
-                extract(StatusMessage, 'readonly (\\\\w+)') != '',
-                concat('Schema parse error: ', extract(StatusMessage, 'readonly (\\\\w+)')),
+                extract(_msgText, 'readonly (\\\\w+)') != '',
+                concat('Schema parse error: ', extract(_msgText, 'readonly (\\\\w+)')),
                 'Schema parse error'
               ),
-            _isJsonObj OR position(StatusMessage, '[') = 1, _jsonLabel,
-            left(StatusMessage, multiIf(
-              position(StatusMessage, ': ')  > 3, toInt64(position(StatusMessage, ': '))  - 1,
-              position(StatusMessage, ' (')  > 3, toInt64(position(StatusMessage, ' (')) - 1,
-              position(StatusMessage, '\\n') > 3, toInt64(position(StatusMessage, '\\n')) - 1,
-              least(toInt64(length(StatusMessage)), 150)
+            _isJsonObj OR position(_msgText, '[') = 1, _jsonLabel,
+            left(_msgText, multiIf(
+              position(_msgText, ': ')  > 3, toInt64(position(_msgText, ': '))  - 1,
+              position(_msgText, ' (')  > 3, toInt64(position(_msgText, ' (')) - 1,
+              position(_msgText, '\\n') > 3, toInt64(position(_msgText, '\\n')) - 1,
+              least(toInt64(length(_msgText)), 150)
             ))
           ) AS _statusLabel,
           if(_exType != '', _exType, _statusLabel) AS _errorLabel,
@@ -873,20 +899,34 @@ const errorEventsSelectSql = `
           -- Client-side runtimes (notably the native Cloudflare Workers
           -- observability) mark ANY non-2xx fetch span as Error, so 404s from bot
           -- traffic arrived here as unlabelled "Unknown Error" issues. Drop a
-          -- span only when all three hold: 4xx, no exception event, and no
-          -- exception type. 5xx and anything carrying an exception still count,
-          -- and SpanKind is deliberately not consulted — these are Client spans.
+          -- span only when all hold: 4xx, no exception event, no exception.type
+          -- attribute, and no error.type beyond the status code itself (HTTP
+          -- semconv sets error.type to the bare status on a non-2xx response,
+          -- which carries no exception). 5xx and anything carrying a real
+          -- exception still count, and SpanKind is deliberately not consulted —
+          -- these are Client spans.
           AND NOT (
             _httpStatus >= 400 AND _httpStatus < 500
             AND _ei = 0
-            AND _exType = ''
+            AND SpanAttributes['exception.type'] = ''
+            AND (SpanAttributes['error.type'] = '' OR SpanAttributes['error.type'] = toString(_httpStatus))
           )
       `
 
 export const errorEventsMv = defineMaterializedView("error_events_mv", {
 	description:
-		"Materializes per-occurrence error events from traces. Unwraps the first OTel exception event and computes a cityHash64 FingerprintHash for issue grouping.",
+		"Materializes per-occurrence error events from traces. Unwraps the first OTel exception event (falling back to exception.* / error.* span attributes) and computes a cityHash64 FingerprintHash for issue grouping.",
 	datasource: errorEvents,
+	// This change rewrites the pipe's SELECT, and Tinybird treats a changed MV
+	// node as a reason to REBUILD the target by replaying its source. That is
+	// wrong twice over here: `traces` keeps 30 days against this target's 90, so
+	// a rebuild silently drops two months of occurrences, and replaying would
+	// recompute FingerprintHash for every existing row — re-bucketing every
+	// triaged issue, which is exactly what migration 0027 refuses to do. `alter`
+	// swaps the SQL at promotion with no data movement, matching the migration's
+	// forward-only contract: stored rows keep their labels, new events get the
+	// attribute fallback.
+	deploymentMethod: "alter",
 	nodes: [
 		node({
 			name: "error_events_mv_node",
@@ -907,6 +947,10 @@ export const errorEventsByTimeMv = defineMaterializedView("error_events_by_time_
 	description:
 		"Time-ordered copy of error_events_mv's projection, written to error_events_by_time (sorted by OrgId, Timestamp, FingerprintHash) for recent-window error scans.",
 	datasource: errorEventsByTime,
+	// Same reason as error_events_mv, whose projection this shares byte-for-byte:
+	// a replay would truncate to the 30-day `traces` window and re-bucket every
+	// issue. The two must also deploy the same way, or the tables disagree.
+	deploymentMethod: "alter",
 	nodes: [
 		node({
 			name: "error_events_by_time_mv_node",
