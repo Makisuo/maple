@@ -16,9 +16,7 @@ const currentDoc = allDocs.find((d) => d.id === currentSlug);
 
 <details class="lg:hidden mb-6 rounded-lg border border-border">
     <summary class="flex items-center justify-between px-4 py-3 cursor-pointer text-xs text-fg-muted hover:text-fg transition-colors list-none [&::-webkit-details-marker]:hidden">
-        <span class="truncate">
-            {currentDoc ? `${currentDoc.data.group} / ${currentDoc.data.title}` : "Browse the docs"}
-        </span>
+        <span class="truncate">Browse the docs</span>
         <svg class="w-3 h-3 shrink-0 transition-transform details-open:rotate-180" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M3 5l3 3 3-3" />
         </svg>

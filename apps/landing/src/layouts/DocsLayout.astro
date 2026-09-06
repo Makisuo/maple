@@ -31,7 +31,7 @@ const absoluteImage = image.startsWith("http") ? image : new URL(image, Astro.si
 ---
 
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en" class="dark docs">
     <head>
         <meta charset="utf-8" />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -104,6 +104,19 @@ const absoluteImage = image.startsWith("http") ? image : new URL(image, Astro.si
             <main class:list={["flex-1 min-w-0 lg:ml-60", !wide && "xl:mr-52"]}>
                 <div class:list={["mx-auto py-10 px-6", wide ? "max-w-4xl" : "max-w-3xl"]}>
                     <DocsMobileNav currentSlug={currentSlug} />
+                    {!wide && headings.some((h) => h.depth >= 2 && h.depth <= 3) && (
+                        <details class="xl:hidden mb-6 rounded-lg border border-border">
+                            <summary class="flex items-center justify-between px-4 py-3 cursor-pointer text-xs text-fg-muted hover:text-fg transition-colors list-none [&::-webkit-details-marker]:hidden">
+                                <span>On this page</span>
+                                <svg class="w-3 h-3 shrink-0 transition-transform details-open:rotate-180" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M3 5l3 3 3-3" />
+                                </svg>
+                            </summary>
+                            <div class="px-4 pb-4 border-t border-border pt-4 max-h-[60vh] overflow-y-auto">
+                                <DocsTableOfContents headings={headings} spy={false} />
+                            </div>
+                        </details>
+                    )}
                     <slot />
                     {currentSlug && <DocsPrevNext currentSlug={currentSlug} />}
                 </div>
@@ -116,5 +129,60 @@ const absoluteImage = image.startsWith("http") ? image : new URL(image, Astro.si
                 </aside>
             )}
         </div>
+
+        <script>
+            import { bindCopyButtons } from "../lib/copy-to-clipboard";
+
+            // Progressive enhancement over the rendered article: copy buttons on
+            // code blocks, section permalinks, and the navigation scrolled so the
+            // current page is in view. Everything here is optional — the page
+            // reads fine without it.
+            const article = document.querySelector(".docs-content");
+
+            if (article) {
+                for (const pre of article.querySelectorAll<HTMLPreElement>("pre")) {
+                    const code = pre.querySelector("code");
+                    if (!code) continue;
+                    pre.dataset.copy = code.textContent ?? "";
+                    const button = document.createElement("button");
+                    button.type = "button";
+                    button.className = "code-copy";
+                    button.textContent = "copy";
+                    button.setAttribute("aria-label", "Copy code");
+                    pre.appendChild(button);
+                }
+                bindCopyButtons({
+                    root: article,
+                    hostSelector: "pre[data-copy]",
+                    buttonSelector: ".code-copy",
+                    track: { event: "docs_snippet_copied", key: "snippet" },
+                });
+
+                for (const heading of article.querySelectorAll<HTMLHeadingElement>("h2[id], h3[id]")) {
+                    const anchor = document.createElement("a");
+                    anchor.className = "heading-anchor";
+                    anchor.href = `#${heading.id}`;
+                    anchor.textContent = "#";
+                    anchor.setAttribute("aria-label", `Link to “${heading.textContent?.trim() ?? ""}”`);
+                    heading.appendChild(anchor);
+                }
+            }
+
+            // Sidebar: the active row is often below the fold on long trees.
+            const sidebar = document.querySelector<HTMLElement>("aside nav[aria-label='Documentation']");
+            const active = sidebar?.querySelector<HTMLElement>("a[aria-current='page']");
+            const rail = sidebar?.closest<HTMLElement>("aside");
+            if (active && rail && active.offsetTop > rail.clientHeight - 80) {
+                rail.scrollTop = active.offsetTop - rail.clientHeight / 2;
+            }
+
+            // Category strip scrolls horizontally on phones; keep the active one visible.
+            const strip = document.querySelector<HTMLElement>(".docs-cat-nav");
+            const category = strip?.querySelector<HTMLElement>("a[aria-current='page']");
+            if (strip && category) {
+                const overflow = category.offsetLeft + category.offsetWidth - strip.clientWidth;
+                if (overflow > 0) strip.scrollLeft = overflow + 24;
+            }
+        </script>
     </body>
 </html>

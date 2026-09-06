@@ -2,6 +2,7 @@
 title: "Sampling & Throughput Estimation"
 description: "How Maple detects trace sampling and extrapolates throughput metrics."
 group: "Concepts"
+navLabel: "Sampling & Throughput"
 order: 2
 ---
 

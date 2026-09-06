@@ -4,6 +4,7 @@ import path from "node:path"
 import { defineConfig } from "astro/config"
 import { transformerNotationDiff, transformerNotationHighlight } from "@shikijs/transformers"
 import { unified } from "@astrojs/markdown-remark"
+import rehypeTableWrap from "./src/lib/rehype-table-wrap.mjs"
 import mdx from "@astrojs/mdx"
 import { paraglideVitePlugin } from "@inlang/paraglide-js"
 import react from "@astrojs/react"
@@ -80,7 +81,7 @@ export default defineConfig({
 	markdown: {
 		// Stay on the remark pipeline: Sätteri doesn't run the Shiki transformers
 		// configured below. Revisit when the transformer story lands there.
-		processor: unified(),
+		processor: unified({ rehypePlugins: [rehypeTableWrap] }),
 		shikiConfig: {
 			theme: "vitesse-dark",
 			wrap: true,
