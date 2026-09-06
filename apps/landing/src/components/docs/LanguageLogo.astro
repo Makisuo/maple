@@ -19,7 +19,7 @@ interface Props {
     class?: string;
 }
 
-const LOGOS: Record<LanguageId, AstroComponentFactory> = {
+const LOGOS = {
     effect: EffectLogo,
     node: NodeJsLogo,
     nextjs: NextjsLogo,
@@ -30,7 +30,7 @@ const LOGOS: Record<LanguageId, AstroComponentFactory> = {
     kotlin: KotlinLogo,
     csharp: CsharpLogo,
     laravel: LaravelLogo,
-};
+} satisfies Record<LanguageId, AstroComponentFactory>;
 
 const { id, class: className = "h-4 w-4" } = Astro.props;
 const Logo = LOGOS[id];
