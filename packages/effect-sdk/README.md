@@ -87,6 +87,8 @@ When `MAPLE_INGEST_KEY` is unset, the SDK runs in no-op mode: buffers are draine
 
 The same `MAPLE_ENDPOINT` / `MAPLE_INGEST_KEY` / `MAPLE_ENVIRONMENT` env vars apply, read from the Workers `env` binding.
 
+Server spans follow the OTEL HTTP semantic conventions for status: a 5xx response marks the span `Error` (with an `HttpServerErrorResponse` exception event) even when the handler returned it as a plain response — which is what `HttpRouter.toWebHandler` and alchemy's Worker bridge do with a defect — while 4xx responses stay `Ok`.
+
 ## Client (Browser and React Native)
 
 All configuration must be provided programmatically since browsers don't have access to environment variables.

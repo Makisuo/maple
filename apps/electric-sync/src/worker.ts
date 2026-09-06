@@ -9,8 +9,6 @@
  * callers from the Clerk / self-hosted session bearer only (no Hyperdrive /
  * MAPLE_DB binding), pins each shape's org scope, and forwards to Electric.
  */
-import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
-import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
 	MapleStack,
@@ -18,9 +16,10 @@ import {
 	resolveWorkerName,
 } from "@maple/infra/cloudflare"
 import { authEnv, merge, optionalPlain, optionalSecret, selfObservabilityEnv } from "@maple/infra/env"
+import { WorkerTelemetry } from "@maple/infra/worker-telemetry"
 import * as Cloudflare from "alchemy/Cloudflare"
-import { Context, Effect, Layer, Scope } from "effect"
-import { FetchHttpClient, HttpMiddleware, HttpRouter } from "effect/unstable/http"
+import { Effect, Layer, Scope } from "effect"
+import { FetchHttpClient, HttpRouter } from "effect/unstable/http"
 
 const configuredEnv = (stage: MapleStage) =>
 	merge(
@@ -74,25 +73,6 @@ const props = Effect.gen(function* () {
 	}
 })
 
-// Module scope stays near empty (fixed ~1s startup CPU budget): `layer` is
-// stable, `flush(env)` resolves env lazily on first call.
-const telemetry = MapleCloudflareSDK.make({
-	serviceName: "electric-sync",
-	serviceNamespace: "core",
-	repositoryUrl: "https://github.com/MapleTechLabs/maple",
-	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
-})
-
-// `HttpMiddleware.tracer` ends the root server span on a deferred macrotask;
-// yield one first so `span.end` lands before the drain, or isolated requests
-// silently drop their trace. The SDK now yields one inside `flush` itself; this
-// stays until the SDK version carrying that is pinned here, so a version skew
-// can't drop spans.
-const flushTelemetry = async (env: Record<string, unknown>): Promise<void> => {
-	await new Promise<void>((resolve) => setTimeout(resolve, 0))
-	await telemetry.flush(env)
-}
-
 // The route graph builds `@maple/domain` Schema ASTs eagerly, so it is imported
 // here rather than at module scope: Cloudflare runs only the top level during
 // upload validation, against the fixed startup-CPU budget.
@@ -138,8 +118,6 @@ export default class ElectricSync extends Cloudflare.Worker<ElectricSync>()(
 	"electric-sync",
 	props,
 	Effect.gen(function* () {
-		const exec = yield* Cloudflare.WorkerExecutionContext
-
 		// Built on the first request and kept for the isolate — not here, in init:
 		// init also runs at plan time, where alchemy auto-binds every `Config` it
 		// sees read onto the Worker, and this Worker's env is declared in full by
@@ -148,36 +126,22 @@ export default class ElectricSync extends Cloudflare.Worker<ElectricSync>()(
 		//
 		// A `ConfigError` here is a misconfigured deploy — `SyncConfig` already dies
 		// on the fatal ones — so the build dies too, and the bridge answers 500
-		// until the isolate is replaced. The inner `orDie` only narrows the router's
-		// `unknown` error channel: the bridge turns Respondable failures into their
-		// responses (RouteNotFound → 404), and the tracer records failures exactly
-		// as `toWebHandler` did.
+		// until the isolate is replaced. The handler itself keeps the router's
+		// typed failures: the bridge renders them before its tracer runs, so an
+		// unmatched route is an Ok span with a 404, and a defect a 500 that the SDK
+		// records as an Error server span (`worker-bridge.test.ts` pins both).
 		const app = yield* Effect.cached(
-			Scope.make().pipe(
-				Effect.flatMap((scope) => Layer.buildWithScope(AppLayer, scope)),
-				Effect.map((services) =>
-					HttpMiddleware.tracer(
-						Context.get(services, HttpRouter.HttpRouter).asHttpEffect().pipe(Effect.orDie),
-					),
-				),
-				Effect.orDie,
-			),
+			Effect.gen(function* () {
+				const scope = yield* Scope.make()
+				return yield* HttpRouter.toHttpEffect(AppLayer).pipe(Scope.provide(scope))
+			}).pipe(Effect.orDie),
 		)
 
-		return {
-			fetch: Effect.gen(function* () {
-				const env = yield* Cloudflare.WorkerEnvironment
-				const handler = yield* app
-				const response = yield* handler
-				// Drain spans and logs after the response is on the wire.
-				yield* exec.waitUntil(Effect.promise(() => flushTelemetry(env)))
-				return response
-			}).pipe(
-				// The Tracer and Logger go on the handler: alchemy only admits Worker
-				// services in a handler's requirements, and the layer is cheap.
-				// oxlint-disable-next-line effecttsgo/strict-effect-provide
-				Effect.provide(telemetry.layer),
-			),
-		}
-	}),
+		return { fetch: app }
+	}).pipe(
+		// The Worker init is the entry point; the bridge builds the telemetry into
+		// each event's scope and flushes it after the response.
+		// oxlint-disable-next-line effecttsgo/strict-effect-provide
+		Effect.provide(WorkerTelemetry({ serviceName: "electric-sync" })),
+	),
 ) {}

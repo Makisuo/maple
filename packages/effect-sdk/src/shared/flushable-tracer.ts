@@ -243,6 +243,18 @@ const isFullyAnticipated = (
 	return failErrors.length > 0 && failErrors.every((error) => isAnticipatedFailure(error, identifiers))
 }
 
+// OTEL HTTP semconv for SERVER spans: a 5xx response is an error even when the
+// handler rendered it as a plain response — exactly what the HTTP boundaries
+// (`HttpRouter.toWebHandler`, alchemy's Worker bridge) do with a defect, so the
+// span would otherwise reach the warehouse as `Ok` and the crash never reach
+// error tracking. A 4xx is a rejection the service handled and stays `Ok`.
+const renderedServerError = (self: SpanImpl): number | undefined => {
+	if (self.kind !== "server") return undefined
+	const raw = self.attributes.get("http.response.status_code")
+	const code = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : Number.NaN
+	return Number.isInteger(code) && code >= 500 ? code : undefined
+}
+
 const makeOtlpSpan = (self: SpanImpl, anticipatedErrorIdentifiers?: ReadonlySet<string>): OtlpSpan => {
 	const status = self.status as ExtractTag<Tracer.SpanStatus, "Ended">
 	const attributes = OtlpResource.entriesToAttributes(self.attributes.entries())
@@ -254,7 +266,25 @@ const makeOtlpSpan = (self: SpanImpl, anticipatedErrorIdentifiers?: ReadonlySet<
 	}))
 
 	let otelStatus: Status
-	if (status.exit._tag === "Success") {
+	const serverError = status.exit._tag === "Success" ? renderedServerError(self) : undefined
+	if (serverError !== undefined) {
+		const method = self.attributes.get("http.request.method")
+		const path = self.attributes.get("url.path")
+		const message =
+			typeof method === "string" && typeof path === "string"
+				? `HTTP ${serverError} (${method} ${path})`
+				: `HTTP ${serverError}`
+		otelStatus = { code: StatusCode.Error, message }
+		events.push({
+			name: "exception",
+			timeUnixNano: String(status.endTime),
+			droppedAttributesCount: 0,
+			attributes: [
+				{ key: ATTR_EXCEPTION_TYPE, value: { stringValue: "HttpServerErrorResponse" } },
+				{ key: ATTR_EXCEPTION_MESSAGE, value: { stringValue: message } },
+			],
+		})
+	} else if (status.exit._tag === "Success") {
 		otelStatus = constOtelStatusSuccess
 	} else if (Cause.hasInterruptsOnly(status.exit.cause)) {
 		otelStatus = { code: StatusCode.Ok, message: "Interrupted" }
