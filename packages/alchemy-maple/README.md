@@ -107,6 +107,36 @@ seam when constructing the API client without the Alchemy provider collection.
 | `Maple.ApiKey`           | Create / roll / revoke (the API has no key update). Changing props replaces the key; bumping the `rotate` prop rolls it in place (same name/scopes, new secret). `secret` is captured once and preserved in Alchemy state — it can never be re-read from the API. |
 | `Maple.IngestKeys`       | Read-only per-org singleton. Surfaces `publicKey` / `privateKey` as `Redacted` outputs; delete only stops tracking it.                                                                                                                                            |
 
+## Worker telemetry
+
+`Maple.Telemetry` exports a Cloudflare Worker's traces, logs and metrics to Maple through the
+Maple SDK, the way `Axiom.Telemetry` wraps alchemy's built-in exporter. Provide it on the
+Worker's init Effect: at deploy time it binds the ingest key (as a secret), endpoint and
+environment onto the Worker; at runtime alchemy's bridge builds the SDK into every event's
+request scope, traces the request with it, and flushes after the response.
+
+```typescript
+import * as Cloudflare from "alchemy/Cloudflare"
+import * as Maple from "@maple-dev/alchemy"
+import { Telemetry } from "@maple-dev/alchemy/telemetry"
+import { Effect } from "effect"
+
+const Ingest = Maple.IngestKeys("ingest")
+
+export default Cloudflare.Worker(
+	"api",
+	{ main: import.meta.url },
+	Effect.gen(function* () {
+		// ...
+	}).pipe(Effect.provide(Telemetry({ serviceName: "api", ingestKey: Ingest }))),
+)
+```
+
+The `@maple-dev/alchemy/telemetry` subpath keeps the API client out of the Worker bundle.
+Omit `ingestKey` when the Worker's env already carries `MAPLE_INGEST_KEY`; the remaining
+options (`anticipatedErrorIdentifiers`, `dropSpanNames`, `serviceNamespace`, …) are the SDK's
+Cloudflare options, forwarded unchanged.
+
 ## Notes
 
 - Store your Alchemy state somewhere durable: the `ApiKey.secret` output lives only there.

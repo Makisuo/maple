@@ -22,6 +22,7 @@
 	},
 	"dependencies": {
 		"@distilled.cloud/aws": "1.0.0-rc.6",
+		"@maple-dev/alchemy": "workspace:*",
 		"@maple-dev/effect-sdk": "workspace:*",
 		"@maple/alchemy-portless": "workspace:*",
 		"@maple/domain": "workspace:*",

@@ -89,6 +89,25 @@ The same `MAPLE_ENDPOINT` / `MAPLE_INGEST_KEY` / `MAPLE_ENVIRONMENT` env vars ap
 
 Server spans follow the OTEL HTTP semantic conventions for status: a 5xx response marks the span `Error` (with an `HttpServerErrorResponse` exception event) even when the handler returned it as a plain response — which is what `HttpRouter.toWebHandler` and alchemy's Worker bridge do with a defect — while 4xx responses stay `Ok`.
 
+### alchemy Workers
+
+Alchemy's Worker bridge owns the request lifecycle: it traces every fetch with Effect's HTTP tracer, opens a scope per event and closes it after the response through `ctx.waitUntil`. `telemetry.requestLayer` plugs into that — the same exporters plus a flush when the scope closes — so there is no `waitUntil` to write:
+
+```typescript
+import * as Telemetry from "alchemy/Telemetry"
+
+export default class Api extends Cloudflare.Worker<Api>()(
+	"api",
+	props,
+	Effect.gen(function* () {
+		// ...
+		return { fetch: HttpRouter.toHttpEffect(AppLayer) }
+	}).pipe(Effect.provide(Telemetry.layer(telemetry.requestLayer))),
+) {}
+```
+
+`@maple-dev/alchemy/telemetry` wraps this as `Maple.Telemetry({ serviceName, ingestKey })`, which also binds the ingest key onto the Worker at deploy time.
+
 ## Client (Browser and React Native)
 
 All configuration must be provided programmatically since browsers don't have access to environment variables.
