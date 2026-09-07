@@ -1,6 +1,11 @@
 ---
 /**
- * HomeHero — announcement row, headline, dual CTA, stat rail, logo wall.
+ * HomeHero — announcement row, headline, dual CTA, proof rail, product plate.
+ *
+ * The proof rail is one hairline row: live numbers on the left, customer
+ * lockups on the right. The logos used to be the hero foot, under the plate —
+ * ~1650px down, below the fold at every desktop size — and the rhythm above
+ * the plate is tightened so the plate's top edge crosses a 900px fold.
  *
  * Backdrop is the system's own dot grid (16×16 in --border, the /infra
  * texture) under a radial mask, not a marketing-only line grid and not a
@@ -41,7 +46,7 @@ const stats = [
 	>
 	</div>
 
-	<div class="relative shell pt-32 md:pt-40">
+	<div class="relative shell pt-28 md:pt-32">
 		<!-- Announcement row. The frame is sized so a video thumbnail can take
 		     its place later without moving anything. -->
 		<a
@@ -65,18 +70,18 @@ const stats = [
 		     splits across a break in any locale — the second line used to run
 		     "Built for you. Native / to AI." on a phone. -->
 		<h1
-			class="mt-8 max-w-4xl font-display text-[2.375rem] font-semibold leading-[1.02] tracking-[-0.025em] text-fg sm:text-6xl lg:text-7xl"
+			class="mt-6 max-w-4xl font-display text-[2.375rem] font-semibold leading-[1.02] tracking-[-0.025em] text-fg sm:text-6xl lg:text-7xl"
 		>
 			<span class="block">{m.hero_title()}</span>
 			<span class="block">{m.hero_title_sub()}</span>
 			<span class="block text-primary">{m.hero_title_accent()}</span>
 		</h1>
 
-		<p class="mt-6 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-base">
+		<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-base">
 			{m.hero_subtitle()}
 		</p>
 
-		<div class="mt-10 flex flex-wrap items-center gap-3">
+		<div class="mt-8 flex flex-wrap items-center gap-3">
 			<HeroCta client:load className={buttonVariants({ size: "xl" })} />
 			<a
 				href="https://github.com/MapleTechLabs/maple"
@@ -88,9 +93,12 @@ const stats = [
 			</a>
 		</div>
 
-		<!-- Stat rail. Hairline dividers only — no cards, no fills. Both slots
-		     are live numbers we can point at. -->
-		<dl class="mt-14 grid grid-cols-2 gap-y-6 border-t border-border pt-8 md:flex md:gap-y-0">
+		<!-- Proof rail. Hairline dividers only — no cards, no fills. Live
+		     numbers left, customer lockups right; below xl the logos drop
+		     under the numbers rather than wrapping beside them (at 1100 the
+		     fifth lockup and the stat labels both broke). -->
+		<div class="mt-10 flex flex-col gap-7 border-t border-border pt-6 xl:flex-row xl:items-center xl:justify-between xl:gap-10">
+		<dl class="grid grid-cols-2 gap-y-6 md:flex md:gap-y-0">
 			{
 				stats.map((stat, i) => {
 					const body = (
@@ -125,13 +133,13 @@ const stats = [
 				})
 			}
 		</dl>
+		<CustomerLogos variant="rail" />
+		</div>
 
 		<!-- The product plate. Sandwiched between two tonal steps, so it reads
 		     raised without a shadow pixel. -->
-		<div class="mt-16 md:mt-20">
+		<div class="mt-12 md:mt-14">
 			<HeroCarousel />
 		</div>
-
-		<CustomerLogos variant="inline" />
 	</div>
 </section>

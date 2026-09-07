@@ -3,10 +3,10 @@
  * CustomerLogos — the "trusted by" band.
  *
  * Two shapes. `section` (default) is the standalone band: an infinite,
- * edge-faded marquee in its own bordered section. `inline` is the hero foot —
- * no section shell, and a static centred row instead of a belt, because a
- * five-logo marquee visibly repeats every five items and announces "we have
- * five" louder than simply showing five does.
+ * edge-faded marquee in its own bordered section. `rail` is the right half of
+ * the hero's proof rail — no shell, no border, an eyebrow and a static row of
+ * lockups, because a five-logo marquee visibly repeats every five items and
+ * announces "we have five" louder than simply showing five does.
  *
  * Companies come from the `logos` content collection; each entry's id maps to a
  * brand logo component in the LOGOS registry below. The marquee is pure CSS
@@ -23,7 +23,7 @@ import SuperwallLogo from "./icons/SuperwallLogo.astro";
 import HypenLogo from "./icons/HypenLogo.astro";
 
 interface Props {
-	variant?: "section" | "inline";
+	variant?: "section" | "rail";
 }
 
 const { variant = "section" } = Astro.props;
@@ -53,37 +53,35 @@ const belt = [...oneCopy, ...oneCopy];
 ---
 
 {
-	variant === "inline" ? (
-		<div class="border-t border-border py-10 md:py-14">
-			<p class="text-center text-[10px] uppercase tracking-[0.2em] text-fg-muted mb-8">
+	variant === "rail" ? (
+		<div class="flex flex-wrap items-center gap-x-7 gap-y-3">
+			<p class="w-full text-[10px] uppercase tracking-[0.2em] text-fg-muted sm:w-auto sm:mr-1">
 				{m.customers_eyebrow()}
 			</p>
-			<div class="flex flex-wrap items-center justify-center gap-x-10 gap-y-6 md:gap-x-14">
-				{base.map((logo) => {
-					const Logo = LOGOS[logo.id];
-					// Same lockup as the marquee — mark plus wordmark. The mark
-					// alone is ambiguous at this size for the single-letter brands.
-					const inner = (
-						<>
-							<Logo class="logo-cell__mark h-6 w-auto" />
-							<span class="font-display text-base font-semibold tracking-[-0.01em]">{logo.name}</span>
-						</>
-					);
-					return logo.href ? (
-						<a
-							href={logo.href}
-							target="_blank"
-							rel="noopener noreferrer"
-							aria-label={logo.name}
-							class="inline-flex items-center gap-2.5 text-fg-muted transition-colors hover:text-fg"
-						>
-							{inner}
-						</a>
-					) : (
-						<span class="inline-flex items-center gap-2.5 text-fg-muted">{inner}</span>
-					);
-				})}
-			</div>
+			{base.map((logo) => {
+				const Logo = LOGOS[logo.id];
+				// Same lockup as the marquee — mark plus wordmark. The mark
+				// alone is ambiguous at this size for the single-letter brands.
+				const inner = (
+					<>
+						<Logo class="logo-cell__mark h-5 w-auto" />
+						<span class="font-display text-sm font-semibold tracking-[-0.01em]">{logo.name}</span>
+					</>
+				);
+				return logo.href ? (
+					<a
+						href={logo.href}
+						target="_blank"
+						rel="noopener noreferrer"
+						aria-label={logo.name}
+						class="inline-flex items-center gap-2 text-fg-muted transition-colors hover:text-fg"
+					>
+						{inner}
+					</a>
+				) : (
+					<span class="inline-flex items-center gap-2 text-fg-muted">{inner}</span>
+				);
+			})}
 		</div>
 	) : (
 		<Fragment>
